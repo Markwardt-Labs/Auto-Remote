@@ -426,7 +426,8 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
             true);
     }
 
-    private async Task<string> Fingerprint(string folder) => await Text(folder, ["for-each-ref", "--format=%(refname) %(objectname)"], CancellationToken.None) + await Text(folder, ["rev-parse", "HEAD"], CancellationToken.None) + await Text(folder, ["status", "--porcelain"], CancellationToken.None);
+    // Git 2.48+ creates refs/remotes/origin/HEAD on the first fetch, which is not a real change.
+    private async Task<string> Fingerprint(string folder) => string.Join('\n', (await Text(folder, ["for-each-ref", "--format=%(refname) %(objectname)"], CancellationToken.None)).Split('\n').Where(line => !line.StartsWith("refs/remotes/") || !line.Split(' ')[0].EndsWith("/HEAD"))) + await Text(folder, ["rev-parse", "HEAD"], CancellationToken.None) + await Text(folder, ["status", "--porcelain"], CancellationToken.None);
 
     private async Task Mirror(string folder, CancellationToken cancellation)
     {
