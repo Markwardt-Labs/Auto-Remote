@@ -10,7 +10,7 @@
       <TextBlock Text="Host" Classes="muted" />
       <TextBox Text="{Binding Host}" PlaceholderText="192.168.1.20" />
       <TextBlock Text="Port" Classes="muted" />
-      <TextBox Text="{Binding Port}" PlaceholderText="52678" />
+      <TextBox Text="{Binding Port}" PlaceholderText="52679" />
       <TextBlock Text="Access key" Classes="muted" />
       <TextBox Text="{Binding AccessKey}" PasswordChar="•" />
 

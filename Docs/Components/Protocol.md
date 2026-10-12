@@ -1,10 +1,10 @@
 # Protocol
 
-How the client and server talk after the TCP connection is up.
+How the client and server talk after the WebSocket connection is up.
 
 ## Transport
 
-Every connection is TLS; there is no plaintext mode. The server listens on two ports so no traffic has to be told apart: `port` carries the protocol as newline-delimited lines over TLS (the mobile and desktop clients), and `webPort` carries the same lines as WebSocket messages over TLS (the browser, which cannot open raw sockets). Inside a WebSocket every message is one line of this protocol (a trailing newline is optional when sending) and each line the server sends is one text message, so everything below applies unchanged. On the web port, an HTTPS request that is not a WebSocket upgrade is answered with a short text page, which lets a browser be pointed at the port once to accept a self-signed certificate. No origin check is made because the access key is the authentication.
+Every connection is a WebSocket over TLS (`wss`) on the single `port`; there is no plaintext mode and no other transport, so the desktop, mobile and web clients all connect the same way, and a reverse proxy or tunnel that forwards WebSockets (such as a Cloudflare tunnel) can front the one port. Every message is one line of this protocol (a trailing newline is optional when sending) and each line the server sends is one text message, so everything below applies unchanged. An HTTPS request that is not a WebSocket upgrade is answered with a short text page, which lets a browser be pointed at the port once to accept a self-signed certificate. No origin check is made because the access key is the authentication.
 
 The server presents one certificate: the PFX named by `certificateFile`, or a self-signed one it creates on first start as `certificate.pfx` in the data folder (private key, readable by its owner only) and logs the SHA-256 fingerprint of at startup. The Avalonia clients accept whatever certificate the server presents without validating or pinning it, so the connection is encrypted but the server is not authenticated by its certificate; the access key is the only authentication.
 
@@ -14,7 +14,7 @@ Every line in both directions, including the handshake, is one JSON object, came
 
 ## Handshake
 
-The client opens the TLS connection and sends one JSON line (at most 1024 bytes, within 5 seconds), then the server replies with one JSON line. On acceptance the connection carries requests and responses; on rejection the server closes it. The key is compared in constant time. A line that is not valid JSON, or has no key, is a rejection.
+The client opens the WebSocket connection and sends one JSON line (at most 1024 bytes, within 5 seconds), then the server replies with one JSON line. On acceptance the connection carries requests and responses; on rejection the server closes it. The key is compared in constant time. A line that is not valid JSON, or has no key, is a rejection.
 
 | Direction | Property | Type | Meaning |
 | --- | --- | --- | --- |

@@ -35,7 +35,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Open_ConfiguresPromptsAndOpensWorkspaces()
     {
-        ServerConfig config = new() { Port = 1, WebPort = 2, Key = "k", DataFolder = "d" };
+        ServerConfig config = new() { Port = 1, Key = "k", DataFolder = "d" };
 
         await handler.Open(config, CancellationToken.None);
 

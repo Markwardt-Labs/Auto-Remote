@@ -21,7 +21,7 @@ public sealed class ApplicationTests
     [Fact]
     public async Task Run_LoadsDefaultConfigAndRunsServer()
     {
-        ServerConfig config = new() { Port = 5000, WebPort = 5001, Key = "key" };
+        ServerConfig config = new() { Port = 5000, Key = "key" };
         loader.Setup(x => x.Load("config.json", It.IsAny<CancellationToken>())).ReturnsAsync(config);
         Application application = new(info.Object, loader.Object, handler.Object, server.Object, output);
 
@@ -36,7 +36,7 @@ public sealed class ApplicationTests
     [Fact]
     public async Task Run_UsesConfigPathArgument()
     {
-        loader.Setup(x => x.Load("custom.json", It.IsAny<CancellationToken>())).ReturnsAsync(new ServerConfig { Port = 1, WebPort = 2, Key = "k" });
+        loader.Setup(x => x.Load("custom.json", It.IsAny<CancellationToken>())).ReturnsAsync(new ServerConfig { Port = 1, Key = "k" });
         Application application = new(info.Object, loader.Object, handler.Object, server.Object, output);
 
         Assert.Equal(0, await application.Run(["custom.json"], CancellationToken.None));

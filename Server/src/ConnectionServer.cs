@@ -1,14 +1,14 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// Accepts TLS connections, carrying plain TCP lines or WebSocket messages, and admits only those that supply the access key.
+/// Accepts secure WebSocket connections and admits only those that supply the access key.
 /// </summary>
 internal interface IConnectionServer
 {
     /// <summary>
-    /// Raised with the bound TCP port and WebSocket port once the server is listening.
+    /// Raised with the bound port once the server is listening.
     /// </summary>
-    event Action<int, int>? Listening;
+    event Action<int>? Listening;
 
     /// <summary>
     /// Raised with the SHA-256 fingerprint of the certificate the server presents, before it starts listening.
@@ -16,7 +16,7 @@ internal interface IConnectionServer
     event Action<string>? Certified;
 
     /// <summary>
-    /// Listens on the configured TCP and WebSocket ports until cancelled.
+    /// Listens on the configured port until cancelled.
     /// </summary>
     /// <param name="config">The server settings.</param>
     /// <param name="cancellation">Stops the server.</param>
@@ -30,7 +30,7 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
     private readonly TimeSpan timeout = TimeSpan.FromSeconds(5);
 
     /// <inheritdoc />
-    public event Action<int, int>? Listening;
+    public event Action<int>? Listening;
 
     /// <inheritdoc />
     public event Action<string>? Certified;
@@ -40,38 +40,35 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
     {
         using X509Certificate2 certificate = await certificates.Load(config, cancellation);
         Certified?.Invoke(Convert.ToHexString(certificate.GetCertHash(HashAlgorithmName.SHA256)));
-        TcpListener tcp = new(IPAddress.Any, config.Port);
-        TcpListener web = new(IPAddress.Any, config.WebPort);
+        TcpListener listener = new(IPAddress.Any, config.Port);
 
         try
         {
-            tcp.Start();
-            web.Start();
-            Listening?.Invoke(((IPEndPoint)tcp.LocalEndpoint).Port, ((IPEndPoint)web.LocalEndpoint).Port);
-            await Task.WhenAll(Accept(tcp, false, config.Key, certificate, cancellation), Accept(web, true, config.Key, certificate, cancellation));
+            listener.Start();
+            Listening?.Invoke(((IPEndPoint)listener.LocalEndpoint).Port);
+            await Accept(listener, config.Key, certificate, cancellation);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
         }
         finally
         {
-            tcp.Stop();
-            web.Stop();
+            listener.Stop();
         }
     }
 
-    private async Task Accept(TcpListener listener, bool webSocket, string accessKey, X509Certificate2 certificate, CancellationToken cancellation)
+    private async Task Accept(TcpListener listener, string accessKey, X509Certificate2 certificate, CancellationToken cancellation)
     {
         while (true)
         {
             TcpClient client = await listener.AcceptTcpClientAsync(cancellation);
-            _ = Serve(client, webSocket, accessKey, certificate, cancellation);
+            _ = Serve(client, accessKey, certificate, cancellation);
         }
     }
 
-    private async Task Serve(TcpClient client, bool webSocket, string accessKey, X509Certificate2 certificate, CancellationToken cancellation)
+    private async Task Serve(TcpClient client, string accessKey, X509Certificate2 certificate, CancellationToken cancellation)
     {
-        string remote = $"{client.Client.RemoteEndPoint} ({(webSocket ? "WebSocket" : "TCP")})";
+        string remote = $"{client.Client.RemoteEndPoint}";
         log.Write($"Connection from {remote}");
 
         using (client)
@@ -87,7 +84,7 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
 
                 log.Write($"TLS established with {remote} ({secure.SslProtocol})");
 
-                if ((webSocket ? await upgrade.Accept(secure, cancellation) : secure) is not { } stream)
+                if (await upgrade.Accept(secure, cancellation) is not { } stream)
                 {
                     log.Write($"Refused {remote}: it sent no WebSocket upgrade in time or something other than one");
                     return;

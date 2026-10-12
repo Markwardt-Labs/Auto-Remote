@@ -24,7 +24,7 @@ public sealed class EndToEndTests : IAsyncLifetime
             File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        ServerConfig config = new() { Port = 0, WebPort = 0, Key = "secret", DataFolder = temp.Combine("data"), ClaudeCommand = fake, ClaudeArguments = [] };
+        ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), ClaudeCommand = fake, ClaudeArguments = [] };
         FolderBrowser folders = new();
         WorkspaceStore store = new();
         WorkspaceManager workspaces = new(store, folders);
@@ -35,7 +35,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
-        server.Listening += (tcp, _) => listening.SetResult(tcp);
+        server.Listening += listening.SetResult;
         running = server.Run(config, stopping.Token);
         int port = await listening.Task;
 

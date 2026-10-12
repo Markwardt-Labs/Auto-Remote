@@ -46,16 +46,6 @@ internal sealed class ConfigLoader : IConfigLoader
             throw new InvalidDataException("Config 'port' must be between 1 and 65535.");
         }
 
-        if (config.WebPort is < 1 or > 65535)
-        {
-            throw new InvalidDataException("Config 'webPort' must be between 1 and 65535.");
-        }
-
-        if (config.WebPort == config.Port)
-        {
-            throw new InvalidDataException("Config 'webPort' must differ from 'port'.");
-        }
-
         if (string.IsNullOrEmpty(config.Key))
         {
             throw new InvalidDataException("Config 'key' must not be empty.");

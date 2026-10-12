@@ -1,9 +1,9 @@
-namespace Markwardt.AutoRemote.Server;
+namespace Markwardt.AutoRemote;
 
 /// <summary>
-/// Presents a server-side WebSocket as a byte stream of newline-delimited lines: every received message becomes one line and every write is sent as one text message.
+/// Presents a connected WebSocket as a byte stream of newline-delimited lines: every received message becomes one line and every write is sent as one text message.
 /// </summary>
-internal sealed class WebSocketLineStream(WebSocket socket) : Stream
+public sealed class WebSocketLineStream(WebSocket socket) : Stream
 {
     private readonly int maxMessageLength = 4 * 1024 * 1024;
 
@@ -51,7 +51,17 @@ internal sealed class WebSocketLineStream(WebSocket socket) : Stream
     }
 
     /// <inheritdoc />
-    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellation = default) => await socket.SendAsync(buffer, WebSocketMessageType.Text, true, cancellation);
+    public override async ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellation = default)
+    {
+        try
+        {
+            await socket.SendAsync(buffer, WebSocketMessageType.Text, true, cancellation);
+        }
+        catch (WebSocketException exception)
+        {
+            throw new IOException(exception.Message, exception);
+        }
+    }
 
     /// <inheritdoc />
     public override Task FlushAsync(CancellationToken cancellation) => Task.CompletedTask;

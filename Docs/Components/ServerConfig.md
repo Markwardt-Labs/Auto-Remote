@@ -5,8 +5,7 @@ The server reads one JSON file at startup (the path passed as the first argument
 | Setting | Default | Description |
 | --- | --- | --- |
 | `key` | required | Key a client must send to connect; must not be empty. |
-| `port` | `52678` | TLS over TCP port for the mobile and desktop clients; 1 to 65535. |
-| `webPort` | `52679` | TLS WebSocket port for the web client; 1 to 65535 and different from `port`. |
+| `port` | `52679` | The one port every client connects to, over secure WebSocket; 1 to 65535. |
 | `dataFolder` | `AutoRemote` folder in the server user's application data | Folder holding all data the server stores; created when missing. |
 | `defaultFolder` | the server user's home folder | Existing folder where browsing for a new workspace's folder starts. |
 | `claudeCommand` | `claude` | Claude Code executable run for prompts; must resolve on the server's machine. |

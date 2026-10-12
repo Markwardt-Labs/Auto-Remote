@@ -10,8 +10,6 @@ public sealed class ServerRunTests : IAsyncLifetime
 
     private int port;
 
-    private int webPort;
-
     private readonly List<string> logged = [];
 
     private string fingerprint = string.Empty;
@@ -29,11 +27,11 @@ public sealed class ServerRunTests : IAsyncLifetime
             }
         });
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler.Object, new EventHub(), log.Object);
-        TaskCompletionSource<(int tcp, int web)> listening = new();
-        server.Listening += (tcp, web) => listening.SetResult((tcp, web));
+        TaskCompletionSource<int> listening = new();
+        server.Listening += value => listening.SetResult(value);
         server.Certified += value => fingerprint = value;
-        running = server.Run(new ServerConfig { Port = 0, WebPort = 0, Key = "secret", DataFolder = temp.Combine("data") }, stopping.Token);
-        (port, webPort) = await listening.Task;
+        running = server.Run(new ServerConfig { Port = 0, Key = "secret", DataFolder = temp.Combine("data") }, stopping.Token);
+        port = await listening.Task;
     }
 
     async Task IAsyncLifetime.DisposeAsync()
@@ -45,13 +43,8 @@ public sealed class ServerRunTests : IAsyncLifetime
 
     private async Task<string> Connect(string key)
     {
-        using TcpClient client = new();
-        await client.ConnectAsync(IPAddress.Loopback, port);
-        using SslStream stream = new(client.GetStream(), false, (_, _, _, _) => true);
-        await stream.AuthenticateAsClientAsync("localhost");
-        await stream.WriteAsync(Encoding.UTF8.GetBytes($"{{\"accessKey\":\"{key}\"}}\n"));
-        using StreamReader reader = new(stream);
-        return await reader.ReadLineAsync() ?? string.Empty;
+        using ClientWebSocket socket = await OpenSocket();
+        return await Exchange(socket, $"{{\"accessKey\":\"{key}\"}}");
     }
 
     private async Task<string[]> WaitForLog(Func<string[], bool> ready)
@@ -80,7 +73,7 @@ public sealed class ServerRunTests : IAsyncLifetime
     {
         ClientWebSocket socket = new();
         socket.Options.RemoteCertificateValidationCallback = (_, _, _, _) => true;
-        await socket.ConnectAsync(new Uri($"wss://127.0.0.1:{webPort}"), CancellationToken.None);
+        await socket.ConnectAsync(new Uri($"wss://127.0.0.1:{port}"), CancellationToken.None);
         return socket;
     }
 
@@ -93,28 +86,28 @@ public sealed class ServerRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Tcp_AdmitsOnlyClientsWithAccessKey()
+    public async Task AdmitsOnlyClientsWithAccessKey()
     {
         Assert.Equal("{\"accepted\":true}", await Connect("secret"));
         Assert.Equal("{\"accepted\":false}", await Connect("nope"));
     }
 
     [Fact]
-    public async Task Tcp_LogsEachConnectionWithItsOutcome()
+    public async Task LogsEachConnectionWithItsOutcome()
     {
         await Connect("secret");
         await Connect("nope");
 
         string[] lines = await WaitForLog(items => items.Any(line => line.StartsWith("Accepted 127.0.0.1:")) && items.Any(line => line.StartsWith("Refused 127.0.0.1:")));
 
-        Assert.Equal(2, lines.Count(line => line.StartsWith("Connection from 127.0.0.1:") && line.EndsWith("(TCP)")));
+        Assert.Equal(2, lines.Count(line => line.StartsWith("Connection from 127.0.0.1:")));
         Assert.Equal(2, lines.Count(line => line.StartsWith("TLS established with 127.0.0.1:")));
         Assert.Single(lines, line => line.StartsWith("Accepted 127.0.0.1:"));
         Assert.Single(lines, line => line.StartsWith("Refused 127.0.0.1:") && line.EndsWith("wrong key"));
     }
 
     [Fact]
-    public async Task Tcp_DropsClientsThatDoNotUseTls()
+    public async Task DropsClientsThatDoNotUseTls()
     {
         using TcpClient client = new();
         await client.ConnectAsync(IPAddress.Loopback, port);
@@ -137,7 +130,7 @@ public sealed class ServerRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WebSocket_SpeaksTheProtocolToBrowsers()
+    public async Task SpeaksTheProtocolOverWebSocket()
     {
         using ClientWebSocket socket = await OpenSocket();
         Assert.Equal("{\"accepted\":true}", await Exchange(socket, "{\"accessKey\":\"secret\"}"));
@@ -148,10 +141,10 @@ public sealed class ServerRunTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WebPort_AnswersPlainHttpRequestsSoBrowsersCanTrustTheCertificate()
+    public async Task AnswersPlainHttpRequestsSoBrowsersCanTrustTheCertificate()
     {
         using TcpClient client = new();
-        await client.ConnectAsync(IPAddress.Loopback, webPort);
+        await client.ConnectAsync(IPAddress.Loopback, port);
         using SslStream stream = new(client.GetStream(), false, (_, _, _, _) => true);
         await stream.AuthenticateAsClientAsync("localhost");
         await stream.WriteAsync(Encoding.ASCII.GetBytes("GET / HTTP/1.1\r\nHost: x\r\n\r\n"));
@@ -175,8 +168,8 @@ public sealed class ServerRunTests : IAsyncLifetime
 
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => factory.Connect(settings with { AccessKey = "nope" }, CancellationToken.None));
 
-        Assert.Contains($"Connecting to 127.0.0.1:{port}", lines);
-        Assert.Contains(lines, line => line.StartsWith($"TLS established with 127.0.0.1:{port}") && line.Contains(fingerprint));
+        Assert.Contains($"Connecting to wss://127.0.0.1:{port}/", lines);
+        Assert.Contains(lines, line => line.StartsWith($"WebSocket and TLS established with 127.0.0.1:{port}") && line.Contains(fingerprint));
         Assert.Contains($"Connected to 127.0.0.1:{port}", lines);
         Assert.Contains($"Connection to 127.0.0.1:{port} failed during the key handshake: UnauthorizedAccessException: The server rejected the access key.", lines);
         Assert.DoesNotContain(lines, line => line.Contains("secret") || line.Contains("nope"));

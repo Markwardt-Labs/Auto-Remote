@@ -37,7 +37,7 @@ internal sealed partial class UsageService(string? codexHome = null) : IUsageSer
 
     private readonly string codexFolder = codexHome ?? Environment.GetEnvironmentVariable("CODEX_HOME") ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
 
-    private ServerConfig config = new() { Port = 0, WebPort = 0, Key = string.Empty };
+    private ServerConfig config = new() { Port = 0, Key = string.Empty };
 
     /// <inheritdoc />
     public void Configure(ServerConfig config) => this.config = config;

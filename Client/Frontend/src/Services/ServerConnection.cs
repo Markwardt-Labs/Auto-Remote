@@ -475,8 +475,7 @@ internal interface IServerConnection : IAsyncDisposable
         /// <param name="cancellation">Cancels the attempt.</param>
         /// <returns>The open connection.</returns>
         /// <exception cref="UnauthorizedAccessException">The server rejected the access key.</exception>
-        /// <exception cref="IOException">The server could not be reached in time, closed the connection.</exception>
-        /// <exception cref="SocketException">The server host could not be resolved or refused the connection.</exception>
+        /// <exception cref="IOException">The server could not be reached in time, refused the connection or closed it.</exception>
         Task<IServerConnection> Connect(ConnectionSettings settings, CancellationToken cancellation);
     }
 
@@ -488,8 +487,8 @@ internal interface IServerConnection : IAsyncDisposable
         /// <inheritdoc />
         public async Task<IServerConnection> Connect(ConnectionSettings settings, CancellationToken cancellation)
         {
-            TcpClient client = new();
-            SslStream? secure = null;
+            ClientWebSocket socket = new();
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
             string server = $"{settings.Host}:{settings.Port}";
             string stage = "connecting";
 
@@ -497,12 +496,8 @@ internal interface IServerConnection : IAsyncDisposable
             {
                 using CancellationTokenSource limit = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
                 limit.CancelAfter(timeout);
-                log.Write($"Connecting to {server}");
-                await client.ConnectAsync(settings.Host, settings.Port, limit.Token);
-                log.Write($"TCP connected to {server} ({client.Client.RemoteEndPoint})");
-                stage = "the TLS handshake";
                 string fingerprint = string.Empty;
-                secure = new SslStream(client.GetStream(), false, (_, certificate, _, _) =>
+                socket.Options.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
                 {
                     if (certificate is null)
                     {
@@ -511,20 +506,23 @@ internal interface IServerConnection : IAsyncDisposable
 
                     fingerprint = Convert.ToHexString(SHA256.HashData(certificate.GetRawCertData()));
                     return true;
-                });
+                };
+
+                Uri address = new UriBuilder("wss", settings.Host, settings.Port).Uri;
+                log.Write($"Connecting to {address}");
 
                 try
                 {
-                    await secure.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = settings.Host }, limit.Token);
+                    await socket.ConnectAsync(address, limit.Token);
                 }
-                catch (AuthenticationException exception)
+                catch (WebSocketException exception)
                 {
-                    throw new IOException($"The secure connection failed: {exception.Message}", exception);
+                    throw new IOException($"Could not connect to {server}: {exception.InnerException?.Message ?? exception.Message}", exception);
                 }
 
-                log.Write($"TLS established with {server} ({secure.SslProtocol}, certificate SHA-256 {fingerprint})");
+                log.Write($"WebSocket and TLS established with {server} (certificate SHA-256 {fingerprint})");
                 stage = "the key handshake";
-                IMessageChannel channel = channels.Create(secure);
+                IMessageChannel channel = channels.Create(new WebSocketLineStream(socket));
                 await channel.Send(new HandshakeRequest { AccessKey = settings.AccessKey }, limit.Token);
                 HandshakeResponse? reply = await channel.Receive<HandshakeResponse>(limit.Token);
 
@@ -539,20 +537,18 @@ internal interface IServerConnection : IAsyncDisposable
                 }
 
                 log.Write($"Connected to {server}");
-                return new ServerConnection(client, secure, channel, log, server);
+                return new ServerConnection(socket, channel, log, server);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
                 log.Write($"Connection to {server} failed during {stage}: timed out after {timeout.TotalSeconds:0} seconds");
-                secure?.Dispose();
-                client.Dispose();
+                socket.Dispose();
                 throw new IOException("Timed out waiting for the server.");
             }
             catch (Exception exception)
             {
                 log.Write($"Connection to {server} failed during {stage}: {exception.GetType().Name}: {exception.Message}");
-                secure?.Dispose();
-                client.Dispose();
+                socket.Dispose();
                 throw;
             }
         }
@@ -565,17 +561,15 @@ internal sealed class ServerConnection : IServerConnection
     /// <summary>
     /// Initializes a new instance of the <see cref="ServerConnection" /> class and starts reading responses.
     /// </summary>
-    /// <param name="client">The connected socket.</param>
-    /// <param name="secure">The TLS stream over the socket.</param>
-    /// <param name="channel">The authenticated message channel over the TLS stream.</param>
+    /// <param name="socket">The connected WebSocket.</param>
+    /// <param name="channel">The authenticated message channel over the WebSocket.</param>
     /// <param name="log">Receives a line when the connection is lost.</param>
     /// <param name="server">The host and port, for the log.</param>
-    public ServerConnection(TcpClient client, SslStream secure, IMessageChannel channel, ILog log, string server)
+    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, ILog log, string server)
     {
         this.log = log;
         this.server = server;
-        this.client = client;
-        this.secure = secure;
+        this.socket = socket;
         this.channel = channel;
         reading = Read();
     }
@@ -584,9 +578,7 @@ internal sealed class ServerConnection : IServerConnection
 
     private readonly string server;
 
-    private readonly TcpClient client;
-
-    private readonly SslStream secure;
+    private readonly ClientWebSocket socket;
 
     private readonly IMessageChannel channel;
 
@@ -752,8 +744,7 @@ internal sealed class ServerConnection : IServerConnection
     public async ValueTask DisposeAsync()
     {
         await stopping.CancelAsync();
-        secure.Dispose();
-        client.Dispose();
+        socket.Dispose();
         await reading;
     }
 

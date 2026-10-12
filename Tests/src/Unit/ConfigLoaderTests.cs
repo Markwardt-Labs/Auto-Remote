@@ -9,7 +9,7 @@ public sealed class ConfigLoaderTests : IDisposable
     [Fact]
     public async Task Load_ReadsPortAndKey()
     {
-        await File.WriteAllTextAsync(path, """{ "port": 8123, "webPort": 8124, "key": "abc" }""");
+        await File.WriteAllTextAsync(path, """{ "port": 8123, "key": "abc" }""");
 
         ServerConfig config = await new ConfigLoader().Load(path, CancellationToken.None);
 
@@ -18,30 +18,30 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
-    public async Task Load_DefaultsThePorts()
+    public async Task Load_DefaultsThePort()
     {
         await File.WriteAllTextAsync(path, """{ "key": "abc" }""");
 
         ServerConfig config = await new ConfigLoader().Load(path, CancellationToken.None);
 
-        Assert.Equal((52678, 52679), (config.Port, config.WebPort));
+        Assert.Equal(52679, config.Port);
     }
 
     [Fact]
     public async Task Load_DefaultFolderDefaultsToHomeAndCanBeSet()
     {
-        await File.WriteAllTextAsync(path, """{ "port": 8123, "webPort": 8124, "key": "abc" }""");
+        await File.WriteAllTextAsync(path, """{ "port": 8123, "key": "abc" }""");
         Assert.Equal(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), (await new ConfigLoader().Load(path, CancellationToken.None)).DefaultFolder);
 
         string folder = Path.GetTempPath().TrimEnd(Path.DirectorySeparatorChar);
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { port = 8123, webPort = 8124, key = "abc", defaultFolder = folder }));
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { port = 8123, key = "abc", defaultFolder = folder }));
         Assert.Equal(folder, (await new ConfigLoader().Load(path, CancellationToken.None)).DefaultFolder);
     }
 
     [Fact]
     public async Task Load_RejectsMissingDefaultFolder()
     {
-        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { port = 8123, webPort = 8124, key = "abc", defaultFolder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()) }));
+        await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { port = 8123, key = "abc", defaultFolder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()) }));
 
         await Assert.ThrowsAsync<InvalidDataException>(() => new ConfigLoader().Load(path, CancellationToken.None));
     }
@@ -49,13 +49,10 @@ public sealed class ConfigLoaderTests : IDisposable
     [Theory]
     [InlineData("{ not json")]
     [InlineData("null")]
-    [InlineData("""{ "port": 8123, "webPort": 8124 }""")]
-    [InlineData("""{ "port": 0, "webPort": 8124, "key": "abc" }""")]
-    [InlineData("""{ "port": 70000, "webPort": 8124, "key": "abc" }""")]
-    [InlineData("""{ "port": 8123, "webPort": 0, "key": "abc" }""")]
-    [InlineData("""{ "port": 8123, "webPort": 70000, "key": "abc" }""")]
-    [InlineData("""{ "port": 8123, "webPort": 8123, "key": "abc" }""")]
-    [InlineData("""{ "port": 80, "webPort": 81, "key": "" }""")]
+    [InlineData("""{ "port": 8123 }""")]
+    [InlineData("""{ "port": 0, "key": "abc" }""")]
+    [InlineData("""{ "port": 70000, "key": "abc" }""")]
+    [InlineData("""{ "port": 80, "key": "" }""")]
     public async Task Load_RejectsInvalidConfig(string json)
     {
         await File.WriteAllTextAsync(path, json);

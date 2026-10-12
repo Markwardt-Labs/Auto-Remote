@@ -30,7 +30,7 @@ public sealed class PromptServiceTests
             }
         });
         service = new PromptService(workspaces.Object, store.Object, runner.Object, hub.Object);
-        service.Configure(new ServerConfig { Port = 0, WebPort = 0, Key = "k" }, CancellationToken.None);
+        service.Configure(new ServerConfig { Port = 0, Key = "k" }, CancellationToken.None);
     }
 
     private Conversation Start(Guid? session = null, bool? resume = null, AiModel model = AiModel.Sonnet, AiEffort effort = AiEffort.High)

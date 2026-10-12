@@ -27,7 +27,7 @@ internal sealed class Application(IAppInfo info, IConfigLoader configLoader, IRe
             ServerConfig config = await configLoader.Load(args.Count > 0 ? args[0] : "config.json", cancellation);
             await requestHandler.Open(config, cancellation);
             connectionServer.Certified += fingerprint => output.WriteLine($"Certificate SHA-256: {fingerprint}");
-            connectionServer.Listening += (port, webPort) => output.WriteLine($"Listening on port {port} (TCP) and port {webPort} (WebSocket)");
+            connectionServer.Listening += port => output.WriteLine($"Listening on port {port} (wss)");
             await connectionServer.Run(config, cancellation);
             return 0;
         }

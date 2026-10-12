@@ -73,7 +73,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(5);
 
-    private ServerConfig config = new() { Port = 0, WebPort = 0, Key = string.Empty };
+    private ServerConfig config = new() { Port = 0, Key = string.Empty };
 
     private CancellationToken stopping;
 

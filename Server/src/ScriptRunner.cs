@@ -70,7 +70,7 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
 
     private readonly TimeSpan flushInterval = TimeSpan.FromMilliseconds(100);
 
-    private ServerConfig config = new() { Port = 0, WebPort = 0, Key = string.Empty };
+    private ServerConfig config = new() { Port = 0, Key = string.Empty };
 
     private CancellationToken stopping;
 

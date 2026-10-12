@@ -6,14 +6,9 @@ namespace Markwardt.AutoRemote.Server;
 internal sealed record ServerConfig
 {
     /// <summary>
-    /// Gets the TCP port the mobile and desktop clients connect to (52678 unless set).
+    /// Gets the port every client connects to, over secure WebSocket (52679 unless set).
     /// </summary>
-    public int Port { get; init; } = 52678;
-
-    /// <summary>
-    /// Gets the WebSocket port the web client connects to (52679 unless set).
-    /// </summary>
-    public int WebPort { get; init; } = 52679;
+    public int Port { get; init; } = 52679;
 
     /// <summary>
     /// Gets the key a client must supply to connect.

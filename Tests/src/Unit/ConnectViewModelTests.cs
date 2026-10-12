@@ -13,5 +13,5 @@ public sealed class ConnectViewModelTests
     }
 
     [Fact]
-    public void Constructor_DefaultsThePortWithoutSavedSettings() => Assert.Equal("52678", new ConnectViewModel(factory.Object, null, "v").Port);
+    public void Constructor_DefaultsThePortWithoutSavedSettings() => Assert.Equal("52679", new ConnectViewModel(factory.Object, null, "v").Port);
 }

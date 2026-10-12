@@ -17,7 +17,7 @@ internal sealed class ConnectViewModel : ViewModelBase
         this.initial = initial;
         Version = version;
         host = initial?.Host ?? string.Empty;
-        port = initial?.Port.ToString() ?? "52678";
+        port = initial?.Port.ToString() ?? "52679";
         accessKey = initial?.AccessKey ?? string.Empty;
         ConnectCommand = new AsyncCommand(_ => Connect());
     }

@@ -8,13 +8,13 @@ Documentation for this repository's own tooling and workflow.
 actions.
 
 - `Scripts/Test.cs` - runs the test suite with coverage collection and prints a summary.
-- `Scripts/Mobile/Server.cs` - runs the server with a git-ignored dev config and app data under `Scripts/Data/`, rewritten on each start (TCP port 52678, access key `dev`, reachable from the emulator at `10.0.2.2`).
+- `Scripts/Mobile/Server.cs` - runs the server with a git-ignored dev config and app data under `Scripts/Data/`, rewritten on each start (port 52679, access key `dev`, reachable from the emulator at `10.0.2.2`).
 - `Scripts/Mobile/Client.cs` - deploys the Android client (`Client/Mobile/`) to an emulator, starting the first AVD if no device is attached, launches it and streams its log until interrupted. An emulator the script started is stopped when the script ends; an already attached device is left running. Finds the Android SDK via `ANDROID_HOME`, `ANDROID_SDK_ROOT` or the default install folder.
 - `Scripts/Mobile/Run.task` - runs the two Mobile scripts together.
-- `Scripts/Desktop/Server.cs` - runs the same dev server for the desktop client (TCP port 52678, access key `dev`, `localhost`).
+- `Scripts/Desktop/Server.cs` - runs the same dev server for the desktop client (port 52679, access key `dev`, `localhost`).
 - `Scripts/Desktop/Client.cs` - builds and runs the desktop client (`Client/Desktop/`) until its window is closed, with its saved settings under `Scripts/Data/` (via the desktop client's `--data-folder <path>` argument, which makes it use that folder instead of the user's application data).
 - `Scripts/Desktop/Run.task` - runs the two Desktop scripts together.
-- `Scripts/Web/Server.cs` - runs the same dev server for the browser (`localhost`, WebSocket port 52679, access key `dev`); its self-signed certificate has to be accepted once by opening `https://localhost:52679`.
+- `Scripts/Web/Server.cs` - runs the same dev server for the browser (`localhost`, port 52679, access key `dev`); its self-signed certificate has to be accepted once by opening `https://localhost:52679`.
 - `Scripts/Web/Client.cs` - serves `Client/Web/index.html` at `http://localhost:8080/`, re-reading the file on each request, and opens it in the default browser.
 - `Scripts/Web/Run.task` - runs the two Web scripts together.
 - `Scripts/Verify.cs` - applies formatting fixes and regenerates the coverage badge.

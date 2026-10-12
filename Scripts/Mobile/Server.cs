@@ -10,7 +10,7 @@ using Markwardt.ScriptUtilities;
 string config = "Scripts/Data/config.json";
 
 Directory.CreateDirectory("Scripts/Data");
-File.WriteAllText(config, """{ "port": 52678, "webPort": 52679, "key": "dev", "dataFolder": "Scripts/Data" }""");
+File.WriteAllText(config, """{ "port": 52679, "key": "dev", "dataFolder": "Scripts/Data" }""");
 
-Script.Log("Dev server: TCP port 52678, access key \"dev\" (10.0.2.2 from the emulator).");
+Script.Log("Dev server: port 52679, access key \"dev\" (10.0.2.2 from the emulator).");
 (await Script.Run("dotnet", "run", "--project", "Server/Server.csproj", "--", config)).Verify();

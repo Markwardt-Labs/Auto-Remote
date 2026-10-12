@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// Completes the WebSocket handshake for browsers and exposes the connection as lines.
+/// Completes the WebSocket handshake for clients and exposes the connection as lines.
 /// </summary>
 internal interface IWebSocketUpgrade
 {

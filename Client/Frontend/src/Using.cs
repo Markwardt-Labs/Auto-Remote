@@ -1,9 +1,7 @@
 global using System.Collections.Concurrent;
 global using System.Collections.ObjectModel;
 global using System.ComponentModel;
-global using System.Net.Security;
 global using System.Net.Sockets;
-global using System.Security.Authentication;
 global using System.Security.Cryptography;
 global using System.Runtime.CompilerServices;
 global using System.Text.Json;
@@ -26,3 +24,4 @@ global using System.Globalization;
 global using System.Text;
 global using Avalonia.Media.TextFormatting;
 global using Avalonia.Input.Platform;
+global using System.Net.WebSockets;
