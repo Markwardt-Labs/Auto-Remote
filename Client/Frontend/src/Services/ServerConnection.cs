@@ -487,8 +487,15 @@ internal interface IServerConnection : IAsyncDisposable
         /// <inheritdoc />
         public async Task<IServerConnection> Connect(ConnectionSettings settings, CancellationToken cancellation)
         {
+            (ClientWebSocket socket, IMessageChannel channel) = await Open(settings, cancellation);
+            return new ServerConnection(socket, channel, token => Open(settings, token), log, $"{settings.Host}:{settings.Port}");
+        }
+
+        private async Task<(ClientWebSocket socket, IMessageChannel channel)> Open(ConnectionSettings settings, CancellationToken cancellation)
+        {
             ClientWebSocket socket = new();
-            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(30);
+            socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
+            socket.Options.KeepAliveTimeout = TimeSpan.FromSeconds(20);
             string server = $"{settings.Host}:{settings.Port}";
             string stage = "connecting";
 
@@ -537,7 +544,7 @@ internal interface IServerConnection : IAsyncDisposable
                 }
 
                 log.Write($"Connected to {server}");
-                return new ServerConnection(socket, channel, log, server);
+                return (socket, channel);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
@@ -563,24 +570,24 @@ internal sealed class ServerConnection : IServerConnection
     /// </summary>
     /// <param name="socket">The connected WebSocket.</param>
     /// <param name="channel">The authenticated message channel over the WebSocket.</param>
+    /// <param name="reopen">Opens a new authenticated connection to the same server, used when the connection is lost.</param>
     /// <param name="log">Receives a line when the connection is lost.</param>
     /// <param name="server">The host and port, for the log.</param>
-    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, ILog log, string server)
+    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel)>> reopen, ILog log, string server)
     {
         this.log = log;
         this.server = server;
         this.socket = socket;
         this.channel = channel;
-        reading = Read();
+        this.reopen = reopen;
+        reading = Read(channel);
     }
 
     private readonly ILog log;
 
     private readonly string server;
 
-    private readonly ClientWebSocket socket;
-
-    private readonly IMessageChannel channel;
+    private readonly Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel)>> reopen;
 
     private readonly SynchronizationContext? context = SynchronizationContext.Current;
 
@@ -590,11 +597,19 @@ internal sealed class ServerConnection : IServerConnection
 
     private readonly CancellationTokenSource stopping = new();
 
-    private readonly Task reading;
+    private readonly SemaphoreSlim reopening = new(1, 1);
+
+    private ClientWebSocket socket;
+
+    private IMessageChannel channel;
+
+    private Task reading;
+
+    private RemoteRequest? watching;
 
     private int nextId;
 
-    private bool lost;
+    private volatile bool lost;
 
     /// <inheritdoc />
     public event Action<RemoteEvent>? EventReceived;
@@ -645,7 +660,12 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.UploadAttachment, WorkspaceId = id, Name = name, Data = Convert.ToBase64String(data.Span) }, cancellation)).AttachmentPath ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task WatchFiles(Guid id, IReadOnlyList<string> paths, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.WatchFiles, WorkspaceId = id, Paths = paths }, cancellation);
+    public async Task WatchFiles(Guid id, IReadOnlyList<string> paths, CancellationToken cancellation)
+    {
+        RemoteRequest request = new() { Id = 0, Command = RemoteCommand.WatchFiles, WorkspaceId = id, Paths = paths };
+        await Send(request, cancellation);
+        watching = request;
+    }
 
     /// <inheritdoc />
     public async Task<WorkspaceFiles> ListFiles(Guid id, string path, bool showHidden, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListFiles, WorkspaceId = id, Path = path, ShowHidden = showHidden ? true : null }, cancellation)).Files ?? throw Malformed();
@@ -752,6 +772,53 @@ internal sealed class ServerConnection : IServerConnection
 
     private async Task<RemoteResponse> Send(RemoteRequest request, CancellationToken cancellation)
     {
+        if (lost && !stopping.IsCancellationRequested)
+        {
+            await Reopen(cancellation);
+        }
+
+        return await Transmit(request, cancellation);
+    }
+
+    private async Task Reopen(CancellationToken cancellation)
+    {
+        await reopening.WaitAsync(cancellation);
+
+        try
+        {
+            if (!lost || stopping.IsCancellationRequested)
+            {
+                return;
+            }
+
+            await reading;
+            log.Write($"Reconnecting to {server}");
+            (ClientWebSocket opened, IMessageChannel openedChannel) = await reopen(cancellation);
+            socket.Dispose();
+            socket = opened;
+            channel = openedChannel;
+            lost = false;
+            reading = Read(openedChannel);
+
+            if (watching is { } request)
+            {
+                try
+                {
+                    await Transmit(request, cancellation);
+                }
+                catch (RemoteException)
+                {
+                }
+            }
+        }
+        finally
+        {
+            reopening.Release();
+        }
+    }
+
+    private async Task<RemoteResponse> Transmit(RemoteRequest request, CancellationToken cancellation)
+    {
         TaskCompletionSource<RemoteResponse> completion = new(TaskCreationOptions.RunContinuationsAsynchronously);
         RemoteRequest numbered = request with { Id = Interlocked.Increment(ref nextId) };
         pending[numbered.Id] = completion;
@@ -799,11 +866,11 @@ internal sealed class ServerConnection : IServerConnection
         }
     }
 
-    private async Task Read()
+    private async Task Read(IMessageChannel source)
     {
         try
         {
-            while (await channel.Receive<RemoteResponse>(stopping.Token) is { } response)
+            while (await source.Receive<RemoteResponse>(stopping.Token) is { } response)
             {
                 if (response.Event is { } remoteEvent)
                 {
