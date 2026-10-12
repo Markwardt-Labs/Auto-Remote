@@ -8,6 +8,7 @@
     <AssemblyName>Markwardt.AutoRemote.Frontend</AssemblyName>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+    <RuntimeIdentifiers>win-x64;linux-x64</RuntimeIdentifiers>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
