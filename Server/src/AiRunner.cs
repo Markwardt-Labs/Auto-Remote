@@ -1,0 +1,62 @@
+namespace Markwardt.AutoRemote.Server;
+
+/// <summary>
+/// Starts conversations with the AI service of a workspace.
+/// </summary>
+internal interface IAiRunner
+{
+    /// <summary>
+    /// Starts a conversation that takes prompts until it is disposed.
+    /// </summary>
+    /// <param name="config">The server settings naming the executables and arguments.</param>
+    /// <param name="service">The AI service to run on.</param>
+    /// <param name="folder">The working folder, which is also what scopes the service's conversation.</param>
+    /// <param name="model">The model to run on.</param>
+    /// <param name="effort">The effort to run with.</param>
+    /// <param name="aiSession">The identifier of the AI session to run in.</param>
+    /// <param name="resume">Whether <paramref name="aiSession" /> already exists and is resumed, instead of being started; a service that chooses identifiers itself reports the new one as <see cref="AiOutputKind.Session" />.</param>
+    /// <returns>The running conversation.</returns>
+    /// <exception cref="RequestException">The service could not be started.</exception>
+    IAiConversation Start(ServerConfig config, AiService service, string folder, AiModel model, AiEffort effort, Guid aiSession, bool resume);
+}
+
+/// <inheritdoc />
+internal sealed class AiRunner : IAiRunner
+{
+    /// <inheritdoc />
+    public IAiConversation Start(ServerConfig config, AiService service, string folder, AiModel model, AiEffort effort, Guid aiSession, bool resume) => service switch
+    {
+        AiService.Codex => new CodexConversation(config, folder, model, effort, resume ? aiSession : null),
+        _ => StartClaude(config, folder, model, effort, aiSession, resume)
+    };
+
+    private ClaudeConversation StartClaude(ServerConfig config, string folder, AiModel model, AiEffort effort, Guid aiSession, bool resume)
+    {
+        ProcessStartInfo start = new(config.ClaudeCommand)
+        {
+            WorkingDirectory = folder,
+            RedirectStandardInput = true,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+        };
+
+        foreach (string argument in (string[])["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--model", model.ToString().ToLowerInvariant(), "--effort", effort.ToString().ToLowerInvariant(), .. config.ClaudeArguments, .. resume ? (string[])["--resume", aiSession.ToString()] : (string[])["--session-id", aiSession.ToString()]])
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        Process process = new() { StartInfo = start };
+
+        try
+        {
+            process.Start();
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            process.Dispose();
+            throw new RequestException($"Claude Code could not be started ('{config.ClaudeCommand}'): {exception.Message}");
+        }
+
+        return new ClaudeConversation(process);
+    }
+}

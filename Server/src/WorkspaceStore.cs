@@ -1,0 +1,163 @@
+namespace Markwardt.AutoRemote.Server;
+
+/// <summary>
+/// Persists workspaces and their conversations on disk.
+/// </summary>
+internal interface IWorkspaceStore
+{
+    /// <summary>
+    /// Points the store at its files.
+    /// </summary>
+    /// <param name="path">The workspaces file; conversations are kept in a <c>history</c> folder beside it.</param>
+    void Open(string path);
+
+    /// <summary>
+    /// Reads the stored groups and workspaces.
+    /// </summary>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The catalog, empty if nothing was stored yet.</returns>
+    /// <exception cref="InvalidDataException">The workspaces file is not valid.</exception>
+    Task<WorkspaceCatalog> Load(CancellationToken cancellation);
+
+    /// <summary>
+    /// Replaces the stored groups and workspaces.
+    /// </summary>
+    /// <param name="catalog">The catalog to store.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    Task Save(WorkspaceCatalog catalog, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads a workspace's conversation.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The messages in order, empty if there are none.</returns>
+    Task<IReadOnlyList<ChatMessage>> ReadHistory(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Appends a message to a workspace's conversation.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="message">The message to add.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    /// <returns>The position of the message in the conversation, starting at zero.</returns>
+    Task<int> AppendHistory(Guid id, ChatMessage message, CancellationToken cancellation);
+
+    /// <summary>
+    /// Deletes a workspace's conversation.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    void DeleteHistory(Guid id);
+}
+
+/// <inheritdoc />
+internal sealed class WorkspaceStore : IWorkspaceStore
+{
+    private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
+
+    private readonly SemaphoreSlim gate = new(1, 1);
+
+    private string path = "workspaces.json";
+
+    /// <inheritdoc />
+    public void Open(string path) => this.path = Path.GetFullPath(path);
+
+    /// <inheritdoc />
+    public async Task<WorkspaceCatalog> Load(CancellationToken cancellation)
+    {
+        if (!File.Exists(path))
+        {
+            return new WorkspaceCatalog { Groups = [], Workspaces = [] };
+        }
+
+        try
+        {
+            await using FileStream stream = File.OpenRead(path);
+            return await JsonSerializer.DeserializeAsync<WorkspaceCatalog>(stream, options, cancellation) ?? new WorkspaceCatalog { Groups = [], Workspaces = [] };
+        }
+        catch (JsonException exception)
+        {
+            throw new InvalidDataException($"Workspaces file '{path}' is invalid: {exception.Message}", exception);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task Save(WorkspaceCatalog catalog, CancellationToken cancellation)
+    {
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            string temporary = path + ".tmp";
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(catalog, options), cancellation);
+            File.Move(temporary, path, true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ChatMessage>> ReadHistory(Guid id, CancellationToken cancellation)
+    {
+        string file = HistoryPath(id);
+
+        if (!File.Exists(file))
+        {
+            return [];
+        }
+
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            List<ChatMessage> messages = [];
+
+            foreach (string line in await File.ReadAllLinesAsync(file, cancellation))
+            {
+                if (line.Length > 0 && JsonSerializer.Deserialize<ChatMessage>(line, options) is { } message)
+                {
+                    messages.Add(message);
+                }
+            }
+
+            return messages;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<int> AppendHistory(Guid id, ChatMessage message, CancellationToken cancellation)
+    {
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            string file = HistoryPath(id);
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            int index = File.Exists(file) ? File.ReadLines(file).Count(line => line.Length > 0) : 0;
+            await File.AppendAllTextAsync(file, JsonSerializer.Serialize(message, new JsonSerializerOptions(options) { WriteIndented = false }) + "\n", cancellation);
+            return index;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public void DeleteHistory(Guid id)
+    {
+        if (File.Exists(HistoryPath(id)))
+        {
+            File.Delete(HistoryPath(id));
+        }
+    }
+
+    private string HistoryPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "history", id.ToString("N") + ".jsonl");
+}

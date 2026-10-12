@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Markwardt.AutoRemote.Client.ConnectView"
+             x:CompileBindings="False">
+  <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <StackPanel MaxWidth="440" Margin="24,48" Spacing="14" VerticalAlignment="Center">
+      <TextBlock Text="Auto Remote" Classes="serif" FontSize="34" HorizontalAlignment="Center" />
+      <TextBlock Text="Connect to your AI server" Classes="muted" HorizontalAlignment="Center" Margin="0,0,0,18" />
+
+      <TextBlock Text="Host" Classes="muted" />
+      <TextBox Text="{Binding Host}" PlaceholderText="192.168.1.20" />
+      <TextBlock Text="Port" Classes="muted" />
+      <TextBox Text="{Binding Port}" PlaceholderText="52678" />
+      <TextBlock Text="Access key" Classes="muted" />
+      <TextBox Text="{Binding AccessKey}" PasswordChar="•" />
+
+      <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+      <Button Content="Connect" Command="{Binding ConnectCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
+      <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsBusy}" Foreground="{DynamicResource Accent}" />
+      <TextBlock Text="{Binding Version}" Classes="muted" FontSize="12" HorizontalAlignment="Center" Margin="0,16,0,0" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

@@ -1,0 +1,467 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             xmlns:core="clr-namespace:Markwardt.AutoRemote;assembly=Markwardt.AutoRemote"
+             x:Class="Markwardt.AutoRemote.Client.HomeView"
+             x:CompileBindings="False">
+  <Grid>
+    <Grid RowDefinitions="Auto,*,Auto">
+      <Border Grid.Row="0" Classes="topbar" Classes.working="{Binding IsAiWorking}" Padding="8">
+        <Grid ColumnDefinitions="140,*,140">
+          <Button Grid.Column="0" Content="☰" Classes="flat" FontSize="20" Command="{Binding ToggleDrawerCommand}" />
+          <TextBlock Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" IsVisible="{Binding HasSelection}">
+            <Button Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
+              <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource RemoteIconGeometry}" Width="18" Height="18" />
+            </Button>
+            <Button Classes="flat" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
+              <Path Classes="usageIcon" Tag="{Binding Usage.SessionPace}" Data="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" Width="18" Height="18" />
+            </Button>
+            <Button Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="Workspace settings" Command="{Binding Active.ToggleSettingsCommand}" />
+          </StackPanel>
+        </Grid>
+      </Border>
+
+      <Grid Grid.Row="1">
+        <StackPanel IsVisible="{Binding !HasSelection}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Margin="32">
+          <TextBlock Text="No workspace selected" Classes="serif" FontSize="24" HorizontalAlignment="Center" />
+          <TextBlock Text="Open the menu to pick a workspace or start a new one." Classes="muted" TextWrapping="Wrap" TextAlignment="Center" />
+          <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+        </StackPanel>
+
+        <Grid IsVisible="{Binding HasSelection}" DataContext="{Binding Active}" ColumnDefinitions="*,Auto,3*,Auto,3*">
+          <Panel Grid.Column="0" Grid.ColumnSpan="{Binding Span}" MinWidth="120" IsVisible="{Binding ShowFilesPanel, FallbackValue=False}">
+           <Grid DataContext="{Binding Files}" RowDefinitions="Auto,Auto,Auto,*" Margin="8,0,0,0">
+            <Button Grid.Row="0" DataContext="{Binding Git}" Classes="version" Classes.pending="{Binding HasChanges}" IsVisible="{Binding IsRepo}">
+              <Button.Flyout>
+                <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                  <MenuItem Header="Commit" Command="{Binding CommitCommand}" />
+                  <MenuItem Header="Reset" Command="{Binding ResetCommand}" />
+                  <Separator />
+                  <MenuItem Header="Branch" Command="{Binding BranchCommand}" />
+                  <MenuItem Header="Tag" Command="{Binding TagCommand}" />
+                  <MenuItem Header="Remote" Command="{Binding RemoteCommand}" />
+                </MenuFlyout>
+              </Button.Flyout>
+              <Grid>
+                <StackPanel Spacing="2" HorizontalAlignment="Center">
+                  <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
+                  <TextBlock Text="{Binding Tag}" IsVisible="{Binding HasTag}" FontSize="13" FontWeight="SemiBold" Classes="modified" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
+                  <TextBlock Text="{Binding Message}" Classes="muted" FontSize="11.5" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
+                  <TextBlock Text="{Binding Commit}" Classes="muted" FontSize="10.5" FontFamily="monospace" HorizontalAlignment="Center" />
+                </StackPanel>
+                <TextBlock Text="*" IsVisible="{Binding HasChanges}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource Accent}" HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip.Tip="Uncommitted changes" />
+              </Grid>
+            </Button>
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,2,0,4">
+              <Button Grid.Column="0" Classes="icon" ToolTip.Tip="Up" Command="{Binding UpCommand}" IsVisible="{Binding !Git.IsChangesMode}">
+                <Path Classes="lineIcon" Data="{StaticResource UpIconGeometry}" Width="13" Height="13" />
+              </Button>
+              <TextBlock Grid.Column="1" Text="{Binding CurrentPath}" IsVisible="{Binding !Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="1" Text="Changes" IsVisible="{Binding Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" />
+              <ToggleButton Grid.Column="2" Classes="icon" ToolTip.Tip="Toggle changes mode" IsChecked="{Binding Git.IsChangesMode, Mode=TwoWay}" IsVisible="{Binding Git.IsRepo}">
+                <Path Classes="lineIcon" Data="{StaticResource ChangesIconGeometry}" Width="13" Height="13" />
+              </ToggleButton>
+              <Button Grid.Column="3" Classes="icon" ToolTip.Tip="Collapse All" Command="{Binding CollapseAllCommand}">
+                <Path Classes="lineIcon" Data="{StaticResource CollapseAllIconGeometry}" Width="13" Height="13" />
+              </Button>
+            </Grid>
+            <TextBlock Grid.Row="2" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="0,0,0,8" />
+            <TreeView Grid.Row="3" ItemsSource="{Binding Git.ChangeTree}" IsVisible="{Binding Git.IsChangesMode}" Background="Transparent" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+              <TreeView.Styles>
+                <Style Selector="TreeViewItem">
+                  <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                </Style>
+              </TreeView.Styles>
+              <TreeView.ItemTemplate>
+                <TreeDataTemplate ItemsSource="{Binding Children}">
+                  <Button Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Panel Width="12" Height="12">
+                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding !IsFolder}" />
+                      </Panel>
+                      <TextBlock Text="{Binding Name}" FontSize="12" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.deleted="{Binding IsDeleted}" />
+                    </StackPanel>
+                  </Button>
+                </TreeDataTemplate>
+              </TreeView.ItemTemplate>
+            </TreeView>
+            <TreeView Grid.Row="3" IsVisible="{Binding !Git.IsChangesMode}" ItemsSource="{Binding Nodes}" SelectedItem="{Binding Selected}" Background="Transparent" Padding="0"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" DoubleTapped="OnFileDoubleTapped">
+              <TreeView.Styles>
+                <Style Selector="TreeViewItem">
+                  <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                  <Setter Property="IsVisible" Value="{Binding !IsPlaceholder}" />
+                  <Setter Property="HorizontalAlignment" Value="Stretch" />
+                </Style>
+              </TreeView.Styles>
+              <TreeView.ItemTemplate>
+                <TreeDataTemplate ItemsSource="{Binding Children}">
+                  <Border Background="Transparent" Padding="2,1" HorizontalAlignment="Left" MinWidth="{Binding $parent[TreeView].Bounds.Width}">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                      <Panel Width="12" Height="12">
+                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsFile}" />
+                      </Panel>
+                      <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.ignored="{Binding IsIgnored}" />
+                    </StackPanel>
+                  </Border>
+                </TreeDataTemplate>
+              </TreeView.ItemTemplate>
+            </TreeView>
+           </Grid>
+          </Panel>
+          <GridSplitter Grid.Column="1" Classes="separator" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
+          <GridSplitter Grid.Column="3" Classes="separator" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
+          <Grid Grid.Column="{Binding ChatColumn}" Grid.ColumnSpan="{Binding Span}" MinWidth="240" RowDefinitions="Auto,*" IsVisible="{Binding ShowChatPanel, FallbackValue=False}">
+           <UniformGrid Grid.Row="0" Rows="1" IsVisible="{Binding ShowSideTabs}">
+             <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChatView}" Padding="0,8" />
+             <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistoryView}" Padding="0,8" />
+           </UniformGrid>
+           <Panel Grid.Row="1">
+           <Panel IsVisible="{Binding ShowChatView}">
+           <Grid DataContext="{Binding Chat}" RowDefinitions="*,Auto,Auto">
+            <ScrollViewer Grid.Row="0" Name="MessageScroller" Padding="16,0" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMessagesScrolled" DataContextChanged="OnMessagesChanged">
+              <ItemsControl ItemsSource="{Binding Messages}" Margin="0,8">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Panel Margin="0,8">
+                      <Border IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.User}}"
+                              Background="{DynamicResource Elevated}" CornerRadius="6" Padding="12,8" HorizontalAlignment="Right" MaxWidth="320">
+                        <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{DynamicResource Text}" />
+                      </Border>
+                      <SelectableTextBlock IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}"
+                                           Text="{Binding Text}" TextWrapping="Wrap" Foreground="{DynamicResource Text}" LineHeight="22" />
+                    </Panel>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </ScrollViewer>
+            <StackPanel Grid.Row="1" Margin="20,4" Spacing="4">
+              <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+            </StackPanel>
+            <Grid Grid.Row="2" Margin="20,4,12,12" ColumnDefinitions="*,Auto">
+              <TextBox Grid.Column="0" Classes="bare" Text="{Binding Input}" PlaceholderText="Message the AI" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
+              <Button Grid.Column="1" Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" Margin="6,0,0,0"
+                      VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
+            </Grid>
+           </Grid>
+           </Panel>
+           <Panel IsVisible="{Binding ShowHistoryView}">
+           <Grid DataContext="{Binding Git.History}" RowDefinitions="Auto,Auto,*">
+            <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="16,8,8,4">
+              <TextBlock Grid.Column="0" Text="History" Classes="muted" VerticalAlignment="Center" />
+              <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}">
+                  <Path Classes="lineIcon" Data="M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13" Width="13" Height="13" />
+                </Button>
+                <Button Classes="icon" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
+                  <Path Classes="lineIcon" Data="M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5" Width="13" Height="13" />
+                </Button>
+              </StackPanel>
+            </Grid>
+            <TextBlock Grid.Row="1" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="16,0,16,8" />
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="8,0,8,12">
+                <TextBlock Text="No commits yet." IsVisible="{Binding IsEmpty}" Classes="muted" Margin="8,4" />
+                <ItemsControl ItemsSource="{Binding Commits}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <StackPanel>
+                        <Grid ColumnDefinitions="20,*">
+                          <Border Grid.Column="0" Width="1" Background="{DynamicResource Border}" HorizontalAlignment="Center" />
+                          <Ellipse Grid.Column="0" Width="9" Height="9" Fill="{DynamicResource Accent}" VerticalAlignment="Top" Margin="0,13,0,0" />
+                          <StackPanel Grid.Column="1">
+                            <ItemsControl ItemsSource="{Binding Refs}" IsVisible="{Binding HasRefs}" Margin="6,6,0,0">
+                              <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                  <WrapPanel />
+                                </ItemsPanelTemplate>
+                              </ItemsControl.ItemsPanel>
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Button Classes="flat" Padding="0" Margin="0">
+                                    <Button.Flyout>
+                                      <MenuFlyout>
+                                        <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" IsVisible="{Binding CanCheckout}" />
+                                        <Separator IsVisible="{Binding HasRelative}" />
+                                        <MenuItem Header="{Binding SquashCurrentHeader}" Command="{Binding SquashCurrentCommand}" IsVisible="{Binding HasRelative}" />
+                                        <MenuItem Header="{Binding SquashSelectedHeader}" Command="{Binding SquashSelectedCommand}" IsVisible="{Binding HasRelative}" />
+                                        <Separator IsVisible="{Binding HasRelative}" />
+                                        <MenuItem Header="{Binding RebaseCurrentHeader}" Command="{Binding RebaseCurrentCommand}" IsVisible="{Binding HasRelative}" />
+                                        <MenuItem Header="{Binding RebaseSelectedHeader}" Command="{Binding RebaseSelectedCommand}" IsVisible="{Binding HasRelative}" />
+                                        <Separator IsVisible="{Binding HasRelative}" />
+                                        <MenuItem Header="{Binding MergeCurrentHeader}" Command="{Binding MergeCurrentCommand}" IsVisible="{Binding HasRelative}" />
+                                        <MenuItem Header="{Binding MergeSelectedHeader}" Command="{Binding MergeSelectedCommand}" IsVisible="{Binding HasRelative}" />
+                                        <Separator IsVisible="{Binding CanDelete}" />
+                                        <MenuItem Header="Delete" Command="{Binding DeleteCommand}" IsVisible="{Binding CanDelete}" />
+                                      </MenuFlyout>
+                                    </Button.Flyout>
+                                    <Border Classes="ref" Classes.branch="{Binding IsBranch}" Classes.tag="{Binding IsTag}" Classes.current="{Binding IsCurrent}">
+                                      <TextBlock Text="{Binding Name}" FontSize="10.5" />
+                                    </Border>
+                                  </Button>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <Button Classes="flat" Command="{Binding ToggleCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,4,6,6">
+                              <StackPanel Spacing="2">
+                                <TextBlock Text="{Binding Subject}" TextWrapping="Wrap" FontSize="13" />
+                                <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="10.5" TextTrimming="CharacterEllipsis" />
+                              </StackPanel>
+                            </Button>
+                          </StackPanel>
+                        </Grid>
+                        <Border IsVisible="{Binding IsExpanded}" Margin="26,0,0,6" Padding="8,6" Background="{DynamicResource Surface}" CornerRadius="4">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="Loading changes…" IsVisible="{Binding IsLoading}" Classes="muted" FontSize="11.5" />
+                            <TextBlock Text="No changes" IsVisible="{Binding HasNoChanges}" Classes="muted" FontSize="11.5" />
+                            <Button Content="Check out this commit" Command="{Binding CheckoutCommand}" HorizontalAlignment="Left" Padding="8,3" FontSize="11.5" />
+                            <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" FontSize="11.5" />
+                            <TreeView ItemsSource="{Binding Changes}" Background="Transparent" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                              <TreeView.Styles>
+                                <Style Selector="TreeViewItem">
+                                  <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
+                                </Style>
+                              </TreeView.Styles>
+                              <TreeView.ItemTemplate>
+                                <TreeDataTemplate ItemsSource="{Binding Children}">
+                                  <Button Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                      <Panel Width="12" Height="12">
+                                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
+                                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding !IsFolder}" />
+                                      </Panel>
+                                      <TextBlock Text="{Binding Name}" FontSize="12" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.deleted="{Binding IsDeleted}" />
+                                    </StackPanel>
+                                  </Button>
+                                </TreeDataTemplate>
+                              </TreeView.ItemTemplate>
+                            </TreeView>
+                          </StackPanel>
+                        </Border>
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Button Content="Load older commits" Command="{Binding LoadMoreCommand}" IsVisible="{Binding HasMore}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="8,8,8,0" />
+              </StackPanel>
+            </ScrollViewer>
+           </Grid>
+           </Panel>
+           </Panel>
+          </Grid>
+          <Panel Grid.Column="{Binding ContentColumn}" Grid.ColumnSpan="{Binding Span}" MinWidth="160" Background="{DynamicResource Background}" IsVisible="{Binding ShowContentPanel, FallbackValue=False}">
+            <TextBlock Text="Select a file to see its content." Classes="muted" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !Files.IsPreviewing, FallbackValue=False}" />
+            <Border DataContext="{Binding Files}" IsVisible="{Binding IsPreviewing}" Margin="12,0" Background="{DynamicResource Background}">
+              <Grid RowDefinitions="Auto,Auto,*">
+                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
+                  <TextBlock Grid.Column="0" Text="{Binding PreviewTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                  <ToggleButton Grid.Column="1" Classes="icon" ToolTip.Tip="Find (Ctrl+F)" IsChecked="{Binding Find.IsOpen, Mode=TwoWay}" IsVisible="{Binding IsTextPreview}" Click="OnFindToggled">
+                    <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="13" Height="13" />
+                  </ToggleButton>
+                  <Button Grid.Column="2" Content="Close" Command="{Binding ClosePreviewCommand}" Margin="6,0,0,0" />
+                </Grid>
+                <Border Grid.Row="1" DataContext="{Binding Find}" IsVisible="{Binding IsOpen}" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="6,4" Margin="0,0,0,8">
+                  <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+                    <TextBox Name="FindBox" Grid.Column="0" Text="{Binding Query}" PlaceholderText="Find" FontSize="12" Padding="6,3" MinHeight="26" MinWidth="80">
+                      <TextBox.KeyBindings>
+                        <KeyBinding Gesture="Enter" Command="{Binding NextCommand}" />
+                        <KeyBinding Gesture="Shift+Enter" Command="{Binding PreviousCommand}" />
+                        <KeyBinding Gesture="Escape" Command="{Binding CloseCommand}" />
+                      </TextBox.KeyBindings>
+                    </TextBox>
+                    <TextBlock Grid.Column="1" Text="{Binding Display}" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="8,0" MinWidth="50" />
+                    <ToggleButton Grid.Column="2" Classes="icon" Content="Aa" IsChecked="{Binding MatchCase, Mode=TwoWay}" ToolTip.Tip="Match case" FontSize="11" Padding="6,3" />
+                    <ToggleButton Grid.Column="3" Classes="icon" Content="&quot;W&quot;" IsChecked="{Binding WholeWord, Mode=TwoWay}" ToolTip.Tip="Match whole word" FontSize="11" Padding="6,3" />
+                    <Button Grid.Column="4" Classes="icon" Content="▲" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous match (Shift+Enter)" FontSize="10" Padding="6,3" />
+                    <Button Grid.Column="5" Classes="icon" Content="▼" Command="{Binding NextCommand}" ToolTip.Tip="Next match (Enter)" FontSize="10" Padding="6,3" />
+                    <Button Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}" ToolTip.Tip="Close (Esc)">
+                      <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
+                    </Button>
+                  </Grid>
+                </Border>
+                <Border Grid.Row="2" Background="{DynamicResource Surface}" CornerRadius="4" Padding="12">
+                  <Panel>
+                    <ScrollViewer IsVisible="{Binding IsTextPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                      <local:SyntaxView File="{Binding Preview}" Matches="{Binding Find.Matches}" />
+                    </ScrollViewer>
+                    <ScrollViewer IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                      <local:MarkdownView Source="{Binding Preview.Text}" />
+                    </ScrollViewer>
+                    <ScrollViewer IsVisible="{Binding IsDiffPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                      <local:DiffView Diff="{Binding Diff}" />
+                    </ScrollViewer>
+                  </Panel>
+                </Border>
+              </Grid>
+            </Border>
+          </Panel>
+          <Panel Grid.Column="0" Grid.ColumnSpan="5" IsVisible="{Binding ShowSettings, FallbackValue=False}" Background="{DynamicResource Background}">
+           <ScrollViewer VerticalScrollBarVisibility="Auto">
+            <StackPanel DataContext="{Binding Settings}" Margin="20,8,20,20" Spacing="8">
+              <TextBlock Text="AI service" Classes="muted" />
+              <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding SelectedService}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Text="Model" Classes="muted" Margin="0,8,0,0" />
+              <ComboBox ItemsSource="{Binding Models}" SelectedItem="{Binding Model}" HorizontalAlignment="Stretch" />
+              <TextBlock Text="Effort" Classes="muted" Margin="0,8,0,0" />
+              <ComboBox ItemsSource="{Binding Efforts}" SelectedItem="{Binding Effort}" HorizontalAlignment="Stretch" />
+              <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+              <Button Content="Rename workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,16,0,0" />
+              <Button Content="Delete workspace" Command="{Binding $parent[UserControl].DataContext.BeginDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            </StackPanel>
+           </ScrollViewer>
+          </Panel>
+        </Grid>
+      </Grid>
+
+      <Border Grid.Row="2" IsVisible="{Binding Active.ShowTabs, FallbackValue=False}" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
+        <UniformGrid Rows="1" DataContext="{Binding Active}">
+          <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChat}" />
+          <Button Content="Files" Command="{Binding ShowFilesCommand}" Classes="tab" Classes.on="{Binding ShowFiles}" />
+          <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistory}" IsVisible="{Binding ShowHistoryTab}" />
+        </UniformGrid>
+      </Border>
+    </Grid>
+
+    <Grid IsVisible="{Binding IsUsageOpen}">
+      <Border Background="Transparent" PointerPressed="CloseUsage" />
+      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="6" Padding="16" Width="300" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="8,60,8,0">
+        <StackPanel DataContext="{Binding Usage}" Spacing="10">
+          <TextBlock Text="{Binding ServiceName, StringFormat='{}{0} usage limits'}" Classes="serif" FontSize="16" />
+          <StackPanel IsVisible="{Binding HasLimits}" Spacing="10">
+            <StackPanel Spacing="2" IsVisible="{Binding SessionText.Length}">
+              <TextBlock Text="Session" Classes="muted" />
+              <TextBlock Text="{Binding SessionText}" Classes="usageText" Tag="{Binding SessionPace}" FontSize="18" />
+              <TextBlock Text="{Binding SessionReset}" Classes="muted" FontSize="12" />
+            </StackPanel>
+            <StackPanel Spacing="2" IsVisible="{Binding WeekText.Length}">
+              <TextBlock Text="Week" Classes="muted" />
+              <TextBlock Text="{Binding WeekText}" Classes="usageText" Tag="{Binding WeekPace}" FontSize="18" />
+              <TextBlock Text="{Binding WeekReset}" Classes="muted" FontSize="12" />
+            </StackPanel>
+          </StackPanel>
+          <TextBlock Text="The service reports no usage limits." IsVisible="{Binding !HasLimits}" Classes="muted" TextWrapping="Wrap" />
+        </StackPanel>
+      </Border>
+    </Grid>
+
+    <Grid IsVisible="{Binding IsDrawerOpen}">
+      <Border Background="{DynamicResource Scrim}" PointerPressed="CloseDrawer" />
+      <Border Background="{DynamicResource Surface}" Width="340" HorizontalAlignment="Left" Padding="12">
+        <Grid RowDefinitions="Auto,*,Auto">
+          <TextBlock Grid.Row="0" Text="Workspaces" Classes="serif" FontSize="22" Margin="8,8,8,12" />
+          <ListBox Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}" Background="Transparent">
+            <ListBox.ItemTemplate>
+              <DataTemplate>
+                <Panel>
+                  <Grid IsVisible="{Binding IsGroup}" ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="{Binding Indent}">
+                    <TextBlock Grid.Column="0" Text="{Binding Text}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <Button Grid.Column="1" Content="+" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginNewGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="2" Content="✎" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginRenameGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="3" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="4" Content="✕" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginDeleteGroupCommand}" CommandParameter="{Binding Group}" />
+                  </Grid>
+                  <Grid IsVisible="{Binding IsWorkspace}" ColumnDefinitions="*,Auto" Margin="{Binding Indent}">
+                    <StackPanel Grid.Column="0">
+                      <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                    <Button Grid.Column="1" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />
+                  </Grid>
+                </Panel>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+          <StackPanel Grid.Row="2" Spacing="8" Margin="0,8,0,0">
+            <Button Content="New workspace" Command="{Binding NewWorkspaceCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <Button Content="Clone workspace" Command="{Binding CloneWorkspaceCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <Button Content="New group" Command="{Binding BeginNewGroupCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <Button Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          </StackPanel>
+        </Grid>
+      </Border>
+    </Grid>
+
+    <Border IsVisible="{Binding Active.Git.IsPrompting, FallbackValue=False}" Background="{DynamicResource Scrim}">
+      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+        <StackPanel DataContext="{Binding Active.Git}" Spacing="12">
+          <TextBlock Text="{Binding PromptTitle}" Classes="serif" FontSize="20" />
+          <TextBlock Text="{Binding PromptHint}" IsVisible="{Binding !HasInput}" Classes="muted" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding PromptHint}" IsVisible="{Binding HasEmail}" Classes="muted" TextWrapping="Wrap" />
+          <TextBox Text="{Binding PromptText}" IsVisible="{Binding HasInput}" PlaceholderText="{Binding PromptPlaceholder}" AcceptsReturn="False" />
+          <TextBox Text="{Binding PromptEmail}" IsVisible="{Binding HasEmail}" PlaceholderText="Email" AcceptsReturn="False" />
+          <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+          <Button Content="{Binding PromptConfirm}" Command="{Binding ConfirmCommand}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding ShowCancel}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <Border IsVisible="{Binding Active.Git.IsWorking, FallbackValue=False}" Background="{DynamicResource Scrim}">
+      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="360" VerticalAlignment="Center">
+        <StackPanel DataContext="{Binding Active.Git}" Spacing="12">
+          <TextBlock Text="Working…" Classes="serif" FontSize="20" />
+          <TextBlock Text="Git is working on the server. If the AI is resolving conflicts, you can watch it in the chat." Classes="muted" TextWrapping="Wrap" />
+          <Button Content="Cancel and undo" Command="{Binding CancelWorkCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <Border IsVisible="{Binding IsEditing}" Background="{DynamicResource Scrim}">
+      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <StackPanel IsVisible="{Binding IsRenaming}" Spacing="12">
+            <TextBlock Text="Rename workspace" Classes="serif" FontSize="20" />
+            <TextBlock Text="This renames the workspace's folder on the server." Classes="muted" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel IsVisible="{Binding IsCreatingGroup}" Spacing="12">
+            <TextBlock Text="New group" Classes="serif" FontSize="20" />
+            <TextBlock Text="{Binding NewGroupHint}" Classes="muted" TextWrapping="Wrap" />
+          </StackPanel>
+          <TextBlock IsVisible="{Binding IsRenamingGroup}" Text="Rename group" Classes="serif" FontSize="20" />
+          <TextBox IsVisible="{Binding NeedsName}" Text="{Binding RenameText}" />
+          <Button IsVisible="{Binding IsRenaming}" Content="Rename" Command="{Binding ConfirmRenameCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button IsVisible="{Binding IsCreatingGroup}" Content="Create" Command="{Binding ConfirmNewGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button IsVisible="{Binding IsRenamingGroup}" Content="Rename" Command="{Binding ConfirmRenameGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <StackPanel IsVisible="{Binding IsDeleting}" Spacing="12">
+            <TextBlock Text="Delete workspace?" Classes="serif" FontSize="20" />
+            <TextBlock Text="{Binding Title, StringFormat='{}{0} will be removed from the server.'}" Classes="muted" TextWrapping="Wrap" />
+            <CheckBox IsChecked="{Binding DeleteFolder}" Content="Also delete the workspace folder and everything in it" />
+            <Button Content="Delete" Command="{Binding ConfirmDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          </StackPanel>
+          <StackPanel IsVisible="{Binding IsMovingWorkspace}" Spacing="12">
+            <TextBlock Text="Move workspace" Classes="serif" FontSize="20" />
+            <TextBlock Text="{Binding MovingName, StringFormat='{}Choose where {0} goes in the list.'}" Classes="muted" TextWrapping="Wrap" />
+          </StackPanel>
+          <StackPanel IsVisible="{Binding IsMovingGroup}" Spacing="12">
+            <TextBlock Text="Move group" Classes="serif" FontSize="20" />
+            <TextBlock Text="{Binding MovingName, StringFormat='{}Choose where {0} goes in the list, with everything in it.'}" Classes="muted" TextWrapping="Wrap" />
+          </StackPanel>
+          <ComboBox IsVisible="{Binding IsMoving}" ItemsSource="{Binding Destinations}" SelectedItem="{Binding Destination}" HorizontalAlignment="Stretch">
+            <ComboBox.ItemTemplate>
+              <DataTemplate>
+                <TextBlock Text="{Binding Name}" />
+              </DataTemplate>
+            </ComboBox.ItemTemplate>
+          </ComboBox>
+          <Button IsVisible="{Binding IsMoving}" Content="Move" Command="{Binding ConfirmMoveCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <StackPanel IsVisible="{Binding IsDeletingGroup}" Spacing="12">
+            <TextBlock Text="Delete group?" Classes="serif" FontSize="20" />
+            <TextBlock Text="{Binding EditingGroupName, StringFormat='{}{0} will be removed. The workspaces and groups in it are kept and move up into its parent.'}" Classes="muted" TextWrapping="Wrap" />
+            <Button Content="Delete" Command="{Binding ConfirmDeleteGroupCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          </StackPanel>
+          <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+          <Button Content="Cancel" Command="{Binding CancelEditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Border>
+  </Grid>
+</UserControl>

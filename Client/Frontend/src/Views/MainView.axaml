@@ -1,0 +1,24 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="using:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.MainView"
+             x:CompileBindings="False">
+  <Border Background="{DynamicResource Background}">
+    <ContentControl Content="{Binding Current}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
+      <ContentControl.DataTemplates>
+        <DataTemplate DataType="local:ConnectViewModel">
+          <local:ConnectView />
+        </DataTemplate>
+        <DataTemplate DataType="local:HomeViewModel">
+          <local:HomeView />
+        </DataTemplate>
+        <DataTemplate DataType="local:NewWorkspaceViewModel">
+          <local:NewWorkspaceView />
+        </DataTemplate>
+        <DataTemplate DataType="local:CloneWorkspaceViewModel">
+          <local:CloneWorkspaceView />
+        </DataTemplate>
+      </ContentControl.DataTemplates>
+    </ContentControl>
+  </Border>
+</UserControl>

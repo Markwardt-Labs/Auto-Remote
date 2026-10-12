@@ -1,0 +1,275 @@
+<Application xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Markwardt.AutoRemote.Client.ClientApp"
+             RequestedThemeVariant="Dark">
+  <Application.Styles>
+    <FluentTheme />
+
+    <Style Selector="TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{DynamicResource Danger}" />
+      <Setter Property="TextWrapping" Value="Wrap" />
+    </Style>
+    <Style Selector="TextBlock.serif">
+      <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <Style Selector="TextBox">
+      <Setter Property="Background" Value="{DynamicResource Surface}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="12,10" />
+      <Setter Property="MinHeight" Value="40" />
+    </Style>
+
+    <Style Selector="Button">
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    </Style>
+    <Style Selector="Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Selection}" />
+    </Style>
+    <Style Selector="Button.primary">
+      <Setter Property="Background" Value="{DynamicResource Accent}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.primary:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+      <Setter Property="TextElement.Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.primary:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Elevated}" />
+      <Setter Property="TextElement.Foreground" Value="{DynamicResource Muted}" />
+    </Style>
+    <Style Selector="Button.danger">
+      <Setter Property="Background" Value="{DynamicResource Danger}" />
+      <Setter Property="Foreground" Value="White" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.danger:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#D9604B" />
+      <Setter Property="TextElement.Foreground" Value="White" />
+    </Style>
+    <Style Selector="Button.flat">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.flat:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
+    </Style>
+    <Style Selector="Button.tab">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="{DynamicResource Muted}" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="0,14" />
+      <Setter Property="BorderThickness" Value="0,2,0,0" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.tab.on">
+      <Setter Property="Background" Value="{DynamicResource Background}" />
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    </Style>
+    <Style Selector="Button.tab.on:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Background}" />
+    </Style>
+
+    <Style Selector="GridSplitter.separator">
+      <Setter Property="Width" Value="5" />
+      <Setter Property="Background" Value="{DynamicResource Border}" />
+      <Setter Property="ResizeDirection" Value="Columns" />
+      <Setter Property="ResizeBehavior" Value="PreviousAndNext" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="Cursor" Value="SizeWestEast" />
+    </Style>
+    <Style Selector="GridSplitter.separator:pointerover">
+      <Setter Property="Background" Value="{DynamicResource Accent}" />
+    </Style>
+
+    <Style Selector="Path.usageIcon">
+      <Setter Property="Stroke" Value="{DynamicResource Text}" />
+      <Setter Property="StrokeThickness" Value="2" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="Stretch" Value="Uniform" />
+    </Style>
+    <Style Selector="Path.usageIcon[Tag=VeryLow]"><Setter Property="Stroke" Value="{DynamicResource PaceVeryLow}" /></Style>
+    <Style Selector="Path.usageIcon[Tag=Low]"><Setter Property="Stroke" Value="{DynamicResource PaceLow}" /></Style>
+    <Style Selector="Path.usageIcon[Tag=High]"><Setter Property="Stroke" Value="{DynamicResource PaceHigh}" /></Style>
+    <Style Selector="Path.usageIcon[Tag=VeryHigh]"><Setter Property="Stroke" Value="{DynamicResource PaceVeryHigh}" /></Style>
+    <Style Selector="Border.topbar.working Path.usageIcon[Tag=Low]"><Setter Property="Stroke" Value="{DynamicResource OnWorking}" /></Style>
+    <Style Selector="TextBlock.usageText[Tag=VeryLow]"><Setter Property="Foreground" Value="{DynamicResource PaceVeryLow}" /></Style>
+    <Style Selector="TextBlock.usageText[Tag=Low]"><Setter Property="Foreground" Value="{DynamicResource PaceLow}" /></Style>
+    <Style Selector="TextBlock.usageText[Tag=High]"><Setter Property="Foreground" Value="{DynamicResource PaceHigh}" /></Style>
+    <Style Selector="TextBlock.usageText[Tag=VeryHigh]"><Setter Property="Foreground" Value="{DynamicResource PaceVeryHigh}" /></Style>
+
+    <Style Selector="Border.topbar">
+      <Setter Property="Background" Value="{DynamicResource Elevated}" />
+      <Setter Property="BorderBrush" Value="{DynamicResource Border}" />
+      <Setter Property="BorderThickness" Value="0,0,0,1" />
+    </Style>
+    <Style Selector="Border.topbar.working">
+      <Setter Property="Background" Value="{DynamicResource Working}" />
+    </Style>
+    <Style Selector="Border.topbar.working TextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource OnWorking}" />
+    </Style>
+    <Style Selector="Border.topbar.working Button">
+      <Setter Property="Foreground" Value="{DynamicResource OnWorking}" />
+    </Style>
+
+    <Style Selector="ListBoxItem">
+      <Setter Property="Padding" Value="12,8" />
+      <Setter Property="CornerRadius" Value="4" />
+      <Setter Property="Margin" Value="0,1" />
+    </Style>
+    <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Selection}" />
+    </Style>
+    <Style Selector="Path.lineIcon">
+      <Setter Property="Stroke" Value="{DynamicResource Muted}" />
+      <Setter Property="StrokeThickness" Value="1.2" />
+      <Setter Property="StrokeLineCap" Value="Round" />
+      <Setter Property="StrokeJoin" Value="Round" />
+      <Setter Property="Fill" Value="Transparent" />
+      <Setter Property="Stretch" Value="Uniform" />
+    </Style>
+    <Style Selector="Button.icon, ToggleButton.icon">
+      <Setter Property="Padding" Value="4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="MinWidth" Value="24" />
+      <Setter Property="MinHeight" Value="24" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="ToggleButton.icon:checked /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Selection}" />
+    </Style>
+    <Style Selector="ToggleButton.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
+    </Style>
+    <Style Selector="Button.icon:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
+    </Style>
+    <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Button.icon:disabled Path.lineIcon">
+      <Setter Property="Opacity" Value="0.4" />
+    </Style>
+    <Style Selector="TextBlock.added"><Setter Property="Foreground" Value="{DynamicResource GitAdded}" /></Style>
+    <Style Selector="TextBlock.modified"><Setter Property="Foreground" Value="{DynamicResource GitModified}" /></Style>
+    <Style Selector="TextBlock.deleted"><Setter Property="Foreground" Value="{DynamicResource Danger}" /></Style>
+    <Style Selector="TextBlock.ignored"><Setter Property="Foreground" Value="{DynamicResource Muted}" /></Style>
+    <Style Selector="Button.version">
+      <Setter Property="Background" Value="{DynamicResource Elevated}" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Margin" Value="0,0,0,6" />
+    </Style>
+    <Style Selector="Button.version.pending">
+      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    </Style>
+    <Style Selector="Border.ref">
+      <Setter Property="CornerRadius" Value="3" />
+      <Setter Property="Padding" Value="5,1" />
+      <Setter Property="Margin" Value="0,0,4,2" />
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
+    </Style>
+    <Style Selector="Border.ref.branch"><Setter Property="Background" Value="{DynamicResource Selection}" /></Style>
+    <Style Selector="Border.ref.current"><Setter Property="Background" Value="{DynamicResource Accent}" /></Style>
+    <Style Selector="Border.ref.tag"><Setter Property="Background" Value="#4B3F1F" /></Style>
+    <Style Selector="TreeViewItem">
+      <Setter Property="Padding" Value="2" />
+      <Setter Property="MinHeight" Value="22" />
+    </Style>
+    <Style Selector="TreeViewItem /template/ Panel#PART_ExpandCollapseChevronContainer, TreeViewItem:empty /template/ Panel#PART_ExpandCollapseChevronContainer, TreeViewItem /template/ ToggleButton#PART_ExpandCollapseChevron">
+      <Setter Property="IsVisible" Value="False" />
+      <Setter Property="Width" Value="0" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Margin" Value="0" />
+    </Style>
+    <Style Selector="TreeViewItem:selected /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="{DynamicResource Selection}" />
+    </Style>
+    <Style Selector="TextBox.bare">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Padding" Value="0,8" />
+      <Setter Property="MinHeight" Value="36" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="TextBox.bare:pointerover /template/ Border#PART_BorderElement, TextBox.bare:focus /template/ Border#PART_BorderElement, TextBox.bare:focus:pointerover /template/ Border#PART_BorderElement">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderBrush" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+  </Application.Styles>
+
+  <Application.Resources>
+    <ResourceDictionary>
+      <Color x:Key="SystemAccentColor">#007ACC</Color>
+      <Color x:Key="SystemAccentColorLight1">#1F8AD2</Color>
+      <Color x:Key="SystemAccentColorLight2">#4BA3DD</Color>
+      <Color x:Key="SystemAccentColorLight3">#75BDE8</Color>
+      <Color x:Key="SystemAccentColorDark1">#0065A9</Color>
+      <Color x:Key="SystemAccentColorDark2">#005289</Color>
+      <Color x:Key="SystemAccentColorDark3">#003F6B</Color>
+      <SolidColorBrush x:Key="Background" Color="#1E1E1E" />
+      <SolidColorBrush x:Key="Surface" Color="#252526" />
+      <SolidColorBrush x:Key="Elevated" Color="#2D2D2D" />
+      <SolidColorBrush x:Key="Border" Color="#3C3C3C" />
+      <SolidColorBrush x:Key="Hover" Color="#2A2D2E" />
+      <SolidColorBrush x:Key="Selection" Color="#094771" />
+      <SolidColorBrush x:Key="Text" Color="#CCCCCC" />
+      <SolidColorBrush x:Key="Muted" Color="#969696" />
+      <SolidColorBrush x:Key="Accent" Color="#007ACC" />
+      <SolidColorBrush x:Key="AccentHover" Color="#1F8AD2" />
+      <SolidColorBrush x:Key="Working" Color="#007ACC" />
+      <SolidColorBrush x:Key="OnWorking" Color="White" />
+      <SolidColorBrush x:Key="Danger" Color="#C74E39" />
+      <SolidColorBrush x:Key="PaceVeryLow" Color="#6FBF73" />
+      <SolidColorBrush x:Key="PaceLow" Color="#569CD6" />
+      <SolidColorBrush x:Key="PaceHigh" Color="#E0A458" />
+      <SolidColorBrush x:Key="PaceVeryHigh" Color="#E57373" />
+      <SolidColorBrush x:Key="Scrim" Color="#99000000" />
+      <SolidColorBrush x:Key="GitAdded" Color="#73C991" />
+      <SolidColorBrush x:Key="GitModified" Color="#E2C08D" />
+      <SolidColorBrush x:Key="DiffAdded" Color="#1E4620" />
+      <SolidColorBrush x:Key="DiffRemoved" Color="#4B1E1E" />
+      <SolidColorBrush x:Key="LineNumber" Color="#858585" />
+      <SolidColorBrush x:Key="FindMatch" Color="#55EA5C00" />
+      <SolidColorBrush x:Key="FindMatchCurrent" Color="#515C6A" />
+      <Geometry x:Key="FileIconGeometry">M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4</Geometry>
+      <Geometry x:Key="FolderIconGeometry">M1,3 L5,3 L6.3,4.5 L13,4.5 L13,15 L1,15 Z</Geometry>
+      <Geometry x:Key="CollapseAllIconGeometry">M2,6 L7,1 L12,6 M2,13 L7,8 L12,13</Geometry>
+      <Geometry x:Key="UpIconGeometry">M7,13 L7,2 M2,7 L7,2 L12,7</Geometry>
+      <Geometry x:Key="FindIconGeometry">M1,5 A4,4 0 1,1 9,5 A4,4 0 1,1 1,5 Z M7.83,7.83 L13,13</Geometry>
+      <Geometry x:Key="ChangesIconGeometry">M2,3 L8,3 M2,7 L12,7 M2,11 L6,11</Geometry>
+      <Geometry x:Key="RemoteIconGeometry">M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5</Geometry>
+      <Geometry x:Key="CloseIconGeometry">M1,1 L13,13 M13,1 L1,13</Geometry>
+      <SolidColorBrush x:Key="SyntaxKeyword" Color="#569CD6" />
+      <SolidColorBrush x:Key="SyntaxString" Color="#CE9178" />
+      <SolidColorBrush x:Key="SyntaxComment" Color="#6A9955" />
+      <SolidColorBrush x:Key="SyntaxNumber" Color="#B5CEA8" />
+      <SolidColorBrush x:Key="SyntaxFunction" Color="#DCDCAA" />
+      <SolidColorBrush x:Key="SyntaxType" Color="#4EC9B0" />
+      <SolidColorBrush x:Key="SyntaxProperty" Color="#9CDCFE" />
+      <SolidColorBrush x:Key="SyntaxTag" Color="#569CD6" />
+      <SolidColorBrush x:Key="SyntaxVariable" Color="#9CDCFE" />
+    </ResourceDictionary>
+  </Application.Resources>
+</Application>
