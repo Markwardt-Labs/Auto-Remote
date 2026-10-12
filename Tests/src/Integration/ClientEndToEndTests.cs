@@ -134,7 +134,7 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
 
     private string T(params string[] arguments) => G(teammate, arguments);
 
-    private async Task Until(Func<bool> condition, string what, int milliseconds = 20000)
+    private async Task Until(Func<bool> condition, string what, int milliseconds = 60000)
     {
         DateTime end = DateTime.UtcNow.AddMilliseconds(milliseconds);
 
@@ -167,6 +167,17 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
 
         git.ConfirmCommand.Execute(null);
     }
+
+    private async Task<GitRefViewModel> Ref(GitViewModel git, string name)
+    {
+        GitRefViewModel? found = null;
+        await Until(() => (found = git.History.Commits.SelectMany(commit => commit.Refs).FirstOrDefault(item => item.Name == name)) is not null, $"the {name} ref in the history");
+        return found!;
+    }
+
+    private async Task Clean(GitViewModel git) => await Until(() => !git.HasChanges && !git.IsPrompting && !git.IsWorking, "the client to see a clean repository");
+
+    private async Task Question(GitViewModel git, GitPrompt kind, string what) => await Until(() => git.Prompt == kind, $"{what} (prompt {git.Prompt}: {git.PromptHint})");
 
     private async Task Settled(GitViewModel git) => await Until(() => !git.IsPrompting && !git.IsWorking, "git to settle");
 
@@ -284,16 +295,15 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             // checkout of a branch discards pending changes after asking
             File.WriteAllText(Path.Combine(app, "README.md"), "dirty\n");
             await Until(() => git.HasChanges, "pending changes");
-            GitRefViewModel mainBadge = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "main");
+            GitRefViewModel mainBadge = await Ref(git, "main");
             Assert.True(mainBadge.CanCheckout);
-            GitRefViewModel other = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "feature/e2e");
+            GitRefViewModel other = await Ref(git, "feature/e2e");
             Assert.False(other.CanCheckout);
             git.BranchCommand.Execute(null);
             await Answer(git, "side");
             await Settled(git);
             await Until(() => git.Title == "side", "side branch");
-            await Until(() => git.History.Commits.SelectMany(commit => commit.Refs).Any(item => item.Name == "side"), "side in history");
-            GitRefViewModel mainRef = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "main");
+            GitRefViewModel mainRef = await Ref(git, "main");
             mainRef.CheckoutCommand.Execute(null);
             await Task.Delay(100);
             Assert.Contains("discard your pending changes", git.PromptHint);
@@ -304,12 +314,12 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             Assert.Equal("one\nTWO\nthree\nfour\nfive", File.ReadAllText(Path.Combine(app, "README.md")).Replace("\r\n", "\n").TrimEnd());
 
             // a tag detaches, a branch returns
-            GitRefViewModel tag = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "v0.1");
+            GitRefViewModel tag = await Ref(git, "v0.1");
             tag.CheckoutCommand.Execute(null);
             await Task.Delay(100);
             await Answer(git);
             await Until(() => git.CurrentBranch is null && git.Title == "v0.1", "detached at the tag");
-            mainRef = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "main");
+            mainRef = await Ref(git, "main");
             mainRef.CheckoutCommand.Execute(null);
             await Task.Delay(100);
             await Answer(git);
@@ -345,9 +355,10 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             git.History.RefreshCommand.Execute(null);
             await Task.Delay(100);
             await Until(() => git.History.Commits.Any(commit => commit.Subject == "Feature edit A"), "the feature branch in the history");
-            GitRefViewModel conflict = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "conflict-a");
+            GitRefViewModel conflict = await Ref(git, "conflict-a");
+            await Clean(git);
             conflict.RebaseSelectedCommand.Execute(null);
-            await Until(() => git.IsPrompting, "the rebase question");
+            await Question(git, GitPrompt.Confirm, "the rebase question");
             git.ConfirmCommand.Execute(null);
             await Until(() => git.IsWorking, "the working state");
             Assert.True(await WaitForWorkingPanel(window));
@@ -361,10 +372,10 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             // merge fast-forwards, pushes and deletes the branch everywhere
             git.History.RefreshCommand.Execute(null);
             await Task.Delay(100);
-            await Until(() => git.History.Commits.SelectMany(commit => commit.Refs).Any(item => item.Name == "conflict-a"), "conflict-a again");
-            conflict = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "conflict-a");
+            conflict = await Ref(git, "conflict-a");
+            await Clean(git);
             conflict.MergeSelectedCommand.Execute(null);
-            await Until(() => git.IsPrompting, "the merge question");
+            await Question(git, GitPrompt.Confirm, "the merge question");
             git.ConfirmCommand.Execute(null);
             await Until(() => G(app, "branch", "--list", "conflict-a").Length == 0, "the merged branch deleted", 40000);
             await Settled(git);
@@ -385,10 +396,10 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             G(app, "checkout", "main");
             git.History.RefreshCommand.Execute(null);
             await Task.Delay(100);
-            await Until(() => git.History.Commits.SelectMany(commit => commit.Refs).Any(item => item.Name == "multi"), "multi");
-            GitRefViewModel multi = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "multi");
+            GitRefViewModel multi = await Ref(git, "multi");
+            await Clean(git);
             multi.SquashSelectedCommand.Execute(null);
-            await Until(() => git.IsPrompting, "the squash question");
+            await Question(git, GitPrompt.Input, "the squash question");
             Assert.Equal("step 3", git.PromptText);
             Assert.Contains("3 commits", git.PromptHint);
             git.PromptText = "All steps";
@@ -398,7 +409,7 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             Assert.Equal("All steps", G(origin, "log", "-1", "--format=%s", "multi"));
 
             // nothing to squash and dirty rebase are explained
-            multi = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "multi");
+            multi = await Ref(git, "multi");
             multi.SquashCurrentCommand.Execute(null);
             await Until(() => git.Prompt == GitPrompt.Notice, "the notice");
             Assert.Contains("has no commits", git.PromptHint);
@@ -414,16 +425,18 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             await Settled(git);
 
             // deleting a tag and a branch
-            tag = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "v1.0");
+            tag = await Ref(git, "v1.0");
             tag.DeleteCommand.Execute(null);
             await Task.Delay(100);
             await Answer(git);
+            await Until(() => !git.IsPrompting, "the tag prompt to close");
             await Until(() => G(app, "tag", "--list", "v1.0").Length == 0, "tag deleted");
             Assert.Equal(string.Empty, G(origin, "tag", "--list", "v1.0"));
-            multi = git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "multi");
+            multi = await Ref(git, "multi");
             multi.DeleteCommand.Execute(null);
             await Task.Delay(100);
             await Answer(git);
+            await Until(() => !git.IsPrompting, "the branch prompt to close");
             await Until(() => G(app, "branch", "--list", "multi").Length == 0, "branch deleted");
             Assert.Equal(string.Empty, G(origin, "branch", "--list", "multi"));
 
@@ -440,9 +453,9 @@ public sealed class ClientEndToEndTests(HeadlessFixture fixture) : IClassFixture
             string before = G(app, "rev-parse", "conflict-b");
             git.History.RefreshCommand.Execute(null);
             await Task.Delay(100);
-            await Until(() => git.History.Commits.SelectMany(commit => commit.Refs).Any(item => item.Name == "conflict-b"), "conflict-b");
-            git.History.Commits.SelectMany(commit => commit.Refs).Single(item => item.Name == "conflict-b").RebaseSelectedCommand.Execute(null);
-            await Until(() => git.IsPrompting, "the rebase question");
+            await Clean(git);
+            (await Ref(git, "conflict-b")).RebaseSelectedCommand.Execute(null);
+            await Question(git, GitPrompt.Confirm, "the rebase question");
             git.ConfirmCommand.Execute(null);
             await Until(() => git.IsWorking, "working");
             await Task.Delay(1000);

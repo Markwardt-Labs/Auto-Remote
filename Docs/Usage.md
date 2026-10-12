@@ -74,7 +74,7 @@ The workspace is named `my-project` after its folder, and the first prompt start
 
 ## Use the client app
 
-The Android app (`Client/Mobile/`) and the desktop app (`Client/Desktop/`, a window that opens maximized and runs on Windows, Linux and macOS) are the same client and use the same TCP port; the desktop app keeps its settings in the user's application data unless started with `--data-folder <path>`. Everything below applies to both.
+The Android app (`Client/Mobile/`) and the desktop app (`Client/Desktop/`, a window that opens maximized and runs on Windows and Linux) are the same client and use the same TCP port; the desktop app keeps its settings in the user's application data unless started with `--data-folder <path>`. Everything below applies to both.
 
 1. On first launch, enter the server's host, TCP port and access key. They are saved on the device, the client accepts whatever certificate the server presents, and later launches reconnect straight to the workspaces. Everything else, the workspaces, groups, settings and conversations, lives on the server.
 2. The menu button opens the drawer listing workspaces and groups as a tree. Tap a workspace to focus it, tap a group to collapse or expand it. A group has buttons to add a group inside it (+), rename it (pencil), move it (arrow) and delete it (cross); a workspace has a move button. Moving asks for the group to put it in, or the top level; a group cannot go into itself or anything inside it. Deleting a group keeps what is in it and moves that up a level. New workspace, Clone workspace, New group and Change server are at the bottom.

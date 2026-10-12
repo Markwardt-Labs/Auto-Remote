@@ -148,7 +148,22 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
         }
     }
 
-    private async Task Respond(IMessageChannel channel, SemaphoreSlim writing, object owner, RemoteRequest request, CancellationToken cancellation) => await Write(channel, writing, await handler.Handle(request, owner, cancellation), cancellation);
+    private async Task Respond(IMessageChannel channel, SemaphoreSlim writing, object owner, RemoteRequest request, CancellationToken cancellation)
+    {
+        RemoteResponse response;
+
+        try
+        {
+            response = await handler.Handle(request, owner, cancellation);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            log.Write($"Request {request.Command} failed: {exception}");
+            response = new RemoteResponse { Id = request.Id, Error = "The server failed to handle the request." };
+        }
+
+        await Write(channel, writing, response, cancellation);
+    }
 
     private async Task Write(IMessageChannel channel, SemaphoreSlim writing, RemoteResponse response, CancellationToken cancellation)
     {

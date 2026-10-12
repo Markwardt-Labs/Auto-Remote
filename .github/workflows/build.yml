@@ -52,7 +52,7 @@ jobs:
     needs: build-and-test
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 30
     permissions:
       contents: write
     steps:
@@ -104,12 +104,34 @@ jobs:
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Publish executables
+      - name: Install Android workload
+        run: dotnet workload install android
+
+      - name: Publish apps
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          dotnet publish Server/Server.csproj --configuration Release --runtime win-x64 --output publish/win-x64 -p:RestoreLockedMode=true -p:Version=${{ steps.version.outputs.version }}
-          dotnet publish Server/Server.csproj --configuration Release --runtime linux-x64 --output publish/linux-x64 -p:RestoreLockedMode=true -p:Version=${{ steps.version.outputs.version }}
+          for rid in win-x64 linux-x64; do
+            dotnet publish Server/Server.csproj --configuration Release --runtime $rid --output publish/server-$rid -p:RestoreLockedMode=true -p:Version=$VERSION
+          done
+          for rid in win-x64 linux-x64; do
+            dotnet publish Client/Desktop/Desktop.csproj --configuration Release --runtime $rid --output publish/desktop-$rid -p:RestoreLockedMode=true -p:Version=$VERSION
+          done
+          dotnet publish Client/Mobile/Mobile.csproj --configuration Release --output publish/mobile -p:AndroidPackageFormat=apk -p:RestoreLockedMode=true -p:Version=$VERSION
+
+      # The release asset names must be unique and say which app and platform they are for.
+      - name: Stage release assets
+        run: |
+          mkdir assets
+          cp publish/server-win-x64/Markwardt.AutoRemote.Server.exe assets/AutoRemote-Server-win.exe
+          cp publish/server-linux-x64/Markwardt.AutoRemote.Server assets/AutoRemote-Server-linux
+          cp publish/desktop-win-x64/Markwardt.AutoRemote.DesktopClient.exe assets/AutoRemote-win.exe
+          cp publish/desktop-linux-x64/Markwardt.AutoRemote.DesktopClient assets/AutoRemote-linux
+          cp publish/mobile/com.markwardt.autoremote-Signed.apk assets/AutoRemote-android.apk
+          cp Client/Web/index.html assets/AutoRemote-web.html
+          cp THIRD-PARTY-NOTICES.txt assets/
 
       - name: Upload release assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "${{ steps.version.outputs.version }}" "publish/win-x64/Markwardt.AutoRemote.Server.exe" "publish/linux-x64/Markwardt.AutoRemote.Server" "THIRD-PARTY-NOTICES.txt"
+        run: gh release upload "${{ steps.version.outputs.version }}" assets/*

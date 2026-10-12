@@ -6,9 +6,9 @@ This document explains the high-level design decisions behind Auto Remote: why i
 
 `Core` holds everything the server and the clients must agree on, so no app references another. The alternative, having a client depend on the server project, was rejected because it would drag server-only code into the client builds. The trade-off is that shared code must stay platform neutral.
 
-## Server is a self-contained single-file executable
+## Server and desktop client are self-contained single-file executables
 
-The server is distributed as one executable per platform (Windows and Linux, x64) with the runtime bundled, so users install nothing else. The trade-off is a larger download than a framework-dependent build.
+The server and the desktop client (Windows and Linux, x64) are each distributed as one executable per platform with the runtime bundled, so users install nothing else. The trade-off is a larger download than a framework-dependent build.
 
 ## Clients share one Avalonia frontend
 
