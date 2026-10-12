@@ -54,6 +54,28 @@ public sealed class ServerRunTests : IAsyncLifetime
         return await reader.ReadLineAsync() ?? string.Empty;
     }
 
+    private async Task<string[]> WaitForLog(Func<string[], bool> ready)
+    {
+        DateTime deadline = DateTime.UtcNow.AddSeconds(10);
+
+        while (true)
+        {
+            string[] lines;
+
+            lock (logged)
+            {
+                lines = [.. logged];
+            }
+
+            if (ready(lines) || DateTime.UtcNow >= deadline)
+            {
+                return lines;
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
     private async Task<ClientWebSocket> OpenSocket()
     {
         ClientWebSocket socket = new();
@@ -83,12 +105,7 @@ public sealed class ServerRunTests : IAsyncLifetime
         await Connect("secret");
         await Connect("nope");
 
-        string[] lines;
-
-        lock (logged)
-        {
-            lines = [.. logged];
-        }
+        string[] lines = await WaitForLog(items => items.Any(line => line.StartsWith("Accepted 127.0.0.1:")) && items.Any(line => line.StartsWith("Refused 127.0.0.1:")));
 
         Assert.Equal(2, lines.Count(line => line.StartsWith("Connection from 127.0.0.1:") && line.EndsWith("(TCP)")));
         Assert.Equal(2, lines.Count(line => line.StartsWith("TLS established with 127.0.0.1:")));

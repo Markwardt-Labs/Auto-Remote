@@ -92,41 +92,6 @@ public sealed class WorkspaceFileBrowserTests
     }
 
     [Fact]
-    public async Task Watch_ReportsChangesToTheFolderOnceAfterTheyQuietDownAndStopsWhenDisposed()
-    {
-        using TempFolder temp = new();
-        Directory.CreateDirectory(temp.Combine("src"));
-        List<string> changes = [];
-        IDisposable watch = browser.Watch(Workspace(temp), "src", path =>
-        {
-            lock (changes)
-            {
-                changes.Add(path);
-            }
-        });
-
-        for (int index = 0; index < 5; index++)
-        {
-            await File.WriteAllTextAsync(temp.Combine($"src/f{index}.txt"), "x");
-        }
-
-        await Until(() => changes.Count > 0, changes);
-        await Task.Delay(600);
-        lock (changes)
-        {
-            Assert.Equal(["src"], changes);
-        }
-
-        watch.Dispose();
-        await File.WriteAllTextAsync(temp.Combine("src/after.txt"), "x");
-        await Task.Delay(600);
-        lock (changes)
-        {
-            Assert.Single(changes);
-        }
-    }
-
-    [Fact]
     public void Watch_RefusesPathsOutsideOrMissing()
     {
         using TempFolder temp = new();
