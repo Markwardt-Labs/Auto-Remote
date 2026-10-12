@@ -31,7 +31,7 @@ Run `Scripts/Publish.cs` locally to cut a release:
 3. It dispatches `build.yml`'s `workflow_dispatch` trigger with the version as input. The workflow
    verifies the dispatcher has Admin permission on the repo, refuses to run from anything but `main`,
    publishes the server and the desktop client (Windows and Linux x64) as self-contained single-file
-   executables, the Android client as a signed APK and the web client
+   executables, the Android client as an APK signed with the release keystore (repository secrets `ANDROID_KEYSTORE_BASE64`, the PKCS12 keystore base64-encoded with alias `autoremote`, and `ANDROID_KEYSTORE_PASSWORD`, used for both store and key; losing the keystore means installed copies must be uninstalled before a differently signed update) and the web client
    as a single HTML file, and uploads them alongside `THIRD-PARTY-NOTICES.txt` as release assets.
 4. It waits for that run to finish, rolling the release/tag back if the workflow fails, so a failed
    publish never leaves one behind. If it can't confirm the run happened at all, it leaves the release

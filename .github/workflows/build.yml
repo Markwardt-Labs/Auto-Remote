@@ -107,9 +107,23 @@ jobs:
       - name: Install Android workload
         run: dotnet workload install android
 
+      # The APK is signed with the release keystore kept in repository secrets (keystore base64-encoded, one
+      # password for store and key, alias "autoremote"); the "env:" prefix makes the Android build read the
+      # passwords from the environment instead of the command line.
+      - name: Restore Android keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::The ANDROID_KEYSTORE_BASE64 secret is not set."
+            exit 1
+          fi
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
       - name: Publish apps
         env:
           VERSION: ${{ steps.version.outputs.version }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: |
           for rid in win-x64 linux-x64; do
             dotnet publish Server/Server.csproj --configuration Release --runtime $rid --output publish/server-$rid -p:RestoreLockedMode=true -p:Version=$VERSION
@@ -117,7 +131,7 @@ jobs:
           for rid in win-x64 linux-x64; do
             dotnet publish Client/Desktop/Desktop.csproj --configuration Release --runtime $rid --output publish/desktop-$rid -p:RestoreLockedMode=true -p:Version=$VERSION
           done
-          dotnet publish Client/Mobile/Mobile.csproj --configuration Release --output publish/mobile -p:AndroidPackageFormat=apk -p:RestoreLockedMode=true -p:Version=$VERSION
+          dotnet publish Client/Mobile/Mobile.csproj --configuration Release --output publish/mobile -p:AndroidPackageFormat=apk -p:RestoreLockedMode=true -p:Version=$VERSION -p:AndroidKeyStore=true -p:AndroidSigningKeyStore="$RUNNER_TEMP/release.keystore" -p:AndroidSigningKeyAlias=autoremote -p:AndroidSigningStorePass=env:ANDROID_KEYSTORE_PASSWORD -p:AndroidSigningKeyPass=env:ANDROID_KEYSTORE_PASSWORD
 
       # The release asset names must be unique and say which app and platform they are for.
       - name: Stage release assets
