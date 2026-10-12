@@ -59,6 +59,25 @@ public sealed class PromptServiceTests
     }
 
     [Fact]
+    public async Task Attach_StoresTheDecodedFileAndAnswersItsPath()
+    {
+        byte[] saved = [];
+        store.Setup(x => x.SaveAttachment(workspace.Id, "a.txt", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).Callback<Guid, string, ReadOnlyMemory<byte>, CancellationToken>((_, _, data, _) => saved = data.ToArray()).ReturnsAsync("/srv/a.txt");
+
+        string path = await service.Attach(workspace.Id, "a.txt", Convert.ToBase64String(new byte[] { 1, 2, 3 }), CancellationToken.None);
+
+        Assert.Equal("/srv/a.txt", path);
+        Assert.Equal(new byte[] { 1, 2, 3 }, saved);
+    }
+
+    [Fact]
+    public async Task Attach_RefusesInvalidAndOversizedData()
+    {
+        await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", "not base64!", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", Convert.ToBase64String(new byte[2 * 1024 * 1024 + 1]), CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Prompt_StartsAiSessionRecordsMessagesAndAttachesItOnTheFirstReply()
     {
         Conversation conversation = Start(resume: false);

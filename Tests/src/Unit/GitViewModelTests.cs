@@ -84,6 +84,8 @@ public sealed class GitViewModelTests
         Assert.Equal(GitChangeStatus.Added, git.StatusOf("src/new", true));
         Assert.Equal(GitChangeStatus.Ignored, git.StatusOf("bin", true));
         Assert.Equal(GitChangeStatus.Ignored, git.StatusOf("bin/out.dll", false));
+        Assert.Equal(GitChangeStatus.Ignored, git.StatusOf(".git", true));
+        Assert.Equal(GitChangeStatus.Ignored, git.StatusOf(".git/HEAD", false));
         Assert.Null(git.StatusOf("docs", true));
         Assert.Null(git.StatusOf("README.md", false));
     }

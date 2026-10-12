@@ -17,13 +17,15 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Workspace = workspace;
         Chat = new ChatViewModel(connection, workspace.Id);
         Git = new GitViewModel(connection, workspace.Id);
-        Files = new FilesViewModel(connection, workspace.Id, Git);
+        Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
+        Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
             {
                 Raise(nameof(IsAiWorking));
+                Raise(nameof(IsWorking));
 
                 if (Chat.IsAiWorking && Git.IsWorking && tab is WorkspaceTab.Files or WorkspaceTab.History)
                 {
@@ -31,6 +33,19 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 }
             }
         };
+        Scripts.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ScriptsViewModel.IsRunning))
+            {
+                Chat.IsBlocked = Scripts.IsRunning;
+                Raise(nameof(IsWorking));
+            }
+            else if (args.PropertyName == nameof(ScriptsViewModel.ActivePaths))
+            {
+                Files.ShowRunning(Scripts.ActivePaths);
+            }
+        };
+        Files.ScriptRequested += path => _ = RunScript(path);
         Files.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(FilesViewModel.IsPreviewing))
@@ -55,6 +70,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         ShowChatCommand = new AsyncCommand(_ =>
         {
             Tab = WorkspaceTab.Chat;
+            return Task.CompletedTask;
+        });
+        ShowScriptCommand = new AsyncCommand(_ =>
+        {
+            Tab = WorkspaceTab.Script;
             return Task.CompletedTask;
         });
         ShowHistoryCommand = new AsyncCommand(async _ =>
@@ -112,14 +132,36 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public FilesViewModel Files { get; }
 
     /// <summary>
+    /// Gets the scripts and tasks the server runs in the workspace.
+    /// </summary>
+    public ScriptsViewModel Scripts { get; }
+
+    /// <summary>
     /// Gets the workspace's settings.
     /// </summary>
     public SettingsViewModel Settings { get; }
 
     /// <summary>
+    /// Gets the absolute path on the server of a path relative to the workspace folder.
+    /// </summary>
+    /// <param name="relative">The path relative to the workspace folder, with <c>/</c> separators.</param>
+    /// <returns>The absolute path, written with the separator the server's paths use.</returns>
+    public string AbsolutePath(string relative)
+    {
+        string folder = Workspace.Folder.TrimEnd('/', '\\');
+        char separator = Workspace.Folder.Contains('\\') && !Workspace.Folder.Contains('/') ? '\\' : '/';
+        return relative.Length == 0 ? folder : folder + separator + relative.Replace('/', separator);
+    }
+
+    /// <summary>
     /// Gets a value indicating whether the AI is working in the workspace.
     /// </summary>
     public bool IsAiWorking => Chat.IsAiWorking;
+
+    /// <summary>
+    /// Gets a value indicating whether the AI is working or a script is running in the workspace.
+    /// </summary>
+    public bool IsWorking => Chat.IsAiWorking || Scripts.IsRunning;
 
     /// <summary>
     /// Gets the tab showing now.
@@ -134,6 +176,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowChat));
                 Raise(nameof(ShowFiles));
                 Raise(nameof(ShowHistory));
+                Raise(nameof(ShowScript));
                 Raise(nameof(ShowSettings));
                 RaiseLayout();
             }
@@ -168,7 +211,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether the conversation is showing in its panel.
     /// </summary>
-    public bool ShowChatView => layout == ClientLayout.Panels ? tab != WorkspaceTab.History : ShowChat;
+    public bool ShowChatView => layout == ClientLayout.Panels ? tab is not (WorkspaceTab.History or WorkspaceTab.Script) : ShowChat;
+
+    /// <summary>
+    /// Gets a value indicating whether the scripts are showing in the panel of the conversation.
+    /// </summary>
+    public bool ShowScriptView => layout == ClientLayout.Panels && tab == WorkspaceTab.Script;
 
     /// <summary>
     /// Gets a value indicating whether the history is showing in its panel.
@@ -186,9 +234,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowHistoryTab => Git.IsRepo;
 
     /// <summary>
-    /// Gets a value indicating whether the panel of the conversation has tabs for the conversation and the history, which only panels do; tabs along the bottom hold them otherwise.
+    /// Gets a value indicating whether the panel of the conversation has tabs for the conversation, the scripts and the history, which only panels do; tabs along the bottom hold the conversation and the history otherwise.
     /// </summary>
-    public bool ShowSideTabs => layout == ClientLayout.Panels && Git.IsRepo;
+    public bool ShowSideTabs => layout == ClientLayout.Panels;
 
     /// <summary>
     /// Gets a value indicating whether the separators between the panels are showing.
@@ -216,6 +264,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowHistory => tab == WorkspaceTab.History;
 
     /// <summary>
+    /// Gets a value indicating whether the scripts tab is selected.
+    /// </summary>
+    public bool ShowScript => tab == WorkspaceTab.Script;
+
+    /// <summary>
     /// Gets a value indicating whether the settings are showing.
     /// </summary>
     public bool ShowSettings => tab == WorkspaceTab.Settings;
@@ -224,6 +277,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the command that shows the conversation.
     /// </summary>
     public AsyncCommand ShowChatCommand { get; }
+
+    /// <summary>
+    /// Gets the command that shows the scripts.
+    /// </summary>
+    public AsyncCommand ShowScriptCommand { get; }
 
     /// <summary>
     /// Gets the command that shows the git history.
@@ -247,6 +305,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public async Task Start()
     {
         _ = Git.Start();
+        _ = Scripts.Start();
         await Chat.Start();
     }
 
@@ -272,8 +331,22 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         Chat.Dispose();
+        Scripts.Dispose();
         Files.Dispose();
         Git.Dispose();
+    }
+
+    private async Task RunScript(string path)
+    {
+        Tab = WorkspaceTab.Script;
+
+        if (Chat.IsAiWorking || Scripts.IsRunning || Git.IsWorking)
+        {
+            Scripts.Reject(Scripts.IsRunning ? "A script is already running." : "Wait for the AI to finish before running a script.");
+            return;
+        }
+
+        await Scripts.Run(path);
     }
 
     private void RaiseLayout()
@@ -281,6 +354,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowFilesPanel));
         Raise(nameof(ShowChatPanel));
         Raise(nameof(ShowChatView));
+        Raise(nameof(ShowScriptView));
         Raise(nameof(ShowHistoryView));
         Raise(nameof(ShowContentPanel));
         Raise(nameof(ShowSeparators));

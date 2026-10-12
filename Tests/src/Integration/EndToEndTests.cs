@@ -31,7 +31,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         EventHub hub = new();
         GitService git = new();
         PromptService prompts = new(workspaces, store, new AiRunner(), hub);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, new WorkspaceVersioning(git, prompts, hub), prompts, Mock.Of<IUsageService>(), hub);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, new WorkspaceVersioning(git, prompts, hub), prompts, new ScriptRunner(hub), Mock.Of<IUsageService>(), hub);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -161,10 +161,10 @@ public sealed class EndToEndTests : IAsyncLifetime
         await Assert.ThrowsAsync<RemoteException>(() => connection.CreateWorkspace(app.Path, CancellationToken.None));
 
         File.WriteAllText(Path.Combine(app.Path, "notes.txt"), "remember");
-        WorkspaceFiles files = await connection.ListFiles(workspace.Id, string.Empty, CancellationToken.None);
+        WorkspaceFiles files = await connection.ListFiles(workspace.Id, string.Empty, false, CancellationToken.None);
         Assert.Equal("notes.txt", Assert.Single(files.Entries).Path);
         Assert.Equal("remember", (await connection.ReadFile(workspace.Id, "notes.txt", CancellationToken.None)).Text);
-        await Assert.ThrowsAsync<RemoteException>(() => connection.ListFiles(workspace.Id, "..", CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.ListFiles(workspace.Id, "..", false, CancellationToken.None));
 
         WorkspaceInfo renamed = await connection.RenameWorkspace(workspace.Id, "app2", CancellationToken.None);
         Assert.Equal("app2", renamed.Name);

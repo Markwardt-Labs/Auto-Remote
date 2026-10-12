@@ -31,9 +31,19 @@ public sealed record RemoteEvent
     public bool? Working { get; init; }
 
     /// <summary>
-    /// Gets the folder that changed relative to the workspace folder, for <see cref="RemoteEventKind.FilesChanged" />.
+    /// Gets the folder that changed relative to the workspace folder for <see cref="RemoteEventKind.FilesChanged" />, or the path of the run for <see cref="RemoteEventKind.ScriptOutput" /> and <see cref="RemoteEventKind.ScriptRemoved" />.
     /// </summary>
     public string? Path { get; init; }
+
+    /// <summary>
+    /// Gets the run that started or changed state, without its output, for <see cref="RemoteEventKind.ScriptChanged" />.
+    /// </summary>
+    public ScriptRun? Script { get; init; }
+
+    /// <summary>
+    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run.
+    /// </summary>
+    public string? Text { get; init; }
 
     /// <summary>
     /// Gets the failure message, for <see cref="RemoteEventKind.Failed" />.
@@ -70,5 +80,20 @@ public enum RemoteEventKind
     /// <summary>
     /// A git action started or finished in a workspace, so its git state may have changed.
     /// </summary>
-    GitChanged
+    GitChanged,
+
+    /// <summary>
+    /// A script or task run started or changed state.
+    /// </summary>
+    ScriptChanged,
+
+    /// <summary>
+    /// A running script wrote output.
+    /// </summary>
+    ScriptOutput,
+
+    /// <summary>
+    /// A run was forgotten.
+    /// </summary>
+    ScriptRemoved
 }

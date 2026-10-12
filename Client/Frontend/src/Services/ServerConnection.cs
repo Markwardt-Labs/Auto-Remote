@@ -145,6 +145,17 @@ internal interface IServerConnection : IAsyncDisposable
     Task Prompt(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Stores a file on the server so that a prompt can refer to it.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="name">The file name.</param>
+    /// <param name="data">The file content.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The path of the file on the server.</returns>
+    /// <exception cref="RemoteException">The server refused, for example because the file is too large.</exception>
+    Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation);
+
+    /// <summary>
     /// Asks to be told when any of some folders inside a workspace's folder changes, in place of the folders watched before.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -158,10 +169,23 @@ internal interface IServerConnection : IAsyncDisposable
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="path">The folder relative to the workspace folder; empty for the workspace folder.</param>
+    /// <param name="showHidden">Whether to include the entries that a <c>.filehide</c> file hides.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The folder's entries.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<WorkspaceFiles> ListFiles(Guid id, string path, CancellationToken cancellation);
+    Task<WorkspaceFiles> ListFiles(Guid id, string path, bool showHidden, CancellationToken cancellation);
+
+    /// <summary>
+    /// Searches a workspace's files by name or by content.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The text to find.</param>
+    /// <param name="content">Whether to search the contents of the files instead of their names.</param>
+    /// <param name="showHidden">Whether to include the files that a <c>.filehide</c> file hides.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The hits.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<IReadOnlyList<FileSearchResult>> SearchFiles(Guid id, string text, bool content, bool showHidden, CancellationToken cancellation);
 
     /// <summary>
     /// Reads a text file inside a workspace's folder.
@@ -394,6 +418,52 @@ internal interface IServerConnection : IAsyncDisposable
     Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation);
 
     /// <summary>
+    /// Lists the script and task runs the server holds for a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The runs with their output.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<ScriptRuns> GetScripts(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Runs a <c>.cs</c> script or a <c>.task</c> file of a workspace; it is accepted once it started, and its progress arrives as events.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="path">The file, relative to the workspace folder.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused, for example while the AI or another script is running.</exception>
+    Task RunScript(Guid id, string path, CancellationToken cancellation);
+
+    /// <summary>
+    /// Stops the run of a script, or of all the scripts of a task.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="path">The file of the run.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task StopScript(Guid id, string path, CancellationToken cancellation);
+
+    /// <summary>
+    /// Writes a line to the standard input of a running script.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="path">The script.</param>
+    /// <param name="text">The line.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task SendScriptInput(Guid id, string path, string text, CancellationToken cancellation);
+
+    /// <summary>
+    /// Forgets a finished run on the server.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="path">The file of the run.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task RemoveScript(Guid id, string path, CancellationToken cancellation);
+
+    /// <summary>
     /// Opens <see cref="IServerConnection" /> instances.
     /// </summary>
     public interface IFactory
@@ -580,10 +650,16 @@ internal sealed class ServerConnection : IServerConnection
     public async Task Prompt(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text }, cancellation);
 
     /// <inheritdoc />
+    public async Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.UploadAttachment, WorkspaceId = id, Name = name, Data = Convert.ToBase64String(data.Span) }, cancellation)).AttachmentPath ?? throw Malformed();
+
+    /// <inheritdoc />
     public async Task WatchFiles(Guid id, IReadOnlyList<string> paths, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.WatchFiles, WorkspaceId = id, Paths = paths }, cancellation);
 
     /// <inheritdoc />
-    public async Task<WorkspaceFiles> ListFiles(Guid id, string path, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListFiles, WorkspaceId = id, Path = path }, cancellation)).Files ?? throw Malformed();
+    public async Task<WorkspaceFiles> ListFiles(Guid id, string path, bool showHidden, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListFiles, WorkspaceId = id, Path = path, ShowHidden = showHidden ? true : null }, cancellation)).Files ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<FileSearchResult>> SearchFiles(Guid id, string text, bool content, bool showHidden, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SearchFiles, WorkspaceId = id, Text = text, SearchContent = content ? true : null, ShowHidden = showHidden ? true : null }, cancellation)).SearchResults ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<FileContent> ReadFile(Guid id, string path, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ReadFile, WorkspaceId = id, Path = path }, cancellation)).Content ?? throw Malformed();
@@ -656,6 +732,21 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetUsage, Service = service }, cancellation)).Usage ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<ScriptRuns> GetScripts(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetScripts, WorkspaceId = id }, cancellation)).Scripts ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task RunScript(Guid id, string path, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.RunScript, WorkspaceId = id, Path = path }, cancellation);
+
+    /// <inheritdoc />
+    public async Task StopScript(Guid id, string path, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StopScript, WorkspaceId = id, Path = path }, cancellation);
+
+    /// <inheritdoc />
+    public async Task SendScriptInput(Guid id, string path, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SendScriptInput, WorkspaceId = id, Path = path, Text = text }, cancellation);
+
+    /// <inheritdoc />
+    public async Task RemoveScript(Guid id, string path, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.RemoveScript, WorkspaceId = id, Path = path }, cancellation);
 
     /// <inheritdoc />
     public async ValueTask DisposeAsync()

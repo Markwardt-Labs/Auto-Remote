@@ -217,7 +217,7 @@ internal sealed class GitService : IGitService
 
         string current = await Optional(folder, ["symbolic-ref", "--short", "-q", "HEAD"], cancellation) ?? string.Empty;
         HashSet<string> remotes = [.. (await Run(folder, ["for-each-ref", "--format=%(refname:short)", "refs/remotes"], cancellation)).Output.Split('\n', StringSplitOptions.RemoveEmptyEntries)];
-        GitOutput result = Check(await Run(folder, ["log", "--date-order", "--branches", "--tags", "--remotes", "HEAD", $"--skip={Math.Max(skip, 0)}", $"-n{limit + 1}", "--format=%H%x1f%an%x1f%aI%x1f%D%x1f%s%x1e"], cancellation));
+        GitOutput result = Check(await Run(folder, ["log", "--date-order", "--branches", "--tags", "--remotes", "HEAD", $"--skip={Math.Max(skip, 0)}", $"-n{limit + 1}", "--format=%H%x1f%an%x1f%aI%x1f%D%x1f%s%x1f%P%x1e"], cancellation));
         List<GitCommit> commits = [];
 
         foreach (string record in result.Output.Split('\u001e', StringSplitOptions.RemoveEmptyEntries))
@@ -236,6 +236,7 @@ internal sealed class GitService : IGitService
                 Date = DateTimeOffset.Parse(fields[2], CultureInfo.InvariantCulture),
                 Refs = ParseRefs(fields[3], current, remotes),
                 Subject = fields[4],
+                Parents = fields.Length > 5 ? [.. fields[5].Split(' ', StringSplitOptions.RemoveEmptyEntries)] : [],
             });
         }
 

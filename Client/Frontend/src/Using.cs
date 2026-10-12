@@ -23,3 +23,6 @@ global using Markdig.Syntax;
 global using Markdig.Syntax.Inlines;
 global using System.Text.RegularExpressions;
 global using System.Globalization;
+global using System.Text;
+global using Avalonia.Media.TextFormatting;
+global using Avalonia.Input.Platform;

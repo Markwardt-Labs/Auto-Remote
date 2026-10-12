@@ -13,6 +13,7 @@ The server reads one JSON file at startup (the path passed as the first argument
 | `claudeArguments` | `[]` | Extra arguments added to every Claude Code run. |
 | `codexCommand` | `codex` | Codex executable run for prompts; must resolve on the server's machine. |
 | `codexArguments` | `[]` | Extra arguments added to every Codex run. |
+| `dotnetCommand` | `dotnet` | .NET executable that runs scripts and tasks with `run --file`; only needed for scripts. |
 | `certificateFile` | none | PFX certificate presented to clients. |
 | `certificatePassword` | none | Password of the PFX certificate, if it has one. |
 

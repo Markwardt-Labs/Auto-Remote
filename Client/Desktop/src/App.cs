@@ -19,6 +19,7 @@ public sealed class App : ClientApp
                 Height = 800,
                 MinWidth = 640,
                 MinHeight = 480,
+                WindowDecorations = WindowDecorations.None,
                 Content = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args)),
             };
 

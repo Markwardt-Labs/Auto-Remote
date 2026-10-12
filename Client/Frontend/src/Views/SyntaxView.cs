@@ -11,9 +11,10 @@ internal sealed class SyntaxView : ContentControl
     public SyntaxView()
     {
         gutter = new TextBlock { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, Margin = new Thickness(0, 0, 12, 0), IsHitTestVisible = false };
-        block = new SelectableTextBlock { FontFamily = mono, FontSize = 12 };
+        block = new SelectableTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
+        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = block };
         Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
-        ScrollViewer scroller = new() { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = block };
+        block.LayoutUpdated += (_, _) => NumberLines();
         Grid.SetColumn(scroller, 1);
         grid.Children.Add(gutter);
         grid.Children.Add(scroller);
@@ -30,8 +31,14 @@ internal sealed class SyntaxView : ContentControl
     /// </summary>
     public static readonly StyledProperty<TextMatches?> MatchesProperty = AvaloniaProperty.Register<SyntaxView, TextMatches?>(nameof(Matches));
 
+    /// <summary>
+    /// Identifies the <see cref="Wrap" /> property.
+    /// </summary>
+    public static readonly StyledProperty<bool> WrapProperty = AvaloniaProperty.Register<SyntaxView, bool>(nameof(Wrap));
+
     static SyntaxView()
     {
+        WrapProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Rewrap());
         FileProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Load());
         MatchesProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Render());
     }
@@ -44,6 +51,10 @@ internal sealed class SyntaxView : ContentControl
 
     private readonly SelectableTextBlock block;
 
+    private readonly ScrollViewer scroller;
+
+    private TextLayout? numbered;
+
     private IReadOnlyList<SyntaxToken> tokens = [];
 
     /// <summary>
@@ -53,6 +64,15 @@ internal sealed class SyntaxView : ContentControl
     {
         get => GetValue(FileProperty);
         set => SetValue(FileProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether long lines wrap instead of scrolling sideways.
+    /// </summary>
+    public bool Wrap
+    {
+        get => GetValue(WrapProperty);
+        set => SetValue(WrapProperty, value);
     }
 
     /// <summary>
@@ -70,9 +90,59 @@ internal sealed class SyntaxView : ContentControl
     {
         string text = File?.Text ?? string.Empty;
         tokens = File is { } file ? highlighter.Highlight(file.Path, text) : [];
-        gutter.Text = File is null ? string.Empty : string.Join('\n', Enumerable.Range(1, text.Count(c => c == '\n') + 1));
         gutter.Foreground = Brush("LineNumber");
+        NumberLines();
         Render();
+    }
+
+    private void Rewrap()
+    {
+        block.TextWrapping = Wrap ? TextWrapping.Wrap : TextWrapping.NoWrap;
+        scroller.HorizontalScrollBarVisibility = Wrap ? Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled : Avalonia.Controls.Primitives.ScrollBarVisibility.Auto;
+        NumberLines();
+    }
+
+    private void NumberLines()
+    {
+        if (File is not { } file)
+        {
+            gutter.Text = string.Empty;
+            return;
+        }
+
+        string text = file.Text;
+
+        if (!Wrap || block.TextLayout is not { } layout)
+        {
+            numbered = null;
+            gutter.Text = string.Join('\n', Enumerable.Range(1, text.Count(c => c == '\n') + 1));
+            return;
+        }
+
+        if (ReferenceEquals(layout, numbered))
+        {
+            return;
+        }
+
+        numbered = layout;
+
+        StringBuilder numbers = new();
+        int number = 0;
+
+        foreach (TextLine line in layout.TextLines)
+        {
+            int start = line.FirstTextSourceIndex;
+
+            if (start == 0 || (start <= text.Length && text[start - 1] == '\n'))
+            {
+                number++;
+                numbers.Append(number);
+            }
+
+            numbers.Append('\n');
+        }
+
+        gutter.Text = numbers.ToString().TrimEnd('\n');
     }
 
     private void Render()

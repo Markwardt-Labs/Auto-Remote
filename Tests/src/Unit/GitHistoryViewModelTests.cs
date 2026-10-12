@@ -31,8 +31,10 @@ public sealed class GitHistoryViewModelTests
         GitCommitViewModel newest = git.History.Commits[0];
         Assert.Equal("2222222", newest.ShortHash);
         Assert.True(newest.HasRefs);
-        Assert.StartsWith("Ann · ", newest.Detail);
-        Assert.EndsWith(" · 2222222", newest.Detail);
+        Assert.Equal("Ann", newest.Author);
+        Assert.Equal("2222222222", newest.FullHash);
+        Assert.Contains("2026", newest.Stamp);
+        Assert.Matches("(AM|PM|am|pm|\\d:\\d\\d)", newest.Stamp);
         connection.Verify(x => x.GetGitHistory(id, 0, It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 

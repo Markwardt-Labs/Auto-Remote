@@ -40,6 +40,17 @@ internal interface IPromptService
     Task Prompt(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Stores a file the user attached to a prompt, so the AI can read it by its path.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="name">The file name; any folders in it are dropped.</param>
+    /// <param name="data">The file content, base64 encoded.</param>
+    /// <param name="cancellation">Cancels the store.</param>
+    /// <returns>The path of the stored file on the server.</returns>
+    /// <exception cref="RequestException">The workspace is unknown, the data is not base64 or it is empty or larger than the limit.</exception>
+    Task<string> Attach(Guid id, string name, string data, CancellationToken cancellation);
+
+    /// <summary>
     /// Ends a workspace's conversation process if the AI is idle, so the next prompt starts a fresh one with the workspace's current settings; does nothing while the AI works.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -55,6 +66,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     private readonly int defaultChunk = 50;
 
     private readonly int maxChunk = 200;
+
+    private readonly int maxAttachment = 2 * 1024 * 1024;
 
     private readonly string[] lostSessionMarkers = ["No conversation found", "no rollout found"];
 
@@ -128,6 +141,25 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             live.Gate.Release();
         }
+    }
+
+    /// <inheritdoc />
+    public async Task<string> Attach(Guid id, string name, string data, CancellationToken cancellation)
+    {
+        await workspaces.Get(id, cancellation);
+        byte[] bytes = new byte[data.Length / 4 * 3 + 3];
+
+        if (!Convert.TryFromBase64String(data, bytes, out int length) || length == 0)
+        {
+            throw new RequestException("The attachment is empty or not valid base64.");
+        }
+
+        if (length > maxAttachment)
+        {
+            throw new RequestException($"The attachment is larger than {maxAttachment / 1024 / 1024} MB.");
+        }
+
+        return await store.SaveAttachment(id, name, bytes.AsMemory(0, length), cancellation);
     }
 
     /// <inheritdoc />

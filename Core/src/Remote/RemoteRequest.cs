@@ -71,7 +71,7 @@ public sealed record RemoteRequest
     public int? Limit { get; init; }
 
     /// <summary>
-    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" /> or the message for <see cref="RemoteCommand.GitCommit" />.
+    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" /> or the input line for <see cref="RemoteCommand.SendScriptInput" />.
     /// </summary>
     public string? Text { get; init; }
 
@@ -109,4 +109,19 @@ public sealed record RemoteRequest
     /// Gets a value indicating whether <see cref="RemoteCommand.DeleteWorkspace" /> also deletes the workspace's folder.
     /// </summary>
     public bool DeleteFolder { get; init; } = true;
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="RemoteCommand.ListFiles" /> also lists the entries that a <c>.filehide</c> file hides.
+    /// </summary>
+    public bool? ShowHidden { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="RemoteCommand.SearchFiles" /> searches the contents of the files instead of their names.
+    /// </summary>
+    public bool? SearchContent { get; init; }
+
+    /// <summary>
+    /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" />.
+    /// </summary>
+    public string? Data { get; init; }
 }

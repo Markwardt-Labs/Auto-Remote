@@ -217,14 +217,30 @@ internal sealed class HomeViewModel : ViewModelBase
                 }
 
                 Raise(nameof(IsAiWorking));
+                Raise(nameof(IsWorking));
             }
         }
     }
 
     /// <summary>
-    /// Gets a value indicating whether the AI is working in the focused workspace, which turns the header blue.
+    /// Gets a value indicating whether the AI is working in the focused workspace.
     /// </summary>
     public bool IsAiWorking => active?.IsAiWorking ?? false;
+
+    /// <summary>
+    /// Gets a value indicating whether the AI is working or a script is running in the focused workspace, which turns the header blue.
+    /// </summary>
+    public bool IsWorking => active?.IsWorking ?? false;
+
+    /// <summary>
+    /// Gets a value indicating whether the client is the desktop one, which has its own window controls, runs scripts and offers the workspace folder on the machine.
+    /// </summary>
+    public bool IsDesktop => layout == ClientLayout.Panels;
+
+    /// <summary>
+    /// Gets the width of the header cell on each side of the title, which the desktop client widens for the window controls.
+    /// </summary>
+    public GridLength HeaderSide => new(layout == ClientLayout.Panels ? 250 : 140);
 
     /// <summary>
     /// Gets a value indicating whether a workspace is focused.
@@ -459,9 +475,10 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <summary>
     /// Loads the workspaces and groups and focuses a workspace.
     /// </summary>
-    /// <param name="focus">The workspace to focus; the first workspace when <see langword="null" /> or not found.</param>
+    /// <param name="focus">The workspace to focus; the first workspace when <see langword="null" /> or not found, unless <paramref name="focusFirst" /> is <see langword="false" />.</param>
+    /// <param name="focusFirst">Whether the first workspace is focused when <paramref name="focus" /> names none; otherwise nothing is focused.</param>
     /// <returns>A task that completes once the workspaces are shown.</returns>
-    public async Task Start(Guid? focus = null)
+    public async Task Start(Guid? focus = null, bool focusFirst = true)
     {
         WorkspaceCatalog? catalog = null;
 
@@ -482,7 +499,7 @@ internal sealed class HomeViewModel : ViewModelBase
             BuildEntries();
             EditMode = EditMode.None;
             Selected = null;
-            Selected = workspaces.FirstOrDefault(workspace => workspace.Id == focus) ?? Entries.FirstOrDefault(entry => entry.IsWorkspace)?.Workspace;
+            Selected = workspaces.FirstOrDefault(workspace => workspace.Id == focus) ?? (focusFirst ? Entries.FirstOrDefault(entry => entry.IsWorkspace)?.Workspace : null);
             IsDrawerOpen = Selected is null;
         }
     }
@@ -498,9 +515,13 @@ internal sealed class HomeViewModel : ViewModelBase
         created.Settings.Changed += Replace;
         created.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(WorkspaceViewModel.IsAiWorking) && created == active)
+            if (created == active && args.PropertyName == nameof(WorkspaceViewModel.IsAiWorking))
             {
                 Raise(nameof(IsAiWorking));
+            }
+            else if (created == active && args.PropertyName == nameof(WorkspaceViewModel.IsWorking))
+            {
+                Raise(nameof(IsWorking));
             }
         };
         opened[workspace.Id] = created;

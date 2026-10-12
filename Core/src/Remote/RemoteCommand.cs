@@ -82,9 +82,14 @@ public enum RemoteCommand
     Prompt,
 
     /// <summary>
-    /// Lists the entries of <see cref="RemoteRequest.Path" /> (relative to the workspace folder, empty for the folder itself); answered in <see cref="RemoteResponse.Files" />.
+    /// Lists the entries of <see cref="RemoteRequest.Path" /> (relative to the workspace folder, empty for the folder itself), without those a <c>.filehide</c> file hides unless <see cref="RemoteRequest.ShowHidden" /> is set; answered in <see cref="RemoteResponse.Files" />.
     /// </summary>
     ListFiles,
+
+    /// <summary>
+    /// Searches the files of <see cref="RemoteRequest.WorkspaceId" /> for <see cref="RemoteRequest.Text" />: by file name with a fuzzy match, or for lines containing it when <see cref="RemoteRequest.SearchContent" /> is set. Files a <c>.filehide</c> file hides are skipped unless <see cref="RemoteRequest.ShowHidden" /> is set; answered in <see cref="RemoteResponse.SearchResults" />.
+    /// </summary>
+    SearchFiles,
 
     /// <summary>
     /// Reads the text file <see cref="RemoteRequest.Path" /> (relative to the workspace folder); answered in <see cref="RemoteResponse.Content" />.
@@ -204,5 +209,35 @@ public enum RemoteCommand
     /// <summary>
     /// Cancels the git action running in <see cref="RemoteRequest.WorkspaceId" />, which undoes what it had done so far.
     /// </summary>
-    GitCancel
+    GitCancel,
+
+    /// <summary>
+    /// Lists the script and task runs the server holds for <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.Scripts" />.
+    /// </summary>
+    GetScripts,
+
+    /// <summary>
+    /// Runs the <c>.cs</c> script or <c>.task</c> file <see cref="RemoteRequest.Path" /> (relative to the workspace folder) with <c>dotnet run --file</c> in the workspace folder and answers once it started. Fails while the AI, a git action or another script is running. Progress arrives as <see cref="RemoteEvent" /> pushes.
+    /// </summary>
+    RunScript,
+
+    /// <summary>
+    /// Stops the run of <see cref="RemoteRequest.Path" /> in <see cref="RemoteRequest.WorkspaceId" />, the whole task for a task.
+    /// </summary>
+    StopScript,
+
+    /// <summary>
+    /// Writes the line <see cref="RemoteRequest.Text" /> to the standard input of the running script <see cref="RemoteRequest.Path" />.
+    /// </summary>
+    SendScriptInput,
+
+    /// <summary>
+    /// Forgets the finished run of <see cref="RemoteRequest.Path" />, and the runs of the scripts of a task.
+    /// </summary>
+    RemoveScript,
+
+    /// <summary>
+    /// Stores the file <see cref="RemoteRequest.Name" /> with the base64 content <see cref="RemoteRequest.Data" /> on the server for <see cref="RemoteRequest.WorkspaceId" /> and answers with its path in <see cref="RemoteResponse.AttachmentPath" />, for a prompt to refer to. Fails above the size limit.
+    /// </summary>
+    UploadAttachment
 }

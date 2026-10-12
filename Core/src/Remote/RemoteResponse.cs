@@ -46,6 +46,11 @@ public sealed record RemoteResponse
     public WorkspaceFiles? Files { get; init; }
 
     /// <summary>
+    /// Gets the hits answering <see cref="RemoteCommand.SearchFiles" />, best match first for a name search and in file order for a content search.
+    /// </summary>
+    public IReadOnlyList<FileSearchResult>? SearchResults { get; init; }
+
+    /// <summary>
     /// Gets the file content answering <see cref="RemoteCommand.ReadFile" />.
     /// </summary>
     public FileContent? Content { get; init; }
@@ -81,7 +86,17 @@ public sealed record RemoteResponse
     public GitBranchState? GitBranch { get; init; }
 
     /// <summary>
+    /// Gets the runs answering <see cref="RemoteCommand.GetScripts" />.
+    /// </summary>
+    public ScriptRuns? Scripts { get; init; }
+
+    /// <summary>
     /// Gets the event the server pushes; set only on a response with id zero, which answers no request.
     /// </summary>
     public RemoteEvent? Event { get; init; }
+
+    /// <summary>
+    /// Gets the server path of the file answering <see cref="RemoteCommand.UploadAttachment" />.
+    /// </summary>
+    public string? AttachmentPath { get; init; }
 }

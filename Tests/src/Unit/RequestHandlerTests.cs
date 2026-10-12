@@ -14,6 +14,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IPromptService> prompts = new();
 
+    private readonly Mock<IScriptRunner> scripts = new();
+
     private readonly Mock<IUsageService> usage = new();
 
     private readonly Mock<IEventHub> events = new();
@@ -27,7 +29,7 @@ public sealed class RequestHandlerTests
     public RequestHandlerTests()
     {
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, usage.Object, events.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object);
     }
 
     [Fact]
@@ -38,6 +40,7 @@ public sealed class RequestHandlerTests
         await handler.Open(config, CancellationToken.None);
 
         prompts.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
+        scripts.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
         folders.Verify(x => x.Configure(config.DefaultFolder), Times.Once);
         workspaces.Verify(x => x.Open(Path.Combine("d", "workspaces.json"), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -109,11 +112,21 @@ public sealed class RequestHandlerTests
     {
         WorkspaceFiles listing = new() { Path = string.Empty, Entries = [] };
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        files.Setup(x => x.List(workspace, string.Empty, It.IsAny<CancellationToken>())).ReturnsAsync(listing);
+        files.Setup(x => x.List(workspace, string.Empty, false, It.IsAny<CancellationToken>())).ReturnsAsync(listing);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ListFiles, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
 
         Assert.Equal(listing, response.Files);
+    }
+
+    [Fact]
+    public async Task Handle_UploadAttachment_AnswersTheStoredPath()
+    {
+        prompts.Setup(x => x.Attach(workspace.Id, "a.txt", "AQ==", It.IsAny<CancellationToken>())).ReturnsAsync("/srv/a.txt");
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.UploadAttachment, WorkspaceId = workspace.Id, Name = "a.txt", Data = "AQ==" }, owner, CancellationToken.None);
+
+        Assert.Equal("/srv/a.txt", response.AttachmentPath);
     }
 
     [Fact]
@@ -363,5 +376,74 @@ public sealed class RequestHandlerTests
         Assert.Null(identity.Error);
         git.Verify(x => x.SetIdentity(workspace.Folder, "Ann", "a@b.c", It.IsAny<CancellationToken>()), Times.Once);
         Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.GitSetIdentity, WorkspaceId = workspace.Id, Name = "Ann" }, owner, CancellationToken.None)).Error);
+    }
+
+    [Fact]
+    public async Task Handle_Prompt_IsRefusedWhileAScriptRuns()
+    {
+        scripts.Setup(x => x.IsRunning(workspace.Id)).Returns(true);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+
+        Assert.Equal("A script is running in this workspace right now.", response.Error);
+        prompts.Verify(x => x.Prompt(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_RunScript_StartsTheScriptInTheWorkspace()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        scripts.Verify(x => x.Run(workspace, "a.cs", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_RunScript_IsRefusedWhileTheAiWorksOrGitActs()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+
+        RemoteResponse working = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+
+        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(false);
+        versioning.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        RemoteResponse acting = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+
+        Assert.Equal("The AI is working in this workspace right now.", working.Error);
+        Assert.Equal("A git action is running in this workspace right now.", acting.Error);
+        scripts.Verify(x => x.Run(It.IsAny<WorkspaceInfo>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_RenameAndDelete_AreRefusedWhileAScriptRuns()
+    {
+        scripts.Setup(x => x.IsRunning(workspace.Id)).Returns(true);
+
+        RemoteResponse rename = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RenameWorkspace, WorkspaceId = workspace.Id, Name = "x" }, owner, CancellationToken.None);
+        RemoteResponse delete = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal("A script is running in this workspace right now.", rename.Error);
+        Assert.Equal("A script is running in this workspace right now.", delete.Error);
+    }
+
+    [Fact]
+    public async Task Handle_ScriptCommands_ReachTheRunner()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        ScriptRuns runs = new() { Runs = [] };
+        scripts.Setup(x => x.List(workspace.Id)).Returns(runs);
+
+        RemoteResponse list = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetScripts, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.StopScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+        await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.SendScriptInput, WorkspaceId = workspace.Id, Path = "a.cs", Text = "yes" }, owner, CancellationToken.None);
+        await handler.Handle(new RemoteRequest { Id = 4, Command = RemoteCommand.RemoveScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+
+        Assert.Equal(runs, list.Scripts);
+        scripts.Verify(x => x.Stop(workspace.Id, "a.cs"), Times.Once);
+        scripts.Verify(x => x.SendInput(workspace.Id, "a.cs", "yes", It.IsAny<CancellationToken>()), Times.Once);
+        scripts.Verify(x => x.Remove(workspace.Id, "a.cs"), Times.Once);
     }
 }

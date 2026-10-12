@@ -49,16 +49,19 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `service` | string | `ConfigureWorkspace`, `GetUsage` | `ClaudeCode` or `Codex`. |
 | `model` | string | `ConfigureWorkspace` | For `ClaudeCode`: `Sonnet`, `Opus` or `Haiku`. For `Codex`: `Terra`, `Sol` or `Luna`. Refused when the service does not offer it. |
 | `effort` | string | `ConfigureWorkspace` | `Low`, `Medium`, `High`, `XHigh` or `Max`. |
-| `name` | string | per command | A folder name, a group name, a branch or tag name, or the name of the folder `CloneWorkspace` creates. |
-| `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into. |
+| `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
+| `data` | string | `UploadAttachment` | The file content, base64 encoded. |
+| `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
 | `url` | string | `CloneWorkspace`, `GitSetRemote` | A git repository URL. |
 | `commit` | string | per command | A commit hash, 4 to 64 hexadecimal characters. |
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
 | `paths` | array of string | `WatchFiles` | Folder paths. |
-| `text` | string | `Prompt`, `GitCommit` | The prompt text, or the commit message. |
+| `text` | string | `Prompt`, `GitCommit`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the line written to a script, or the text to search for. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
+| `showHidden` | bool | no | `ListFiles` and `SearchFiles`; includes the entries a `.filehide` file hides. |
+| `searchContent` | bool | no | `SearchFiles` only; searches the contents of the files instead of their names. |
 
 Properties a command does not use are omitted.
 
@@ -81,12 +84,14 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `history` | history | `GetHistory` |
 | `usage` | usage | `GetUsage` |
 | `files` | files | `ListFiles` |
+| `searchResults` | array of search result | `SearchFiles` |
 | `content` | content | `ReadFile` |
 | `git` | git status | `GetGitStatus` |
 | `gitBranch` | branch state | `GetGitBranchState` |
 | `gitChanges` | git changes | `GetGitChanges`, `GetGitCommitChanges` |
 | `gitHistory` | git history | `GetGitHistory` |
 | `gitDiff` | git diff | `GetGitDiff` |
+| `scripts` | script runs | `GetScripts` |
 | `event` | event | Pushed by the server, with `id` zero (see Events). |
 
 ### Commands
@@ -97,21 +102,23 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | --- | --- | --- | --- |
 | `ListWorkspaces` | none | `catalog` | Workspaces and groups, each ordered by name. |
 | `CreateWorkspace` | `path` (existing folder on the server) | `workspace` | |
-| `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused while the AI is working in the workspace. |
+| `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused while the AI is working or a script is running in the workspace. |
 | `ConfigureWorkspace` | `workspaceId`, `service`, `model`, `effort` | `workspace` | Applies from the next AI process: an idle one is ended now, a working one finishes first. Switching the service detaches the workspace's AI session, since sessions belong to one service. |
 | `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. |
 | `CreateGroup` | `name`, optional `parentId` | `group` | Names are trimmed, must be non-empty and unique ignoring case among the groups with the same parent. The parent must exist. |
 | `RenameGroup` | `groupId`, `name` | `group` | Same name rules as `CreateGroup`. |
 | `MoveGroup` | `groupId`, optional `parentId` | `group` | Omitting `parentId` moves it to the top level. Refused into itself or anything inside it, and when the name is taken in the new place. |
 | `DeleteGroup` | `groupId` | none | Its workspaces and groups are kept and move into its parent. |
-| `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused while the AI is working in the workspace. |
+| `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused while the AI is working or a script is running in the workspace. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
 | `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
-| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the text is handed to the AI, also while it is working, when it joins the work in progress. The message and the AI's replies arrive as events. |
-| `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself) | `files` | |
+| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the text is handed to the AI, also while it is working, when it joins the work in progress. The message and the AI's replies arrive as events. Refused while a script is running in the workspace. |
+| `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused while a script is running. |
+| `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
+| `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |
 | `WatchFiles` | `workspaceId`, `paths` (folders relative to the workspace folder; empty string for the folder itself) | none | Replaces the folders this connection watched before; an empty list stops watching. Changes arrive as `FilesChanged` events. |
 | `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |
 | `GetGitStatus` | `workspaceId` | `git` | `isRepo` is false for a folder that is not the root of a repository, and when git is not installed on the server. |
@@ -135,6 +142,11 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GitSync` | `workspaceId` | none | `GitFetch`, then fast-forwards the checked out branch onto its remote counterpart, stashing changes that are not committed and restoring them (the AI resolves conflicts of the restore). Does nothing while the AI is working or another git action runs, without a remote, or when the branch has diverged. |
 | `GitSetIdentity` | `workspaceId`, `name`, `email` | none | Sets the git user name and email in the server user's global git configuration. |
 | `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone. |
+| `GetScripts` | `workspaceId` | `scripts` | The runs the server holds for the workspace, with their output. |
+| `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Refused while the AI, a git action or another script or task is running in the workspace, for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. |
+| `StopScript` | `workspaceId`, `path` | none | Kills the script, or every script of the task, and the task stops. Does nothing when the run is not in progress. |
+| `SendScriptInput` | `workspaceId`, `path`, `text` | none | Writes the line to the standard input of the running script and adds it, with a newline, to the output. Refused when the script is not running. |
+| `RemoveScript` | `workspaceId`, `path` | none | Forgets a finished run, and the runs of a task's scripts. Refused while it is in progress. |
 
 ### Payload objects
 
@@ -223,6 +235,14 @@ The client colors the usage icon by the pace of the session: percent used minus 
 | `parent` | string, optional | Relative path of the containing folder; omitted at the workspace folder. |
 | `entries` | array of entry | Folders first, then files, each ordered by name. |
 
+**search result** (item of `searchResults`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | File path relative to the workspace folder, using `/` separators. |
+| `line` | number | One-based matching line; 0 for a match on the file name. |
+| `text` | string | The trimmed matching line; empty for a match on the file name. |
+
 **entry** (item of `files.entries`)
 
 | Property | Type | Meaning |
@@ -290,6 +310,7 @@ The client colors the usage icon by the pace of the session: percent used minus 
 | `subject` | string | The first line of the message. |
 | `author` | string | The author's name. |
 | `date` | string | ISO 8601. |
+| `parents` | array of string | The full hashes of the commit's parents, the first being the one it continues; clients lay out the history graph from them. |
 | `refs` | array of ref | The branches and tags pointing at the commit. |
 
 **ref** (item of `commit.refs`)
@@ -299,6 +320,25 @@ The client colors the usage icon by the pace of the session: percent used minus 
 | `name` | string | The short name. |
 | `kind` | string | `Branch`, `Remote` or `Tag`. |
 | `isCurrent` | bool, optional | `true` for the checked out branch. |
+
+**script runs** (`GetScripts`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `runs` | array of script run | Earliest started first, a task followed by the scripts it runs. |
+
+**script run** (item of `scripts.runs`, and `event.script`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `path` | string | The file relative to the workspace folder, which identifies the run. |
+| `name` | string | The file name without its extension. |
+| `state` | string | `Pending` (a script of a task waiting for its turn), `Running`, `Succeeded`, `Failed`, `Stopped` or `Skipped` (a script of a task that stopped before its turn). |
+| `isTask` | bool, optional | `true` for a `.task` file. |
+| `taskPath` | string, optional | The task that runs this script. |
+| `scripts` | array of string, optional | The scripts a task runs, in order. |
+| `output` | string, optional | Everything written so far, the earliest part cut beyond 500000 characters; omitted in events. |
+| `trimmed` | bool, optional | `true` when the earliest part of the output was cut. |
 
 **git diff** (`GetGitDiff`)
 
@@ -326,13 +366,17 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged` or `Failed`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput` or `ScriptRemoved`. |
 | `workspaceId` | GUID | The workspace concerned. |
 | `index` | number | `MessageAdded`: the message's position in the conversation. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
-| `path` | string | `FilesChanged`: the changed folder relative to the workspace folder. |
+| `path` | string | `FilesChanged`: the changed folder relative to the workspace folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
+| `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
+| `text` | string | `ScriptOutput`: what the run wrote since the last event. |
 | `error` | string | `Failed`: why the AI could not do its work. |
+
+`ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.
 
 `GitChanged` says a git action started or finished in the workspace (the automatic fetch and pull only say it when they changed something), so a client reads the git state again; it does the same when a `FilesChanged` event arrives, when a `WorkingChanged` event says the AI stopped, and after its own git actions.
 

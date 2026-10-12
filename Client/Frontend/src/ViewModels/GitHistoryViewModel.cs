@@ -97,6 +97,14 @@ internal sealed class GitHistoryViewModel : ViewModelBase
             Commits.Add(new GitCommitViewModel(connection, workspaceId, commit, node => git.RequestDiff(node.Path, node.Commit), git) { IsExpanded = open.Contains(commit.Hash) });
         }
 
+        GitGraph graph = new([.. Commits.Select(commit => commit.Commit)]);
+
+        for (int index = 0; index < Commits.Count; index++)
+        {
+            Commits[index].GraphLanes = graph.Lanes;
+            Commits[index].Graph = graph.Rows[index];
+        }
+
         hasMore = history.HasMore;
         loaded = true;
         Raise(nameof(HasMore));

@@ -1,6 +1,7 @@
 namespace Markwardt.AutoRemote.Tests.Unit;
 
-public sealed class ViewTests(HeadlessFixture fixture) : IClassFixture<HeadlessFixture>
+[Collection("Headless")]
+public sealed class ViewTests(HeadlessFixture fixture)
 {
     private readonly Mock<IServerConnection> connection = new();
 
@@ -47,6 +48,25 @@ public sealed class ViewTests(HeadlessFixture fixture) : IClassFixture<HeadlessF
         window.Close();
         return (texts.Count, grids, text);
     });
+
+    [Fact]
+    public async Task Matches_MarkTheFoundTextInTheRenderedBlocks()
+    {
+        (string plain, List<string> marked) = await fixture.Run(() =>
+        {
+            MarkdownView view = new() { Source = "# Title\n\nsome **bold** text and bold again" };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            string plain = view.PlainText;
+            view.Matches = new TextMatches { Starts = [plain.IndexOf("bold", StringComparison.Ordinal), plain.LastIndexOf("bold", StringComparison.Ordinal)], Length = 4, Current = 1 };
+            List<string> marked = view.GetVisualDescendants().OfType<SelectableTextBlock>().SelectMany(block => block.Inlines!.OfType<Span>().SelectMany(span => span.Inlines).Concat(block.Inlines!).OfType<Run>()).Where(run => run.Background is not null && run.Text == "bold").Select(run => run.Text!).ToList();
+            window.Close();
+            return (plain, marked);
+        });
+
+        Assert.Equal("Title\nsome bold text and bold again\n", plain);
+        Assert.Equal(2, marked.Count);
+    }
 
     [Fact]
     public async Task Source_RendersEveryKindOfBlock()
@@ -145,7 +165,7 @@ public sealed class ViewTests(HeadlessFixture fixture) : IClassFixture<HeadlessF
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", GroupId = group.Id };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [group], Workspaces = [workspace] });
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }, new ChatMessage { Role = MessageRole.Assistant, Text = "hello" }], Start = 0 });
-        connection.Setup(x => x.ListFiles(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false, Size = 1 }] });
+        connection.Setup(x => x.ListFiles(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false, Size = 1 }] });
 
         Assert.True(await fixture.Run(() => Shows<HomeView>(new HomeView(), new HomeViewModel(connection.Object))));
         Assert.True(await fixture.Run(() =>
@@ -219,7 +239,7 @@ public sealed class ViewTests(HeadlessFixture fixture) : IClassFixture<HeadlessF
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "first", HasChanges = true });
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([new GitChange { Path = "a.txt", Status = GitChangeStatus.Modified }]);
-        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false }] });
+        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false }] });
 
         (string[] labels, double[] widths, string[] versionTexts) = await fixture.Run(() =>
         {
@@ -230,7 +250,7 @@ public sealed class ViewTests(HeadlessFixture fixture) : IClassFixture<HeadlessF
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
             List<Button> tabs = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.Classes.Contains("tab") && button.IsEffectivelyVisible)];
-            string[] versionTexts = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.Classes.Contains("version")).SelectMany(button => button.GetVisualDescendants().OfType<TextBlock>()).Select(block => block.Text ?? string.Empty)];
+            string[] versionTexts = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.Classes.Contains("versionSection")).SelectMany(button => button.GetVisualDescendants().OfType<TextBlock>()).Select(block => block.Text ?? string.Empty)];
             string[] labels = [.. tabs.Select(tab => tab.Content?.ToString() ?? string.Empty)];
             double[] widths = [.. tabs.Select(tab => Math.Round(tab.Bounds.Width))];
             window.Close();
@@ -243,6 +263,102 @@ public sealed class ViewTests(HeadlessFixture fixture) : IClassFixture<HeadlessF
         Assert.Contains("first", versionTexts);
         Assert.Contains("abc1234", versionTexts);
         Assert.Contains("*", versionTexts);
+    }
+
+    [Fact]
+    public async Task HomeView_DesktopLayoutShowsScriptTabWindowControlsAndTheHistoryGraph()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [new ScriptRun { Path = "a.cs", Name = "a", State = ScriptState.Succeeded, Output = "hello" }] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "merge" });
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }] });
+        GitCommit Commit(string hash, params string[] parents) => new() { Hash = hash, Subject = "commit " + hash, Author = "Ann", Date = DateTimeOffset.UnixEpoch, Parents = parents };
+        connection.Setup(x => x.GetGitHistory(workspace.Id, 0, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new GitHistory { Commits = [Commit("m", "a", "b"), Commit("a", "base"), Commit("b", "base"), Commit("base")] });
+
+        (string[] labels, int controls, int graphs, int[] lanes, string output) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            model.Active!.Scripts.Start().GetAwaiter().GetResult();
+            model.Active.Files.Start().GetAwaiter().GetResult();
+            model.Active.Git.History.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1280, Height = 800, Content = view };
+            window.Show();
+            string[] labels = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.Classes.Contains("tab") && button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty)];
+            int controls = window.GetVisualDescendants().OfType<WindowControlsView>().Count(item => item.IsEffectivelyVisible);
+            model.Active.ShowHistoryCommand.Execute(null);
+            window.UpdateLayout();
+            List<GitGraphView> graphs = [.. window.GetVisualDescendants().OfType<GitGraphView>().Where(item => item.IsEffectivelyVisible)];
+            model.Active.ShowScriptCommand.Execute(null);
+            model.Active.Scripts.SelectedEntry = model.Active.Scripts.Entries[0];
+            window.UpdateLayout();
+            string output = string.Concat(window.GetVisualDescendants().OfType<SelectableTextBlock>().Where(item => item.IsEffectivelyVisible).Select(item => item.Text));
+            window.Close();
+            return (labels, controls, graphs.Count, graphs.Select(item => item.Row!.Lane).ToArray(), output);
+        });
+
+        Assert.Equal(["Chat", "Script", "History"], labels);
+        Assert.Equal(1, controls);
+        Assert.Equal(4, graphs);
+        Assert.Equal([0, 0, 1, 0], lanes);
+        Assert.Contains("hello", output);
+    }
+
+    [Fact]
+    public async Task HomeView_TabsLayoutHasNoWindowControlsOrScriptTab()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+
+        (string[] labels, int controls) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            string[] labels = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.Classes.Contains("tab") && button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty)];
+            int controls = window.GetVisualDescendants().OfType<WindowControlsView>().Count(item => item.IsEffectivelyVisible);
+            window.Close();
+            return (labels, controls);
+        });
+
+        Assert.Equal(["Chat", "Files"], labels);
+        Assert.Equal(0, controls);
+    }
+
+    [Theory]
+    [InlineData(false, "1\n2\n3")]
+    [InlineData(true, "1\n2\n\n\n3")]
+    public async Task SyntaxView_NumbersLogicalLinesAndLeavesWrappedContinuationsBlank(bool wrap, string expected)
+    {
+        string longLine = string.Join(' ', Enumerable.Repeat("word", 40));
+
+        string numbers = await fixture.Run(() =>
+        {
+            SyntaxView view = new() { Wrap = wrap, File = new FileContent { Path = "notes.txt", Text = $"short\n{longLine}\nlast" } };
+            Window window = new() { Width = 400, Height = 600, Content = new ScrollViewer { Content = view } };
+            window.Show();
+            window.UpdateLayout();
+            string result = view.GetVisualDescendants().OfType<TextBlock>().First(block => block is not SelectableTextBlock).Text ?? string.Empty;
+            window.Close();
+            return result;
+        });
+
+        string[] lines = numbers.Split('\n');
+        Assert.Equal(expected.Split('\n').Where(line => line.Length > 0), lines.Where(line => line.Length > 0));
+
+        if (wrap)
+        {
+            Assert.True(lines.Length > 3);
+        }
     }
 
     [Fact]

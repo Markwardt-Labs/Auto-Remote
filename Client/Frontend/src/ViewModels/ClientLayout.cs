@@ -11,7 +11,7 @@ public enum ClientLayout
     Tabs,
 
     /// <summary>
-    /// Side by side as the file system, the content of the selected file and the conversation, with resizable separators.
+    /// Side by side as the file system, the content of the selected file and the conversation, with resizable separators; the layout of the desktop client, which also has what only suits a computer.
     /// </summary>
     Panels
 }

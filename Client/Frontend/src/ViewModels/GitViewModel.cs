@@ -366,6 +366,11 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     /// <returns>The status, or <see langword="null" /> for a path without changes.</returns>
     public GitChangeStatus? StatusOf(string path, bool isFolder)
     {
+        if (IsRepo && (path == ".git" || path.StartsWith(".git/", StringComparison.Ordinal)))
+        {
+            return GitChangeStatus.Ignored;
+        }
+
         foreach (GitChange change in changes)
         {
             if (change.Status == GitChangeStatus.Ignored)

@@ -30,6 +30,10 @@ Each workspace has an AI service, a model and an effort (low to max). Claude Cod
 
 Workspaces can be filed into groups, which can contain other groups to any depth; the client shows the result as a tree. A group exists only in the server's workspaces file: it is organization for Auto Remote and has nothing to do with the folder hierarchy on disk, so filing a workspace never moves anything and the workspace folders keep their real parents. A workspace is in at most one group and a group has at most one parent. Names are unique ignoring case among the groups with the same parent. A group cannot be moved into itself or into anything inside it. Deleting a group keeps what is in it and moves its workspaces and groups up into its parent (to the top level if it had none). Groups are managed from the workspace listing, not from a workspace's settings, and live server side so every client sees the same organization.
 
+## Attachments
+
+Files attached to a prompt are kept in an `attachments` folder in the data folder, one subfolder per workspace, under a name prefixed with a random id, and are deleted with the workspace. The AI reads them by path, as it reads any file.
+
 ## History
 
 The server keeps its own transcript per workspace (one JSON line per message, in a `history` folder in the data folder) so the client can show past conversation without depending on Claude Code's storage. Every message is recorded when it happens and gets the next position in the conversation, which events carry so clients can place them. The client reads the history in chunks, newest first, and asks for the chunk before the oldest one it has when the user scrolls to the top, until the start of the history.

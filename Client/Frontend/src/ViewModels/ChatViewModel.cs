@@ -14,7 +14,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     {
         this.connection = connection;
         this.workspaceId = workspaceId;
-        SendCommand = new AsyncCommand(_ => Send(), () => !string.IsNullOrWhiteSpace(input));
+        SendCommand = new AsyncCommand(_ => Send(), () => !isBlocked && (!string.IsNullOrWhiteSpace(input) || Attachments.Count > 0));
+        RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
+        Attachments.CollectionChanged += (_, _) =>
+        {
+            Raise(nameof(HasAttachments));
+            SendCommand.Refresh();
+        };
     }
 
     private readonly IServerConnection connection;
@@ -25,11 +31,14 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly int chunk = 30;
 
+
     private int first;
 
     private string input = string.Empty;
 
     private bool isAiWorking;
+
+    private bool isBlocked;
 
     private bool loaded;
 
@@ -52,6 +61,27 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether a script is running in the workspace, which keeps the AI from starting.
+    /// </summary>
+    public bool IsBlocked
+    {
+        get => isBlocked;
+        set
+        {
+            if (Set(ref isBlocked, value))
+            {
+                Raise(nameof(Placeholder));
+                SendCommand.Refresh();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the hint shown in the empty message box.
+    /// </summary>
+    public string Placeholder => isBlocked ? "A script is running, wait for it to finish" : "Enter query...";
+
+    /// <summary>
     /// Gets a value indicating whether older messages exist on the server than the ones loaded so far.
     /// </summary>
     public bool HasMore => first > 0;
@@ -72,9 +102,46 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work.
+    /// Gets the largest file, in bytes, that the server accepts as an attachment.
+    /// </summary>
+    public int MaxAttachment { get; } = 2 * 1024 * 1024;
+
+    /// <summary>
+    /// Gets the files waiting to be sent with the next prompt.
+    /// </summary>
+    public ObservableCollection<ChatAttachment> Attachments { get; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether any file waits to be sent.
+    /// </summary>
+    public bool HasAttachments => Attachments.Count > 0;
+
+    /// <summary>
+    /// Gets the command that removes the <see cref="ChatAttachment" /> given as its parameter from <see cref="Attachments" />.
+    /// </summary>
+    public AsyncCommand RemoveAttachmentCommand { get; }
+
+    /// <summary>
+    /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work, but not while a script runs.
     /// </summary>
     public AsyncCommand SendCommand { get; }
+
+    /// <summary>
+    /// Adds a file to send with the next prompt, unless it is empty or larger than the server accepts.
+    /// </summary>
+    /// <param name="name">The file name.</param>
+    /// <param name="data">The file content.</param>
+    public void Attach(string name, ReadOnlyMemory<byte> data)
+    {
+        if (data.Length == 0 || data.Length > MaxAttachment)
+        {
+            Error = $"{name} is empty or larger than {MaxAttachment / 1024 / 1024} MB.";
+            return;
+        }
+
+        Error = null;
+        Attachments.Add(new() { Name = name, Data = data });
+    }
 
     /// <summary>
     /// Loads the newest chunk of the stored conversation and starts following it live.
@@ -207,14 +274,43 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private Task Remove(object? attachment)
+    {
+        if (attachment is ChatAttachment found)
+        {
+            Attachments.Remove(found);
+        }
+
+        return Task.CompletedTask;
+    }
+
     private async Task Send()
     {
         string text = input.Trim();
+        List<ChatAttachment> sending = [.. Attachments];
         Input = string.Empty;
+        Attachments.Clear();
 
-        if (!await Attempt(() => connection.Prompt(workspaceId, text, CancellationToken.None)) && input.Length == 0)
+        bool sent = await Attempt(async () =>
+        {
+            List<string> lines = text.Length == 0 ? [] : [text];
+
+            foreach (ChatAttachment attachment in sending)
+            {
+                lines.Add($"Attached file: {await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None)}");
+            }
+
+            await connection.Prompt(workspaceId, string.Join('\n', lines), CancellationToken.None);
+        });
+
+        if (!sent && input.Length == 0 && Attachments.Count == 0)
         {
             Input = text;
+
+            foreach (ChatAttachment attachment in sending)
+            {
+                Attachments.Add(attachment);
+            }
         }
     }
 }

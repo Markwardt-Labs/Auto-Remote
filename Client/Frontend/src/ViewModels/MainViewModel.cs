@@ -91,7 +91,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             await cloning.Open();
         };
         Current = home;
-        await home.Start(focus);
+        await home.Start(focus, false);
     }
 
     private async Task Close()

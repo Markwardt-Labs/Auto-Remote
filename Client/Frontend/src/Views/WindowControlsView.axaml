@@ -1,0 +1,23 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Markwardt.AutoRemote.Client.WindowControlsView">
+  <UserControl.Styles>
+    <Style Selector="Path.lineIcon">
+      <Setter Property="Stroke" Value="White" />
+    </Style>
+  </UserControl.Styles>
+  <StackPanel Orientation="Horizontal">
+    <Button Classes="flat" ToolTip.Tip="Minimize" Click="OnMinimizeClick">
+      <Path Classes="lineIcon" Data="{StaticResource MinimizeIconGeometry}" Width="11" Height="11" Fill="White" Stroke="Transparent" />
+    </Button>
+    <Button Name="MaximizeButton" Classes="flat" ToolTip.Tip="Maximize" Click="OnMaximizeRestoreClick">
+      <Path Classes="lineIcon" Data="{StaticResource MaximizeIconGeometry}" Width="11" Height="11" />
+    </Button>
+    <Button Name="RestoreButton" Classes="flat" ToolTip.Tip="Restore" Click="OnMaximizeRestoreClick" IsVisible="False">
+      <Path Classes="lineIcon" Data="{StaticResource RestoreIconGeometry}" Width="11" Height="11" />
+    </Button>
+    <Button Classes="flat" ToolTip.Tip="Close" Click="OnCloseClick">
+      <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="11" Height="11" />
+    </Button>
+  </StackPanel>
+</UserControl>

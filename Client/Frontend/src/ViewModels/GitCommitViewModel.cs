@@ -20,8 +20,8 @@ internal sealed class GitCommitViewModel : ViewModelBase
         this.opened = opened;
         Commit = commit;
         string? current = commit.Refs.FirstOrDefault(item => item.IsCurrent)?.Name ?? git.CurrentBranch;
-        Refs = [.. commit.Refs.Select(item => new GitRefViewModel(item, git, current))];
         ToggleCommand = new AsyncCommand(_ => Toggle());
+        Refs = [.. commit.Refs.Where(item => !IsShared(commit, item)).Select(item => new GitRefViewModel(item, git, current, RemotesOf(commit, item), ToggleCommand))];
         CheckoutCommand = new AsyncCommand(_ => git.Checkout(commit.Hash));
     }
 
@@ -30,6 +30,12 @@ internal sealed class GitCommitViewModel : ViewModelBase
     private readonly Guid workspaceId;
 
     private readonly Action<ChangeNode> opened;
+
+    private readonly GitGraphColors colors = new();
+
+    private GitGraphRow? graph;
+
+    private int graphLanes = 1;
 
     private bool isExpanded;
 
@@ -63,9 +69,53 @@ internal sealed class GitCommitViewModel : ViewModelBase
     public string ShortHash => Commit.Hash[..Math.Min(7, Commit.Hash.Length)];
 
     /// <summary>
-    /// Gets the author and the time of the commit.
+    /// Gets or sets the graph drawn beside the commit.
     /// </summary>
-    public string Detail => $"{Commit.Author} · {Commit.Date.LocalDateTime:MMM d, yyyy h:mm tt} · {ShortHash}";
+    public GitGraphRow? Graph
+    {
+        get => graph;
+        set
+        {
+            if (Set(ref graph, value))
+            {
+                Raise(nameof(GraphBrush));
+
+                foreach (GitRefViewModel item in Refs)
+                {
+                    item.Accent = GraphBrush;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets how many lanes the whole graph needs, which keeps the graph beside every commit the same width.
+    /// </summary>
+    public int GraphLanes
+    {
+        get => graphLanes;
+        set => Set(ref graphLanes, value);
+    }
+
+    /// <summary>
+    /// Gets the color of the commit's node and its branch labels.
+    /// </summary>
+    public IBrush GraphBrush => new SolidColorBrush(colors.At(graph?.Color ?? 0));
+
+    /// <summary>
+    /// Gets the author's name.
+    /// </summary>
+    public string Author => Commit.Author;
+
+    /// <summary>
+    /// Gets the day and time of the commit.
+    /// </summary>
+    public string Stamp => Commit.Date.LocalDateTime.ToString("MMM d, yyyy h:mm tt", CultureInfo.CurrentCulture);
+
+    /// <summary>
+    /// Gets the full hash, shown when hovering over the commit.
+    /// </summary>
+    public string FullHash => Commit.Hash;
 
     /// <summary>
     /// Gets a value indicating whether branches or tags point at the commit.
@@ -116,6 +166,14 @@ internal sealed class GitCommitViewModel : ViewModelBase
     /// Gets the command that checks the commit out.
     /// </summary>
     public AsyncCommand CheckoutCommand { get; }
+
+    private string BranchOf(GitRef remote) => remote.Name.Contains('/') ? remote.Name[(remote.Name.IndexOf('/') + 1)..] : remote.Name;
+
+    private bool IsShared(GitCommit commit, GitRef item) => item.Kind == GitRefKind.Remote && commit.Refs.Any(other => other.Kind == GitRefKind.Branch && other.Name == BranchOf(item));
+
+    private IReadOnlyList<string> RemotesOf(GitCommit commit, GitRef item) => item.Kind == GitRefKind.Branch
+        ? [.. commit.Refs.Where(other => other.Kind == GitRefKind.Remote && other.Name.Contains('/') && BranchOf(other) == item.Name).Select(other => other.Name[..other.Name.IndexOf('/')])]
+        : [];
 
     private Task Toggle()
     {

@@ -26,6 +26,11 @@ public sealed record GitCommit
     public required DateTimeOffset Date { get; init; }
 
     /// <summary>
+    /// Gets the full hashes of the commit's parents, the first being the one it continues.
+    /// </summary>
+    public IReadOnlyList<string> Parents { get; init; } = [];
+
+    /// <summary>
     /// Gets the branches and tags that point at the commit.
     /// </summary>
     public IReadOnlyList<GitRef> Refs { get; init; } = [];

@@ -33,6 +33,17 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task Start_WithoutFocusingFirst_StaysBlankWithTheDrawerOpen()
+    {
+        await model.Start(null, false);
+
+        Assert.Equal([first, second], model.Entries.Select(entry => entry.Workspace));
+        Assert.Null(model.Selected);
+        Assert.Null(model.Active);
+        Assert.True(model.IsDrawerOpen);
+    }
+
+    [Fact]
     public async Task Start_FocusesRequestedWorkspace()
     {
         await model.Start(second.Id);

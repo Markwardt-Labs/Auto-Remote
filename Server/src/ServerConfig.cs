@@ -36,6 +36,11 @@ internal sealed record ServerConfig
     public string ClaudeCommand { get; init; } = "claude";
 
     /// <summary>
+    /// Gets the .NET command that runs scripts with <c>run --file</c>.
+    /// </summary>
+    public string DotnetCommand { get; init; } = "dotnet";
+
+    /// <summary>
     /// Gets the PFX certificate file presented to clients; when empty, a self-signed certificate is created in the data folder.
     /// </summary>
     public string? CertificateFile { get; init; }

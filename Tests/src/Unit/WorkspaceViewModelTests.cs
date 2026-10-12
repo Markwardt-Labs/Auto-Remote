@@ -96,7 +96,7 @@ public sealed class WorkspaceViewModelTests
     [Fact]
     public void ToggleSettings_ReturnsToTheTabThatWasShowing()
     {
-        connection.Setup(x => x.ListFiles(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [] });
+        connection.Setup(x => x.ListFiles(workspace.Id, It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [] });
         WorkspaceViewModel model = new(connection.Object, workspace);
         model.ShowFilesCommand.Execute(null);
 

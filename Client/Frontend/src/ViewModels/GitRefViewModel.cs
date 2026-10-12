@@ -11,9 +11,13 @@ internal sealed class GitRefViewModel : ViewModelBase
     /// <param name="reference">The branch or tag.</param>
     /// <param name="git">The git state the actions run through.</param>
     /// <param name="currentBranch">The checked out branch, or <see langword="null" /> when the head is detached.</param>
-    public GitRefViewModel(GitRef reference, GitViewModel git, string? currentBranch)
+    /// <param name="remotes">The remotes whose copy of this branch is on the same commit, shown in the same label.</param>
+    /// <param name="toggle">The command of the commit the label sits on, which tapping the label runs; its own actions are in its context menu.</param>
+    public GitRefViewModel(GitRef reference, GitViewModel git, string? currentBranch, IReadOnlyList<string>? remotes = null, ICommand? toggle = null)
     {
         Reference = reference;
+        ToggleCommand = toggle;
+        RemoteLabel = string.Join(", ", remotes ?? []);
         this.currentBranch = currentBranch;
         string target = Target;
         CheckoutCommand = new AsyncCommand(_ => git.Checkout(target));
@@ -28,10 +32,31 @@ internal sealed class GitRefViewModel : ViewModelBase
 
     private readonly string? currentBranch;
 
+    private IBrush? accent;
+
+    /// <summary>
+    /// Gets or sets the color of the branch line the label sits on, which outlines the label.
+    /// </summary>
+    public IBrush? Accent
+    {
+        get => accent;
+        set => Set(ref accent, value);
+    }
+
     /// <summary>
     /// Gets the branch or tag.
     /// </summary>
     public GitRef Reference { get; }
+
+    /// <summary>
+    /// Gets the names of the remotes whose copy of the branch is on the same commit, which share this label.
+    /// </summary>
+    public string RemoteLabel { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the label also stands for the branch on a remote.
+    /// </summary>
+    public bool HasRemote => RemoteLabel.Length > 0;
 
     /// <summary>
     /// Gets the name shown.
@@ -102,6 +127,11 @@ internal sealed class GitRefViewModel : ViewModelBase
     /// Gets the label of merging this branch into the checked out one.
     /// </summary>
     public string MergeSelectedHeader => $"Merge {Selected} into {Current}";
+
+    /// <summary>
+    /// Gets the command of the commit the label sits on that opens or closes it, or <see langword="null" />.
+    /// </summary>
+    public ICommand? ToggleCommand { get; }
 
     /// <summary>
     /// Gets the command that checks the ref out.

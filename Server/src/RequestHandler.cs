@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IUsageService usage, IEventHub events) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -38,6 +38,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     public async Task Open(ServerConfig config, CancellationToken cancellation)
     {
         prompts.Configure(config, cancellation);
+        scripts.Configure(config, cancellation);
         usage.Configure(config);
         folders.Configure(config.DefaultFolder);
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
@@ -94,10 +95,16 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.GetHistory:
                 return new RemoteResponse { Id = 0, History = await prompts.History(RequireWorkspace(request), request.Before, request.Limit, cancellation) };
             case RemoteCommand.Prompt:
+                RequireNoScript(request);
                 await prompts.Prompt(RequireWorkspace(request), Require(request.Text, "text"), cancellation);
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.UploadAttachment:
+                RequireNoScript(request);
+                return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
             case RemoteCommand.ListFiles:
-                return new RemoteResponse { Id = 0, Files = await files.List(await workspaces.Get(RequireWorkspace(request), cancellation), request.Path ?? string.Empty, cancellation) };
+                return new RemoteResponse { Id = 0, Files = await files.List(await workspaces.Get(RequireWorkspace(request), cancellation), request.Path ?? string.Empty, request.ShowHidden == true, cancellation) };
+            case RemoteCommand.SearchFiles:
+                return new RemoteResponse { Id = 0, SearchResults = await files.Search(await workspaces.Get(RequireWorkspace(request), cancellation), Require(request.Text, "text"), request.SearchContent == true, request.ShowHidden == true, cancellation) };
             case RemoteCommand.ReadFile:
                 return new RemoteResponse { Id = 0, Content = await files.Read(await workspaces.Get(RequireWorkspace(request), cancellation), Require(request.Path, "path"), cancellation) };
             case RemoteCommand.WatchFiles:
@@ -170,6 +177,23 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.GitCancel:
                 versioning.Cancel(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GetScripts:
+                await workspaces.Get(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, Scripts = scripts.List(RequireWorkspace(request)) };
+            case RemoteCommand.RunScript:
+                RequireNotBusy(request);
+                RequireNoGitAction(request);
+                await scripts.Run(await WorkspaceOf(request, cancellation), Require(request.Path, "path"), cancellation);
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.StopScript:
+                scripts.Stop(RequireWorkspace(request), Require(request.Path, "path"));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.SendScriptInput:
+                await scripts.SendInput(RequireWorkspace(request), Require(request.Path, "path"), Require(request.Text, "text"), cancellation);
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.RemoveScript:
+                scripts.Remove(RequireWorkspace(request), Require(request.Path, "path"));
+                return new RemoteResponse { Id = 0 };
             default:
                 throw new RequestException("Unknown command.");
         }
@@ -192,6 +216,22 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         }
     }
 
+    private void RequireNoScript(RemoteRequest request)
+    {
+        if (request.WorkspaceId is { } id && scripts.IsRunning(id))
+        {
+            throw new RequestException("A script is running in this workspace right now.");
+        }
+    }
+
+    private void RequireNoGitAction(RemoteRequest request)
+    {
+        if (request.WorkspaceId is { } id && versioning.IsBusy(id))
+        {
+            throw new RequestException("A git action is running in this workspace right now.");
+        }
+    }
+
     private async Task RequireIdle(RemoteRequest request)
     {
         if (request.WorkspaceId is { } id)
@@ -200,6 +240,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             {
                 throw new RequestException("The AI is working in this workspace right now.");
             }
+
+            RequireNoScript(request);
 
             await prompts.Release(id);
         }

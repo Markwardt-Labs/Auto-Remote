@@ -31,6 +31,8 @@ internal sealed class FileNode : ViewModelBase
 
     private GitChangeStatus? gitStatus;
 
+    private bool isScriptRunning;
+
     /// <summary>
     /// Gets the file or folder, or <see langword="null" /> for a placeholder.
     /// </summary>
@@ -60,6 +62,35 @@ internal sealed class FileNode : ViewModelBase
     /// Gets a value indicating whether this is a file.
     /// </summary>
     public bool IsFile => Entry is { IsFolder: false };
+
+    /// <summary>
+    /// Gets a value indicating whether the file is a script or task that can be run.
+    /// </summary>
+    public bool IsRunnable { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the file is a runnable <c>.cs</c> script.
+    /// </summary>
+    public bool IsScriptFile => IsRunnable && Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets a value indicating whether the file is a runnable <c>.task</c> file.
+    /// </summary>
+    public bool IsTaskFile => IsRunnable && Name.EndsWith(".task", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Gets a value indicating whether the file is neither a script nor a task shown as runnable.
+    /// </summary>
+    public bool IsPlainFile => IsFile && !IsRunnable;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the script or task is running.
+    /// </summary>
+    public bool IsScriptRunning
+    {
+        get => isScriptRunning;
+        set => Set(ref isScriptRunning, value);
+    }
 
     /// <summary>
     /// Gets a value indicating whether this only stands in for the content of a folder not read yet.

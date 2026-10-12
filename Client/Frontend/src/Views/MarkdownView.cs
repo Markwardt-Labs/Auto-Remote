@@ -1,20 +1,44 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// Renders markdown text, including tables, task lists and code blocks, as native Avalonia controls.
+/// Renders markdown text, including tables, task lists and code blocks, as native Avalonia controls, with the matches of a search marked.
 /// </summary>
-public sealed class MarkdownView : ContentControl
+internal sealed class MarkdownView : ContentControl
 {
     /// <summary>
     /// Identifies the <see cref="Source" /> property.
     /// </summary>
     public static readonly StyledProperty<string?> SourceProperty = AvaloniaProperty.Register<MarkdownView, string?>(nameof(Source));
 
+    /// <summary>
+    /// Identifies the <see cref="Matches" /> property.
+    /// </summary>
+    public static readonly StyledProperty<TextMatches?> MatchesProperty = AvaloniaProperty.Register<MarkdownView, TextMatches?>(nameof(Matches));
+
+    /// <summary>
+    /// Identifies the <see cref="PlainText" /> property.
+    /// </summary>
+    public static readonly StyledProperty<string> PlainTextProperty = AvaloniaProperty.Register<MarkdownView, string>(nameof(PlainText), string.Empty, defaultBindingMode: Avalonia.Data.BindingMode.OneWayToSource);
+
     private static readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
-    static MarkdownView() => SourceProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+    static MarkdownView()
+    {
+        SourceProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+        MatchesProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+    }
 
     private readonly MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+
+    private readonly StringBuilder plain = new();
+
+    private SelectableTextBlock? block;
+
+    private int blockStart;
+
+    private int matchIndex;
+
+    private (SelectableTextBlock Block, int Offset)? current;
 
     /// <summary>
     /// Gets or sets the markdown text to render.
@@ -25,7 +49,90 @@ public sealed class MarkdownView : ContentControl
         set => SetValue(SourceProperty, value);
     }
 
-    private void Render() => Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0);
+    /// <summary>
+    /// Gets or sets the search matches to mark, as positions in <see cref="PlainText" />.
+    /// </summary>
+    public TextMatches? Matches
+    {
+        get => GetValue(MatchesProperty);
+        set => SetValue(MatchesProperty, value);
+    }
+
+    /// <summary>
+    /// Gets the text as laid out on screen, the text blocks in order separated by line breaks, which is what the matches index into.
+    /// </summary>
+    public string PlainText
+    {
+        get => GetValue(PlainTextProperty);
+        private set => SetValue(PlainTextProperty, value);
+    }
+
+    private void Render()
+    {
+        plain.Clear();
+        matchIndex = 0;
+        current = null;
+        block = null;
+        Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0);
+        PlainText = plain.ToString();
+
+        if (Matches is { Navigate: true } && current is var (target, offset))
+        {
+            Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (target.TextLayout is { } layout)
+                {
+                    Rect rect = layout.HitTestTextPosition(offset);
+                    target.BringIntoView(new Rect(rect.X, rect.Y, Math.Max(rect.Width, 1), rect.Height).Inflate(new Thickness(40, 20)));
+                }
+            }, Avalonia.Threading.DispatcherPriority.Loaded);
+        }
+    }
+
+    private void Begin(SelectableTextBlock target)
+    {
+        block = target;
+        blockStart = plain.Length;
+    }
+
+    private void End() => plain.Append('\n');
+
+    private void Emit(InlineCollection target, string text, Action<Run>? style = null)
+    {
+        int start = plain.Length;
+        plain.Append(text);
+        TextMatches matches = Matches ?? new TextMatches { Starts = [], Length = 0, Current = -1 };
+        int at = 0;
+
+        while (at < text.Length)
+        {
+            int position = start + at;
+
+            while (matchIndex < matches.Starts.Count && matches.Starts[matchIndex] + matches.Length <= position)
+            {
+                matchIndex++;
+            }
+
+            bool hit = matchIndex < matches.Starts.Count && matches.Starts[matchIndex] <= position;
+            int end = matchIndex >= matches.Starts.Count ? text.Length : Math.Min(text.Length, (hit ? matches.Starts[matchIndex] + matches.Length : matches.Starts[matchIndex]) - start);
+            Run run = new(text[at..end]);
+            style?.Invoke(run);
+
+            if (hit)
+            {
+                bool isCurrent = matchIndex == matches.Current;
+                run.Background = Brush(isCurrent ? "FindMatchCurrent" : "FindMatch", Brushes.Orange);
+
+                if (isCurrent && current is null && block is not null)
+                {
+                    current = (block, position - blockStart);
+                }
+            }
+
+            target.Add(run);
+            at = end;
+        }
+    }
 
     private IBrush Brush(string key, IBrush fallback) => Application.Current?.Resources.TryGetResource(key, ActualThemeVariant, out object? value) == true && value is IBrush brush ? brush : fallback;
 
@@ -60,7 +167,14 @@ public sealed class MarkdownView : ContentControl
         _ => null,
     };
 
-    private SelectableTextBlock Plain(string text, double size) => new() { Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap };
+    private SelectableTextBlock Plain(string text, double size)
+    {
+        SelectableTextBlock result = new() { FontSize = size, TextWrapping = TextWrapping.Wrap };
+        Begin(result);
+        Emit(result.Inlines!, text);
+        End();
+        return result;
+    }
 
     private SelectableTextBlock Heading(HeadingBlock heading)
     {
@@ -70,19 +184,25 @@ public sealed class MarkdownView : ContentControl
 
     private SelectableTextBlock Text(ContainerInline? inline, double size, FontWeight weight)
     {
-        SelectableTextBlock block = new() { FontSize = size, FontWeight = weight, TextWrapping = TextWrapping.Wrap };
+        SelectableTextBlock result = new() { FontSize = size, FontWeight = weight, TextWrapping = TextWrapping.Wrap };
+        Begin(result);
 
         if (inline is not null)
         {
-            Fill(block.Inlines!, inline);
+            Fill(result.Inlines!, inline);
         }
 
-        return block;
+        End();
+        return result;
     }
 
-    private Border Code(Block block)
+    private Border Code(Block source)
     {
-        string text = string.Join('\n', ((LeafBlock)block).Lines.Lines.Take(((LeafBlock)block).Lines.Count).Select(line => line.ToString()));
+        string text = string.Join('\n', ((LeafBlock)source).Lines.Lines.Take(((LeafBlock)source).Lines.Count).Select(line => line.ToString()));
+        SelectableTextBlock result = new() { FontFamily = mono, FontSize = 12 };
+        Begin(result);
+        Emit(result.Inlines!, text);
+        End();
 
         return new Border
         {
@@ -93,7 +213,7 @@ public sealed class MarkdownView : ContentControl
             {
                 HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
                 VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-                Content = new SelectableTextBlock { Text = text, FontFamily = mono, FontSize = 12 },
+                Content = result,
             },
         };
     }
@@ -147,11 +267,14 @@ public sealed class MarkdownView : ContentControl
             foreach (TableCell cell in row.OfType<TableCell>())
             {
                 SelectableTextBlock text = new() { FontSize = 13, FontWeight = row.IsHeader ? FontWeight.SemiBold : FontWeight.Normal, TextWrapping = TextWrapping.Wrap, MaxWidth = 360 };
+                Begin(text);
 
                 if (cell.OfType<ParagraphBlock>().FirstOrDefault()?.Inline is { } inline)
                 {
                     Fill(text.Inlines!, inline);
                 }
+
+                End();
 
                 Border border = new()
                 {
@@ -181,16 +304,29 @@ public sealed class MarkdownView : ContentControl
             switch (node)
             {
                 case LiteralInline literal:
-                    target.Add(new Run(literal.Content.ToString()));
+                    Emit(target, literal.Content.ToString());
                     break;
                 case CodeInline code:
-                    target.Add(new Run(code.Content) { FontFamily = mono, FontSize = 13, Background = Brush("Elevated", Brushes.DimGray) });
+                    Emit(target, code.Content, run =>
+                    {
+                        run.FontFamily = mono;
+                        run.FontSize = 13;
+                        run.Background = Brush("Elevated", Brushes.DimGray);
+                    });
                     break;
                 case LineBreakInline lineBreak:
-                    target.Add(lineBreak.IsHard ? new LineBreak() : new Run(" "));
+                    if (lineBreak.IsHard)
+                    {
+                        plain.Append('\n');
+                        target.Add(new LineBreak());
+                    }
+                    else
+                    {
+                        Emit(target, " ");
+                    }
                     break;
                 case TaskList task:
-                    target.Add(new Run(task.Checked ? "☑ " : "☐ "));
+                    Emit(target, task.Checked ? "☑ " : "☐ ");
                     break;
                 case EmphasisInline emphasis:
                     Span span = emphasis.DelimiterChar == '~' ? new Span { TextDecorations = TextDecorations.Strikethrough } : emphasis.DelimiterCount >= 2 ? new Bold() : new Italic();
@@ -199,9 +335,9 @@ public sealed class MarkdownView : ContentControl
                     break;
                 case LinkInline link when link.IsImage:
                     Span image = new Italic();
+                    Emit(image.Inlines, "[image: ");
                     Fill(image.Inlines, link);
-                    image.Inlines.Insert(0, new Run("[image: "));
-                    image.Inlines.Add(new Run("]"));
+                    Emit(image.Inlines, "]");
                     target.Add(image);
                     break;
                 case LinkInline link:
@@ -210,10 +346,14 @@ public sealed class MarkdownView : ContentControl
                     target.Add(anchor);
                     break;
                 case AutolinkInline autolink:
-                    target.Add(new Run(autolink.Url) { Foreground = Brush("Accent", Brushes.Orange), TextDecorations = TextDecorations.Underline });
+                    Emit(target, autolink.Url, run =>
+                    {
+                        run.Foreground = Brush("Accent", Brushes.Orange);
+                        run.TextDecorations = TextDecorations.Underline;
+                    });
                     break;
                 case HtmlInline html:
-                    target.Add(new Run(html.Tag));
+                    Emit(target, html.Tag);
                     break;
                 case ContainerInline nested:
                     Fill(target, nested);

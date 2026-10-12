@@ -11,14 +11,33 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// <param name="connection">The server connection.</param>
     /// <param name="workspaceId">The workspace whose folder is browsed.</param>
     /// <param name="git">The git state of the workspace, which colors the tree and supplies the diffs.</param>
-    public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git)
+    /// <param name="desktop">Whether this is the desktop layout: the tree always starts at the workspace folder, keeps the open file selected with its folders open, and marks <c>.cs</c> scripts and <c>.task</c> files as runnable.</param>
+    public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false)
     {
         this.connection = connection;
         this.workspaceId = workspaceId;
+        this.desktop = desktop;
         Git = git;
         git.Updated += ApplyGit;
+        git.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(GitViewModel.IsChangesMode))
+            {
+                Raise(nameof(ShowTree));
+                Raise(nameof(ShowChangeTree));
+            }
+        };
+        Search = new FileSearchViewModel(connection, workspaceId, () => showHidden);
+        Search.Chosen += (result, text) => _ = OpenResult(result, text);
+        Search.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(FileSearchViewModel.IsOpen))
+            {
+                Raise(nameof(ShowTree));
+                Raise(nameof(ShowChangeTree));
+            }
+        };
         git.DiffRequested += (path, commit) => _ = OpenDiff(path, commit);
-        UpCommand = new AsyncCommand(_ => Open(files?.Parent), () => files?.Parent is not null);
         CollapseAllCommand = new AsyncCommand(_ => CollapseAll());
         ClosePreviewCommand = new AsyncCommand(_ =>
         {
@@ -35,6 +54,10 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private readonly List<string> watched = [];
 
+    private readonly bool desktop;
+
+    private IReadOnlySet<string> running = new HashSet<string>();
+
     private WorkspaceFiles? files;
 
     private FileNode? selected;
@@ -47,14 +70,42 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private string? diffPath;
 
+    private string markdownText = string.Empty;
+
+    private bool restartFind;
+
     private string? diffCommit;
 
     private bool subscribed;
+
+    private bool wrapLines;
+
+    private bool showHidden;
+
+    /// <summary>
+    /// Raised with the path of a script or task file that was activated to run it.
+    /// </summary>
+    public event Action<string>? ScriptRequested;
 
     /// <summary>
     /// Gets the git state of the workspace.
     /// </summary>
     public GitViewModel Git { get; }
+
+    /// <summary>
+    /// Gets the search of the workspace's files by name or content.
+    /// </summary>
+    public FileSearchViewModel Search { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the file tree shows: outside the changes mode and the file search.
+    /// </summary>
+    public bool ShowTree => !Git.IsChangesMode && !Search.IsOpen;
+
+    /// <summary>
+    /// Gets a value indicating whether the tree of changed files shows: in the changes mode outside the file search.
+    /// </summary>
+    public bool ShowChangeTree => Git.IsChangesMode && !Search.IsOpen;
 
     /// <summary>
     /// Gets the search of the previewed file's text.
@@ -65,11 +116,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// Gets the entries of the root folder.
     /// </summary>
     public ObservableCollection<FileNode> Nodes { get; } = [];
-
-    /// <summary>
-    /// Gets the root folder relative to the workspace folder, with a leading slash.
-    /// </summary>
-    public string CurrentPath => "/" + files?.Path;
 
     /// <summary>
     /// Gets the file being previewed, or <see langword="null" />.
@@ -88,19 +134,43 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
                     Diff = null;
                 }
 
-                if (value is null || IsMarkdownPreview)
+                if (value is null)
                 {
                     Find.IsOpen = false;
                 }
 
-                Find.Show(value is null || IsMarkdownPreview ? string.Empty : value.Text, before != value?.Path);
+                if (IsMarkdownPreview)
+                {
+                    restartFind = before != value?.Path;
+                }
+                else
+                {
+                    Find.Show(value?.Text ?? string.Empty, before != value?.Path);
+                }
+
+                Raise(nameof(IsFindable));
                 Raise(nameof(IsPreviewing));
                 Raise(nameof(IsMarkdownPreview));
                 Raise(nameof(IsTextPreview));
                 Raise(nameof(PreviewTitle));
+                _ = Reveal();
             }
         }
     }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether long lines of the previewed text wrap instead of scrolling sideways.
+    /// </summary>
+    public bool WrapLines
+    {
+        get => wrapLines;
+        set => Set(ref wrapLines, value);
+    }
+
+    /// <summary>
+    /// Gets the tag shown for the previewed content: "Diff" for a diff, empty for a plain file.
+    /// </summary>
+    public string PreviewKind => diff is not null ? "Diff" : string.Empty;
 
     /// <summary>
     /// Gets the diff being previewed, or <see langword="null" />.
@@ -114,7 +184,9 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(IsDiffPreview));
                 Raise(nameof(IsPreviewing));
+                Raise(nameof(PreviewKind));
                 Raise(nameof(PreviewTitle));
+                _ = Reveal();
             }
         }
     }
@@ -135,6 +207,29 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     public bool IsMarkdownPreview => preview is not null && (preview.Path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || preview.Path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
+    /// Gets a value indicating whether the previewed file can be searched with the find bar.
+    /// </summary>
+    public bool IsFindable => preview is not null;
+
+    /// <summary>
+    /// Gets or sets the text of the rendered markdown preview as the view lays it out, which the find bar searches.
+    /// </summary>
+    public string MarkdownText
+    {
+        get => markdownText;
+        set
+        {
+            markdownText = value;
+
+            if (IsMarkdownPreview)
+            {
+                Find.Show(value, restartFind);
+                restartFind = false;
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets a value indicating whether the previewed file is shown as plain text.
     /// </summary>
     public bool IsTextPreview => preview is not null && !IsMarkdownPreview;
@@ -145,24 +240,33 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     public string PreviewTitle => diff is not null ? diffTitle : preview is null ? string.Empty : preview.Truncated ? $"{preview.Path} (first part only)" : preview.Path;
 
     /// <summary>
-    /// Gets or sets the tapped node; setting it opens or closes the folder or previews the file.
+    /// Gets a value indicating whether the tree has controls to move its root, which only the layout that is not desktop needs since the desktop tree always starts at the workspace folder.
     /// </summary>
-    public FileNode? Selected
+    public bool ShowNavigation => !desktop;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the entries that a <c>.filehide</c> file hides show in the tree; changing it reloads the open folders.
+    /// </summary>
+    public bool ShowHidden
     {
-        get => selected;
+        get => showHidden;
         set
         {
-            if (Set(ref selected, value) && value is not null)
+            if (Set(ref showHidden, value))
             {
-                _ = Choose(value);
+                _ = Reload();
             }
         }
     }
 
     /// <summary>
-    /// Gets the command that makes the parent of the root folder the root.
+    /// Gets or sets the selected node: the file being previewed with the desktop layout.
     /// </summary>
-    public AsyncCommand UpCommand { get; }
+    public FileNode? Selected
+    {
+        get => selected;
+        set => Set(ref selected, value);
+    }
 
     /// <summary>
     /// Gets the command that closes every open folder.
@@ -195,6 +299,34 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// <param name="node">The folder.</param>
     /// <returns>A task that completes once the folder is shown.</returns>
     public Task Enter(FileNode node) => node.IsFolder ? Open(node.Path) : Task.CompletedTask;
+
+    /// <summary>
+    /// Shows a failure the view hit while acting on the workspace, such as a folder that cannot be opened.
+    /// </summary>
+    /// <param name="message">The failure.</param>
+    public void Fail(string message) => Error = message;
+
+    /// <summary>
+    /// Asks for a script or task file to be run, as double tapping it does; does nothing for any other node.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    public void Run(FileNode node)
+    {
+        if (node.IsRunnable)
+        {
+            ScriptRequested?.Invoke(node.Path);
+        }
+    }
+
+    /// <summary>
+    /// Marks the scripts and tasks that are running.
+    /// </summary>
+    /// <param name="paths">The paths of the running scripts and tasks.</param>
+    public void ShowRunning(IReadOnlySet<string> paths)
+    {
+        running = paths;
+        MarkRunning(Nodes);
+    }
 
     /// <summary>
     /// Stops following changes.
@@ -235,6 +367,17 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void MarkRunning(IEnumerable<FileNode> nodes)
+    {
+        foreach (FileNode node in nodes.Where(node => !node.IsPlaceholder))
+        {
+            node.IsScriptRunning = running.Contains(node.Path);
+            MarkRunning(node.Children);
+        }
+    }
+
+    private bool CanRun(FileEntry entry) => desktop && !entry.IsFolder && (entry.Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".task", StringComparison.OrdinalIgnoreCase));
+
     private void Apply(IEnumerable<FileNode> nodes)
     {
         foreach (FileNode node in nodes.Where(node => !node.IsPlaceholder))
@@ -244,7 +387,66 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task Choose(FileNode node)
+    private string? OpenPath => preview?.Path ?? (diff is not null ? diffPath : null);
+
+    private async Task Reveal()
+    {
+        if (!desktop)
+        {
+            return;
+        }
+
+        if (OpenPath is not { } path)
+        {
+            Selected = null;
+            return;
+        }
+
+        string[] parts = path.Split('/');
+        IList<FileNode> level = Nodes;
+        string current = string.Empty;
+        bool changed = false;
+
+        for (int i = 0; i < parts.Length - 1; i++)
+        {
+            current = current.Length == 0 ? parts[i] : $"{current}/{parts[i]}";
+
+            if (level.FirstOrDefault(node => node.IsFolder && node.Path == current) is not { } folder)
+            {
+                return;
+            }
+
+            if (!folder.IsLoaded)
+            {
+                await Load(folder);
+            }
+
+            if (!folder.IsExpanded)
+            {
+                changed = true;
+                folder.IsExpanded = true;
+            }
+
+            level = folder.Children;
+        }
+
+        if (OpenPath == path)
+        {
+            Selected = level.FirstOrDefault(node => node.IsFile && node.Path == path);
+        }
+
+        if (changed)
+        {
+            await Watch();
+        }
+    }
+
+    /// <summary>
+    /// Opens or closes a folder, or previews a file, as tapping its node does.
+    /// </summary>
+    /// <param name="node">The node.</param>
+    /// <returns>A task that completes once the file is shown.</returns>
+    public async Task Choose(FileNode node)
     {
         if (node.IsFolder)
         {
@@ -260,7 +462,36 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             }
         }
 
-        Selected = null;
+        if (desktop)
+        {
+            await Reveal();
+        }
+        else
+        {
+            Selected = null;
+        }
+    }
+
+    private async Task OpenResult(FileSearchResult result, string text)
+    {
+        FileContent? content = null;
+        Search.IsOpen = false;
+
+        if (await Attempt(async () => content = await connection.ReadFile(workspaceId, result.Path, CancellationToken.None)))
+        {
+            Preview = content;
+
+            if (result.Line > 0)
+            {
+                Find.Query = text;
+                Find.IsOpen = true;
+
+                if (IsTextPreview)
+                {
+                    Find.Seek(result.Line);
+                }
+            }
+        }
     }
 
     private async Task CollapseAll()
@@ -319,6 +550,18 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private IEnumerable<string> Expanded(IEnumerable<FileNode> nodes) => nodes.Where(node => node.IsFolder && node.IsLoaded && node.IsExpanded).SelectMany(node => Expanded(node.Children).Prepend(node.Path));
 
+    private async Task Reload()
+    {
+        await Open(files?.Path ?? string.Empty, false);
+
+        foreach (FileNode node in Nodes.Where(node => node.IsFolder && node.IsExpanded).ToList())
+        {
+            await Load(node);
+        }
+
+        await Watch();
+    }
+
     private async Task Refresh(string path)
     {
         if (path == files?.Path)
@@ -353,7 +596,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
             if (at < 0)
             {
-                target.Insert(i, new FileNode(entries[i], Expand) { GitStatus = Git.StatusOf(entries[i].Path, entries[i].IsFolder) });
+                target.Insert(i, new FileNode(entries[i], Expand) { GitStatus = Git.StatusOf(entries[i].Path, entries[i].IsFolder), IsRunnable = CanRun(entries[i]), IsScriptRunning = running.Contains(entries[i].Path) });
             }
             else if (at != i)
             {
@@ -380,7 +623,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     {
         WorkspaceFiles? result = null;
 
-        if (await Attempt(async () => result = await connection.ListFiles(workspaceId, node.Path, CancellationToken.None)))
+        if (await Attempt(async () => result = await connection.ListFiles(workspaceId, node.Path, showHidden, CancellationToken.None)))
         {
             Sync(node.Children, result!.Entries);
             node.IsLoaded = true;
@@ -411,7 +654,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     {
         WorkspaceFiles? result = null;
 
-        if (path is not null && await Attempt(async () => result = await connection.ListFiles(workspaceId, path, CancellationToken.None)))
+        if (path is not null && await Attempt(async () => result = await connection.ListFiles(workspaceId, path, showHidden, CancellationToken.None)))
         {
             files = result;
 
@@ -421,9 +664,8 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             }
 
             Sync(Nodes, result!.Entries);
-            Raise(nameof(CurrentPath));
-            UpCommand.Refresh();
             await Watch();
+            _ = Reveal();
         }
     }
 }

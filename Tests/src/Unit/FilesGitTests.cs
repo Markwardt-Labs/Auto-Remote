@@ -12,7 +12,7 @@ public sealed class FilesGitTests
     {
         connection.Setup(x => x.GetGitStatus(id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main" });
         connection.Setup(x => x.GetGitChanges(id, It.IsAny<CancellationToken>())).ReturnsAsync(() => changes);
-        connection.Setup(x => x.ListFiles(id, string.Empty, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles
+        connection.Setup(x => x.ListFiles(id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles
         {
             Path = string.Empty,
             Entries =

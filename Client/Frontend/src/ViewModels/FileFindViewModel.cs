@@ -131,6 +131,23 @@ internal sealed class FileFindViewModel : ViewModelBase
         Search(restart, restart);
     }
 
+    /// <summary>
+    /// Makes the first match on a line the current one.
+    /// </summary>
+    /// <param name="line">The one-based line number.</param>
+    public void Seek(int line)
+    {
+        for (int i = 0; i < matches.Starts.Count; i++)
+        {
+            if (source.AsSpan(0, matches.Starts[i]).Count('\n') + 1 == line)
+            {
+                Matches = matches with { Current = i, Navigate = true };
+                Raise(nameof(Display));
+                return;
+            }
+        }
+    }
+
     private Task Step(int direction)
     {
         int count = matches.Starts.Count;

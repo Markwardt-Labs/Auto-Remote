@@ -16,6 +16,11 @@ internal enum WorkspaceTab
     Files,
 
     /// <summary>
+    /// The scripts and tasks the server runs in the workspace's folder.
+    /// </summary>
+    Script,
+
+    /// <summary>
     /// The git history of the workspace.
     /// </summary>
     History,

@@ -8,6 +8,9 @@
     <Style Selector="TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource Text}" />
     </Style>
+    <Style Selector="SelectableTextBlock">
+      <Setter Property="Foreground" Value="{DynamicResource Text}" />
+    </Style>
     <Style Selector="TextBlock.muted">
       <Setter Property="Foreground" Value="{DynamicResource Muted}" />
     </Style>
@@ -68,14 +71,18 @@
       <Setter Property="Background" Value="{DynamicResource Hover}" />
     </Style>
     <Style Selector="Button.tab">
-      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Background" Value="{DynamicResource Elevated}" />
       <Setter Property="Foreground" Value="{DynamicResource Muted}" />
       <Setter Property="CornerRadius" Value="0" />
-      <Setter Property="Padding" Value="0,14" />
-      <Setter Property="BorderThickness" Value="0,2,0,0" />
+      <Setter Property="Padding" Value="12,7" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="BorderThickness" Value="0,0,0,2" />
       <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.tab:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
     </Style>
     <Style Selector="Button.tab.on">
       <Setter Property="Background" Value="{DynamicResource Background}" />
@@ -88,14 +95,12 @@
 
     <Style Selector="GridSplitter.separator">
       <Setter Property="Width" Value="5" />
-      <Setter Property="Background" Value="{DynamicResource Border}" />
+      <Setter Property="Margin" Value="-2,0" />
+      <Setter Property="Background" Value="Transparent" />
       <Setter Property="ResizeDirection" Value="Columns" />
       <Setter Property="ResizeBehavior" Value="PreviousAndNext" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="Cursor" Value="SizeWestEast" />
-    </Style>
-    <Style Selector="GridSplitter.separator:pointerover">
-      <Setter Property="Background" Value="{DynamicResource Accent}" />
     </Style>
 
     <Style Selector="Path.usageIcon">
@@ -127,6 +132,16 @@
     </Style>
     <Style Selector="Border.topbar.working Button">
       <Setter Property="Foreground" Value="{DynamicResource OnWorking}" />
+    </Style>
+    <Style Selector="Border.topbar Button">
+      <Setter Property="Width" Value="34" />
+      <Setter Property="Height" Value="34" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.topbar Button:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#40FFFFFF" />
     </Style>
 
     <Style Selector="ListBoxItem">
@@ -173,24 +188,43 @@
     <Style Selector="TextBlock.modified"><Setter Property="Foreground" Value="{DynamicResource GitModified}" /></Style>
     <Style Selector="TextBlock.deleted"><Setter Property="Foreground" Value="{DynamicResource Danger}" /></Style>
     <Style Selector="TextBlock.ignored"><Setter Property="Foreground" Value="{DynamicResource Muted}" /></Style>
-    <Style Selector="Button.version">
-      <Setter Property="Background" Value="{DynamicResource Elevated}" />
+    <Style Selector="Button.versionSection">
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="Padding" Value="10,8" />
+      <Setter Property="Margin" Value="0" />
       <Setter Property="HorizontalAlignment" Value="Stretch" />
       <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-      <Setter Property="Padding" Value="10,8" />
-      <Setter Property="Margin" Value="0,0,0,6" />
     </Style>
-    <Style Selector="Button.version.pending">
-      <Setter Property="BorderBrush" Value="{DynamicResource Accent}" />
+    <Style Selector="Button.versionSection:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Hover}" />
+    </Style>
+    <Style Selector="Button.versionSection.pending /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Selection}" />
+    </Style>
+    <Style Selector="Button.scriptSubTab">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="Padding" Value="8,4" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="BorderThickness" Value="0" />
+    </Style>
+    <Style Selector="Button.scriptSubTab.on">
+      <Setter Property="Background" Value="{DynamicResource Selection}" />
+    </Style>
+    <Style Selector="TextBlock.scriptRunning">
+      <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style Selector="Border.ref">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="CornerRadius" Value="3" />
       <Setter Property="Padding" Value="5,1" />
       <Setter Property="Margin" Value="0,0,4,2" />
       <Setter Property="Background" Value="{DynamicResource Hover}" />
     </Style>
     <Style Selector="Border.ref.branch"><Setter Property="Background" Value="{DynamicResource Selection}" /></Style>
-    <Style Selector="Border.ref.current"><Setter Property="Background" Value="{DynamicResource Accent}" /></Style>
+    <Style Selector="Border.ref.current"><Setter Property="Background" Value="{DynamicResource Accent}" /><Setter Property="BorderBrush" Value="{DynamicResource Accent}" /></Style>
     <Style Selector="Border.ref.tag"><Setter Property="Background" Value="#4B3F1F" /></Style>
     <Style Selector="TreeViewItem">
       <Setter Property="Padding" Value="2" />
@@ -258,9 +292,19 @@
       <Geometry x:Key="CollapseAllIconGeometry">M2,6 L7,1 L12,6 M2,13 L7,8 L12,13</Geometry>
       <Geometry x:Key="UpIconGeometry">M7,13 L7,2 M2,7 L7,2 L12,7</Geometry>
       <Geometry x:Key="FindIconGeometry">M1,5 A4,4 0 1,1 9,5 A4,4 0 1,1 1,5 Z M7.83,7.83 L13,13</Geometry>
+      <Geometry x:Key="EyeIconGeometry">M1,7 C3,3 11,3 13,7 C11,11 3,11 1,7 Z M5,7 A2,2 0 1,1 9,7 A2,2 0 1,1 5,7 Z</Geometry>
       <Geometry x:Key="ChangesIconGeometry">M2,3 L8,3 M2,7 L12,7 M2,11 L6,11</Geometry>
       <Geometry x:Key="RemoteIconGeometry">M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5</Geometry>
       <Geometry x:Key="CloseIconGeometry">M1,1 L13,13 M13,1 L1,13</Geometry>
+      <Geometry x:Key="ScriptFileIconGeometry">M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6.5,7.5 L6.5,11.5 L10,9.5 Z</Geometry>
+      <Geometry x:Key="TaskFileIconGeometry">M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6,6 L6,8.5 L8.5,7.25 Z M6,9.5 L6,12 L8.5,10.75 Z</Geometry>
+      <Geometry x:Key="OpenExternalIconGeometry">M5,1 L12,1 L12,8 M12,1 L6,7 M9,4 L2,4 L2,12 L10,12 L10,7</Geometry>
+      <Geometry x:Key="AttachIconGeometry">M12,6.5 L6.8,11.7 A2.4,2.4 0 0 1 3.4,8.3 L8.9,2.8 A1.6,1.6 0 0 1 11.2,5.1 L5.8,10.5</Geometry>
+      <Geometry x:Key="CopyIconGeometry">M5,1 L12,1 L12,10 L9,10 M2,4 L9,4 L9,13 L2,13 Z</Geometry>
+      <Geometry x:Key="WrapIconGeometry">M1,3 L13,3 M1,7 L10,7 A2,2 0 0,1 10,11 L6,11 M8,9 L6,11 L8,13 M1,11 L3,11</Geometry>
+      <Geometry x:Key="MinimizeIconGeometry">M1,1 M13,13 M1,10.6 L13,10.6 L13,12 L1,12 Z</Geometry>
+      <Geometry x:Key="MaximizeIconGeometry">M1,1 L13,1 L13,13 L1,13 Z</Geometry>
+      <Geometry x:Key="RestoreIconGeometry">M4,1 L13,1 L13,10 L10,10 M1,4 L10,4 L10,13 L1,13 Z</Geometry>
       <SolidColorBrush x:Key="SyntaxKeyword" Color="#569CD6" />
       <SolidColorBrush x:Key="SyntaxString" Color="#CE9178" />
       <SolidColorBrush x:Key="SyntaxComment" Color="#6A9955" />

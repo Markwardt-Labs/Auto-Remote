@@ -6,18 +6,26 @@
              x:CompileBindings="False">
   <Grid>
     <Grid RowDefinitions="Auto,*,Auto">
-      <Border Grid.Row="0" Classes="topbar" Classes.working="{Binding IsAiWorking}" Padding="8">
-        <Grid ColumnDefinitions="140,*,140">
-          <Button Grid.Column="0" Content="☰" Classes="flat" FontSize="20" Command="{Binding ToggleDrawerCommand}" />
+      <Border Grid.Row="0" Classes="topbar" Classes.working="{Binding IsWorking}" Padding="8" PointerPressed="OnTopBarPointerPressed">
+        <Grid>
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="{Binding HeaderSide}" />
+            <ColumnDefinition Width="*" />
+            <ColumnDefinition Width="{Binding HeaderSide}" />
+          </Grid.ColumnDefinitions>
+          <Button Grid.Column="0" Content="☰" Classes="flat" FontSize="20" HorizontalAlignment="Left" Command="{Binding ToggleDrawerCommand}" />
           <TextBlock Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
-          <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" IsVisible="{Binding HasSelection}">
-            <Button Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
-              <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource RemoteIconGeometry}" Width="18" Height="18" />
-            </Button>
-            <Button Classes="flat" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
-              <Path Classes="usageIcon" Tag="{Binding Usage.SessionPace}" Data="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" Width="18" Height="18" />
-            </Button>
-            <Button Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="Workspace settings" Command="{Binding Active.ToggleSettingsCommand}" />
+          <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
+            <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
+              <Button Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
+                <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource RemoteIconGeometry}" Width="18" Height="18" />
+              </Button>
+              <Button Classes="flat" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
+                <Path Classes="usageIcon" Tag="{Binding Usage.SessionPace}" Data="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" Width="18" Height="18" />
+              </Button>
+              <Button Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="Workspace settings" Command="{Binding Active.ToggleSettingsCommand}" />
+            </StackPanel>
+            <local:WindowControlsView IsVisible="{Binding IsDesktop}" Margin="12,0,4,0" VerticalAlignment="Center" />
           </StackPanel>
         </Grid>
       </Border>
@@ -30,44 +38,76 @@
         </StackPanel>
 
         <Grid IsVisible="{Binding HasSelection}" DataContext="{Binding Active}" ColumnDefinitions="*,Auto,3*,Auto,3*">
-          <Panel Grid.Column="0" Grid.ColumnSpan="{Binding Span}" MinWidth="120" IsVisible="{Binding ShowFilesPanel, FallbackValue=False}">
-           <Grid DataContext="{Binding Files}" RowDefinitions="Auto,Auto,Auto,*" Margin="8,0,0,0">
-            <Button Grid.Row="0" DataContext="{Binding Git}" Classes="version" Classes.pending="{Binding HasChanges}" IsVisible="{Binding IsRepo}">
-              <Button.Flyout>
-                <MenuFlyout Placement="BottomEdgeAlignedLeft">
-                  <MenuItem Header="Commit" Command="{Binding CommitCommand}" />
-                  <MenuItem Header="Reset" Command="{Binding ResetCommand}" />
-                  <Separator />
-                  <MenuItem Header="Branch" Command="{Binding BranchCommand}" />
-                  <MenuItem Header="Tag" Command="{Binding TagCommand}" />
-                  <MenuItem Header="Remote" Command="{Binding RemoteCommand}" />
-                </MenuFlyout>
-              </Button.Flyout>
-              <Grid>
-                <StackPanel Spacing="2" HorizontalAlignment="Center">
-                  <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
-                  <TextBlock Text="{Binding Tag}" IsVisible="{Binding HasTag}" FontSize="13" FontWeight="SemiBold" Classes="modified" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
-                  <TextBlock Text="{Binding Message}" Classes="muted" FontSize="11.5" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" />
-                  <TextBlock Text="{Binding Commit}" Classes="muted" FontSize="10.5" FontFamily="monospace" HorizontalAlignment="Center" />
-                </StackPanel>
-                <TextBlock Text="*" IsVisible="{Binding HasChanges}" FontSize="18" FontWeight="Bold" Foreground="{DynamicResource Accent}" HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip.Tip="Uncommitted changes" />
-              </Grid>
-            </Button>
-            <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto" Margin="0,2,0,4">
-              <Button Grid.Column="0" Classes="icon" ToolTip.Tip="Up" Command="{Binding UpCommand}" IsVisible="{Binding !Git.IsChangesMode}">
-                <Path Classes="lineIcon" Data="{StaticResource UpIconGeometry}" Width="13" Height="13" />
+          <Panel Grid.Column="0" Grid.ColumnSpan="{Binding Span}" MinWidth="120" Background="{DynamicResource Surface}" IsVisible="{Binding ShowFilesPanel, FallbackValue=False}">
+           <Grid DataContext="{Binding Files}" RowDefinitions="Auto,Auto,Auto,*">
+            <Grid Grid.Row="0" DataContext="{Binding Git}" IsVisible="{Binding IsRepo}">
+              <Button Classes="versionSection" Classes.pending="{Binding HasChanges}">
+                <Button.Flyout>
+                  <MenuFlyout Placement="BottomEdgeAlignedLeft">
+                    <MenuItem Header="Commit" Command="{Binding CommitCommand}" />
+                    <MenuItem Header="Reset" Command="{Binding ResetCommand}" />
+                    <Separator />
+                    <MenuItem Header="Branch" Command="{Binding BranchCommand}" />
+                    <MenuItem Header="Tag" Command="{Binding TagCommand}" />
+                    <MenuItem Header="Remote" Command="{Binding RemoteCommand}" />
+                  </MenuFlyout>
+                </Button.Flyout>
+                <Grid>
+                  <StackPanel Spacing="3" HorizontalAlignment="Center">
+                    <TextBlock Text="{Binding Title}" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock Text="{Binding Tag}" IsVisible="{Binding HasTag}" FontSize="15" FontWeight="Bold" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock Text="{Binding Message}" Classes="muted" FontSize="11.5" TextTrimming="CharacterEllipsis" HorizontalAlignment="Center" TextAlignment="Center" />
+                    <TextBlock Text="{Binding Commit}" Classes="muted" FontSize="10.5" FontFamily="monospace" HorizontalAlignment="Center" TextAlignment="Center" />
+                  </StackPanel>
+                  <TextBlock Text="*" IsVisible="{Binding HasChanges}" FontSize="18" FontWeight="Bold" LineHeight="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip.Tip="Uncommitted changes" />
+                </Grid>
               </Button>
-              <TextBlock Grid.Column="1" Text="{Binding CurrentPath}" IsVisible="{Binding !Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" TextTrimming="CharacterEllipsis" />
+              <Border VerticalAlignment="Bottom" Height="1" Background="{DynamicResource Border}" IsHitTestVisible="False" />
+            </Grid>
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" Margin="6,4,6,4">
               <TextBlock Grid.Column="1" Text="Changes" IsVisible="{Binding Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" />
-              <ToggleButton Grid.Column="2" Classes="icon" ToolTip.Tip="Toggle changes mode" IsChecked="{Binding Git.IsChangesMode, Mode=TwoWay}" IsVisible="{Binding Git.IsRepo}">
+              <Button Grid.Column="2" Classes="icon" ToolTip.Tip="Open in file manager" Click="OnOpenFolderClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
+                <Path Classes="lineIcon" Data="{StaticResource OpenExternalIconGeometry}" Width="13" Height="13" />
+              </Button>
+              <Button Grid.Column="3" Classes="icon" ToolTip.Tip="Copy workspace root path" Click="OnCopyPathClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
+                <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
+              </Button>
+              <ToggleButton Grid.Column="4" Classes="icon" ToolTip.Tip="Search files" IsChecked="{Binding Search.IsOpen, Mode=TwoWay}" Click="OnSearchToggled">
+                <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="13" Height="13" />
+              </ToggleButton>
+              <ToggleButton Grid.Column="5" Classes="icon" ToolTip.Tip="Toggle changes mode" IsChecked="{Binding Git.IsChangesMode, Mode=TwoWay}" IsVisible="{Binding Git.IsRepo}">
                 <Path Classes="lineIcon" Data="{StaticResource ChangesIconGeometry}" Width="13" Height="13" />
               </ToggleButton>
-              <Button Grid.Column="3" Classes="icon" ToolTip.Tip="Collapse All" Command="{Binding CollapseAllCommand}">
+              <ToggleButton Grid.Column="6" Classes="icon" ToolTip.Tip="See hidden files" IsChecked="{Binding ShowHidden, Mode=TwoWay}">
+                <Path Classes="lineIcon" Data="{StaticResource EyeIconGeometry}" Width="13" Height="13" />
+              </ToggleButton>
+              <Button Grid.Column="7" Classes="icon" ToolTip.Tip="Collapse All" Command="{Binding CollapseAllCommand}">
                 <Path Classes="lineIcon" Data="{StaticResource CollapseAllIconGeometry}" Width="13" Height="13" />
               </Button>
             </Grid>
-            <TextBlock Grid.Row="2" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="0,0,0,8" />
-            <TreeView Grid.Row="3" ItemsSource="{Binding Git.ChangeTree}" IsVisible="{Binding Git.IsChangesMode}" Background="Transparent" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+            <TextBlock Grid.Row="2" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="10,0,8,8" />
+            <DockPanel Grid.Row="3" DataContext="{Binding Search}" IsVisible="{Binding IsOpen}" Margin="8,0,8,6">
+              <TextBox Name="SearchBox" DockPanel.Dock="Top" Text="{Binding Query}" PlaceholderText="{Binding Placeholder}" FontSize="12" Padding="6,3" MinHeight="26" />
+              <ToggleButton DockPanel.Dock="Top" Classes="icon" IsChecked="{Binding SearchContent, Mode=TwoWay}" Margin="0,4" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Padding="6,2" ToolTip.Tip="Search inside the files instead of their names">
+                <TextBlock Text="Search file contents" FontSize="11" />
+              </ToggleButton>
+              <TextBlock DockPanel.Dock="Top" Text="No results" Classes="muted" FontSize="12" Margin="2,4" IsVisible="{Binding HasNoResults}" />
+              <ScrollViewer HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <ItemsControl ItemsSource="{Binding Results}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Button Classes="flat" Padding="4,3" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding $parent[DockPanel].DataContext.ChooseCommand}" CommandParameter="{Binding}">
+                        <StackPanel>
+                          <TextBlock Text="{Binding Primary}" FontSize="12" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Text="{Binding Secondary}" FontSize="10.5" Classes="muted" TextTrimming="CharacterEllipsis" IsVisible="{Binding Secondary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                        </StackPanel>
+                      </Button>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </DockPanel>
+            <TreeView Grid.Row="3" ItemsSource="{Binding Git.ChangeTree}" IsVisible="{Binding ShowChangeTree}" Background="Transparent" Padding="10,0,0,0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
               <TreeView.Styles>
                 <Style Selector="TreeViewItem">
                   <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -87,8 +127,8 @@
                 </TreeDataTemplate>
               </TreeView.ItemTemplate>
             </TreeView>
-            <TreeView Grid.Row="3" IsVisible="{Binding !Git.IsChangesMode}" ItemsSource="{Binding Nodes}" SelectedItem="{Binding Selected}" Background="Transparent" Padding="0"
-                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" DoubleTapped="OnFileDoubleTapped">
+            <TreeView Grid.Row="3" IsVisible="{Binding ShowTree}" ItemsSource="{Binding Nodes}" SelectedItem="{Binding Selected}" Background="Transparent" Padding="10,0,0,0"
+                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" Tapped="OnFileTapped" DoubleTapped="OnFileDoubleTapped">
               <TreeView.Styles>
                 <Style Selector="TreeViewItem">
                   <Setter Property="IsExpanded" Value="{Binding IsExpanded, Mode=TwoWay}" />
@@ -99,12 +139,21 @@
               <TreeView.ItemTemplate>
                 <TreeDataTemplate ItemsSource="{Binding Children}">
                   <Border Background="Transparent" Padding="2,1" HorizontalAlignment="Left" MinWidth="{Binding $parent[TreeView].Bounds.Width}">
+                    <Border.ContextMenu>
+                      <ContextMenu Opening="OnFileMenuOpening">
+                        <MenuItem Header="Copy Name" Click="OnCopyNameClick" />
+                        <MenuItem Header="Copy Relative Path" Click="OnCopyRelativePathClick" />
+                        <MenuItem Header="Copy Absolute Path" Click="OnCopyAbsolutePathClick" />
+                      </ContextMenu>
+                    </Border.ContextMenu>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Panel Width="12" Height="12">
                         <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
-                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsFile}" />
+                        <Path Classes="lineIcon" Data="{StaticResource ScriptFileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsScriptFile}" />
+                        <Path Classes="lineIcon" Data="{StaticResource TaskFileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsTaskFile}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsPlainFile}" />
                       </Panel>
-                      <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.ignored="{Binding IsIgnored}" />
+                      <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.ignored="{Binding IsIgnored}" Classes.scriptRunning="{Binding IsScriptRunning}" />
                     </StackPanel>
                   </Border>
                 </TreeDataTemplate>
@@ -113,40 +162,152 @@
            </Grid>
           </Panel>
           <GridSplitter Grid.Column="1" Classes="separator" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
+          <Border Grid.Column="1" HorizontalAlignment="Stretch" Background="{DynamicResource Border}" IsHitTestVisible="False" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
           <GridSplitter Grid.Column="3" Classes="separator" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
+          <Border Grid.Column="3" HorizontalAlignment="Stretch" Background="{DynamicResource Border}" IsHitTestVisible="False" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
           <Grid Grid.Column="{Binding ChatColumn}" Grid.ColumnSpan="{Binding Span}" MinWidth="240" RowDefinitions="Auto,*" IsVisible="{Binding ShowChatPanel, FallbackValue=False}">
            <UniformGrid Grid.Row="0" Rows="1" IsVisible="{Binding ShowSideTabs}">
-             <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChatView}" Padding="0,8" />
-             <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistoryView}" Padding="0,8" />
+             <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChatView}" />
+             <Button Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScriptView}" />
+             <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistoryView}" IsVisible="{Binding ShowHistoryTab}" />
            </UniformGrid>
            <Panel Grid.Row="1">
            <Panel IsVisible="{Binding ShowChatView}">
-           <Grid DataContext="{Binding Chat}" RowDefinitions="*,Auto,Auto">
-            <ScrollViewer Grid.Row="0" Name="MessageScroller" Padding="16,0" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMessagesScrolled" DataContextChanged="OnMessagesChanged">
+           <Grid Name="ChatGrid" DataContext="{Binding Chat}" RowDefinitions="*,Auto,Auto">
+            <DockPanel Grid.Row="0">
+            <StackPanel DockPanel.Dock="Bottom" Margin="20,4" Spacing="4" IsVisible="{Binding HasError}">
+              <TextBlock Text="{Binding Error}" Classes="error" />
+            </StackPanel>
+            <ScrollViewer Name="MessageScroller" Padding="16,0" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMessagesScrolled" DataContextChanged="OnMessagesChanged">
               <ItemsControl ItemsSource="{Binding Messages}" Margin="0,8">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
                     <Panel Margin="0,8">
                       <Border IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.User}}"
-                              Background="{DynamicResource Elevated}" CornerRadius="6" Padding="12,8" HorizontalAlignment="Right" MaxWidth="320">
+                              Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Accent}" BorderThickness="1" CornerRadius="6" Padding="12,8">
                         <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{DynamicResource Text}" />
                       </Border>
-                      <SelectableTextBlock IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}"
-                                           Text="{Binding Text}" TextWrapping="Wrap" Foreground="{DynamicResource Text}" LineHeight="22" />
+                      <local:MarkdownView IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}"
+                                          Source="{Binding Text}" />
                     </Panel>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </ScrollViewer>
-            <StackPanel Grid.Row="1" Margin="20,4" Spacing="4">
-              <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-            </StackPanel>
-            <Grid Grid.Row="2" Margin="20,4,12,12" ColumnDefinitions="*,Auto">
-              <TextBox Grid.Column="0" Classes="bare" Text="{Binding Input}" PlaceholderText="Message the AI" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
-              <Button Grid.Column="1" Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" Margin="6,0,0,0"
+            </DockPanel>
+            <GridSplitter Grid.Row="1" Height="4" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Cursor="SizeNorthSouth"
+                          IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop, FallbackValue=False}" />
+            <Border Grid.Row="1" Height="1" VerticalAlignment="Top" Background="{DynamicResource Border}" IsHitTestVisible="False"
+                    IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop, FallbackValue=False}" />
+            <Grid Grid.Row="2" Margin="20,4,12,12" RowDefinitions="Auto,*">
+            <ItemsControl Grid.Row="0" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}" Margin="0,0,0,4">
+              <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <WrapPanel />
+                </ItemsPanelTemplate>
+              </ItemsControl.ItemsPanel>
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="0,0,6,4">
+                    <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                      <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" />
+                      <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                      <Button Classes="icon" ToolTip.Tip="Remove" Command="{Binding $parent[ItemsControl].DataContext.RemoveAttachmentCommand}" CommandParameter="{Binding}">
+                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="8" Height="8" />
+                      </Button>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+              <Button Grid.Column="0" Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center" Margin="0,0,6,0">
+                <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
+              </Button>
+              <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
+              <Button Grid.Column="2" Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" Margin="6,0,0,0"
                       VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
             </Grid>
+            </Grid>
            </Grid>
+           </Panel>
+           <Panel IsVisible="{Binding ShowScriptView}">
+           <DockPanel DataContext="{Binding Scripts}">
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="10,6" IsVisible="{Binding HasEntries}">
+              <ComboBox ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry, Mode=TwoWay}" HorizontalAlignment="Stretch" PlaceholderText="Select a script…">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid ColumnDefinitions="Auto,*,Auto">
+                      <TextBlock Grid.Column="0" Text="●" FontSize="8" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" Margin="0,0,6,0" IsVisible="{Binding IsRunning}" />
+                      <TextBlock Grid.Column="1" Text="{Binding Path}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                      <Button Grid.Column="2" Classes="icon" ToolTip.Tip="Remove" Margin="6,0,0,0" IsVisible="{Binding !IsActive}"
+                              Command="{Binding $parent[ComboBox].DataContext.RemoveCommand}" CommandParameter="{Binding}">
+                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="9" Height="9" />
+                      </Button>
+                    </Grid>
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+            </Border>
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="6,4" IsVisible="{Binding IsTaskSelected}">
+              <ItemsControl ItemsSource="{Binding Children}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <StackPanel Orientation="Horizontal" Spacing="2" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Button Classes="scriptSubTab" Classes.on="{Binding IsSelected}" Command="{Binding $parent[ItemsControl].DataContext.SelectChildCommand}" CommandParameter="{Binding}">
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="●" FontSize="8" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" IsVisible="{Binding IsRunning}" />
+                        <TextBlock Text="{Binding Name}" FontSize="12" />
+                      </StackPanel>
+                    </Button>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+            <Border DockPanel.Dock="Top" Background="{DynamicResource Elevated}" Padding="10,4" IsVisible="{Binding HasScript}">
+              <Grid ColumnDefinitions="*,Auto">
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                  <TextBlock Text="{Binding ScriptName}" FontSize="12" Classes="muted" />
+                  <StackPanel Orientation="Horizontal" Spacing="5" IsVisible="{Binding ShowRunning}">
+                    <TextBlock Text="●" FontSize="8" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" />
+                    <TextBlock Text="Running…" FontStyle="Italic" FontSize="11" Classes="muted" />
+                  </StackPanel>
+                  <TextBlock Text="✓ Succeeded" IsVisible="{Binding ShowSucceeded}" FontSize="11" Foreground="{DynamicResource Accent}" />
+                  <TextBlock Text="⊘ Stopped" IsVisible="{Binding ShowStopped}" FontSize="11" Classes="muted" />
+                  <TextBlock Text="⊘ Skipped" IsVisible="{Binding ShowSkipped}" FontSize="11" Classes="muted" />
+                  <TextBlock Text="✗ Failed" IsVisible="{Binding ShowFailed}" FontSize="11" Foreground="Crimson" />
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                  <Button Classes="icon" ToolTip.Tip="Copy output" Click="OnCopyOutputClick">
+                    <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
+                  </Button>
+                  <Button Content="Stop" FontSize="11" Padding="8,4" Command="{Binding StopCommand}" IsVisible="{Binding ShowStop}" ToolTip.Tip="Forcefully stop this script" />
+                </StackPanel>
+              </Grid>
+            </Border>
+            <TextBlock DockPanel.Dock="Top" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="12,6" />
+            <Border DockPanel.Dock="Bottom" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0" Padding="10,6" IsVisible="{Binding ShowRunning}">
+              <Grid ColumnDefinitions="*,Auto">
+                <TextBox Grid.Column="0" Text="{Binding InputText}" PlaceholderText="Enter input for the running script… (Enter to send)">
+                  <TextBox.KeyBindings>
+                    <KeyBinding Gesture="Enter" Command="{Binding SendInputCommand}" />
+                  </TextBox.KeyBindings>
+                </TextBox>
+                <Button Grid.Column="1" Content="Send" Margin="8,0,0,0" Command="{Binding SendInputCommand}" />
+              </Grid>
+            </Border>
+            <Grid>
+              <TextBlock Text="No script selected. Pick one from the dropdown above, or double click a .cs or .task file in the file system."
+                         IsVisible="{Binding !HasScript}" TextWrapping="Wrap" TextAlignment="Center" Margin="24,0" HorizontalAlignment="Center" VerticalAlignment="Center" Classes="muted" FontSize="13" />
+              <ScrollViewer IsVisible="{Binding HasScript}" ScrollChanged="OnOutputScrolled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                <SelectableTextBlock Text="{Binding OutputText}" TextWrapping="Wrap" Margin="14,10,14,14" FontFamily="Menlo, Consolas, DejaVu Sans Mono, monospace" FontSize="12" />
+              </ScrollViewer>
+            </Grid>
+           </DockPanel>
            </Panel>
            <Panel IsVisible="{Binding ShowHistoryView}">
            <Grid DataContext="{Binding Git.History}" RowDefinitions="Auto,Auto,*">
@@ -163,61 +324,67 @@
             </Grid>
             <TextBlock Grid.Row="1" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="16,0,16,8" />
             <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-              <StackPanel Margin="8,0,8,12">
+              <StackPanel Margin="4,0,8,12">
                 <TextBlock Text="No commits yet." IsVisible="{Binding IsEmpty}" Classes="muted" Margin="8,4" />
                 <ItemsControl ItemsSource="{Binding Commits}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <StackPanel>
-                        <Grid ColumnDefinitions="20,*">
-                          <Border Grid.Column="0" Width="1" Background="{DynamicResource Border}" HorizontalAlignment="Center" />
-                          <Ellipse Grid.Column="0" Width="9" Height="9" Fill="{DynamicResource Accent}" VerticalAlignment="Top" Margin="0,13,0,0" />
-                          <StackPanel Grid.Column="1">
-                            <ItemsControl ItemsSource="{Binding Refs}" IsVisible="{Binding HasRefs}" Margin="6,6,0,0">
-                              <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                  <WrapPanel />
-                                </ItemsPanelTemplate>
-                              </ItemsControl.ItemsPanel>
-                              <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                  <Button Classes="flat" Padding="0" Margin="0">
-                                    <Button.Flyout>
-                                      <MenuFlyout>
-                                        <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" IsVisible="{Binding CanCheckout}" />
-                                        <Separator IsVisible="{Binding HasRelative}" />
-                                        <MenuItem Header="{Binding SquashCurrentHeader}" Command="{Binding SquashCurrentCommand}" IsVisible="{Binding HasRelative}" />
-                                        <MenuItem Header="{Binding SquashSelectedHeader}" Command="{Binding SquashSelectedCommand}" IsVisible="{Binding HasRelative}" />
-                                        <Separator IsVisible="{Binding HasRelative}" />
-                                        <MenuItem Header="{Binding RebaseCurrentHeader}" Command="{Binding RebaseCurrentCommand}" IsVisible="{Binding HasRelative}" />
-                                        <MenuItem Header="{Binding RebaseSelectedHeader}" Command="{Binding RebaseSelectedCommand}" IsVisible="{Binding HasRelative}" />
-                                        <Separator IsVisible="{Binding HasRelative}" />
-                                        <MenuItem Header="{Binding MergeCurrentHeader}" Command="{Binding MergeCurrentCommand}" IsVisible="{Binding HasRelative}" />
-                                        <MenuItem Header="{Binding MergeSelectedHeader}" Command="{Binding MergeSelectedCommand}" IsVisible="{Binding HasRelative}" />
-                                        <Separator IsVisible="{Binding CanDelete}" />
-                                        <MenuItem Header="Delete" Command="{Binding DeleteCommand}" IsVisible="{Binding CanDelete}" />
-                                      </MenuFlyout>
-                                    </Button.Flyout>
-                                    <Border Classes="ref" Classes.branch="{Binding IsBranch}" Classes.tag="{Binding IsTag}" Classes.current="{Binding IsCurrent}">
+                      <Grid ColumnDefinitions="Auto,*" RowDefinitions="28,Auto">
+                        <local:GitGraphView Grid.Column="0" Grid.RowSpan="2" Row="{Binding Graph}" Lanes="{Binding GraphLanes}" />
+                        <Grid Grid.Column="1" Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
+                          <Button Grid.ColumnSpan="3" Classes="flat" Command="{Binding ToggleCommand}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" CornerRadius="4" ToolTip.Tip="{Binding FullHash}">
+                            <Button.ContextMenu>
+                              <ContextMenu>
+                                <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" />
+                              </ContextMenu>
+                            </Button.ContextMenu>
+                          </Button>
+                          <ItemsControl Grid.Column="0" ItemsSource="{Binding Refs}" IsVisible="{Binding HasRefs}" VerticalAlignment="Center" Margin="4,0,0,0">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal" />
+                              </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Button Classes="flat" Padding="0" Margin="0" Command="{Binding ToggleCommand}">
+                                  <Button.ContextMenu>
+                                    <ContextMenu>
+                                      <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" IsVisible="{Binding CanCheckout}" />
+                                      <Separator IsVisible="{Binding HasRelative}" />
+                                      <MenuItem Header="{Binding SquashCurrentHeader}" Command="{Binding SquashCurrentCommand}" IsVisible="{Binding HasRelative}" />
+                                      <MenuItem Header="{Binding SquashSelectedHeader}" Command="{Binding SquashSelectedCommand}" IsVisible="{Binding HasRelative}" />
+                                      <Separator IsVisible="{Binding HasRelative}" />
+                                      <MenuItem Header="{Binding RebaseCurrentHeader}" Command="{Binding RebaseCurrentCommand}" IsVisible="{Binding HasRelative}" />
+                                      <MenuItem Header="{Binding RebaseSelectedHeader}" Command="{Binding RebaseSelectedCommand}" IsVisible="{Binding HasRelative}" />
+                                      <Separator IsVisible="{Binding HasRelative}" />
+                                      <MenuItem Header="{Binding MergeCurrentHeader}" Command="{Binding MergeCurrentCommand}" IsVisible="{Binding HasRelative}" />
+                                      <MenuItem Header="{Binding MergeSelectedHeader}" Command="{Binding MergeSelectedCommand}" IsVisible="{Binding HasRelative}" />
+                                      <Separator IsVisible="{Binding CanDelete}" />
+                                      <MenuItem Header="Delete" Command="{Binding DeleteCommand}" IsVisible="{Binding CanDelete}" />
+                                    </ContextMenu>
+                                  </Button.ContextMenu>
+                                  <Border Classes="ref" Classes.branch="{Binding IsBranch}" Classes.tag="{Binding IsTag}" Classes.current="{Binding IsCurrent}" BorderBrush="{Binding Accent}" Margin="0,0,4,0">
+                                    <StackPanel Orientation="Horizontal" Spacing="4">
                                       <TextBlock Text="{Binding Name}" FontSize="10.5" />
-                                    </Border>
-                                  </Button>
-                                </DataTemplate>
-                              </ItemsControl.ItemTemplate>
-                            </ItemsControl>
-                            <Button Classes="flat" Command="{Binding ToggleCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,4,6,6">
-                              <StackPanel Spacing="2">
-                                <TextBlock Text="{Binding Subject}" TextWrapping="Wrap" FontSize="13" />
-                                <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="10.5" TextTrimming="CharacterEllipsis" />
-                              </StackPanel>
-                            </Button>
+                                      <TextBlock Text="{Binding RemoteLabel}" IsVisible="{Binding HasRemote}" FontSize="10.5" Opacity="0.65" />
+                                    </StackPanel>
+                                  </Border>
+                                </Button>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                          <TextBlock Grid.Column="1" Text="{Binding Subject}" FontSize="12.5" VerticalAlignment="Center" Margin="6,0,6,0" TextTrimming="CharacterEllipsis" IsHitTestVisible="False" />
+                          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" Margin="0,0,6,0" IsHitTestVisible="False">
+                            <TextBlock Text="{Binding Author}" Classes="muted" FontSize="10.5" />
+                            <TextBlock Text="{Binding Stamp}" Classes="muted" FontSize="10.5" />
+                            <TextBlock Text="{Binding ShortHash}" Classes="muted" FontSize="10.5" FontFamily="monospace" />
                           </StackPanel>
                         </Grid>
-                        <Border IsVisible="{Binding IsExpanded}" Margin="26,0,0,6" Padding="8,6" Background="{DynamicResource Surface}" CornerRadius="4">
+                        <Border Grid.Column="1" Grid.Row="1" IsVisible="{Binding IsExpanded}" Margin="4,0,0,6" Padding="8,6" Background="{DynamicResource Elevated}" CornerRadius="4">
                           <StackPanel Spacing="4">
                             <TextBlock Text="Loading changes…" IsVisible="{Binding IsLoading}" Classes="muted" FontSize="11.5" />
                             <TextBlock Text="No changes" IsVisible="{Binding HasNoChanges}" Classes="muted" FontSize="11.5" />
-                            <Button Content="Check out this commit" Command="{Binding CheckoutCommand}" HorizontalAlignment="Left" Padding="8,3" FontSize="11.5" />
                             <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" FontSize="11.5" />
                             <TreeView ItemsSource="{Binding Changes}" Background="Transparent" Padding="0" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                               <TreeView.Styles>
@@ -241,7 +408,7 @@
                             </TreeView>
                           </StackPanel>
                         </Border>
-                      </StackPanel>
+                      </Grid>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -254,49 +421,62 @@
           </Grid>
           <Panel Grid.Column="{Binding ContentColumn}" Grid.ColumnSpan="{Binding Span}" MinWidth="160" Background="{DynamicResource Background}" IsVisible="{Binding ShowContentPanel, FallbackValue=False}">
             <TextBlock Text="Select a file to see its content." Classes="muted" HorizontalAlignment="Center" VerticalAlignment="Center" IsVisible="{Binding !Files.IsPreviewing, FallbackValue=False}" />
-            <Border DataContext="{Binding Files}" IsVisible="{Binding IsPreviewing}" Margin="12,0" Background="{DynamicResource Background}">
-              <Grid RowDefinitions="Auto,Auto,*">
-                <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" Margin="0,0,0,8">
-                  <TextBlock Grid.Column="0" Text="{Binding PreviewTitle}" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                  <ToggleButton Grid.Column="1" Classes="icon" ToolTip.Tip="Find (Ctrl+F)" IsChecked="{Binding Find.IsOpen, Mode=TwoWay}" IsVisible="{Binding IsTextPreview}" Click="OnFindToggled">
-                    <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="13" Height="13" />
-                  </ToggleButton>
-                  <Button Grid.Column="2" Content="Close" Command="{Binding ClosePreviewCommand}" Margin="6,0,0,0" />
-                </Grid>
-                <Border Grid.Row="1" DataContext="{Binding Find}" IsVisible="{Binding IsOpen}" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="6,4" Margin="0,0,0,8">
-                  <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
-                    <TextBox Name="FindBox" Grid.Column="0" Text="{Binding Query}" PlaceholderText="Find" FontSize="12" Padding="6,3" MinHeight="26" MinWidth="80">
-                      <TextBox.KeyBindings>
-                        <KeyBinding Gesture="Enter" Command="{Binding NextCommand}" />
-                        <KeyBinding Gesture="Shift+Enter" Command="{Binding PreviousCommand}" />
-                        <KeyBinding Gesture="Escape" Command="{Binding CloseCommand}" />
-                      </TextBox.KeyBindings>
-                    </TextBox>
-                    <TextBlock Grid.Column="1" Text="{Binding Display}" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="8,0" MinWidth="50" />
-                    <ToggleButton Grid.Column="2" Classes="icon" Content="Aa" IsChecked="{Binding MatchCase, Mode=TwoWay}" ToolTip.Tip="Match case" FontSize="11" Padding="6,3" />
-                    <ToggleButton Grid.Column="3" Classes="icon" Content="&quot;W&quot;" IsChecked="{Binding WholeWord, Mode=TwoWay}" ToolTip.Tip="Match whole word" FontSize="11" Padding="6,3" />
-                    <Button Grid.Column="4" Classes="icon" Content="▲" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous match (Shift+Enter)" FontSize="10" Padding="6,3" />
-                    <Button Grid.Column="5" Classes="icon" Content="▼" Command="{Binding NextCommand}" ToolTip.Tip="Next match (Enter)" FontSize="10" Padding="6,3" />
-                    <Button Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}" ToolTip.Tip="Close (Esc)">
+            <Grid DataContext="{Binding Files}" IsVisible="{Binding IsPreviewing}" RowDefinitions="Auto,Auto,*">
+              <Border Grid.Row="0" Background="{DynamicResource Elevated}" Padding="10,4">
+                <Grid ColumnDefinitions="*,Auto">
+                  <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <Border Background="{DynamicResource Background}" CornerRadius="3" Padding="5,1" VerticalAlignment="Center" IsVisible="{Binding PreviewKind, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                      <TextBlock Text="{Binding PreviewKind}" FontSize="10" Classes="muted" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="{Binding PreviewTitle}" FontSize="12" Classes="muted" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="Read-only, viewing a diff" FontSize="11" FontStyle="Italic" Classes="muted" IsVisible="{Binding IsDiffPreview}" VerticalAlignment="Center" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
+                    <ToggleButton Classes="icon" ToolTip.Tip="Find (Ctrl+F)" IsChecked="{Binding Find.IsOpen, Mode=TwoWay}" IsVisible="{Binding IsFindable}" Click="OnFindToggled">
+                      <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="12" Height="12" />
+                    </ToggleButton>
+                    <ToggleButton Classes="icon" ToolTip.Tip="Word wrap" IsChecked="{Binding WrapLines, Mode=TwoWay}" IsVisible="{Binding !IsMarkdownPreview}">
+                      <Path Classes="lineIcon" Data="{StaticResource WrapIconGeometry}" Width="12" Height="12" />
+                    </ToggleButton>
+                    <Button Classes="icon" ToolTip.Tip="Close" Command="{Binding ClosePreviewCommand}">
                       <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
                     </Button>
-                  </Grid>
-                </Border>
-                <Border Grid.Row="2" Background="{DynamicResource Surface}" CornerRadius="4" Padding="12">
-                  <Panel>
-                    <ScrollViewer IsVisible="{Binding IsTextPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                      <local:SyntaxView File="{Binding Preview}" Matches="{Binding Find.Matches}" />
-                    </ScrollViewer>
-                    <ScrollViewer IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                      <local:MarkdownView Source="{Binding Preview.Text}" />
-                    </ScrollViewer>
-                    <ScrollViewer IsVisible="{Binding IsDiffPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                      <local:DiffView Diff="{Binding Diff}" />
-                    </ScrollViewer>
-                  </Panel>
-                </Border>
-              </Grid>
-            </Border>
+                  </StackPanel>
+                </Grid>
+              </Border>
+              <Border Grid.Row="1" DataContext="{Binding Find}" IsVisible="{Binding IsOpen}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="10,6">
+                <Grid ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto">
+                  <TextBox Name="FindBox" Grid.Column="0" Text="{Binding Query}" PlaceholderText="Find" FontSize="12" Padding="6,3" MinHeight="26" MinWidth="80">
+                    <TextBox.KeyBindings>
+                      <KeyBinding Gesture="Enter" Command="{Binding NextCommand}" />
+                      <KeyBinding Gesture="Shift+Enter" Command="{Binding PreviousCommand}" />
+                      <KeyBinding Gesture="Escape" Command="{Binding CloseCommand}" />
+                    </TextBox.KeyBindings>
+                  </TextBox>
+                  <TextBlock Grid.Column="1" Text="{Binding Display}" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="8,0" MinWidth="50" />
+                  <ToggleButton Grid.Column="2" Classes="icon" Content="Aa" IsChecked="{Binding MatchCase, Mode=TwoWay}" ToolTip.Tip="Match case" FontSize="11" Padding="6,3" />
+                  <ToggleButton Grid.Column="3" Classes="icon" Content="&quot;W&quot;" IsChecked="{Binding WholeWord, Mode=TwoWay}" ToolTip.Tip="Match whole word" FontSize="11" Padding="6,3" />
+                  <Button Grid.Column="4" Classes="icon" Content="▲" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous match (Shift+Enter)" FontSize="10" Padding="6,3" />
+                  <Button Grid.Column="5" Classes="icon" Content="▼" Command="{Binding NextCommand}" ToolTip.Tip="Next match (Enter)" FontSize="10" Padding="6,3" />
+                  <Button Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}" ToolTip.Tip="Close (Esc)">
+                    <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
+                  </Button>
+                </Grid>
+              </Border>
+              <Border Grid.Row="2" Background="Transparent" Padding="14,8">
+                <Panel>
+                  <ScrollViewer IsVisible="{Binding IsTextPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <local:SyntaxView File="{Binding Preview}" Matches="{Binding Find.Matches}" Wrap="{Binding WrapLines}" />
+                  </ScrollViewer>
+                  <ScrollViewer IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <local:MarkdownView Source="{Binding Preview.Text}" Matches="{Binding Find.Matches}" PlainText="{Binding MarkdownText, Mode=OneWayToSource}" />
+                  </ScrollViewer>
+                  <ScrollViewer IsVisible="{Binding IsDiffPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                    <local:DiffView Diff="{Binding Diff}" Wrap="{Binding WrapLines}" />
+                  </ScrollViewer>
+                </Panel>
+              </Border>
+            </Grid>
           </Panel>
           <Panel Grid.Column="0" Grid.ColumnSpan="5" IsVisible="{Binding ShowSettings, FallbackValue=False}" Background="{DynamicResource Background}">
            <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -322,11 +502,11 @@
         </Grid>
       </Grid>
 
-      <Border Grid.Row="2" IsVisible="{Binding Active.ShowTabs, FallbackValue=False}" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
+      <Border Grid.Row="2" IsVisible="{Binding Active.ShowTabs, FallbackValue=False}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
         <UniformGrid Rows="1" DataContext="{Binding Active}">
-          <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChat}" />
-          <Button Content="Files" Command="{Binding ShowFilesCommand}" Classes="tab" Classes.on="{Binding ShowFiles}" />
-          <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistory}" IsVisible="{Binding ShowHistoryTab}" />
+          <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChat}" Padding="0,12" />
+          <Button Content="Files" Command="{Binding ShowFilesCommand}" Classes="tab" Classes.on="{Binding ShowFiles}" Padding="0,12" />
+          <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistory}" IsVisible="{Binding ShowHistoryTab}" Padding="0,12" />
         </UniformGrid>
       </Border>
     </Grid>

@@ -44,7 +44,17 @@ internal interface IWorkspaceStore
     Task<int> AppendHistory(Guid id, ChatMessage message, CancellationToken cancellation);
 
     /// <summary>
-    /// Deletes a workspace's conversation.
+    /// Stores a file attached to a prompt in the workspace's attachments folder beside the workspaces file.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="name">The file name; any folders in it are dropped.</param>
+    /// <param name="data">The file content.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    /// <returns>The full path of the stored file.</returns>
+    Task<string> SaveAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation);
+
+    /// <summary>
+    /// Deletes a workspace's conversation and its attachments.
     /// </summary>
     /// <param name="id">The workspace.</param>
     void DeleteHistory(Guid id);
@@ -151,13 +161,31 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     }
 
     /// <inheritdoc />
+    public async Task<string> SaveAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation)
+    {
+        string clean = string.Concat(name.Split(['/', '\\']).Last().Where(character => !Path.GetInvalidFileNameChars().Contains(character)));
+        string folder = AttachmentsPath(id);
+        Directory.CreateDirectory(folder);
+        string file = Path.Combine(folder, $"{Guid.NewGuid():N}"[..8] + "-" + (clean.Length == 0 ? "file" : clean));
+        await File.WriteAllBytesAsync(file, data, cancellation);
+        return file;
+    }
+
+    /// <inheritdoc />
     public void DeleteHistory(Guid id)
     {
         if (File.Exists(HistoryPath(id)))
         {
             File.Delete(HistoryPath(id));
         }
+
+        if (Directory.Exists(AttachmentsPath(id)))
+        {
+            Directory.Delete(AttachmentsPath(id), true);
+        }
     }
+
+    private string AttachmentsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "attachments", id.ToString("N"));
 
     private string HistoryPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "history", id.ToString("N") + ".jsonl");
 }

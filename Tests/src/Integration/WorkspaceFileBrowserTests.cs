@@ -13,14 +13,14 @@ public sealed class WorkspaceFileBrowserTests
         Directory.CreateDirectory(temp.Combine("zdir"));
         File.WriteAllText(temp.Combine("a.txt"), "abc");
 
-        WorkspaceFiles root = await browser.List(Workspace(temp), string.Empty, CancellationToken.None);
+        WorkspaceFiles root = await browser.List(Workspace(temp), string.Empty, false, CancellationToken.None);
 
         Assert.Equal(["zdir", "a.txt"], root.Entries.Select(entry => entry.Name));
         Assert.Equal(3, root.Entries[1].Size);
         Assert.Null(root.Parent);
 
         File.WriteAllText(temp.Combine("zdir/inner.txt"), "x");
-        WorkspaceFiles inner = await browser.List(Workspace(temp), "zdir", CancellationToken.None);
+        WorkspaceFiles inner = await browser.List(Workspace(temp), "zdir", false, CancellationToken.None);
 
         Assert.Equal("zdir", inner.Path);
         Assert.Equal(string.Empty, inner.Parent);
@@ -36,7 +36,7 @@ public sealed class WorkspaceFileBrowserTests
         using TempFolder temp = new();
         Directory.CreateDirectory(temp.Combine("sub"));
 
-        await Assert.ThrowsAsync<RequestException>(() => browser.List(Workspace(temp), path, CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => browser.List(Workspace(temp), path, false, CancellationToken.None));
     }
 
     [Fact]
@@ -48,7 +48,7 @@ public sealed class WorkspaceFileBrowserTests
 
         try
         {
-            await Assert.ThrowsAsync<RequestException>(() => browser.List(Workspace(temp), "../" + Path.GetFileName(sibling), CancellationToken.None));
+            await Assert.ThrowsAsync<RequestException>(() => browser.List(Workspace(temp), "../" + Path.GetFileName(sibling), false, CancellationToken.None));
         }
         finally
         {
@@ -116,5 +116,62 @@ public sealed class WorkspaceFileBrowserTests
         }
 
         Assert.Fail("Timed out.");
+    }
+
+    [Fact]
+    public async Task List_HidesWhatAFileHideMatchesUnlessShowingHidden()
+    {
+        using TempFolder temp = new();
+        Directory.CreateDirectory(temp.Combine("bin"));
+        Directory.CreateDirectory(temp.Combine("src/gen"));
+        File.WriteAllText(temp.Combine(".filehide"), "# comment\nbin/\n*.log\n");
+        File.WriteAllText(temp.Combine("src/.filehide"), "gen/\n!keep.log\n");
+        File.WriteAllText(temp.Combine("a.log"), "x");
+        File.WriteAllText(temp.Combine("b.txt"), "x");
+        File.WriteAllText(temp.Combine("src/keep.log"), "x");
+        File.WriteAllText(temp.Combine("src/c.cs"), "x");
+
+        Assert.Equal(["src", ".filehide", "b.txt"], (await browser.List(Workspace(temp), string.Empty, false, CancellationToken.None)).Entries.Select(entry => entry.Name));
+        Assert.Equal([".filehide", "c.cs", "keep.log"], (await browser.List(Workspace(temp), "src", false, CancellationToken.None)).Entries.Select(entry => entry.Name));
+        Assert.Equal(["bin", "src", ".filehide", "a.log", "b.txt"], (await browser.List(Workspace(temp), string.Empty, true, CancellationToken.None)).Entries.Select(entry => entry.Name));
+        Assert.Empty((await browser.List(Workspace(temp), "bin", false, CancellationToken.None)).Entries);
+    }
+
+    [Fact]
+    public async Task Search_FindsFilesByFuzzyNameBestFirstAndSkipsGitAndHiddenFiles()
+    {
+        using TempFolder temp = new();
+        Directory.CreateDirectory(temp.Combine(".git"));
+        Directory.CreateDirectory(temp.Combine("src"));
+        Directory.CreateDirectory(temp.Combine("gen"));
+        File.WriteAllText(temp.Combine(".git/config"), "x");
+        File.WriteAllText(temp.Combine(".filehide"), "gen/\n");
+        File.WriteAllText(temp.Combine("gen/config.cs"), "x");
+        File.WriteAllText(temp.Combine("src/config.cs"), "x");
+        File.WriteAllText(temp.Combine("src/readme.md"), "x");
+        File.WriteAllText(temp.Combine("cfg.txt"), "x");
+
+        IReadOnlyList<FileSearchResult> found = await browser.Search(Workspace(temp), "cfg", false, false, CancellationToken.None);
+        Assert.Equal(["cfg.txt", "src/config.cs"], found.Select(result => result.Path));
+        Assert.All(found, result => Assert.Equal(0, result.Line));
+
+        IReadOnlyList<FileSearchResult> all = await browser.Search(Workspace(temp), "config", false, true, CancellationToken.None);
+        Assert.Equal(["gen/config.cs", "src/config.cs"], all.Select(result => result.Path).Order(StringComparer.Ordinal));
+    }
+
+    [Fact]
+    public async Task Search_ContentFindsMatchingLinesIgnoringCaseAndBinaryFiles()
+    {
+        using TempFolder temp = new();
+        File.WriteAllText(temp.Combine("a.txt"), "one\n  Needle here  \nthree");
+        File.WriteAllBytes(temp.Combine("b.bin"), [110, 101, 101, 100, 108, 101, 0, 1]);
+        File.WriteAllText(temp.Combine("c.txt"), "nothing");
+
+        IReadOnlyList<FileSearchResult> found = await browser.Search(Workspace(temp), "needle", true, false, CancellationToken.None);
+
+        FileSearchResult hit = Assert.Single(found);
+        Assert.Equal("a.txt", hit.Path);
+        Assert.Equal(2, hit.Line);
+        Assert.Equal("Needle here", hit.Text);
     }
 }
