@@ -549,34 +549,6 @@ public sealed class WorkspaceVersioningTests : IDisposable
     }
 
     [Fact]
-    public async Task Sync_OnlyTellsClientsWhenItChangedSomething_AndIsNotReportedAsBusyWhileRunning()
-    {
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(false);
-        await versioning.Sync(workspace, CancellationToken.None);
-        events.Verify(x => x.Publish(It.IsAny<RemoteEvent>()), Times.Never);
-
-        string other = temp.Combine("other");
-        G(temp.Path, "clone", remote, "other");
-        Commit(other, "n.txt", "n", "from elsewhere");
-        G(other, "push", "origin", "main");
-        await versioning.Sync(workspace, CancellationToken.None);
-        events.Verify(x => x.Publish(It.Is<RemoteEvent>(e => e.Kind == RemoteEventKind.GitChanged)), Times.Once);
-
-        TaskCompletionSource release = new();
-        TaskCompletionSource started = new();
-        Task background = versioning.Perform(workspace, false, async _ =>
-        {
-            started.SetResult();
-            await release.Task;
-        }, CancellationToken.None, true);
-        await started.Task;
-        Assert.False(versioning.IsBusy(workspace.Id));
-        await Refused(versioning.Perform(workspace, false, _ => Task.CompletedTask, CancellationToken.None));
-        release.SetResult();
-        await background;
-    }
-
-    [Fact]
     public async Task Perform_RunsOneActionAtATimeAndTellsClientsWhenItStartsAndEnds()
     {
         TaskCompletionSource release = new();

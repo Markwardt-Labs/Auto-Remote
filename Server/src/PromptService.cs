@@ -113,6 +113,10 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             {
                 await live.Conversation!.Send(text, cancellation);
             }
+            catch (RequestException) when (live.Resumed && !live.Confirmed)
+            {
+                // A resumed process whose session is gone can exit before taking the prompt; Pump then sees its failure and restarts with the unanswered prompts.
+            }
             catch (RequestException)
             {
                 live.Unanswered.Clear();

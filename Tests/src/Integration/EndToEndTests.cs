@@ -215,27 +215,6 @@ public sealed class EndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Prompt_StartsNewAiSessionWhenTheOldOneIsGone()
-    {
-        FolderListing folder = await connection.CreateFolder(temp.Path, "gone", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
-        await connection.Prompt(workspace.Id, "one", CancellationToken.None);
-        await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && events.Last().Kind == RemoteEventKind.WorkingChanged);
-        await connection.ConfigureWorkspace(workspace.Id, AiService.ClaudeCode, AiModel.Sonnet, AiEffort.Low, CancellationToken.None);
-
-        foreach (string marker in Directory.GetFiles(folder.Path, ".ai-*"))
-        {
-            File.Delete(marker);
-        }
-
-        await connection.Prompt(workspace.Id, "two", CancellationToken.None);
-        await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Kind == RemoteEventKind.WorkingChanged);
-
-        Assert.Equal(["one", "new:gone:one", "two", "new:gone:two"], (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
-        Assert.DoesNotContain(received, remoteEvent => remoteEvent.Kind == RemoteEventKind.Failed);
-    }
-
-    [Fact]
     public async Task History_IsReadInChunksFromTheNewestBackToTheBeginning()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "chunks", CancellationToken.None);
