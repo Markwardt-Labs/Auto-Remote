@@ -12,6 +12,8 @@ public sealed class PromptServiceTests
 
     private readonly List<RemoteEvent> events = [];
 
+    private readonly WorkspaceActivity activity = new();
+
     private readonly WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
 
     private readonly PromptService service;
@@ -29,7 +31,7 @@ public sealed class PromptServiceTests
                 events.Add(remoteEvent);
             }
         });
-        service = new PromptService(workspaces.Object, store.Object, runner.Object, hub.Object);
+        service = new PromptService(workspaces.Object, store.Object, runner.Object, hub.Object, activity);
         service.Configure(new ServerConfig { Port = 0, Key = "k" }, CancellationToken.None);
     }
 
@@ -75,6 +77,50 @@ public sealed class PromptServiceTests
     {
         await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", "not base64!", CancellationToken.None));
         await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", Convert.ToBase64String(new byte[2 * 1024 * 1024 + 1]), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Prompt_TakesTheWorkspaceIntoWorkingAndGivesItBackWhenTheAiFinishes()
+    {
+        Conversation conversation = Start();
+
+        await service.Prompt(workspace.Id, "hello", CancellationToken.None);
+        Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
+        await service.Prompt(workspace.Id, "and more", CancellationToken.None);
+
+        conversation.Output.Writer.TryWrite(new AiOutput { Kind = AiOutputKind.Finished });
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Theory]
+    [InlineData(WorkspaceState.Running)]
+    public async Task Prompt_IsRefusedWhileOtherWorkHoldsTheWorkspace(WorkspaceState busy)
+    {
+        Conversation conversation = Start();
+        activity.TryEnter(workspace.Id, busy);
+
+        await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "hello", CancellationToken.None));
+
+        Assert.Empty(conversation.Sent);
+        Assert.False(service.IsBusy(workspace.Id));
+        Assert.Equal(busy, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Prompt_DuringAGitActionWorksWithoutChangingTheState()
+    {
+        Conversation conversation = Start();
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
+
+        await service.Prompt(workspace.Id, "resolve the conflicts", CancellationToken.None);
+        Assert.Equal(WorkspaceState.Managing, activity.Get(workspace.Id));
+
+        conversation.Output.Writer.TryWrite(new AiOutput { Kind = AiOutputKind.Finished });
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Equal(WorkspaceState.Managing, activity.Get(workspace.Id));
     }
 
     [Fact]

@@ -102,14 +102,14 @@ internal interface IWorkspaceVersioning
     Task Merge(WorkspaceInfo workspace, string source, string target, string? squashMessage, CancellationToken cancellation);
 
     /// <summary>
-    /// Fetches the remote with pruning and moves the local branches that have nothing of their own to match it; does nothing without a remote.
+    /// Fetches the remote with pruning and moves the local branches that have nothing of their own to match it, as a git action; does nothing without a remote.
     /// </summary>
     /// <param name="workspace">The workspace.</param>
     /// <param name="cancellation">Cancels the action.</param>
     Task Fetch(WorkspaceInfo workspace, CancellationToken cancellation);
 
     /// <summary>
-    /// Fetches, then fast-forwards the checked out branch onto its remote counterpart, stashing and restoring changes that are not committed; the AI resolves conflicts. Does nothing without a remote, while the AI works or another action runs.
+    /// Fetches, then fast-forwards the checked out branch onto its remote counterpart, stashing and restoring changes that are not committed; the AI resolves conflicts. Does nothing without a remote, or unless the workspace is ready.
     /// </summary>
     /// <param name="workspace">The workspace.</param>
     /// <param name="cancellation">Cancels the action.</param>
@@ -118,7 +118,7 @@ internal interface IWorkspaceVersioning
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompts, IEventHub events) : IWorkspaceVersioning
+internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompts, IEventHub events, IWorkspaceActivity activity) : IWorkspaceVersioning
 {
     private readonly ConcurrentDictionary<Guid, Running> running = new();
 
@@ -148,6 +148,12 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
         if (!running.TryAdd(workspace.Id, new Running(source, background)))
         {
             throw new RequestException("A git action is already running in this workspace.");
+        }
+
+        if (!background && !activity.TryEnter(workspace.Id, WorkspaceState.Managing))
+        {
+            running.TryRemove(workspace.Id, out _);
+            throw new RequestException(activity.Describe(workspace.Id));
         }
 
         string before = background ? await Fingerprint(workspace.Folder) : string.Empty;
@@ -180,6 +186,16 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
         finally
         {
             running.TryRemove(workspace.Id, out _);
+
+            if (!background)
+            {
+                activity.Leave(workspace.Id, WorkspaceState.Managing);
+
+                if (prompts.IsBusy(workspace.Id))
+                {
+                    activity.TryEnter(workspace.Id, WorkspaceState.Working);
+                }
+            }
 
             if (!background || await Fingerprint(workspace.Folder) != before)
             {
@@ -402,14 +418,14 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     {
         if (await HasRemote(workspace.Folder, cancellation))
         {
-            await Perform(workspace, false, token => Mirror(workspace.Folder, token), cancellation, true);
+            await Perform(workspace, false, token => Mirror(workspace.Folder, token), cancellation);
         }
     }
 
     /// <inheritdoc />
     public async Task Sync(WorkspaceInfo workspace, CancellationToken cancellation)
     {
-        if (prompts.IsBusy(workspace.Id) || running.ContainsKey(workspace.Id) || !await HasRemote(workspace.Folder, cancellation))
+        if (activity.Get(workspace.Id) != WorkspaceState.Ready || running.ContainsKey(workspace.Id) || !await HasRemote(workspace.Folder, cancellation))
         {
             return;
         }

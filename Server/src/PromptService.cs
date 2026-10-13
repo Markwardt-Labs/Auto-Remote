@@ -59,7 +59,7 @@ internal interface IPromptService
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IAiRunner runner, IEventHub events) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IAiRunner runner, IEventHub events, IWorkspaceActivity activity) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
 
@@ -111,6 +111,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
+            if (!live.Working && !activity.TryEnter(id, WorkspaceState.Working))
+            {
+                throw new RequestException(activity.Describe(id));
+            }
+
             live.Idle?.Cancel();
 
             if (live.Conversation is null)
@@ -136,6 +141,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 await End(id, live, live.Conversation!);
                 throw;
             }
+        }
+        catch (Exception) when (!live.Working)
+        {
+            activity.Leave(id, WorkspaceState.Working);
+            throw;
         }
         finally
         {
@@ -336,9 +346,20 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private void SetWorking(Guid id, Live live, bool working)
     {
+        if (working)
+        {
+            activity.TryEnter(id, WorkspaceState.Working);
+        }
+
         if (live.Working != working)
         {
             live.Working = working;
+
+            if (!working)
+            {
+                activity.Leave(id, WorkspaceState.Working);
+            }
+
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = id, Working = working });
         }
     }

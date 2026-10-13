@@ -14,7 +14,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     {
         this.connection = connection;
         this.workspaceId = workspaceId;
-        SendCommand = new AsyncCommand(_ => Send(), () => !isBlocked && (!string.IsNullOrWhiteSpace(input) || Attachments.Count > 0));
+        SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && (!string.IsNullOrWhiteSpace(input) || Attachments.Count > 0));
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
         Attachments.CollectionChanged += (_, _) =>
         {
@@ -38,7 +38,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool isAiWorking;
 
-    private bool isBlocked;
+    private string? blockReason;
 
     private bool loaded;
 
@@ -61,14 +61,14 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether a script is running in the workspace, which keeps the AI from starting.
+    /// Gets or sets why the AI cannot be given work now, such as a script or git running in the workspace, or <see langword="null" /> when it can; it is shown as the hint of the message box.
     /// </summary>
-    public bool IsBlocked
+    public string? BlockReason
     {
-        get => isBlocked;
+        get => blockReason;
         set
         {
-            if (Set(ref isBlocked, value))
+            if (Set(ref blockReason, value))
             {
                 Raise(nameof(Placeholder));
                 SendCommand.Refresh();
@@ -79,7 +79,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets the hint shown in the empty message box.
     /// </summary>
-    public string Placeholder => isBlocked ? "A script is running, wait for it to finish" : "Enter query...";
+    public string Placeholder => blockReason ?? "Enter query...";
 
     /// <summary>
     /// Gets a value indicating whether older messages exist on the server than the ones loaded so far.
@@ -122,7 +122,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public AsyncCommand RemoveAttachmentCommand { get; }
 
     /// <summary>
-    /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work, but not while a script runs.
+    /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work, but not while a script or git runs.
     /// </summary>
     public AsyncCommand SendCommand { get; }
 

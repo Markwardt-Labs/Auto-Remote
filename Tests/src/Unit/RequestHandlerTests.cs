@@ -20,6 +20,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IEventHub> events = new();
 
+    private readonly WorkspaceActivity activity = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -29,7 +31,7 @@ public sealed class RequestHandlerTests
     public RequestHandlerTests()
     {
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity);
     }
 
     [Fact]
@@ -88,9 +90,9 @@ public sealed class RequestHandlerTests
     [Theory]
     [InlineData(RemoteCommand.RenameWorkspace)]
     [InlineData(RemoteCommand.DeleteWorkspace)]
-    public async Task Handle_RenameOrDeleteWhileBusy_IsRefused(RemoteCommand command)
+    public async Task Handle_RenameOrDeleteWhileNotReady_IsRefused(RemoteCommand command)
     {
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = command, WorkspaceId = workspace.Id, Name = "n" }, owner, CancellationToken.None);
 
@@ -296,9 +298,9 @@ public sealed class RequestHandlerTests
     public async Task Handle_GitActionsThatChangeTheWorkingTree_RefuseWhileTheAiWorks()
     {
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
-        foreach (RemoteCommand command in new[] { RemoteCommand.GitCommit, RemoteCommand.GitReset, RemoteCommand.GitCreateBranch })
+        foreach (RemoteCommand command in new[] { RemoteCommand.GitCommit, RemoteCommand.GitReset, RemoteCommand.GitCreateBranch, RemoteCommand.GitCreateTag, RemoteCommand.GitSetRemote })
         {
             RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = command, WorkspaceId = workspace.Id, Text = "m", Name = "n" }, owner, CancellationToken.None);
 
@@ -362,9 +364,9 @@ public sealed class RequestHandlerTests
     public async Task Handle_VersioningCommandsThatChangeTheWorkingTree_RefuseWhileTheAiWorks()
     {
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
-        foreach (RemoteCommand command in new[] { RemoteCommand.GitCheckout, RemoteCommand.GitDeleteBranch, RemoteCommand.GitSquash, RemoteCommand.GitRebase, RemoteCommand.GitMerge })
+        foreach (RemoteCommand command in new[] { RemoteCommand.GitCheckout, RemoteCommand.GitDeleteBranch, RemoteCommand.GitDeleteTag, RemoteCommand.GitSquash, RemoteCommand.GitRebase, RemoteCommand.GitMerge, RemoteCommand.GitFetch })
         {
             RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = command, WorkspaceId = workspace.Id, Name = "a", Base = "b", Text = "m" }, owner, CancellationToken.None);
 
@@ -391,14 +393,33 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_Prompt_IsRefusedWhileAScriptRuns()
+    public async Task Handle_Prompt_IsRefusedWhileAScriptRunsOrGitActs()
     {
-        scripts.Setup(x => x.IsRunning(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        RemoteResponse running = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+        RemoteResponse attaching = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.UploadAttachment, WorkspaceId = workspace.Id, Name = "a.txt", Data = "AAAA" }, owner, CancellationToken.None);
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+        activity.Leave(workspace.Id, WorkspaceState.Running);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
+        RemoteResponse managing = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
 
-        Assert.Equal("A script is running in this workspace right now.", response.Error);
+        Assert.Equal("A script is running in this workspace right now.", running.Error);
+        Assert.Equal("A script is running in this workspace right now.", attaching.Error);
+        Assert.Equal("A git action is running in this workspace right now.", managing.Error);
         prompts.Verify(x => x.Prompt(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        prompts.Verify(x => x.Attach(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_Prompt_IsAcceptedWhenReadyOrWorking()
+    {
+        RemoteResponse ready = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
+        RemoteResponse working = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "more" }, owner, CancellationToken.None);
+
+        Assert.Null(ready.Error);
+        Assert.Null(working.Error);
+        prompts.Verify(x => x.Prompt(workspace.Id, "more", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -416,12 +437,12 @@ public sealed class RequestHandlerTests
     public async Task Handle_RunScript_IsRefusedWhileTheAiWorksOrGitActs()
     {
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
         RemoteResponse working = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
 
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(false);
-        versioning.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        activity.Leave(workspace.Id, WorkspaceState.Working);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
         RemoteResponse acting = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
 
         Assert.Equal("The AI is working in this workspace right now.", working.Error);
@@ -432,7 +453,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_RenameAndDelete_AreRefusedWhileAScriptRuns()
     {
-        scripts.Setup(x => x.IsRunning(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Running);
 
         RemoteResponse rename = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RenameWorkspace, WorkspaceId = workspace.Id, Name = "x" }, owner, CancellationToken.None);
         RemoteResponse delete = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);

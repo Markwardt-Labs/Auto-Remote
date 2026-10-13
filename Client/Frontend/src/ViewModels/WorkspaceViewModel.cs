@@ -25,7 +25,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
             {
                 Raise(nameof(IsAiWorking));
-                Raise(nameof(IsWorking));
+                UpdateState();
 
                 if (Chat.IsAiWorking && Git.IsWorking && tab is WorkspaceTab.Files or WorkspaceTab.History)
                 {
@@ -37,8 +37,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             if (args.PropertyName == nameof(ScriptsViewModel.IsRunning))
             {
-                Chat.IsBlocked = Scripts.IsRunning;
-                Raise(nameof(IsWorking));
+                UpdateState();
             }
             else if (args.PropertyName == nameof(ScriptsViewModel.ActivePaths))
             {
@@ -55,6 +54,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         };
         Git.PropertyChanged += (_, args) =>
         {
+            if (args.PropertyName == nameof(GitViewModel.IsWorking))
+            {
+                UpdateState();
+            }
+
             if (args.PropertyName == nameof(GitViewModel.IsRepo))
             {
                 if (!Git.IsRepo && tab == WorkspaceTab.History)
@@ -159,9 +163,14 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool IsAiWorking => Chat.IsAiWorking;
 
     /// <summary>
-    /// Gets a value indicating whether the AI is working or a script is running in the workspace.
+    /// Gets what the workspace is doing: only one kind of work runs at a time, and more work only starts once it is <see cref="WorkspaceState.Ready" />, except AI input, which is also accepted while <see cref="WorkspaceState.Working" />.
     /// </summary>
-    public bool IsWorking => Chat.IsAiWorking || Scripts.IsRunning;
+    public WorkspaceState State => Scripts.IsRunning ? WorkspaceState.Running : Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready;
+
+    /// <summary>
+    /// Gets a value indicating whether the workspace is in any state but <see cref="WorkspaceState.Ready" />, which turns the header blue.
+    /// </summary>
+    public bool IsWorking => State != WorkspaceState.Ready;
 
     /// <summary>
     /// Gets the tab showing now.
@@ -336,13 +345,32 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Git.Dispose();
     }
 
+    private void UpdateState()
+    {
+        WorkspaceState state = State;
+        Chat.BlockReason = state switch
+        {
+            WorkspaceState.Running => "A script is running, wait for it to finish",
+            WorkspaceState.Managing => "Git is working, wait for it to finish",
+            _ => null
+        };
+        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Running;
+        Raise(nameof(State));
+        Raise(nameof(IsWorking));
+    }
+
     private async Task RunScript(string path)
     {
         Tab = WorkspaceTab.Script;
 
-        if (Chat.IsAiWorking || Scripts.IsRunning || Git.IsWorking)
+        if (State != WorkspaceState.Ready)
         {
-            Scripts.Reject(Scripts.IsRunning ? "A script is already running." : "Wait for the AI to finish before running a script.");
+            Scripts.Reject(State switch
+            {
+                WorkspaceState.Running => "A script is already running.",
+                WorkspaceState.Managing => "Wait for git to finish before running a script.",
+                _ => "Wait for the AI to finish before running a script."
+            });
             return;
         }
 

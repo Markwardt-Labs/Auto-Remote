@@ -40,7 +40,7 @@ internal sealed class HomeViewModel : ViewModelBase
             ChangeServerRequested?.Invoke();
             return Task.CompletedTask;
         });
-        BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => selected is not null);
+        BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => CanEditSelected);
         ConfirmRenameCommand = new AsyncCommand(_ => Rename());
         BeginDeleteCommand = new AsyncCommand(
             _ =>
@@ -48,7 +48,7 @@ internal sealed class HomeViewModel : ViewModelBase
                 DeleteFolder = true;
                 return Begin(EditMode.DeleteWorkspace, string.Empty);
             },
-            () => selected is not null);
+            () => CanEditSelected);
         ConfirmDeleteCommand = new AsyncCommand(_ => Delete());
         BeginNewGroupCommand = new AsyncCommand(parent => Begin(EditMode.NewGroup, string.Empty, parent as WorkspaceGroup));
         ConfirmNewGroupCommand = new AsyncCommand(_ => CreateGroup());
@@ -269,6 +269,11 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the width of the header cell on each side of the title, which the desktop client widens for the window controls.
     /// </summary>
     public GridLength HeaderSide => new(layout == ClientLayout.Panels ? 250 : 140);
+
+    /// <summary>
+    /// Gets a value indicating whether the focused workspace can be renamed or deleted: it is focused and <see cref="WorkspaceState.Ready" />.
+    /// </summary>
+    public bool CanEditSelected => selected is not null && (active?.State ?? WorkspaceState.Ready) == WorkspaceState.Ready;
 
     /// <summary>
     /// Gets a value indicating whether a workspace is focused.
@@ -575,6 +580,8 @@ internal sealed class HomeViewModel : ViewModelBase
             else if (created == active && args.PropertyName == nameof(WorkspaceViewModel.IsWorking))
             {
                 Raise(nameof(IsWorking));
+                BeginRenameCommand.Refresh();
+                BeginDeleteCommand.Refresh();
             }
         };
         opened[workspace.Id] = created;

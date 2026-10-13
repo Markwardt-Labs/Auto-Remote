@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -101,11 +101,11 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.GetHistory:
                 return new RemoteResponse { Id = 0, History = await prompts.History(RequireWorkspace(request), request.Before, request.Limit, cancellation) };
             case RemoteCommand.Prompt:
-                RequireNoScript(request);
+                RequireAiInput(request);
                 await prompts.Prompt(RequireWorkspace(request), Require(request.Text, "text"), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.UploadAttachment:
-                RequireNoScript(request);
+                RequireAiInput(request);
                 return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
             case RemoteCommand.ListFiles:
                 return new RemoteResponse { Id = 0, Files = await files.List(await workspaces.Get(RequireWorkspace(request), cancellation), request.Path ?? string.Empty, request.ShowHidden == true, cancellation) };
@@ -131,47 +131,51 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.GetGitBranchState:
                 return new RemoteResponse { Id = 0, GitBranch = await versioning.BranchState(await WorkspaceOf(request, cancellation), Require(request.Name, "name"), Require(request.Base, "base"), cancellation) };
             case RemoteCommand.GitCommit:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await Act(request, true, (folder, token) => git.Commit(folder, Require(request.Text, "message").Trim() is { Length: > 0 } message ? message : throw new RequestException("Enter a commit message."), token), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitReset:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await Act(request, true, (folder, token) => git.Reset(folder, token), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitCreateBranch:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await Act(request, true, (folder, token) => git.CreateBranch(folder, Require(request.Name, "name").Trim(), token), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitCreateTag:
+                RequireReady(request);
                 await Act(request, true, (folder, token) => git.CreateTag(folder, Require(request.Name, "name").Trim(), token), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitSetRemote:
+                RequireReady(request);
                 await Act(request, false, (folder, token) => git.SetRemote(folder, Require(request.Url, "URL").Trim(), token), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitCheckout:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await versioning.Checkout(await WorkspaceOf(request, cancellation), Require(request.Name, "name").Trim(), request.Force == true, cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitDeleteBranch:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await versioning.DeleteBranch(await WorkspaceOf(request, cancellation), Require(request.Name, "name").Trim(), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitDeleteTag:
+                RequireReady(request);
                 await versioning.DeleteTag(await WorkspaceOf(request, cancellation), Require(request.Name, "name").Trim(), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitSquash:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await versioning.Squash(await WorkspaceOf(request, cancellation), Require(request.Name, "name").Trim(), Require(request.Base, "base").Trim(), Require(request.Text, "message"), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitRebase:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await versioning.Rebase(await WorkspaceOf(request, cancellation), Require(request.Name, "name").Trim(), Require(request.Base, "base").Trim(), string.IsNullOrWhiteSpace(request.Text) ? null : request.Text.Trim(), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitMerge:
-                RequireNotBusy(request);
+                RequireReady(request);
                 await versioning.Merge(await WorkspaceOf(request, cancellation), Require(request.Name, "name").Trim(), Require(request.Base, "base").Trim(), string.IsNullOrWhiteSpace(request.Text) ? null : request.Text.Trim(), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitFetch:
+                RequireReady(request);
                 await versioning.Fetch(await WorkspaceOf(request, cancellation), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitSync:
@@ -187,8 +191,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await workspaces.Get(RequireWorkspace(request), cancellation);
                 return new RemoteResponse { Id = 0, Scripts = scripts.List(RequireWorkspace(request)) };
             case RemoteCommand.RunScript:
-                RequireNotBusy(request);
-                RequireNoGitAction(request);
+                RequireReady(request);
                 await scripts.Run(await WorkspaceOf(request, cancellation), Require(request.Path, "path"), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.StopScript:
@@ -214,27 +217,19 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         }
     }
 
-    private void RequireNotBusy(RemoteRequest request)
+    private void RequireReady(RemoteRequest request)
     {
-        if (request.WorkspaceId is { } id && prompts.IsBusy(id))
+        if (request.WorkspaceId is { } id && activity.Get(id) != WorkspaceState.Ready)
         {
-            throw new RequestException("The AI is working in this workspace right now.");
+            throw new RequestException(activity.Describe(id));
         }
     }
 
-    private void RequireNoScript(RemoteRequest request)
+    private void RequireAiInput(RemoteRequest request)
     {
-        if (request.WorkspaceId is { } id && scripts.IsRunning(id))
+        if (request.WorkspaceId is { } id && activity.Get(id) is not (WorkspaceState.Ready or WorkspaceState.Working))
         {
-            throw new RequestException("A script is running in this workspace right now.");
-        }
-    }
-
-    private void RequireNoGitAction(RemoteRequest request)
-    {
-        if (request.WorkspaceId is { } id && versioning.IsBusy(id))
-        {
-            throw new RequestException("A git action is running in this workspace right now.");
+            throw new RequestException(activity.Describe(id));
         }
     }
 
@@ -242,13 +237,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     {
         if (request.WorkspaceId is { } id)
         {
-            if (prompts.IsBusy(id))
-            {
-                throw new RequestException("The AI is working in this workspace right now.");
-            }
-
-            RequireNoScript(request);
-
+            RequireReady(request);
             await prompts.Release(id);
         }
     }

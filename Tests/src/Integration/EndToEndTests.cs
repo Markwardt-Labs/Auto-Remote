@@ -30,8 +30,9 @@ public sealed class EndToEndTests : IAsyncLifetime
         WorkspaceManager workspaces = new(store, folders);
         EventHub hub = new();
         GitService git = new();
-        PromptService prompts = new(workspaces, store, new AiRunner(), hub);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, new WorkspaceVersioning(git, prompts, hub), prompts, new ScriptRunner(hub), Mock.Of<IUsageService>(), hub);
+        WorkspaceActivity activity = new();
+        PromptService prompts = new(workspaces, store, new AiRunner(), hub, activity);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, new WorkspaceVersioning(git, prompts, hub, activity), prompts, new ScriptRunner(hub, activity), Mock.Of<IUsageService>(), hub, activity);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();

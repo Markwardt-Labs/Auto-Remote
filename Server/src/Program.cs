@@ -25,8 +25,9 @@ internal static class Program
         IWorkspaceManager workspaces = new WorkspaceManager(store, folders);
         IEventHub events = new EventHub();
         IGitService git = new GitService();
-        IPromptService prompts = new PromptService(workspaces, store, new AiRunner(), events);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, new WorkspaceVersioning(git, prompts, events), prompts, new ScriptRunner(events), new UsageService(), events);
+        IWorkspaceActivity activity = new WorkspaceActivity();
+        IPromptService prompts = new PromptService(workspaces, store, new AiRunner(), events, activity);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, new WorkspaceVersioning(git, prompts, events, activity), prompts, new ScriptRunner(events, activity), new UsageService(), events, activity);
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, new ConsoleLog()), Console.Out);
         return await application.Run(args, cancellation.Token);
     }

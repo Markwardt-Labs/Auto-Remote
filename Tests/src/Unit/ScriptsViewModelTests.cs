@@ -150,6 +150,69 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_BlocksThePromptAndShowsWorkingWhileGitWorks()
+    {
+        GitStatus status = new() { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" };
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => status);
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
+        await model.Start();
+        await model.Git.Refresh();
+        model.Chat.Input = "hello";
+
+        Assert.False(model.IsWorking);
+        Assert.True(model.Chat.SendCommand.CanExecute(null));
+
+        status = status with { Busy = true };
+        await model.Git.Refresh();
+
+        Assert.True(model.IsWorking);
+        Assert.Equal(WorkspaceState.Managing, model.State);
+        Assert.False(model.IsAiWorking);
+        Assert.False(model.Chat.SendCommand.CanExecute(null));
+        Assert.Equal("Git is working, wait for it to finish", model.Chat.Placeholder);
+
+        status = status with { Busy = false };
+        await model.Git.Refresh();
+
+        Assert.False(model.IsWorking);
+        Assert.Equal(WorkspaceState.Ready, model.State);
+        Assert.True(model.Chat.SendCommand.CanExecute(null));
+        Assert.Equal("Enter query...", model.Chat.Placeholder);
+    }
+
+    [Fact]
+    public async Task Workspace_WhileTheAiWorksTakesMoreAiInputButNoGitActionsOrScripts()
+    {
+        GitStatus status = new() { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" };
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => status);
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
+        await model.Start();
+        await model.Git.Refresh();
+        model.Chat.Input = "hello";
+        Assert.True(model.Git.CommitCommand.CanExecute(null));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+
+        Assert.Equal(WorkspaceState.Working, model.State);
+        Assert.True(model.Chat.SendCommand.CanExecute(null));
+        Assert.False(model.Git.CommitCommand.CanExecute(null));
+        Assert.False(model.Git.FetchCommand.CanExecute(null));
+        await model.Git.Checkout("feature");
+        Assert.Equal(GitPrompt.Notice, model.Git.Prompt);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
+
+        Assert.Equal(WorkspaceState.Ready, model.State);
+        Assert.True(model.Git.CommitCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Workspace_BlocksThePromptWhileAScriptRunsAndMarksItsFile()
     {
         connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });

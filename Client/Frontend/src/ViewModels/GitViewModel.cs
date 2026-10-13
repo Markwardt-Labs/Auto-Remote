@@ -17,12 +17,12 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         this.workspaceId = workspaceId;
         this.syncInterval = syncInterval ?? TimeSpan.FromSeconds(60);
         History = new GitHistoryViewModel(connection, workspaceId, this);
-        CommitCommand = new AsyncCommand(_ => AskCommit());
-        ResetCommand = new AsyncCommand(_ => AskReset());
-        BranchCommand = new AsyncCommand(_ => NewBranch());
-        TagCommand = new AsyncCommand(_ => NewTag());
-        RemoteCommand = new AsyncCommand(_ => SetRemote());
-        FetchCommand = new AsyncCommand(_ => Fetch());
+        CommitCommand = new AsyncCommand(_ => AskCommit(), () => CanAct);
+        ResetCommand = new AsyncCommand(_ => AskReset(), () => CanAct);
+        BranchCommand = new AsyncCommand(_ => NewBranch(), () => CanAct);
+        TagCommand = new AsyncCommand(_ => NewTag(), () => CanAct);
+        RemoteCommand = new AsyncCommand(_ => SetRemote(), () => CanAct);
+        FetchCommand = new AsyncCommand(_ => Fetch(), () => CanAct);
         ConfirmCommand = new AsyncCommand(_ => Confirm());
         CancelCommand = new AsyncCommand(_ =>
         {
@@ -47,6 +47,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
             if (args.PropertyName == nameof(IsBusy))
             {
                 Raise(nameof(IsWorking));
+                RefreshActions();
             }
         };
         ToggleChangesModeCommand = new AsyncCommand(_ =>
@@ -89,6 +90,8 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     private CancellationTokenSource? syncing;
 
     private bool isChangesMode;
+
+    private bool isLocked;
 
     private bool subscribed;
 
@@ -174,6 +177,26 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether the server is doing git work in the workspace that the user waits for, started from this client or any other.
     /// </summary>
     public bool IsWorking => IsBusy || status.Busy;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether other work, the AI or a script, holds the workspace, which keeps git actions from starting.
+    /// </summary>
+    public bool IsLocked
+    {
+        get => isLocked;
+        set
+        {
+            if (Set(ref isLocked, value))
+            {
+                RefreshActions();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether a git action can start: nothing else holds the workspace and no git action is running.
+    /// </summary>
+    public bool CanAct => !isLocked && !IsWorking;
 
     /// <summary>
     /// Gets the shape of the question being asked.
@@ -476,10 +499,28 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         Raise(nameof(HasChanges));
         Raise(nameof(Remote));
         Raise(nameof(IsWorking));
+        RefreshActions();
+    }
+
+    private void RefreshActions()
+    {
+        Raise(nameof(CanAct));
+        CommitCommand.Refresh();
+        ResetCommand.Refresh();
+        BranchCommand.Refresh();
+        TagCommand.Refresh();
+        RemoteCommand.Refresh();
+        FetchCommand.Refresh();
     }
 
     private void Ask(GitPrompt kind, string title, string hint, string confirm, Func<Task>? action, string text = "", bool destructive = false, string empty = "", Func<Task>? then = null)
     {
+        if (isLocked && kind != GitPrompt.Notice)
+        {
+            Ask(GitPrompt.Notice, "Git", "Wait for the AI or the script to finish before running git actions.", "OK", null);
+            return;
+        }
+
         Error = null;
         promptTitle = title;
         promptHint = hint;

@@ -8,7 +8,7 @@ A workspace stores the folder path, its AI settings, the attached AI session and
 
 ## Deleting
 
-Deleting removes the workspace and its stored conversation. Deleting the folder as well is the default and recursive, so the server refuses it for a file system root, the server user's home folder or any ancestor of it, and any folder that contains or sits inside another workspace. Rename and delete are refused while the AI is working in that workspace.
+Deleting removes the workspace and its stored conversation. Deleting the folder as well is the default and recursive, so the server refuses it for a file system root, the server user's home folder or any ancestor of it, and any folder that contains or sits inside another workspace. Rename and delete are refused unless the workspace is ready.
 
 ## AI sessions and the live conversation
 
@@ -25,6 +25,14 @@ An idle process is ended after five minutes, and also before a rename, a delete 
 ## Service, model and effort
 
 Each workspace has an AI service, a model and an effort (low to max). Claude Code offers Sonnet, Opus and Haiku and defaults to Sonnet on high; Codex offers Terra, Sol and Luna (the `gpt-5.6` models) and defaults to Terra on medium. A new workspace uses Claude Code. The client offers only the models of the chosen service and switches to that service's defaults when the service changes, and the server refuses a model the service does not offer. Every run passes the choices on the command line, so a change applies from the next process, including to an AI session that is resumed. Switching the service detaches the AI session, because a session only exists in the service that created it; the history is the server's own and stays.
+
+## States
+
+A workspace is always in exactly one state: Ready (nothing runs), Working (the AI is running), Running (a script or task is running) or Managing (a git action is running). The server owns the state in one place, a tracker that the prompt service, the script runner and the git workflows each enter when their work starts and leave when it ends, so the check and the change are one step and two requests racing for an idle workspace cannot both win. Work only starts from Ready: a workspace in any other state refuses the others (a prompt while a script runs, a git action while the AI works, a script during a git action, and rename and delete in every state but Ready) with a message naming what is in progress, and the work that holds the workspace has to end first. The one exception is AI input: a prompt or attachment is accepted in Ready and Working, where it joins the work in progress, and refused in Running and Managing.
+
+A git action can use the AI itself to resolve conflicts. That AI work is part of Managing rather than a change of state, so the workspace stays Managing until the action ends, and if the AI is somehow still busy then, the workspace falls to Working instead of Ready. The automatic fetch and pull is not a state: it runs only from Ready, is not reported as busy and does not stop other work from starting. A fetch the user asks for is a git action like any other.
+
+Clients show the state: the header is blue in every state but Ready, the message box is locked in Running and Managing (and says why), buttons that start work are disabled or refuse with a message, and the Managing state offers Cancel and undo. They work it out from the events and statuses they already receive (the AI working, a script running, a git action busy), in that order of priority, while the server remains the authority.
 
 ## Groups
 

@@ -11,6 +11,8 @@ public sealed class WorkspaceVersioningTests : IDisposable
 
     private readonly GitService git = new();
 
+    private readonly WorkspaceActivity activity = new();
+
     private readonly WorkspaceVersioning versioning;
 
     private readonly string remote;
@@ -25,7 +27,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
         Environment.SetEnvironmentVariable("GIT_AUTHOR_EMAIL", "tester@example.com");
         Environment.SetEnvironmentVariable("GIT_COMMITTER_NAME", "Tester");
         Environment.SetEnvironmentVariable("GIT_COMMITTER_EMAIL", "tester@example.com");
-        versioning = new WorkspaceVersioning(git, prompts.Object, events.Object);
+        versioning = new WorkspaceVersioning(git, prompts.Object, events.Object, activity);
         remote = temp.Combine("origin.git");
         work = temp.Combine("work");
         Directory.CreateDirectory(remote);
@@ -532,12 +534,17 @@ public sealed class WorkspaceVersioningTests : IDisposable
         G(temp.Path, "clone", remote, "other");
         Commit(other, "n.txt", "n", "from elsewhere");
         G(other, "push", "origin", "main");
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
         await versioning.Sync(workspace, CancellationToken.None);
         Assert.False(File.Exists(Path.Combine(work, "n.txt")));
 
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(false);
+        activity.Leave(workspace.Id, WorkspaceState.Working);
+        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        await versioning.Sync(workspace, CancellationToken.None);
+        Assert.False(File.Exists(Path.Combine(work, "n.txt")));
+
+        activity.Leave(workspace.Id, WorkspaceState.Running);
         Commit(work, "local.txt", "l", "local commit");
         await versioning.Sync(workspace, CancellationToken.None);
         Assert.False(File.Exists(Path.Combine(work, "n.txt")));
@@ -546,6 +553,36 @@ public sealed class WorkspaceVersioningTests : IDisposable
         G(work, "remote", "remove", "origin");
         await versioning.Sync(workspace, CancellationToken.None);
         await versioning.Fetch(workspace, CancellationToken.None);
+    }
+
+    [Theory]
+    [InlineData(WorkspaceState.Working)]
+    [InlineData(WorkspaceState.Running)]
+    public async Task Perform_IsRefusedUnlessTheWorkspaceIsReady(WorkspaceState busy)
+    {
+        activity.TryEnter(workspace.Id, busy);
+        bool ran = false;
+
+        RequestException refused = await Refused(versioning.Perform(workspace, false, _ =>
+        {
+            ran = true;
+            return Task.CompletedTask;
+        }, CancellationToken.None));
+
+        Assert.False(ran);
+        Assert.Contains("right now", refused.Message);
+        Assert.False(versioning.IsBusy(workspace.Id));
+        Assert.Equal(busy, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Perform_LeavesTheWorkspaceWorkingWhenTheAiIsStillBusyAfterwards()
+    {
+        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+
+        await versioning.Perform(workspace, false, _ => Task.CompletedTask, CancellationToken.None);
+
+        Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
     }
 
     [Fact]
@@ -562,12 +599,14 @@ public sealed class WorkspaceVersioningTests : IDisposable
         await started.Task;
 
         Assert.True(versioning.IsBusy(workspace.Id));
+        Assert.Equal(WorkspaceState.Managing, activity.Get(workspace.Id));
         RequestException second = await Refused(versioning.Perform(workspace, false, _ => Task.CompletedTask, CancellationToken.None));
         Assert.Contains("already running", second.Message);
         release.SetResult();
         await first;
 
         Assert.False(versioning.IsBusy(workspace.Id));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
         events.Verify(x => x.Publish(It.Is<RemoteEvent>(e => e.Kind == RemoteEventKind.GitChanged && e.WorkspaceId == workspace.Id)), Times.Exactly(2));
     }
 

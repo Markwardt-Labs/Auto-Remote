@@ -62,7 +62,7 @@ internal interface IScriptRunner
 }
 
 /// <inheritdoc />
-internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
+internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity) : IScriptRunner
 {
     private readonly ConcurrentDictionary<Guid, Workspace> workspaces = new();
 
@@ -120,6 +120,11 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
             if (state.Active)
             {
                 throw new RequestException("A script is already running in this workspace.");
+            }
+
+            if (!activity.TryEnter(workspace.Id, WorkspaceState.Running))
+            {
+                throw new RequestException(activity.Describe(workspace.Id));
             }
 
             Forget(workspace.Id, state, relative);
@@ -353,6 +358,7 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
                 state.Active = false;
             }
 
+            activity.Leave(workspace.Id, WorkspaceState.Running);
             Finish(workspace.Id, state, main, result);
         }
     }

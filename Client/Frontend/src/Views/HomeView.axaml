@@ -199,8 +199,15 @@
                           IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop, FallbackValue=False}" />
             <Border Grid.Row="1" Height="1" VerticalAlignment="Top" Background="{DynamicResource Border}" IsHitTestVisible="False"
                     IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop, FallbackValue=False}" />
-            <Grid Grid.Row="2" Margin="20,4,12,12" RowDefinitions="Auto,*">
-            <ItemsControl Grid.Row="0" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}" Margin="0,0,0,4">
+            <Grid Grid.Row="2" Margin="20,4,12,12" RowDefinitions="Auto,Auto,*">
+            <Border Grid.Row="0" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,0,0,6"
+                    IsVisible="{Binding $parent[local:HomeView].DataContext.Active.Git.IsWorking, FallbackValue=False}">
+              <Grid ColumnDefinitions="*,Auto" DataContext="{Binding $parent[local:HomeView].DataContext.Active.Git}">
+                <TextBlock Grid.Column="0" Text="Git is working on the server. If the AI is resolving conflicts, you can watch it here." Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <Button Grid.Column="1" Content="Cancel and undo" Command="{Binding CancelWorkCommand}" Margin="8,0,0,0" Padding="8,3" FontSize="12" />
+              </Grid>
+            </Border>
+            <ItemsControl Grid.Row="1" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}" Margin="0,0,0,4">
               <ItemsControl.ItemsPanel>
                 <ItemsPanelTemplate>
                   <WrapPanel />
@@ -220,7 +227,7 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto">
+            <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
               <Button Grid.Column="0" Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center" Margin="0,0,6,0">
                 <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
               </Button>
@@ -587,16 +594,6 @@
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
           <Button Content="{Binding PromptConfirm}" Command="{Binding ConfirmCommand}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding ShowCancel}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-        </StackPanel>
-      </Border>
-    </Border>
-
-    <Border IsVisible="{Binding Active.Git.IsWorking, FallbackValue=False}" Background="{DynamicResource Scrim}">
-      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="360" VerticalAlignment="Center">
-        <StackPanel DataContext="{Binding Active.Git}" Spacing="12">
-          <TextBlock Text="Working…" Classes="serif" FontSize="20" />
-          <TextBlock Text="Git is working on the server. If the AI is resolving conflicts, you can watch it in the chat." Classes="muted" TextWrapping="Wrap" />
-          <Button Content="Cancel and undo" Command="{Binding CancelWorkCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         </StackPanel>
       </Border>
     </Border>

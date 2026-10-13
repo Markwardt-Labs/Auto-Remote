@@ -256,7 +256,9 @@ button.icon.on { background: var(--selection); }
 .diff-note { padding: 0 14px; color: var(--muted); }
 button.refbtn { background: transparent; border: 0; padding: 0; margin: 0 4px 0 0; }
 button.refbtn .ref { margin: 0; }
-.working-wrap { position: absolute; inset: 0; background: var(--scrim); z-index: 30; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.git-working { display: flex; align-items: center; gap: 8px; background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin-bottom: 6px; font-size: 12px; }
+.git-working[hidden] { display: none; }
+.git-working span { flex: 1; color: var(--muted); }
 .settings { overflow-y: auto; }
 .settings .inner { max-width: 820px; width: 100%; margin: 0 auto; padding: 8px 20px 20px; }
 
@@ -1180,6 +1182,7 @@ class Connection {
   }
 
   listWorkspaces() { return this.request("ListWorkspaces").then(r => r.catalog); }
+  getScripts(workspaceId) { return this.request("GetScripts", { workspaceId }).then(r => r.scripts); }
   createWorkspace(path) { return this.request("CreateWorkspace", { path }).then(r => r.workspace); }
   renameWorkspace(workspaceId, name) { return this.request("RenameWorkspace", { workspaceId, name }).then(r => r.workspace); }
   getUsage(service) { return this.request("GetUsage", { service }).then(r => r.usage); }
@@ -1459,12 +1462,14 @@ class WorkspaceView {
     this.gitAgain = false;
     this.gitRefs = false;
     this.localBusy = false;
+    this.activeScripts = new Set();
     this.syncTimer = null;
     this.build();
     this.listener = event => this.receive(event);
     connection.listeners.add(this.listener);
     this.loadChat();
     this.refreshGit();
+    this.loadScripts();
   }
 
   build() {
@@ -1478,11 +1483,14 @@ class WorkspaceView {
     this.attachButton = h("button", { class: "flat icon", title: "Attach files", onclick: () => this.fileInput.click() }, icon("attach"));
     this.input.addEventListener("paste", event => this.pasted(event));
     this.grip = h("div", { class: "composer-grip", onpointerdown: event => this.resizeInput(event) });
+    this.gitBar = h("div", { class: "git-working", hidden: true },
+      h("span", {}, "Git is working on the server. If the AI is resolving conflicts, you can watch it here."),
+      h("button", { onclick: () => this.cancelGit() }, "Cancel and undo"));
     this.chatBody = h("div", { class: "pane-body chat" },
       this.scroller,
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.input, this.sendButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.input, this.sendButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", { class: "muted" }, "History"), h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -1692,6 +1700,52 @@ class WorkspaceView {
     return this.localBusy || this.gitStatus.busy === true;
   }
 
+  state() {
+    return this.activeScripts.size > 0 ? "Running" : this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
+  }
+
+  refuseWork() {
+    const state = this.state();
+
+    if (state === "Ready") {
+      return false;
+    }
+
+    this.home.notice("Git", state === "Managing" ? "A git action is already running." : "Wait for the AI or the script to finish before running git actions.");
+    return true;
+  }
+
+  async loadScripts() {
+    try {
+      const scripts = await this.connection.getScripts(this.info.id);
+      this.activeScripts = new Set((scripts.runs ?? []).filter(run => run.state === "Running" || run.state === "Pending").map(run => run.path));
+      this.applyState();
+    } catch (exception) {
+    }
+  }
+
+  trackScript(event) {
+    if (event.kind === "ScriptChanged" && event.script) {
+      if (event.script.state === "Running" || event.script.state === "Pending") {
+        this.activeScripts.add(event.script.path);
+      } else {
+        this.activeScripts.delete(event.script.path);
+      }
+    } else {
+      this.activeScripts.delete(event.path);
+    }
+
+    this.applyState();
+  }
+
+  applyState() {
+    const state = this.state();
+    this.gitBar.hidden = state !== "Managing";
+    this.input.placeholder = state === "Running" ? "A script is running, wait for it to finish" : state === "Managing" ? "Git is working, wait for it to finish" : "Enter query...";
+    this.updateSend();
+    this.home.updateWorking(this);
+  }
+
   dispose() {
     this.connection.listeners.delete(this.listener);
     document.removeEventListener("keydown", this.keyListener);
@@ -1706,7 +1760,7 @@ class WorkspaceView {
       this.showSide("chat");
     }
 
-    this.home.updateWorking(this);
+    this.applyState();
   }
 
   async loadChat() {
@@ -1753,6 +1807,11 @@ class WorkspaceView {
 
   receive(event) {
     if (event.workspaceId !== this.info.id) {
+      return;
+    }
+
+    if (event.kind === "ScriptChanged" || event.kind === "ScriptRemoved") {
+      this.trackScript(event);
       return;
     }
 
@@ -1897,7 +1956,16 @@ class WorkspaceView {
 
   inputChanged() {
     this.fitInput();
-    this.sendButton.disabled = this.input.value.trim().length === 0 && this.attachments.length === 0;
+    this.updateSend();
+  }
+
+  takesAiInput() {
+    const state = this.state();
+    return state === "Ready" || state === "Working";
+  }
+
+  updateSend() {
+    this.sendButton.disabled = !this.takesAiInput() || (this.input.value.trim().length === 0 && this.attachments.length === 0);
   }
 
   keyed(event) {
@@ -1911,7 +1979,7 @@ class WorkspaceView {
     const text = this.input.value.trim();
     const sending = this.attachments;
 
-    if (!text && sending.length === 0) {
+    if ((!text && sending.length === 0) || !this.takesAiInput()) {
       return;
     }
 
@@ -2389,7 +2457,7 @@ class WorkspaceView {
     this.applyChangesMode();
     this.renderTree();
     this.renderChanges();
-    this.home.setGitWorking(this, this.gitWorking());
+    this.applyState();
   }
 
   applyChangesMode() {
@@ -2691,6 +2759,10 @@ class WorkspaceView {
   }
 
   askGit({ title, body = null, confirm, input = null, text = "", email = false, destructive = false, empty = "", action, then }) {
+    if (this.refuseWork()) {
+      return;
+    }
+
     const go = () => {
       const value = nameBox ? nameBox.value.trim() : "";
       const mail = emailBox ? emailBox.value.trim() : "";
@@ -2876,6 +2948,10 @@ class WorkspaceView {
   }
 
   async fetchGit() {
+    if (this.refuseWork()) {
+      return;
+    }
+
     this.localBusy = true;
     this.renderGit();
 
@@ -2994,13 +3070,7 @@ class Home {
         h("button", { class: "block", onclick: () => this.app.changeServer() }, "Change server")));
     this.scrim = h("div", { class: "overlay", hidden: true, onclick: () => this.setDrawer(false) });
     this.dialogHost = h("div", { class: "dialog-wrap", hidden: true });
-    this.workingWrap = h("div", { class: "working-wrap", hidden: true },
-      h("div", { class: "dialog" },
-        h("h3", { class: "serif" }, "Working…"),
-        h("div", { class: "muted" }, "Git is working on the server. If the AI is resolving conflicts, you can watch it in the chat."),
-        h("button", { class: "block", onclick: () => this.active?.cancelGit() }, "Cancel and undo")));
-
-    this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.scrim, this.drawer, this.dialogHost, this.workingWrap);
+    this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.scrim, this.drawer, this.dialogHost);
     this.drawerOpen = false;
   }
 
@@ -3077,7 +3147,7 @@ class Home {
 
   updateWorking(view) {
     if (view === this.active) {
-      this.topbar.classList.toggle("working", view.working);
+      this.topbar.classList.toggle("working", view.state() !== "Ready");
     }
   }
 
@@ -3129,7 +3199,6 @@ class Home {
       view.blur();
     }
 
-    this.workingWrap.hidden = true;
     this.empty.hidden = workspace !== null;
     this.tools.hidden = workspace === null;
     this.toggleUsage(false);
@@ -3284,6 +3353,15 @@ class Home {
     this.dialogHost.querySelector("input[type=text]")?.focus();
   }
 
+  refuseEdit() {
+    if (this.active && this.active.state() !== "Ready") {
+      this.notice("Workspace busy", "Wait for the work in this workspace to finish first.");
+      return true;
+    }
+
+    return false;
+  }
+
   notice(title, body) {
     this.dialogError.set(null);
     this.dialogHost.replaceChildren(h("div", { class: "dialog" },
@@ -3291,12 +3369,6 @@ class Home {
       h("div", { class: "muted" }, body),
       h("button", { class: "primary block", onclick: () => this.closeDialog() }, "OK")));
     this.dialogHost.hidden = false;
-  }
-
-  setGitWorking(view, working) {
-    if (view === this.active) {
-      this.workingWrap.hidden = !working;
-    }
   }
 
   nameBox(text, confirm) {
@@ -3329,6 +3401,10 @@ class Home {
       return;
     }
 
+    if (this.refuseEdit()) {
+      return;
+    }
+
     const confirm = () => {
       const name = box.value;
 
@@ -3347,6 +3423,10 @@ class Home {
     const workspace = this.selected;
 
     if (!workspace) {
+      return;
+    }
+
+    if (this.refuseEdit()) {
       return;
     }
 
