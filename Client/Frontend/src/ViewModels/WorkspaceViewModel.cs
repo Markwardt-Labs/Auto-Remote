@@ -213,9 +213,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowFilesPanel => !ShowSettings && (layout == ClientLayout.Panels || ShowFiles);
 
     /// <summary>
-    /// Gets a value indicating whether the panel of the conversation and the history is showing.
+    /// Gets a value indicating whether the panel of the conversation, the scripts and the history is showing.
     /// </summary>
-    public bool ShowChatPanel => !ShowSettings && (layout == ClientLayout.Panels || ShowChat || ShowHistory);
+    public bool ShowChatPanel => !ShowSettings && (layout == ClientLayout.Panels || ShowChat || ShowScript || ShowHistory);
 
     /// <summary>
     /// Gets a value indicating whether the conversation is showing in its panel.
@@ -225,7 +225,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether the scripts are showing in the panel of the conversation.
     /// </summary>
-    public bool ShowScriptView => layout == ClientLayout.Panels && tab == WorkspaceTab.Script;
+    public bool ShowScriptView => tab == WorkspaceTab.Script;
 
     /// <summary>
     /// Gets a value indicating whether the history is showing in its panel.
@@ -243,7 +243,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowHistoryTab => Git.IsRepo;
 
     /// <summary>
-    /// Gets a value indicating whether the panel of the conversation has tabs for the conversation, the scripts and the history, which only panels do; tabs along the bottom hold the conversation and the history otherwise.
+    /// Gets a value indicating whether the panel of the conversation has tabs for the conversation, the scripts and the history, which only panels do; tabs along the bottom hold them next to the files otherwise.
     /// </summary>
     public bool ShowSideTabs => layout == ClientLayout.Panels;
 

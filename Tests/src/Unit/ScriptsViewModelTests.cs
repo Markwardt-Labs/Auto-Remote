@@ -266,16 +266,31 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_DoesNotMarkScriptsRunnableWithTabs()
+    public async Task Workspace_WithTabsRunsScriptsAndShowsThemInTheirOwnTab()
     {
         connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
-        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }] });
+        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }, new FileEntry { Name = "b.task", Path = "b.task", IsFolder = false }, new FileEntry { Name = "c.txt", Path = "c.txt", IsFolder = false }] });
         WorkspaceViewModel model = new(connection.Object, workspace);
         await model.Start();
         await model.Files.Start();
 
-        Assert.False(model.Files.Nodes[0].IsRunnable);
+        Assert.Equal([true, true, false], model.Files.Nodes.Select(node => node.IsRunnable));
         Assert.False(model.ShowSideTabs);
+        Assert.False(model.ShowScriptView);
+
+        model.Files.Run(model.Files.Nodes[0]);
+        await Task.Delay(50);
+
+        connection.Verify(x => x.RunScript(workspace.Id, "a.cs", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.True(model.ShowScriptView);
+        Assert.True(model.ShowChatPanel);
+        Assert.False(model.ShowChatView);
+        Assert.False(model.ShowFilesPanel);
+
+        model.ShowChatCommand.Execute(null);
+
+        Assert.False(model.ShowScriptView);
+        Assert.True(model.ShowChatView);
     }
 }

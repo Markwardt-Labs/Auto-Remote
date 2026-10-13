@@ -197,7 +197,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task HomeView_ShowsTwoEqualTabsAGearAtTheTopRightAndTurnsTheTopBarAccentBlueWhileTheAiWorks(bool working)
+    public async Task HomeView_ShowsEqualTabsAGearAtTheTopRightAndTurnsTheTopBarAccentBlueWhileTheAiWorks(bool working)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
@@ -223,7 +223,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (labels, widths, accented, paintedAccent, statusText, gearAtTopRight);
         });
 
-        Assert.Equal(["Chat", "Files"], labels);
+        Assert.Equal(["Chat", "Files", "Script"], labels);
         Assert.Single(widths.Distinct());
         Assert.True(gearAtTopRight);
         Assert.Equal(working, accented);
@@ -232,7 +232,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_ShowsAThirdEqualHistoryTabOnlyWhenTheWorkspaceIsAGitRepository()
+    public async Task HomeView_ShowsAnEqualHistoryTabOnlyWhenTheWorkspaceIsAGitRepository()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
@@ -257,7 +257,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (labels, widths, versionTexts);
         });
 
-        Assert.Equal(["Chat", "Files", "History"], labels);
+        Assert.Equal(["Chat", "Files", "Script", "History"], labels);
         Assert.Single(widths.Distinct());
         Assert.Contains("main", versionTexts);
         Assert.Contains("first", versionTexts);
@@ -309,7 +309,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_TabsLayoutHasNoWindowControlsOrScriptTab()
+    public async Task HomeView_TabsLayoutHasNoWindowControlsButAScriptTab()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
@@ -330,7 +330,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (labels, controls);
         });
 
-        Assert.Equal(["Chat", "Files"], labels);
+        Assert.Equal(["Chat", "Files", "Script"], labels);
         Assert.Equal(0, controls);
     }
 

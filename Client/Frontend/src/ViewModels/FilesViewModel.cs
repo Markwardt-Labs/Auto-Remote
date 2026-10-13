@@ -11,7 +11,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// <param name="connection">The server connection.</param>
     /// <param name="workspaceId">The workspace whose folder is browsed.</param>
     /// <param name="git">The git state of the workspace, which colors the tree and supplies the diffs.</param>
-    /// <param name="desktop">Whether this is the desktop layout: the tree always starts at the workspace folder, keeps the open file selected with its folders open, and marks <c>.cs</c> scripts and <c>.task</c> files as runnable.</param>
+    /// <param name="desktop">Whether this is the desktop layout: the tree always starts at the workspace folder, and keeps the open file selected with its folders open.</param>
     public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false)
     {
         this.connection = connection;
@@ -376,7 +376,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private bool CanRun(FileEntry entry) => desktop && !entry.IsFolder && (entry.Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".task", StringComparison.OrdinalIgnoreCase));
+    private bool CanRun(FileEntry entry) => !entry.IsFolder && (entry.Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".task", StringComparison.OrdinalIgnoreCase));
 
     private void Apply(IEnumerable<FileNode> nodes)
     {

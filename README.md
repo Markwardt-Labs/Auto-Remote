@@ -8,7 +8,7 @@ Auto Remote is a command line server that hosts Claude Code or OpenAI Codex work
 
 ## Requirements
 
-- Windows 10/11, 64-bit, or Linux, x86-64 (glibc-based distro). No separate .NET runtime install needed: the server executable is self-contained. Running `.cs` scripts and `.task` files from the desktop client needs the .NET SDK on the server's machine.
+- Windows 10/11, 64-bit, or Linux, x86-64 (glibc-based distro). No separate .NET runtime install needed: the server executable is self-contained. Running `.cs` scripts and `.task` files from a client needs the .NET SDK on the server's machine.
 
 ## Installing
 

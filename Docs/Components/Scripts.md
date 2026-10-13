@@ -10,7 +10,7 @@ A `.task` file lists one script path per line. A line with only `-` is a wait: t
 
 ## One thing at a time
 
-The AI, a git action and scripts must never change the same working tree at once, so the server allows one script or task per workspace at a time and, as for every kind of work, only starts it when the workspace is Ready: `RunScript` is refused while the AI works or a git action runs, and `Prompt` (and rename and delete) while a script runs. The checks live in the server, so every client gets them whatever it shows; the desktop client also disables sending and refuses to start scripts using the state it follows. Clients show a running script like a working AI: the header turns blue.
+The AI, a git action and scripts must never change the same working tree at once, so the server allows one script or task per workspace at a time and, as for every kind of work, only starts it when the workspace is Ready: `RunScript` is refused while the AI works or a git action runs, and `Prompt` (and rename and delete) while a script runs. The checks live in the server, so every client gets them whatever it shows; every client also disables sending and refuses to start scripts using the state it follows. Clients show a running script like a working AI: the header turns blue.
 
 ## Runs are kept in memory
 

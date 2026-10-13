@@ -118,6 +118,23 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .tabs button { flex: 1; background: var(--elevated); border: 0; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); padding: 7px 12px; font-size: 12px; }
 .tabs button:hover:not(:disabled) { background: var(--hover); }
 .tabs button.on { color: var(--text); border-bottom-color: var(--accent); background: var(--background); }
+.script-pick { display: flex; gap: 8px; align-items: center; padding: 6px 10px; background: var(--elevated); border-bottom: 1px solid var(--border); }
+.script-pick select { flex: 1; min-height: 32px; padding: 4px 8px; }
+.script-children { display: flex; gap: 2px; padding: 4px 6px; background: var(--elevated); border-bottom: 1px solid var(--border); overflow-x: auto; }
+.script-children button { background: transparent; border: 0; font-size: 11px; padding: 4px 8px; white-space: nowrap; }
+.script-children button.on { background: var(--selection); }
+.script-bar { display: flex; align-items: center; gap: 8px; padding: 4px 10px; background: var(--elevated); }
+.script-bar .spacer { flex: 1; }
+.script-bar button { font-size: 11px; padding: 4px 8px; min-height: 0; }
+.script-bar .state { font-size: 11px; }
+.script-bar .state.ok { color: var(--accent); }
+.script-bar .state.bad { color: crimson; }
+.script-scroll { flex: 1; min-height: 0; overflow: auto; position: relative; display: flex; flex-direction: column; }
+.script-output { margin: 0; padding: 10px 14px 14px; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px Menlo, Consolas, "DejaVu Sans Mono", monospace; user-select: text; }
+.script-input { display: flex; gap: 8px; padding: 6px 10px; background: var(--elevated); border-top: 1px solid var(--border); }
+.script-input input { flex: 1; }
+.row.running .name { font-weight: 700; }
+.tree .row { user-select: none; }
 .messages { flex: 1; overflow-y: auto; padding: 0 16px; }
 .messages .inner { max-width: 820px; margin: 0 auto; padding: 8px 0; }
 .msg { margin: 16px 0; }
@@ -1183,6 +1200,10 @@ class Connection {
 
   listWorkspaces() { return this.request("ListWorkspaces").then(r => r.catalog); }
   getScripts(workspaceId) { return this.request("GetScripts", { workspaceId }).then(r => r.scripts); }
+  runScript(workspaceId, path) { return this.request("RunScript", { workspaceId, path }); }
+  stopScript(workspaceId, path) { return this.request("StopScript", { workspaceId, path }); }
+  sendScriptInput(workspaceId, path, text) { return this.request("SendScriptInput", { workspaceId, path, text }); }
+  removeScript(workspaceId, path) { return this.request("RemoveScript", { workspaceId, path }); }
   createWorkspace(path) { return this.request("CreateWorkspace", { path }).then(r => r.workspace); }
   renameWorkspace(workspaceId, name) { return this.request("RenameWorkspace", { workspaceId, name }).then(r => r.workspace); }
   getUsage(service) { return this.request("GetUsage", { service }).then(r => r.usage); }
@@ -1252,6 +1273,8 @@ async function attempt(action, errors) {
 
 const icons = {
   file: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4", "4 1 9 14", 11],
+  script: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6.5,7.5 L6.5,11.5 L10,9.5 Z", "4 1 9 14", 11],
+  task: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6,6 L6,8.5 L8.5,7.25 Z M6,9.5 L6,12 L8.5,10.75 Z", "4 1 9 14", 11],
   folder: ["M1,3 L5,3 L6.3,4.5 L13,4.5 L13,15 L1,15 Z", "1 3 12 12", 12],
   collapse: ["M2,6 L7,1 L12,6 M2,13 L7,8 L12,13", "2 1 10 12", 13],
   up: ["M7,13 L7,2 M2,7 L7,2 L12,7", "2 2 10 11", 13],
@@ -1462,7 +1485,8 @@ class WorkspaceView {
     this.gitAgain = false;
     this.gitRefs = false;
     this.localBusy = false;
-    this.activeScripts = new Set();
+    this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
+    this.scriptError = new ErrorLine();
     this.syncTimer = null;
     this.build();
     this.listener = event => this.receive(event);
@@ -1496,10 +1520,32 @@ class WorkspaceView {
       h("div", { class: "head" }, h("div", { class: "muted" }, "History"), h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
       h("div", { style: "padding:0 16px" }, this.historyError.element),
       this.historyList);
+    this.scriptSelect = h("select", { onchange: () => this.selectScript(this.scriptSelect.value) });
+    this.scriptRemove = h("button", { title: "Remove the finished run", onclick: () => this.removeScript() }, "Remove");
+    this.scriptPick = h("div", { class: "script-pick", hidden: true }, this.scriptSelect, this.scriptRemove);
+    this.scriptChildren = h("div", { class: "script-children", hidden: true });
+    this.scriptName = h("span", { class: "muted small" });
+    this.scriptState = h("span", { class: "state" });
+    this.scriptCopy = h("button", { class: "flat", title: "Copy output", onclick: () => this.copyScriptOutput() }, "Copy");
+    this.scriptStop = h("button", { title: "Forcefully stop this script", onclick: () => this.stopScript() }, "Stop");
+    this.scriptBar = h("div", { class: "script-bar", hidden: true }, this.scriptName, this.scriptState, h("span", { class: "spacer" }), this.scriptCopy, this.scriptStop);
+    this.scriptEmpty = h("div", { class: "placeholder muted", style: "padding:0 24px" }, "No script selected. Pick one from the dropdown above, or double click a .cs or .task file in the file system.");
+    this.scriptOutput = h("pre", { class: "script-output", hidden: true });
+    this.scriptScroller = h("div", { class: "script-scroll" }, this.scriptEmpty, this.scriptOutput);
+    this.scriptInput = h("input", { type: "text", placeholder: "Enter input for the running script… (Enter to send)", onkeydown: event => { if (event.key === "Enter") { this.sendScriptInput(); } } });
+    this.scriptInputBar = h("div", { class: "script-input", hidden: true }, this.scriptInput, h("button", { onclick: () => this.sendScriptInput() }, "Send"));
+    this.scriptBody = h("div", { class: "pane-body script", hidden: true },
+      this.scriptPick,
+      this.scriptChildren,
+      this.scriptBar,
+      h("div", { style: "padding:0 16px" }, this.scriptError.element),
+      this.scriptScroller,
+      this.scriptInputBar);
     this.chatTab = h("button", { class: "on", onclick: () => this.showSide("chat") }, "Chat");
-    this.historyTab = h("button", { onclick: () => this.showSide("history") }, "History");
-    this.tabs = h("div", { class: "tabs", hidden: true }, this.chatTab, this.historyTab);
-    this.chatPane = h("div", { class: "panel chat" }, this.tabs, this.chatBody, this.historyBody);
+    this.scriptTab = h("button", { onclick: () => this.showSide("script") }, "Script");
+    this.historyTab = h("button", { hidden: true, onclick: () => this.showSide("history") }, "History");
+    this.tabs = h("div", { class: "tabs" }, this.chatTab, this.scriptTab, this.historyTab);
+    this.chatPane = h("div", { class: "panel chat" }, this.tabs, this.chatBody, this.scriptBody, this.historyBody);
 
     this.pathLabel = h("div", { class: "path muted", hidden: true }, "Changes");
     this.fileList = h("div", { class: "list tree" });
@@ -1701,7 +1747,7 @@ class WorkspaceView {
   }
 
   state() {
-    return this.activeScripts.size > 0 ? "Running" : this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
+    return this.scriptsRunning() ? "Running" : this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
   }
 
   refuseWork() {
@@ -1715,27 +1761,249 @@ class WorkspaceView {
     return true;
   }
 
+  scriptList() {
+    return this.scripts.entries.flatMap(entry => [entry, ...entry.children]);
+  }
+
+  scriptFind(path) {
+    return this.scriptList().find(entry => entry.path === path) ?? null;
+  }
+
+  scriptActive(entry) {
+    return entry.state === "Running" || entry.state === "Pending";
+  }
+
+  scriptsRunning() {
+    return this.scripts.entries.some(entry => this.scriptActive(entry));
+  }
+
+  scriptDisplayed() {
+    const selected = this.scriptFind(this.scripts.selected);
+    return selected?.isTask ? selected.children.find(entry => entry.path === this.scripts.child) ?? null : selected;
+  }
+
+  pickChild() {
+    const selected = this.scriptFind(this.scripts.selected);
+    this.scripts.child = selected?.isTask ? (selected.children.find(entry => entry.state === "Running") ?? selected.children[0])?.path ?? null : null;
+  }
+
+  addScript(run) {
+    const entry = { path: run.path, name: run.name, isTask: run.isTask === true, taskPath: run.taskPath ?? null, state: run.state, output: run.output ?? "", trimmed: run.trimmed === true, children: [] };
+
+    if (entry.taskPath) {
+      const parent = this.scripts.entries.find(item => item.path === entry.taskPath);
+      parent?.children.push(entry);
+
+      if (parent && parent.path === this.scripts.selected && !this.scripts.child) {
+        this.scripts.child = entry.path;
+      }
+    } else {
+      this.scripts.entries.push(entry);
+    }
+
+    return entry;
+  }
+
   async loadScripts() {
-    try {
-      const scripts = await this.connection.getScripts(this.info.id);
-      this.activeScripts = new Set((scripts.runs ?? []).filter(run => run.state === "Running" || run.state === "Pending").map(run => run.path));
-      this.applyState();
-    } catch (exception) {
+    const result = await attempt(() => this.connection.getScripts(this.info.id), this.scriptError);
+
+    if (result.ok) {
+      const viewing = this.scripts.selected;
+      this.scripts.entries = [];
+
+      for (const run of result.value.runs ?? []) {
+        this.addScript(run);
+      }
+
+      this.scripts.selected = this.scripts.entries.some(entry => entry.path === viewing) ? viewing : null;
+      this.pickChild();
+    }
+
+    this.scripts.loaded = true;
+
+    for (const event of this.scripts.early.splice(0)) {
+      this.applyScript(event);
+    }
+
+    this.scriptsChanged();
+  }
+
+  receiveScript(event) {
+    if (this.scripts.loaded) {
+      this.applyScript(event);
+
+      if (event.kind === "ScriptOutput") {
+        this.showScriptOutput();
+      } else {
+        this.scriptsChanged();
+      }
+    } else {
+      this.scripts.early.push(event);
     }
   }
 
-  trackScript(event) {
+  applyScript(event) {
     if (event.kind === "ScriptChanged" && event.script) {
-      if (event.script.state === "Running" || event.script.state === "Pending") {
-        this.activeScripts.add(event.script.path);
+      const run = event.script;
+      const existing = this.scriptFind(run.path);
+
+      if (existing) {
+        existing.state = run.state;
+
+        if (run.state === "Running" && run.taskPath && this.scriptFind(this.scripts.selected)?.children.includes(existing)) {
+          this.scripts.child = existing.path;
+        }
       } else {
-        this.activeScripts.delete(event.script.path);
+        const added = this.addScript(run);
+
+        if (run.path === this.scripts.wanted && !added.taskPath) {
+          this.scripts.wanted = null;
+          this.scripts.selected = added.path;
+          this.pickChild();
+        }
       }
-    } else {
-      this.activeScripts.delete(event.path);
+    } else if (event.kind === "ScriptOutput" && event.path) {
+      const target = this.scriptFind(event.path);
+
+      if (target) {
+        target.output += event.text ?? "";
+
+        if (target.output.length > 500000) {
+          target.output = target.output.slice(-500000);
+          target.trimmed = true;
+        }
+      }
+    } else if (event.kind === "ScriptRemoved" && event.path) {
+      const top = this.scripts.entries.findIndex(entry => entry.path === event.path);
+
+      if (top >= 0) {
+        this.scripts.entries.splice(top, 1);
+
+        if (this.scripts.selected === event.path) {
+          this.scripts.selected = null;
+          this.scripts.child = null;
+        }
+      } else {
+        for (const entry of this.scripts.entries) {
+          const at = entry.children.findIndex(item => item.path === event.path);
+
+          if (at >= 0) {
+            entry.children.splice(at, 1);
+
+            if (this.scripts.child === event.path) {
+              this.scripts.child = entry.children[0]?.path ?? null;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  scriptsChanged() {
+    this.renderScripts();
+    this.renderTree();
+    this.applyState();
+  }
+
+  shownScript(entry) {
+    return entry.output.length > 100000 ? `... earlier output is not shown (copy gives all of it) ...\n${entry.output.slice(-100000)}` : entry.trimmed ? `... earlier output was cut ...\n${entry.output}` : entry.output;
+  }
+
+  showScriptOutput() {
+    const displayed = this.scriptDisplayed();
+    const scroller = this.scriptScroller;
+    const stick = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 24;
+    this.scriptOutput.textContent = displayed ? this.shownScript(displayed) : "";
+
+    if (stick) {
+      scroller.scrollTop = scroller.scrollHeight;
+    }
+  }
+
+  renderScripts() {
+    const selected = this.scriptFind(this.scripts.selected);
+    const displayed = this.scriptDisplayed();
+    this.scriptPick.hidden = this.scripts.entries.length === 0;
+    this.scriptSelect.replaceChildren(h("option", { value: "" }, "Select a script…"), ...this.scripts.entries.map(entry => h("option", { value: entry.path }, `${entry.state === "Running" ? "● " : ""}${entry.path}`)));
+    this.scriptSelect.value = selected?.path ?? "";
+    this.scriptRemove.hidden = !selected || this.scriptActive(selected);
+    this.scriptChildren.hidden = !selected?.isTask;
+    this.scriptChildren.replaceChildren(...(selected?.isTask ? selected.children.map(entry => h("button", { class: entry.path === this.scripts.child ? "on" : "", onclick: () => this.selectScriptChild(entry.path) }, `${entry.state === "Running" ? "● " : ""}${entry.name}`)) : []));
+    this.scriptBar.hidden = !displayed;
+    this.scriptName.textContent = displayed?.name ?? "";
+    const labels = { Running: ["● Running…", ""], Succeeded: ["✓ Succeeded", "ok"], Stopped: ["⊘ Stopped", ""], Skipped: ["⊘ Skipped", ""], Failed: ["✗ Failed", "bad"] };
+    const [label, tone] = labels[displayed?.state] ?? ["", ""];
+    this.scriptState.textContent = label;
+    this.scriptState.className = `state ${tone}`;
+    this.scriptStop.hidden = !selected || !this.scriptActive(selected);
+    this.scriptEmpty.hidden = !!displayed;
+    this.scriptOutput.hidden = !displayed;
+    this.scriptInputBar.hidden = !displayed || displayed.state !== "Running" || displayed.isTask;
+    this.showScriptOutput();
+  }
+
+  selectScript(path) {
+    this.scripts.selected = path || null;
+    this.pickChild();
+    this.renderScripts();
+    this.scriptScroller.scrollTop = this.scriptScroller.scrollHeight;
+  }
+
+  selectScriptChild(path) {
+    this.scripts.child = path;
+    this.renderScripts();
+    this.scriptScroller.scrollTop = this.scriptScroller.scrollHeight;
+  }
+
+  async runScript(path) {
+    this.showSide("script");
+    const state = this.state();
+
+    if (state !== "Ready") {
+      this.scriptError.set(state === "Running" ? "A script is already running." : state === "Managing" ? "Wait for git to finish before running a script." : "Wait for the AI to finish before running a script.");
+      return;
     }
 
-    this.applyState();
+    this.scripts.wanted = path;
+
+    if (!(await attempt(() => this.connection.runScript(this.info.id, path), this.scriptError)).ok) {
+      this.scripts.wanted = null;
+    }
+  }
+
+  async stopScript() {
+    if (this.scripts.selected) {
+      await attempt(() => this.connection.stopScript(this.info.id, this.scripts.selected), this.scriptError);
+    }
+  }
+
+  async sendScriptInput() {
+    const displayed = this.scriptDisplayed();
+    const text = this.scriptInput.value;
+
+    if (!displayed || !text) {
+      return;
+    }
+
+    this.scriptInput.value = "";
+
+    if (!(await attempt(() => this.connection.sendScriptInput(this.info.id, displayed.path, text), this.scriptError)).ok && !this.scriptInput.value) {
+      this.scriptInput.value = text;
+    }
+  }
+
+  async removeScript() {
+    if (this.scripts.selected) {
+      await attempt(() => this.connection.removeScript(this.info.id, this.scripts.selected), this.scriptError);
+    }
+  }
+
+  copyScriptOutput() {
+    const displayed = this.scriptDisplayed();
+
+    if (displayed) {
+      navigator.clipboard?.writeText(displayed.output);
+    }
   }
 
   applyState() {
@@ -1810,8 +2078,8 @@ class WorkspaceView {
       return;
     }
 
-    if (event.kind === "ScriptChanged" || event.kind === "ScriptRemoved") {
-      this.trackScript(event);
+    if (event.kind === "ScriptChanged" || event.kind === "ScriptOutput" || event.kind === "ScriptRemoved") {
+      this.receiveScript(event);
       return;
     }
 
@@ -2117,16 +2385,19 @@ class WorkspaceView {
   renderTree() {
     const scroll = this.fileList.scrollTop;
     const open = this.openPath();
+    const active = new Set(this.scriptList().filter(entry => this.scriptActive(entry)).map(entry => entry.path));
+    const runnable = node => !node.entry.isFolder && /\.(cs|task)$/i.test(node.entry.name);
     const rows = (nodes, depth) => nodes.flatMap(node => [
       h("div", {
-        class: `row${this.statusClass(this.statusOf(node.entry.path, node.entry.isFolder))}${!node.entry.isFolder && node.entry.path === open ? " on" : ""}`,
+        class: `row${this.statusClass(this.statusOf(node.entry.path, node.entry.isFolder))}${!node.entry.isFolder && node.entry.path === open ? " on" : ""}${runnable(node) && active.has(node.entry.path) ? " running" : ""}`,
         style: `padding-left:${8 + depth * 16}px`,
         onclick: () => this.choose(node),
+        ondblclick: () => runnable(node) && this.runScript(node.entry.path),
         oncontextmenu: event => {
           event.preventDefault();
           this.showMenu(event, [{ label: "Copy Name", action: () => navigator.clipboard?.writeText(node.entry.name) }, { label: "Copy Relative Path", action: () => this.copyPath(node, false) }, { label: "Copy Absolute Path", action: () => this.copyPath(node, true) }]);
         } },
-        h("span", { class: "slot" }, icon(node.entry.isFolder ? "folder" : "file")),
+        h("span", { class: "slot" }, icon(node.entry.isFolder ? "folder" : runnable(node) ? (/\.task$/i.test(node.entry.name) ? "task" : "script") : "file")),
         h("div", { class: "name" }, node.entry.name)),
       ...(node.entry.isFolder && node.expanded ? rows(node.children, depth + 1) : []),
     ]);
@@ -2440,7 +2711,7 @@ class WorkspaceView {
     const status = this.gitStatus;
     this.versionWrap.hidden = !status.isRepo;
     this.changesToggle.hidden = !status.isRepo;
-    this.tabs.hidden = !status.isRepo;
+    this.historyTab.hidden = !status.isRepo;
     this.versionTitle.textContent = status.branch ?? status.tag ?? (status.commit ? "Detached head" : "No commits");
     const tag = status.branch ? status.tag : null;
     this.versionTag.textContent = tag ?? "";
@@ -2657,10 +2928,12 @@ class WorkspaceView {
   }
 
   showSide(name) {
-    this.side = name === "history" && this.gitStatus.isRepo ? "history" : "chat";
+    this.side = name === "history" && this.gitStatus.isRepo ? "history" : name === "script" ? "script" : "chat";
     this.chatBody.hidden = this.side !== "chat";
+    this.scriptBody.hidden = this.side !== "script";
     this.historyBody.hidden = this.side !== "history";
     this.chatTab.classList.toggle("on", this.side === "chat");
+    this.scriptTab.classList.toggle("on", this.side === "script");
     this.historyTab.classList.toggle("on", this.side === "history");
 
     if (this.side === "history") {
@@ -2671,6 +2944,8 @@ class WorkspaceView {
       this.loadHistory(true);
     } else if (this.side === "chat") {
       this.scrollToEnd();
+    } else if (this.side === "script") {
+      this.scriptScroller.scrollTop = this.scriptScroller.scrollHeight;
     }
   }
 

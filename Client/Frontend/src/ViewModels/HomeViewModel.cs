@@ -261,7 +261,7 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool IsWorking => active?.IsWorking ?? false;
 
     /// <summary>
-    /// Gets a value indicating whether the client is the desktop one, which has its own window controls, runs scripts and offers the workspace folder on the machine.
+    /// Gets a value indicating whether the client is the desktop one, which has its own window controls and offers the workspace folder on the machine.
     /// </summary>
     public bool IsDesktop => layout == ClientLayout.Panels;
 
