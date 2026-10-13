@@ -264,6 +264,7 @@ button.refbtn .ref { margin: 0; }
 .overlay { position: absolute; inset: 0; background: var(--scrim); z-index: 10; }
 .drawer { position: absolute; top: 0; bottom: 0; left: 0; width: min(340px, 88vw); background: var(--surface); padding: 12px; display: flex; flex-direction: column; z-index: 11; }
 .drawer h2 { font-size: 22px; margin: 8px 8px 12px; }
+.drawer input[type=text] { margin-bottom: 8px; flex: none; }
 .drawer .list { margin-bottom: 8px; }
 .drawer .row { padding: 10px 8px 10px 14px; }
 .drawer .row .name small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
@@ -1189,6 +1190,8 @@ class Connection {
   renameGroup(groupId, name) { return this.request("RenameGroup", { groupId, name }).then(r => r.group); }
   moveGroup(groupId, parentId) { return this.request("MoveGroup", { groupId, parentId: parentId ?? undefined }).then(r => r.group); }
   deleteGroup(groupId) { return this.request("DeleteGroup", { groupId }); }
+  shiftWorkspace(workspaceId, offset) { return this.request("ShiftWorkspace", { workspaceId, offset }); }
+  shiftGroup(groupId, offset) { return this.request("ShiftGroup", { groupId, offset }); }
   listFolders(path) { return this.request("ListFolders", { path: path ?? undefined }).then(r => r.listing); }
   createFolder(path, name) { return this.request("CreateFolder", { path, name }).then(r => r.listing); }
   getHistory(workspaceId, before, limit) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit }).then(r => r.history); }
@@ -2977,9 +2980,12 @@ class Home {
       this.error.element);
     this.content.append(this.empty);
 
+    this.filter = "";
+    this.filterInput = h("input", { type: "text", placeholder: "Filter workspaces", oninput: () => { this.filter = this.filterInput.value; this.buildEntries(); this.renderDrawer(); } });
     this.drawerList = h("div", { class: "list" });
     this.drawer = h("div", { class: "drawer", hidden: true },
       h("h2", { class: "serif" }, "Workspaces"),
+      this.filterInput,
       this.drawerList,
       h("div", { class: "actions" },
         h("button", { class: "primary block", onclick: () => this.app.showNewWorkspace(this.connection, this) }, "New workspace"),
@@ -3179,25 +3185,53 @@ class Home {
 
   buildEntries() {
     this.entries = [];
-    this.addEntries(null, 0);
+    this.addEntries(null, 0, false);
   }
 
-  addEntries(parent, depth) {
+  get filtering() {
+    return this.filter.trim() !== "";
+  }
+
+  matchesText(text) {
+    return text.toLowerCase().includes(this.filter.trim().toLowerCase());
+  }
+
+  matchesWorkspace(workspace) {
+    return this.matchesText(folderName(workspace.folder)) || this.matchesText(workspace.folder);
+  }
+
+  holdsMatch(id) {
+    return this.workspaces.some(item => this.parentOf(item.groupId) === id && this.matchesWorkspace(item))
+      || this.children(id).some(child => this.matchesText(child.name) || this.holdsMatch(child.id));
+  }
+
+  addEntries(parent, depth, showAll) {
     for (const group of this.children(parent)) {
-      const collapsed = this.collapsed.has(group.id);
+      const shown = !this.filtering || showAll || this.matchesText(group.name);
+
+      if (!shown && !this.holdsMatch(group.id)) {
+        continue;
+      }
+
+      const collapsed = !this.filtering && this.collapsed.has(group.id);
       this.entries.push({ group, collapsed, depth });
 
       if (!collapsed) {
-        this.addEntries(group.id, depth + 1);
+        this.addEntries(group.id, depth + 1, shown && this.filtering);
       }
     }
 
-    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent)) {
+    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item)))) {
       this.entries.push({ workspace, depth });
     }
   }
 
   renderDrawer() {
+    if (this.filtering && this.entries.length === 0) {
+      this.drawerList.replaceChildren(h("div", { class: "muted", style: "padding:8px" }, "No workspaces match."));
+      return;
+    }
+
     this.drawerList.replaceChildren(...this.entries.map(entry => {
       const indent = `margin-left:${entry.depth * 18}px`;
 
@@ -3206,6 +3240,8 @@ class Home {
         const tool = (label, title, action) => h("button", { class: "flat", title, onclick: event => { event.stopPropagation(); action(); } }, label);
         return h("div", { class: "row group", style: indent, onclick: () => this.toggleGroup(group.id) },
           h("div", { class: "name" }, `${entry.collapsed ? "▸" : "▾"} ${group.name}`),
+          tool("▲", "Move up", () => this.shift(() => this.connection.shiftGroup(group.id, -1))),
+          tool("▼", "Move down", () => this.shift(() => this.connection.shiftGroup(group.id, 1))),
           tool("+", "New group inside", () => this.beginNewGroup(group)),
           tool("✎", "Rename group", () => this.beginRenameGroup(group)),
           tool("↪", "Move group", () => this.beginMove(null, group)),
@@ -3215,6 +3251,8 @@ class Home {
       const workspace = entry.workspace;
       return h("div", { class: `row${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
         h("div", { class: "name" }, folderName(workspace.folder), h("small", {}, workspace.folder)),
+        h("button", { class: "flat", title: "Move up", onclick: event => { event.stopPropagation(); this.shift(() => this.connection.shiftWorkspace(workspace.id, -1)); } }, "▲"),
+        h("button", { class: "flat", title: "Move down", onclick: event => { event.stopPropagation(); this.shift(() => this.connection.shiftWorkspace(workspace.id, 1)); } }, "▼"),
         h("button", { class: "flat", title: "Move workspace", onclick: event => { event.stopPropagation(); this.beginMove(workspace, null); } }, "↪"));
     }));
   }
@@ -3263,6 +3301,17 @@ class Home {
 
   nameBox(text, confirm) {
     return h("input", { type: "text", value: text, onkeydown: event => { if (event.key === "Enter") { confirm(); } } });
+  }
+
+  async shift(action) {
+    const result = await attempt(async () => { await action(); return this.connection.listWorkspaces(); }, this.error);
+
+    if (result.ok) {
+      this.workspaces = result.value.workspaces;
+      this.groups = result.value.groups;
+      this.buildEntries();
+      this.renderDrawer();
+    }
   }
 
   async submit(action, afterwards) {

@@ -536,31 +536,37 @@
     <Grid IsVisible="{Binding IsDrawerOpen}">
       <Border Background="{DynamicResource Scrim}" PointerPressed="CloseDrawer" />
       <Border Background="{DynamicResource Surface}" Width="340" HorizontalAlignment="Left" Padding="12">
-        <Grid RowDefinitions="Auto,*,Auto">
+        <Grid RowDefinitions="Auto,Auto,*,Auto">
           <TextBlock Grid.Row="0" Text="Workspaces" Classes="serif" FontSize="22" Margin="8,8,8,12" />
-          <ListBox Grid.Row="1" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}" Background="Transparent">
+          <TextBox Grid.Row="1" Text="{Binding Filter}" PlaceholderText="Filter workspaces" Margin="0,0,0,8" />
+          <ListBox Grid.Row="2" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}" Background="Transparent">
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Panel>
-                  <Grid IsVisible="{Binding IsGroup}" ColumnDefinitions="*,Auto,Auto,Auto,Auto" Margin="{Binding Indent}">
+                  <Grid IsVisible="{Binding IsGroup}" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" Margin="{Binding Indent}">
                     <TextBlock Grid.Column="0" Text="{Binding Text}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Button Grid.Column="1" Content="+" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginNewGroupCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="2" Content="✎" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginRenameGroupCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="3" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveGroupCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="4" Content="✕" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginDeleteGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="1" Content="▲" Classes="flat" Padding="8,4" ToolTip.Tip="Move up" Command="{Binding $parent[ListBox].DataContext.ShiftGroupUpCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="2" Content="▼" Classes="flat" Padding="8,4" ToolTip.Tip="Move down" Command="{Binding $parent[ListBox].DataContext.ShiftGroupDownCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="3" Content="+" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginNewGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="4" Content="✎" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginRenameGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="5" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveGroupCommand}" CommandParameter="{Binding Group}" />
+                    <Button Grid.Column="6" Content="✕" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginDeleteGroupCommand}" CommandParameter="{Binding Group}" />
                   </Grid>
-                  <Grid IsVisible="{Binding IsWorkspace}" ColumnDefinitions="*,Auto" Margin="{Binding Indent}">
+                  <Grid IsVisible="{Binding IsWorkspace}" ColumnDefinitions="*,Auto,Auto,Auto" Margin="{Binding Indent}">
                     <StackPanel Grid.Column="0">
                       <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" />
                       <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />
+                    <Button Grid.Column="1" Content="▲" Classes="flat" Padding="8,4" ToolTip.Tip="Move up" Command="{Binding $parent[ListBox].DataContext.ShiftWorkspaceUpCommand}" CommandParameter="{Binding Workspace}" />
+                    <Button Grid.Column="2" Content="▼" Classes="flat" Padding="8,4" ToolTip.Tip="Move down" Command="{Binding $parent[ListBox].DataContext.ShiftWorkspaceDownCommand}" CommandParameter="{Binding Workspace}" />
+                    <Button Grid.Column="3" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />
                   </Grid>
                 </Panel>
               </DataTemplate>
             </ListBox.ItemTemplate>
           </ListBox>
-          <StackPanel Grid.Row="2" Spacing="8" Margin="0,8,0,0">
+          <TextBlock Grid.Row="2" Text="No workspaces match." IsVisible="{Binding HasNoMatches}" Classes="muted" Margin="8,4" VerticalAlignment="Top" />
+          <StackPanel Grid.Row="3" Spacing="8" Margin="0,8,0,0">
             <Button Content="New workspace" Command="{Binding NewWorkspaceCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             <Button Content="Clone workspace" Command="{Binding CloneWorkspaceCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             <Button Content="New group" Command="{Binding BeginNewGroupCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />

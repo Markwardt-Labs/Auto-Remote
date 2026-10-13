@@ -33,6 +33,58 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task Filter_KeepsMatchingWorkspacesWithTheirGroupsAndOpensCollapsedGroups()
+    {
+        WorkspaceGroup clients = new() { Id = Guid.NewGuid(), Name = "Clients" };
+        WorkspaceGroup empty = new() { Id = Guid.NewGuid(), Name = "Empty" };
+        WorkspaceInfo acme = new() { Id = Guid.NewGuid(), Folder = "/work/acme", GroupId = clients.Id };
+        WorkspaceInfo other = new() { Id = Guid.NewGuid(), Folder = "/work/other", GroupId = clients.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([clients, empty], acme, other, first));
+        await model.Start();
+        model.SelectedEntry = model.Entries.First(entry => entry.Group == clients);
+
+        model.Filter = "ACM";
+
+        Assert.Equal([(object)clients, acme], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.False(model.HasNoMatches);
+
+        model.Filter = "client";
+
+        Assert.Equal([(object)clients, acme, other], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+
+        model.Filter = "/work/a";
+
+        Assert.Equal([(object)clients, acme, first], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+
+        model.Filter = "nothing";
+
+        Assert.Empty(model.Entries);
+        Assert.True(model.HasNoMatches);
+
+        model.Filter = " ";
+
+        Assert.Equal([(object)clients, empty, first], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.True(model.Entries[0].IsCollapsed);
+    }
+
+    [Fact]
+    public async Task ShiftCommands_AskTheServerAndShowTheNewOrder()
+    {
+        WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
+        await model.Start();
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([group], second, first));
+
+        model.ShiftWorkspaceUpCommand.Execute(second);
+
+        connection.Verify(x => x.ShiftWorkspace(second.Id, -1, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal([group, second, first], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+
+        model.ShiftGroupDownCommand.Execute(group);
+
+        connection.Verify(x => x.ShiftGroup(group.Id, 1, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Start_WithoutFocusingFirst_StaysBlankWithTheDrawerOpen()
     {
         await model.Start(null, false);

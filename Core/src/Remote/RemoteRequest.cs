@@ -106,6 +106,11 @@ public sealed record RemoteRequest
     public int? Skip { get; init; }
 
     /// <summary>
+    /// Gets how many places <see cref="RemoteCommand.ShiftWorkspace" /> or <see cref="RemoteCommand.ShiftGroup" /> moves the item: negative moves it up the list, positive down.
+    /// </summary>
+    public int? Offset { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether <see cref="RemoteCommand.DeleteWorkspace" /> also deletes the workspace's folder.
     /// </summary>
     public bool DeleteFolder { get; init; } = true;

@@ -59,6 +59,10 @@ internal sealed class HomeViewModel : ViewModelBase
         BeginMoveWorkspaceCommand = new AsyncCommand(workspace => BeginMove(EditMode.MoveWorkspace, workspace as WorkspaceInfo, null));
         BeginMoveGroupCommand = new AsyncCommand(group => BeginMove(EditMode.MoveGroup, null, group as WorkspaceGroup));
         ConfirmMoveCommand = new AsyncCommand(_ => Move());
+        ShiftWorkspaceUpCommand = new AsyncCommand(workspace => Shift(workspace as WorkspaceInfo, null, -1));
+        ShiftWorkspaceDownCommand = new AsyncCommand(workspace => Shift(workspace as WorkspaceInfo, null, 1));
+        ShiftGroupUpCommand = new AsyncCommand(group => Shift(null, group as WorkspaceGroup, -1));
+        ShiftGroupDownCommand = new AsyncCommand(group => Shift(null, group as WorkspaceGroup, 1));
         CancelEditCommand = new AsyncCommand(_ =>
         {
             EditMode = EditMode.None;
@@ -101,6 +105,8 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private string renameText = string.Empty;
 
+    private string filter = string.Empty;
+
     private bool deleteFolder = true;
 
     /// <summary>
@@ -122,6 +128,28 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the drawer rows: the group tree flattened in display order: each group, then what is inside it, then the workspaces in no group.
     /// </summary>
     public ObservableCollection<DrawerEntry> Entries { get; } = [];
+
+    /// <summary>
+    /// Gets or sets the text the drawer is filtered by: only workspaces whose name or folder contains it show, with the groups that hold them or whose name contains it (everything in such a group shows). Groups are all open while it is set.
+    /// </summary>
+    public string Filter
+    {
+        get => filter;
+        set
+        {
+            if (Set(ref filter, value ?? string.Empty))
+            {
+                BuildEntries();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the filter hides every row.
+    /// </summary>
+    public bool HasNoMatches => IsFiltering && Entries.Count == 0;
+
+    private bool IsFiltering => !string.IsNullOrWhiteSpace(filter);
 
     /// <summary>
     /// Gets or sets the tapped drawer row; tapping a workspace focuses it and tapping a group expands or collapses it.
@@ -468,6 +496,26 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand ConfirmMoveCommand { get; }
 
     /// <summary>
+    /// Gets the command that moves the workspace passed as its parameter up among the workspaces in its group.
+    /// </summary>
+    public AsyncCommand ShiftWorkspaceUpCommand { get; }
+
+    /// <summary>
+    /// Gets the command that moves the workspace passed as its parameter down among the workspaces in its group.
+    /// </summary>
+    public AsyncCommand ShiftWorkspaceDownCommand { get; }
+
+    /// <summary>
+    /// Gets the command that moves the group passed as its parameter up among the groups with the same parent.
+    /// </summary>
+    public AsyncCommand ShiftGroupUpCommand { get; }
+
+    /// <summary>
+    /// Gets the command that moves the group passed as its parameter down among the groups with the same parent.
+    /// </summary>
+    public AsyncCommand ShiftGroupDownCommand { get; }
+
+    /// <summary>
     /// Gets the command that closes the showing dialog.
     /// </summary>
     public AsyncCommand CancelEditCommand { get; }
@@ -484,11 +532,7 @@ internal sealed class HomeViewModel : ViewModelBase
 
         if (await Attempt(async () => catalog = await connection.ListWorkspaces(CancellationToken.None)))
         {
-            workspaces.Clear();
-            workspaces.AddRange(catalog!.Workspaces);
-            groups.Clear();
-            groups.AddRange(catalog.Groups);
-            collapsed.IntersectWith(groups.Select(group => group.Id));
+            Fill(catalog!);
 
             foreach (Guid stale in opened.Keys.Where(key => workspaces.All(workspace => workspace.Id != key)).ToList())
             {
@@ -502,6 +546,15 @@ internal sealed class HomeViewModel : ViewModelBase
             Selected = workspaces.FirstOrDefault(workspace => workspace.Id == focus) ?? (focusFirst ? Entries.FirstOrDefault(entry => entry.IsWorkspace)?.Workspace : null);
             IsDrawerOpen = Selected is null;
         }
+    }
+
+    private void Fill(WorkspaceCatalog catalog)
+    {
+        workspaces.Clear();
+        workspaces.AddRange(catalog.Workspaces);
+        groups.Clear();
+        groups.AddRange(catalog.Groups);
+        collapsed.IntersectWith(groups.Select(group => group.Id));
     }
 
     private WorkspaceViewModel Open(WorkspaceInfo workspace)
@@ -609,25 +662,39 @@ internal sealed class HomeViewModel : ViewModelBase
     {
         building = true;
         Entries.Clear();
-        AddEntries(null, 0);
+        AddEntries(null, 0, false);
         building = false;
+        Raise(nameof(HasNoMatches));
         SyncSelectedEntry();
     }
 
-    private void AddEntries(Guid? parent, int depth)
+    private bool Matches(WorkspaceInfo workspace) => workspace.Name.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase) || workspace.Folder.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private bool Matches(WorkspaceGroup group) => group.Name.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
+
+    private bool HoldsMatch(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && Matches(workspace)) || Children(group).Any(child => Matches(child) || HoldsMatch(child.Id));
+
+    private void AddEntries(Guid? parent, int depth, bool showAll)
     {
         foreach (WorkspaceGroup group in Children(parent))
         {
-            bool isCollapsed = collapsed.Contains(group.Id);
+            bool shown = !IsFiltering || showAll || Matches(group);
+
+            if (!shown && !HoldsMatch(group.Id))
+            {
+                continue;
+            }
+
+            bool isCollapsed = !IsFiltering && collapsed.Contains(group.Id);
             Entries.Add(new DrawerEntry { Group = group, IsCollapsed = isCollapsed, Depth = depth });
 
             if (!isCollapsed)
             {
-                AddEntries(group.Id, depth + 1);
+                AddEntries(group.Id, depth + 1, shown && IsFiltering);
             }
         }
 
-        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent))
+        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))))
         {
             Entries.Add(new DrawerEntry { Workspace = workspace, Depth = depth });
         }
@@ -726,6 +793,26 @@ internal sealed class HomeViewModel : ViewModelBase
         else if (editingGroup is not null && await Attempt(() => connection.MoveGroup(editingGroup.Id, destination.Id, CancellationToken.None)))
         {
             await Reload();
+        }
+    }
+
+    private async Task Shift(WorkspaceInfo? workspace, WorkspaceGroup? group, int offset)
+    {
+        WorkspaceCatalog? catalog = null;
+
+        if (workspace is null && group is null)
+        {
+            return;
+        }
+
+        if (await Attempt(async () =>
+        {
+            await (workspace is null ? connection.ShiftGroup(group!.Id, offset, CancellationToken.None) : connection.ShiftWorkspace(workspace.Id, offset, CancellationToken.None));
+            catalog = await connection.ListWorkspaces(CancellationToken.None);
+        }))
+        {
+            Fill(catalog!);
+            BuildEntries();
         }
     }
 

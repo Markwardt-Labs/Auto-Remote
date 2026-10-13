@@ -14,7 +14,7 @@ internal interface IWorkspaceManager
     Task Open(string path, CancellationToken cancellation);
 
     /// <summary>
-    /// Lists the groups and the workspaces, each ordered by name.
+    /// Lists the groups and the workspaces, each in its custom order.
     /// </summary>
     /// <param name="cancellation">Cancels the call.</param>
     /// <returns>The catalog.</returns>
@@ -70,7 +70,7 @@ internal interface IWorkspaceManager
     Task AttachAiSession(Guid id, Guid aiSessionId, CancellationToken cancellation);
 
     /// <summary>
-    /// Moves a workspace into a group, or out of any group.
+    /// Moves a workspace into a group, or out of any group; it goes to the end of that group.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="groupId">The group, or <see langword="null" /> for no group.</param>
@@ -108,6 +108,24 @@ internal interface IWorkspaceManager
     /// <returns>The moved group.</returns>
     /// <exception cref="RequestException">The group or parent is unknown, the parent is the group or inside it, or the name is already used in the new place.</exception>
     Task<WorkspaceGroup> MoveGroup(Guid id, Guid? parentId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Moves a workspace up or down among the workspaces in its group.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="offset">How many places to move: negative is up, positive is down. It stops at the first or last place.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <exception cref="RequestException">The workspace is unknown.</exception>
+    Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation);
+
+    /// <summary>
+    /// Moves a group up or down among the groups with the same parent.
+    /// </summary>
+    /// <param name="id">The group identifier.</param>
+    /// <param name="offset">How many places to move: negative is up, positive is down. It stops at the first or last place.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <exception cref="RequestException">The group is unknown.</exception>
+    Task ShiftGroup(Guid id, int offset, CancellationToken cancellation);
 
     /// <summary>
     /// Deletes a group; the workspaces and groups in it are kept and move into its parent.
@@ -250,7 +268,16 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 throw new RequestException("The group no longer exists.");
             }
 
-            return await Replace(workspace with { GroupId = groupId }, cancellation);
+            if (groupId == workspace.GroupId)
+            {
+                return workspace;
+            }
+
+            WorkspaceInfo moved = workspace with { GroupId = groupId };
+            workspaces.Remove(workspace);
+            workspaces.Add(moved);
+            await store.Save(Snapshot(), cancellation);
+            return moved;
         }
     }
 
@@ -306,9 +333,37 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             ValidateGroupName(group.Name, parentId, id);
             WorkspaceGroup moved = group with { ParentId = parentId };
-            groups[groups.IndexOf(group)] = moved;
+
+            if (parentId != group.ParentId)
+            {
+                groups.Remove(group);
+                groups.Add(moved);
+            }
+
             await store.Save(Snapshot(), cancellation);
             return moved;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo workspace = Find(id);
+            Shift(workspaces, workspace, offset, other => other.GroupId == workspace.GroupId);
+            await store.Save(Snapshot(), cancellation);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task ShiftGroup(Guid id, int offset, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceGroup group = FindGroup(id);
+            Shift(groups, group, offset, other => other.ParentId == group.ParentId);
+            await store.Save(Snapshot(), cancellation);
         }
     }
 
@@ -369,11 +424,31 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         return new Releaser(gate);
     }
 
-    private WorkspaceCatalog Snapshot() => new()
+    private WorkspaceCatalog Snapshot() => new() { Groups = [.. groups], Workspaces = [.. workspaces] };
+
+    private void Shift<T>(List<T> items, T item, int offset, Func<T, bool> isSibling)
     {
-        Groups = [.. groups.OrderBy(group => group.Name, StringComparer.OrdinalIgnoreCase)],
-        Workspaces = [.. workspaces.OrderBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase)]
-    };
+        int step = Math.Sign(offset);
+        int position = items.IndexOf(item);
+
+        for (int remaining = Math.Abs(offset); remaining > 0; remaining--)
+        {
+            int next = position + step;
+
+            while (next >= 0 && next < items.Count && !isSibling(items[next]))
+            {
+                next += step;
+            }
+
+            if (next < 0 || next >= items.Count)
+            {
+                return;
+            }
+
+            (items[position], items[next]) = (items[next], items[position]);
+            position = next;
+        }
+    }
 
     private async Task<WorkspaceInfo> Replace(WorkspaceInfo updated, CancellationToken cancellation)
     {

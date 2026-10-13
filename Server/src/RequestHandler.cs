@@ -84,6 +84,12 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.DeleteGroup:
                 await workspaces.DeleteGroup(RequireGroup(request), cancellation);
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.ShiftWorkspace:
+                await workspaces.ShiftWorkspace(RequireWorkspace(request), request.Offset ?? throw new RequestException("The request needs an offset."), cancellation);
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.ShiftGroup:
+                await workspaces.ShiftGroup(RequireGroup(request), request.Offset ?? throw new RequestException("The request needs an offset."), cancellation);
+                return new RemoteResponse { Id = 0 };
             case RemoteCommand.DeleteWorkspace:
                 await RequireIdle(request);
                 await workspaces.Delete(RequireWorkspace(request), request.DeleteFolder, cancellation);

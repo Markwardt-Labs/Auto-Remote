@@ -14,7 +14,7 @@ internal interface IServerConnection : IAsyncDisposable
     /// Lists the server's workspaces and the groups they are organized into.
     /// </summary>
     /// <param name="cancellation">Cancels the wait.</param>
-    /// <returns>The groups and workspaces, each ordered by name.</returns>
+    /// <returns>The groups and workspaces, each in its custom order.</returns>
     Task<WorkspaceCatalog> ListWorkspaces(CancellationToken cancellation);
 
     /// <summary>
@@ -95,6 +95,24 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="cancellation">Cancels the wait.</param>
     /// <exception cref="RemoteException">The server refused.</exception>
     Task DeleteGroup(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Moves a workspace up or down among the workspaces in its group.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="offset">How many places to move: negative is up, positive is down.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation);
+
+    /// <summary>
+    /// Moves a group up or down among the groups with the same parent.
+    /// </summary>
+    /// <param name="id">The group identifier.</param>
+    /// <param name="offset">How many places to move: negative is up, positive is down.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task ShiftGroup(Guid id, int offset, CancellationToken cancellation);
 
     /// <summary>
     /// Deletes a workspace.
@@ -640,6 +658,12 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task DeleteGroup(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.DeleteGroup, GroupId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ShiftWorkspace, WorkspaceId = id, Offset = offset }, cancellation);
+
+    /// <inheritdoc />
+    public async Task ShiftGroup(Guid id, int offset, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ShiftGroup, GroupId = id, Offset = offset }, cancellation);
 
     /// <inheritdoc />
     public async Task DeleteWorkspace(Guid id, bool deleteFolder, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = id, DeleteFolder = deleteFolder }, cancellation);

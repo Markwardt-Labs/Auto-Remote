@@ -6,12 +6,12 @@ namespace Markwardt.AutoRemote;
 public sealed record WorkspaceCatalog
 {
     /// <summary>
-    /// Gets the groups, ordered by name.
+    /// Gets the groups in their custom order, which applies among the groups sharing a parent.
     /// </summary>
     public required IReadOnlyList<WorkspaceGroup> Groups { get; init; }
 
     /// <summary>
-    /// Gets the workspaces, ordered by name.
+    /// Gets the workspaces in their custom order, which applies among the workspaces sharing a group.
     /// </summary>
     public required IReadOnlyList<WorkspaceInfo> Workspaces { get; init; }
 }

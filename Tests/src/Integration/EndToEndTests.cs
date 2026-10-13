@@ -272,6 +272,11 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal(other.Id, (await connection.MoveGroup(group.Id, other.Id, CancellationToken.None)).ParentId);
         Assert.Equal(group.Id, (await connection.ListWorkspaces(CancellationToken.None)).Groups.Single(listedGroup => listedGroup.Id == nested.Id).ParentId);
 
+        WorkspaceGroup extra = await connection.CreateGroup("Extra", null, CancellationToken.None);
+        await connection.ShiftGroup(extra.Id, -1, CancellationToken.None);
+        await connection.ShiftWorkspace(workspace.Id, 1, CancellationToken.None);
+        Assert.Equal([extra.Id, other.Id], (await connection.ListWorkspaces(CancellationToken.None)).Groups.Where(listedGroup => listedGroup.ParentId is null).Select(listedGroup => listedGroup.Id));
+
         await connection.DeleteGroup(group.Id, CancellationToken.None);
         catalog = await connection.ListWorkspaces(CancellationToken.None);
         Assert.Equal(other.Id, Assert.Single(catalog.Workspaces).GroupId);

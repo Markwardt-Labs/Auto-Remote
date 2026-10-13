@@ -45,6 +45,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
 | `before` | number | no | `GetHistory` only: read the messages before this position in the conversation; omitted means the newest. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
+| `offset` | number | `ShiftWorkspace`, `ShiftGroup` | How many places to move: negative is up, positive is down. |
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
 | `service` | string | `ConfigureWorkspace`, `GetUsage` | `ClaudeCode` or `Codex`. |
 | `model` | string | `ConfigureWorkspace` | For `ClaudeCode`: `Sonnet`, `Opus` or `Haiku`. For `Codex`: `Terra`, `Sol` or `Luna`. Refused when the service does not offer it. |
@@ -100,14 +101,16 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 
 | Command | Request properties | Response property | Notes |
 | --- | --- | --- | --- |
-| `ListWorkspaces` | none | `catalog` | Workspaces and groups, each ordered by name. |
+| `ListWorkspaces` | none | `catalog` | Workspaces and groups, each in its custom order. |
 | `CreateWorkspace` | `path` (existing folder on the server) | `workspace` | |
 | `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused while the AI is working or a script is running in the workspace. |
 | `ConfigureWorkspace` | `workspaceId`, `service`, `model`, `effort` | `workspace` | Applies from the next AI process: an idle one is ended now, a working one finishes first. Switching the service detaches the workspace's AI session, since sessions belong to one service. |
-| `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. |
+| `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. It goes to the end of the group. |
 | `CreateGroup` | `name`, optional `parentId` | `group` | Names are trimmed, must be non-empty and unique ignoring case among the groups with the same parent. The parent must exist. |
 | `RenameGroup` | `groupId`, `name` | `group` | Same name rules as `CreateGroup`. |
-| `MoveGroup` | `groupId`, optional `parentId` | `group` | Omitting `parentId` moves it to the top level. Refused into itself or anything inside it, and when the name is taken in the new place. |
+| `MoveGroup` | `groupId`, optional `parentId` | `group` | Omitting `parentId` moves it to the top level. Refused into itself or anything inside it, and when the name is taken in the new place. It goes to the end of its new parent. |
+| `ShiftWorkspace` | `workspaceId`, `offset` | none | Moves the workspace among the workspaces in its group; it stops at the first or last place. |
+| `ShiftGroup` | `groupId`, `offset` | none | Moves the group among the groups with the same parent; it stops at the first or last place. |
 | `DeleteGroup` | `groupId` | none | Its workspaces and groups are kept and move into its parent. |
 | `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused while the AI is working or a script is running in the workspace. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
@@ -168,8 +171,8 @@ Nested objects are shown after the table of the object that contains them. Optio
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `groups` | array of group | The groups, ordered by name. |
-| `workspaces` | array of workspace | The workspaces, ordered by name. |
+| `groups` | array of group | The groups in their custom order. |
+| `workspaces` | array of workspace | The workspaces in their custom order. |
 
 **group** (also the items of `catalog.groups`)
 

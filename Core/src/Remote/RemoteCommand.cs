@@ -52,6 +52,16 @@ public enum RemoteCommand
     DeleteGroup,
 
     /// <summary>
+    /// Moves <see cref="RemoteRequest.WorkspaceId" /> up or down among the workspaces in its group by <see cref="RemoteRequest.Offset" /> places.
+    /// </summary>
+    ShiftWorkspace,
+
+    /// <summary>
+    /// Moves <see cref="RemoteRequest.GroupId" /> up or down among the groups with the same parent by <see cref="RemoteRequest.Offset" /> places.
+    /// </summary>
+    ShiftGroup,
+
+    /// <summary>
     /// Deletes <see cref="RemoteRequest.WorkspaceId" />, and its folder too when <see cref="RemoteRequest.DeleteFolder" /> is set.
     /// </summary>
     DeleteWorkspace,

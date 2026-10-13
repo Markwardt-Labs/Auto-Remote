@@ -54,12 +54,76 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
-    public async Task List_OrdersByName()
+    public async Task List_KeepsCreationOrderAndRenameKeepsPlace()
     {
         await manager.Create("/work/zeta", CancellationToken.None);
-        await manager.Create("/work/Alpha", CancellationToken.None);
+        WorkspaceInfo alpha = await manager.Create("/work/Alpha", CancellationToken.None);
+        folders.Setup(x => x.Rename("/work/Alpha", "omega", It.IsAny<CancellationToken>())).ReturnsAsync("/work/omega");
 
-        Assert.Equal(["Alpha", "zeta"], (await manager.List(CancellationToken.None)).Workspaces.Select(workspace => workspace.Name));
+        await manager.Rename(alpha.Id, "omega", CancellationToken.None);
+
+        Assert.Equal(["zeta", "omega"], (await manager.List(CancellationToken.None)).Workspaces.Select(workspace => workspace.Name));
+    }
+
+    [Fact]
+    public async Task ShiftWorkspace_MovesAmongWorkspacesOfTheSameGroupAndStopsAtTheEnds()
+    {
+        WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
+        WorkspaceInfo a = await manager.Create("/work/a", CancellationToken.None);
+        WorkspaceInfo b = await manager.Create("/work/b", CancellationToken.None);
+        WorkspaceInfo c = await manager.Create("/work/c", CancellationToken.None);
+        WorkspaceInfo d = await manager.Create("/work/d", CancellationToken.None);
+        await manager.Move(b.Id, group.Id, CancellationToken.None);
+        await manager.Move(d.Id, group.Id, CancellationToken.None);
+
+        await manager.ShiftWorkspace(c.Id, -1, CancellationToken.None);
+        Assert.Equal(["c", "a"], await Names(null));
+
+        await manager.ShiftWorkspace(d.Id, -1, CancellationToken.None);
+        Assert.Equal(["d", "b"], await Names(group.Id));
+
+        await manager.ShiftWorkspace(d.Id, -1, CancellationToken.None);
+        await manager.ShiftWorkspace(a.Id, 5, CancellationToken.None);
+        Assert.Equal(["d", "b"], await Names(group.Id));
+        Assert.Equal(["c", "a"], await Names(null));
+
+        await manager.ShiftWorkspace(c.Id, 1, CancellationToken.None);
+        Assert.Equal(["a", "c"], await Names(null));
+        store.Verify(x => x.Save(It.IsAny<WorkspaceCatalog>(), It.IsAny<CancellationToken>()), Times.AtLeast(8));
+        await Assert.ThrowsAsync<RequestException>(() => manager.ShiftWorkspace(Guid.NewGuid(), 1, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Move_PutsWorkspaceAtTheEndOfTheGroup()
+    {
+        WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
+        WorkspaceInfo a = await manager.Create("/work/a", CancellationToken.None);
+        WorkspaceInfo b = await manager.Create("/work/b", CancellationToken.None);
+        WorkspaceInfo c = await manager.Create("/work/c", CancellationToken.None);
+        await manager.Move(c.Id, group.Id, CancellationToken.None);
+
+        await manager.Move(a.Id, group.Id, CancellationToken.None);
+
+        Assert.Equal(["c", "a"], await Names(group.Id));
+        Assert.Equal(["b"], await Names(null));
+    }
+
+    [Fact]
+    public async Task ShiftGroup_MovesAmongGroupsWithTheSameParent()
+    {
+        WorkspaceGroup first = await manager.CreateGroup("First", null, CancellationToken.None);
+        WorkspaceGroup second = await manager.CreateGroup("Second", null, CancellationToken.None);
+        WorkspaceGroup inner = await manager.CreateGroup("Inner", first.Id, CancellationToken.None);
+        WorkspaceGroup third = await manager.CreateGroup("Third", null, CancellationToken.None);
+
+        await manager.ShiftGroup(third.Id, -1, CancellationToken.None);
+        await manager.ShiftGroup(first.Id, 1, CancellationToken.None);
+        await manager.ShiftGroup(inner.Id, 1, CancellationToken.None);
+
+        WorkspaceCatalog catalog = await manager.List(CancellationToken.None);
+        Assert.Equal(["Third", "First", "Second"], catalog.Groups.Where(group => group.ParentId is null).Select(group => group.Name));
+        Assert.Equal(["Inner"], catalog.Groups.Where(group => group.ParentId == first.Id).Select(group => group.Name));
+        await Assert.ThrowsAsync<RequestException>(() => manager.ShiftGroup(Guid.NewGuid(), 1, CancellationToken.None));
     }
 
     [Fact]
@@ -177,13 +241,13 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
-    public async Task Groups_CreateRenameAndListOrderedByName()
+    public async Task Groups_CreateRenameAndListInCreationOrder()
     {
         WorkspaceGroup zeta = await manager.CreateGroup(" Zeta ", null, CancellationToken.None);
         await manager.CreateGroup("alpha", null, CancellationToken.None);
         await manager.RenameGroup(zeta.Id, "Omega", CancellationToken.None);
 
-        Assert.Equal(["alpha", "Omega"], (await manager.List(CancellationToken.None)).Groups.Select(group => group.Name));
+        Assert.Equal(["Omega", "alpha"], (await manager.List(CancellationToken.None)).Groups.Select(group => group.Name));
     }
 
     [Fact]
@@ -283,4 +347,6 @@ public sealed class WorkspaceManagerTests
 
     [Fact]
     public async Task Get_ThrowsForUnknownWorkspace() => await Assert.ThrowsAsync<RequestException>(() => manager.Get(Guid.NewGuid(), CancellationToken.None));
+
+    private async Task<IReadOnlyList<string>> Names(Guid? groupId) => [.. (await manager.List(CancellationToken.None)).Workspaces.Where(workspace => workspace.GroupId == groupId).Select(workspace => workspace.Name)];
 }

@@ -213,6 +213,18 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
+    public async Task Handle_ShiftCommands_PassTheOffsetAndNeedOne()
+    {
+        Guid group = Guid.NewGuid();
+
+        Assert.Null((await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ShiftWorkspace, WorkspaceId = workspace.Id, Offset = -1 }, owner, CancellationToken.None)).Error);
+        Assert.Null((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ShiftGroup, GroupId = group, Offset = 1 }, owner, CancellationToken.None)).Error);
+        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.ShiftGroup, GroupId = group }, owner, CancellationToken.None)).Error);
+        workspaces.Verify(x => x.ShiftWorkspace(workspace.Id, -1, It.IsAny<CancellationToken>()), Times.Once);
+        workspaces.Verify(x => x.ShiftGroup(group, 1, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Handle_GroupCommands_UseManager()
     {
         WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
