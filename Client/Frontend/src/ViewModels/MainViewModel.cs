@@ -15,8 +15,29 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     public object? Current
     {
         get => current;
-        private set => Set(ref current, value);
+        private set
+        {
+            if (current is HomeViewModel previous)
+            {
+                previous.PropertyChanged -= HomeChanged;
+            }
+
+            if (Set(ref current, value))
+            {
+                if (value is HomeViewModel home)
+                {
+                    home.PropertyChanged += HomeChanged;
+                }
+
+                Raise(nameof(WindowTitle));
+            }
+        }
     }
+
+    /// <summary>
+    /// Gets the title for the window of a desktop client: the open workspace's name, or the app's name when none is open.
+    /// </summary>
+    public string WindowTitle => current is HomeViewModel home ? home.Title : "Auto Remote";
 
     /// <summary>
     /// Opens the app: reconnects to the saved server, or asks for one when none is saved or it cannot be reached.
@@ -39,6 +60,14 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         catch (Exception exception) when (exception is IOException or SocketException or UnauthorizedAccessException)
         {
             ShowConnect(saved, exception.Message);
+        }
+    }
+
+    private void HomeChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(HomeViewModel.Title))
+        {
+            Raise(nameof(WindowTitle));
         }
     }
 

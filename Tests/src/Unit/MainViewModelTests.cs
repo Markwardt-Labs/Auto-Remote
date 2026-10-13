@@ -55,4 +55,23 @@ public sealed class MainViewModelTests
         Assert.Equal("timed out", connect.Error);
     }
 
+    [Fact]
+    public async Task WindowTitle_FollowsTheOpenWorkspaceAndFallsBackToTheAppName()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/acme" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        List<string?> raised = [];
+        model.PropertyChanged += (_, e) => raised.Add(e.PropertyName);
+
+        await model.Start();
+        HomeViewModel home = Assert.IsType<HomeViewModel>(model.Current);
+        Assert.Equal("Auto Remote", model.WindowTitle);
+
+        home.Selected = workspace;
+
+        Assert.Equal("acme", model.WindowTitle);
+        Assert.Contains(nameof(MainViewModel.WindowTitle), raised);
+    }
 }

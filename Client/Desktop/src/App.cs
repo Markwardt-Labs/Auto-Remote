@@ -12,17 +12,20 @@ public sealed class App : ClientApp
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
+            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args));
             Window window = new()
             {
                 Title = "Auto Remote",
+                Icon = new WindowIcon(AssetLoader.Open(new Uri("avares://Markwardt.AutoRemote.DesktopClient/Assets/app.png"))),
                 Width = 1280,
                 Height = 800,
                 MinWidth = 640,
                 MinHeight = 480,
                 WindowDecorations = WindowDecorations.None,
-                Content = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args)),
+                Content = view,
             };
 
+            window.Bind(Window.TitleProperty, new Binding("DataContext.WindowTitle") { Source = view });
             window.Loaded += (_, _) => window.WindowState = WindowState.Maximized;
             desktop.MainWindow = window;
         }

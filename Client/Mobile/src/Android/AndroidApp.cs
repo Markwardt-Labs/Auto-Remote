@@ -9,7 +9,7 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 /// <param name="handle">The native handle supplied by the Android runtime.</param>
 /// <param name="transfer">How the runtime hands over ownership of the handle.</param>
-[Application]
+[Application(Icon = "@mipmap/appicon")]
 public sealed class AndroidApp(IntPtr handle, JniHandleOwnership transfer) : AvaloniaAndroidApplication<App>(handle, transfer)
 {
 }
