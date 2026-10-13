@@ -311,6 +311,7 @@ button.refbtn .ref { margin: 0; }
 "use strict";
 
 const storageKey = "autoRemote.connection";
+const draftKey = "autoRemote.draft.";
 const historyChunk = 30;
 const maxAttachment = 2 * 1024 * 1024;
 const paceOf = (period, now = Date.now()) => {
@@ -1713,6 +1714,36 @@ class WorkspaceView {
     this.refreshGit();
     this.startSync();
     this.scrollToEnd();
+    this.restoreDraft();
+  }
+
+  restoreDraft() {
+    if (this.draftRestored) {
+      return;
+    }
+
+    this.draftRestored = true;
+
+    try {
+      const saved = localStorage.getItem(`${draftKey}${this.info.id}`);
+
+      if (saved && !this.input.value) {
+        this.input.value = saved;
+        this.inputChanged();
+      }
+    } catch (exception) {
+    }
+  }
+
+  saveDraft() {
+    try {
+      if (this.input.value) {
+        localStorage.setItem(`${draftKey}${this.info.id}`, this.input.value);
+      } else {
+        localStorage.removeItem(`${draftKey}${this.info.id}`);
+      }
+    } catch (exception) {
+    }
   }
 
   blur() {
@@ -2225,6 +2256,7 @@ class WorkspaceView {
   inputChanged() {
     this.fitInput();
     this.updateSend();
+    this.saveDraft();
   }
 
   takesAiInput() {
@@ -2253,6 +2285,7 @@ class WorkspaceView {
 
     this.input.value = "";
     this.fitInput();
+    this.saveDraft();
     this.attachments = [];
     this.renderAttachments();
     this.stick = true;
@@ -2268,6 +2301,7 @@ class WorkspaceView {
 
     if (!result.ok && this.input.value.length === 0 && this.attachments.length === 0) {
       this.input.value = text;
+      this.saveDraft();
       this.fitInput();
       this.attachments = sending;
       this.renderAttachments();

@@ -10,10 +10,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="connection">The server connection.</param>
     /// <param name="workspaceId">The workspace whose conversation this is.</param>
-    public ChatViewModel(IServerConnection connection, Guid workspaceId)
+    /// <param name="drafts">Where the text typed in the message box is kept, or <see langword="null" /> to keep none.</param>
+    public ChatViewModel(IServerConnection connection, Guid workspaceId, IDraftStore? drafts = null)
     {
         this.connection = connection;
         this.workspaceId = workspaceId;
+        this.drafts = drafts;
         SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && (!string.IsNullOrWhiteSpace(input) || Attachments.Count > 0));
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
         Attachments.CollectionChanged += (_, _) =>
@@ -26,6 +28,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private readonly IServerConnection connection;
 
     private readonly Guid workspaceId;
+
+    private readonly IDraftStore? drafts;
+
+    private readonly TimeSpan draftDelay = TimeSpan.FromMilliseconds(250);
+
+    private CancellationTokenSource? draftSaving;
 
     private readonly List<RemoteEvent> early = [];
 
@@ -87,7 +95,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool HasMore => first > 0;
 
     /// <summary>
-    /// Gets or sets the prompt being typed.
+    /// Gets or sets the prompt being typed, which is kept on the device and comes back when the workspace is opened again.
     /// </summary>
     public string Input
     {
@@ -97,6 +105,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             if (Set(ref input, value))
             {
                 SendCommand.Refresh();
+                SaveDraft();
             }
         }
     }
@@ -155,6 +164,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             connection.EventReceived += Receive;
         }
 
+        await Restore();
         await Load();
         loaded = true;
 
@@ -282,6 +292,52 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
 
         return Task.CompletedTask;
+    }
+
+    private async Task Restore()
+    {
+        if (drafts is null || input.Length > 0)
+        {
+            return;
+        }
+
+        try
+        {
+            string saved = await drafts.Load(workspaceId, CancellationToken.None);
+
+            if (input.Length == 0)
+            {
+                Input = saved;
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private void SaveDraft()
+    {
+        if (drafts is null)
+        {
+            return;
+        }
+
+        draftSaving?.Cancel();
+        CancellationTokenSource source = new();
+        draftSaving = source;
+        _ = Persist(input, source.Token);
+    }
+
+    private async Task Persist(string text, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(draftDelay, cancellation);
+            await drafts!.Save(workspaceId, text, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private async Task Send()

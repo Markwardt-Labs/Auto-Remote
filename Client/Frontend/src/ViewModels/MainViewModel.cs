@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
@@ -67,7 +67,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
 
         connection = opened;
-        HomeViewModel home = new(opened, layout);
+        HomeViewModel home = new(opened, layout, drafts);
         home.ChangeServerRequested += async () =>
         {
             ConnectionSettings? saved = await store.Load(CancellationToken.None);

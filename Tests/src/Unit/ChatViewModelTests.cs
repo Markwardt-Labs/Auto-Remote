@@ -11,6 +11,53 @@ public sealed class ChatViewModelTests
     public ChatViewModelTests() => chat = new ChatViewModel(connection.Object, workspaceId);
 
     [Fact]
+    public async Task Start_RestoresTheSavedDraft()
+    {
+        Mock<IDraftStore> drafts = new();
+        drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("half written");
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object);
+
+        await restoring.Start();
+
+        Assert.Equal("half written", restoring.Input);
+        Assert.True(restoring.SendCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Start_KeepsWhatWasTypedBeforeItFinished()
+    {
+        Mock<IDraftStore> drafts = new();
+        drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("old draft");
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object) { Input = "typed already" };
+
+        await restoring.Start();
+
+        Assert.Equal("typed already", restoring.Input);
+    }
+
+    [Fact]
+    public async Task Input_IsSavedAsADraftOnceTypingPausesAndClearedWhenSent()
+    {
+        Mock<IDraftStore> drafts = new();
+        ChatViewModel typing = new(connection.Object, workspaceId, drafts.Object);
+
+        typing.Input = "h";
+        typing.Input = "hello";
+        await Until(() => drafts.Invocations.Any(call => call.Method.Name == nameof(IDraftStore.Save)));
+
+        drafts.Verify(x => x.Save(workspaceId, "hello", It.IsAny<CancellationToken>()), Times.Once);
+        drafts.Verify(x => x.Save(workspaceId, "h", It.IsAny<CancellationToken>()), Times.Never);
+
+        typing.SendCommand.Execute(null);
+        await Until(() => typing.Input.Length == 0);
+        await Until(() => drafts.Invocations.Count(call => call.Method.Name == nameof(IDraftStore.Save)) == 2);
+
+        drafts.Verify(x => x.Save(workspaceId, string.Empty, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Send_UploadsAttachmentsAndRefersToThemInThePrompt()
     {
         connection.Setup(x => x.UploadAttachment(workspaceId, "a.png", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync("/srv/a.png");

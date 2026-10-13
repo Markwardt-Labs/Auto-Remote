@@ -11,11 +11,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <param name="connection">The server connection.</param>
     /// <param name="workspace">The workspace.</param>
     /// <param name="layout">How the conversation and files are laid out.</param>
-    public WorkspaceViewModel(IServerConnection connection, WorkspaceInfo workspace, ClientLayout layout = ClientLayout.Tabs)
+    /// <param name="drafts">Where the text typed in the message box is kept, or <see langword="null" /> to keep none.</param>
+    public WorkspaceViewModel(IServerConnection connection, WorkspaceInfo workspace, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null)
     {
         this.layout = layout;
         Workspace = workspace;
-        Chat = new ChatViewModel(connection, workspace.Id);
+        Chat = new ChatViewModel(connection, workspace.Id, drafts);
         Git = new GitViewModel(connection, workspace.Id);
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
         Scripts = new ScriptsViewModel(connection, workspace.Id);

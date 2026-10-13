@@ -10,10 +10,12 @@ internal sealed class HomeViewModel : ViewModelBase
     /// </summary>
     /// <param name="connection">The server connection.</param>
     /// <param name="layout">How a focused workspace lays out its conversation and files.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs)
+    /// <param name="drafts">Where the text typed in each workspace's message box is kept, or <see langword="null" /> to keep none.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null)
     {
         this.connection = connection;
         this.layout = layout;
+        this.drafts = drafts;
         Usage = new UsageViewModel(connection);
         ToggleUsageCommand = new AsyncCommand(_ =>
         {
@@ -74,6 +76,8 @@ internal sealed class HomeViewModel : ViewModelBase
     private readonly IServerConnection connection;
 
     private readonly ClientLayout layout;
+
+    private readonly IDraftStore? drafts;
 
     private bool isUsageOpen;
 
@@ -569,7 +573,7 @@ internal sealed class HomeViewModel : ViewModelBase
             return existing;
         }
 
-        WorkspaceViewModel created = new(connection, workspace, layout);
+        WorkspaceViewModel created = new(connection, workspace, layout, drafts);
         created.Settings.Changed += Replace;
         created.PropertyChanged += (_, args) =>
         {
