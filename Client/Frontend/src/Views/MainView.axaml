@@ -3,7 +3,7 @@
              xmlns:local="using:Markwardt.AutoRemote.Client"
              x:Class="Markwardt.AutoRemote.Client.MainView"
              x:CompileBindings="False">
-  <Border Background="{DynamicResource Background}">
+  <Border x:Name="Root" Background="{DynamicResource Background}">
     <ContentControl Content="{Binding Current}" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch">
       <ContentControl.DataTemplates>
         <DataTemplate DataType="local:ConnectViewModel">
