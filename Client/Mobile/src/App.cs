@@ -12,7 +12,7 @@ public sealed class App : ClientApp
     {
         if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
-            singleView.MainView = CreateMainView(typeof(App).Assembly, ClientLayout.Tabs);
+            singleView.MainView = CreateMainView(typeof(App).Assembly, ClientLayout.Tabs, null, new AndroidChime(new ChimeSound()));
         }
 
         base.OnFrameworkInitializationCompleted();

@@ -11,8 +11,12 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <param name="connection">The server connection.</param>
     /// <param name="layout">How a focused workspace lays out its conversation and files.</param>
     /// <param name="drafts">Where the text typed in each workspace's message box is kept, or <see langword="null" /> to keep none.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null)
+    /// <param name="chime">Plays the ding when a workspace becomes ready again, or <see langword="null" /> for silence.</param>
+    /// <param name="time">The clock that times how long a workspace was busy, or <see langword="null" /> for the system clock.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null)
     {
+        this.chime = chime;
+        this.time = time ?? TimeProvider.System;
         this.connection = connection;
         this.layout = layout;
         this.drafts = drafts;
@@ -78,6 +82,12 @@ internal sealed class HomeViewModel : ViewModelBase
     private readonly ClientLayout layout;
 
     private readonly IDraftStore? drafts;
+
+    private readonly IChime? chime;
+
+    private readonly TimeProvider time;
+
+    private readonly TimeSpan minimumBusy = TimeSpan.FromSeconds(2);
 
     private bool isUsageOpen;
 
@@ -575,6 +585,26 @@ internal sealed class HomeViewModel : ViewModelBase
 
         WorkspaceViewModel created = new(connection, workspace, layout, drafts);
         created.Settings.Changed += Replace;
+        WorkspaceState previous = created.State;
+        DateTimeOffset busySince = time.GetUtcNow();
+        created.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName != nameof(WorkspaceViewModel.State) || created.State == previous)
+            {
+                return;
+            }
+
+            if (previous == WorkspaceState.Ready)
+            {
+                busySince = time.GetUtcNow();
+            }
+            else if (created.State == WorkspaceState.Ready && time.GetUtcNow() - busySince >= minimumBusy)
+            {
+                chime?.Play();
+            }
+
+            previous = created.State;
+        };
         created.PropertyChanged += (_, args) =>
         {
             if (created == active && args.PropertyName == nameof(WorkspaceViewModel.IsAiWorking))

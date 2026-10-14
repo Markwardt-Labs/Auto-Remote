@@ -141,6 +141,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .msg { margin: 16px 0; }
 .msg.user { display: flex; }
 .msg.user .bubble { background: var(--elevated); border: 1px solid var(--accent); border-radius: 6px; padding: 8px 12px; flex: 1; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.user .attached { display: flex; flex-wrap: wrap; gap: 4px 6px; white-space: normal; }
+.msg.user .body + .attached { margin-top: 8px; }
+.msg.user .attached .chip { display: flex; align-items: center; gap: 6px; background: var(--background); border: 1px solid var(--border); border-radius: 4px; padding: 3px 8px; font-size: 12px; }
+.msg.user .attached .name { max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .msg.assistant .bubble { overflow-wrap: anywhere; font-size: 14px; user-select: text; }
 .chat-error { max-width: 820px; width: 100%; margin: 0 auto; padding: 4px 20px; }
 .composer { max-width: 820px; width: 100%; margin: 0 auto; padding: 4px 12px 12px; }
@@ -1262,6 +1266,40 @@ class ErrorLine {
   }
 }
 
+let audio = null;
+
+function unlockAudio() {
+  audio ??= new (window.AudioContext ?? window.webkitAudioContext)();
+  audio.resume();
+}
+
+for (const name of ["pointerdown", "keydown"]) {
+  document.addEventListener(name, unlockAudio, { once: true, capture: true });
+}
+
+function ding() {
+  if (audio === null || audio.state !== "running") {
+    return;
+  }
+
+  const start = audio.currentTime;
+  const master = audio.createGain();
+  master.gain.value = 0.35;
+  master.connect(audio.destination);
+
+  for (const [frequency, level, decay] of [[880, 1, 5], [1320, 0.45, 7], [2640, 0.2, 10]]) {
+    const oscillator = audio.createOscillator();
+    const gain = audio.createGain();
+    oscillator.frequency.value = frequency;
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(level, start + 0.005);
+    gain.gain.setTargetAtTime(0, start + 0.005, 1 / decay);
+    oscillator.connect(gain).connect(master);
+    oscillator.start(start);
+    oscillator.stop(start + 0.8);
+  }
+}
+
 async function attempt(action, errors) {
   errors.set(null);
 
@@ -1289,6 +1327,19 @@ const icons = {
   refresh: ["M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5", "1 1 12 12", 13],
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
 };
+
+function splitAttachments(text) {
+  const prefix = "Attached file: ";
+  const lines = text.split("\n").map(line => line.replace(/\r$/, ""));
+  const files = [];
+
+  while (lines.length > 0 && lines[lines.length - 1].startsWith(prefix) && lines[lines.length - 1].length > prefix.length) {
+    const path = lines.pop().slice(prefix.length);
+    files.unshift({ path, name: path.slice(Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\")) + 1).replace(/^[0-9a-f]{8}-(?=.)/, "") });
+  }
+
+  return { body: lines.join("\n").trimEnd(), files };
+}
 
 function icon(name) {
   const [path, box, size] = icons[name];
@@ -1501,6 +1552,7 @@ class WorkspaceView {
   build() {
     this.list = h("div", { class: "inner" });
     this.scroller = h("div", { class: "messages", onscroll: () => this.scrolled() }, this.list);
+    this.boxHeight = 120;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary", disabled: true, title: "Send", onclick: () => this.send() }, "↑");
     this.attachments = [];
@@ -2040,6 +2092,15 @@ class WorkspaceView {
 
   applyState() {
     const state = this.state();
+    const previous = this.lastState ?? "Ready";
+    this.lastState = state;
+
+    if (previous === "Ready" && state !== "Ready") {
+      this.busySince = Date.now();
+    } else if (previous !== "Ready" && state === "Ready" && Date.now() - this.busySince >= 2000) {
+      ding();
+    }
+
     this.gitBar.hidden = state !== "Managing";
     this.input.placeholder = state === "Running" ? "A script is running, wait for it to finish" : state === "Managing" ? "Git is working, wait for it to finish" : "Enter query...";
     this.updateSend();
@@ -2151,7 +2212,15 @@ class WorkspaceView {
 
   messageElement(message) {
     const user = message.role === "User";
-    return h("div", { class: `msg ${user ? "user" : "assistant"}` }, user ? h("div", { class: "bubble" }, message.text) : h("div", { class: "bubble md" }, ...renderMarkdown(message.text).childNodes));
+
+    if (!user) {
+      return h("div", { class: "msg assistant" }, h("div", { class: "bubble md" }, ...renderMarkdown(message.text).childNodes));
+    }
+
+    const { body, files } = splitAttachments(message.text);
+    return h("div", { class: "msg user" }, h("div", { class: "bubble" },
+      ...(body.length > 0 ? [h("div", { class: "body" }, body)] : []),
+      ...(files.length > 0 ? [h("div", { class: "attached" }, ...files.map(file => h("div", { class: "chip", title: file.path }, icon("attach"), h("span", { class: "name" }, file.name))))] : [])));
   }
 
   renderMessages() {
@@ -2188,10 +2257,11 @@ class WorkspaceView {
   resizeInput(event) {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = this.box.offsetHeight;
+    const startHeight = this.boxHeight;
     const move = moved => {
       const limit = Math.max(60, this.chatBody.clientHeight - 120);
-      this.box.style.height = `${Math.min(limit, Math.max(60, startHeight + startY - moved.clientY))}px`;
+      this.boxHeight = Math.min(limit, Math.max(60, startHeight + startY - moved.clientY));
+      this.fitInput();
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
@@ -2251,7 +2321,10 @@ class WorkspaceView {
 
   fitInput() {
     this.input.style.height = "0";
-    this.input.style.height = `${this.input.scrollHeight}px`;
+    const wanted = this.input.scrollHeight;
+    this.input.style.height = `${wanted}px`;
+    const limit = Math.max(this.boxHeight, this.chatBody.clientHeight - 120);
+    this.box.style.height = `${Math.min(limit, Math.max(this.boxHeight, wanted + 8))}px`;
   }
 
   inputChanged() {

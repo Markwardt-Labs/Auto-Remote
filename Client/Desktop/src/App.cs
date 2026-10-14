@@ -12,7 +12,7 @@ public sealed class App : ClientApp
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args));
+            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()));
             Window window = new()
             {
                 Title = "Auto Remote",

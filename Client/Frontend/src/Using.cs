@@ -26,3 +26,4 @@ global using Avalonia.Media.TextFormatting;
 global using Avalonia.Input.Platform;
 global using System.Net.WebSockets;
 global using Avalonia.Controls.Platform;
+global using Avalonia.Data.Converters;

@@ -13,9 +13,30 @@ public sealed partial class HomeView : UserControl
         InitializeComponent();
         AddHandler(Avalonia.Input.InputElement.PointerPressedEvent, OnFilePointerPressed, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         this.FindControl<TextBox>("ChatInput")?.AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnChatKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        if (this.FindControl<TextBox>("ChatInput") is { } input)
+        {
+            input.TextChanged += (_, _) => FitChatInput();
+            input.SizeChanged += (_, _) => FitChatInput();
+        }
+
+        if (this.FindControl<Grid>("ChatGrid") is { } grid)
+        {
+            grid.RowDefinitions[2].PropertyChanged += (_, args) =>
+            {
+                if (!fitting && args.Property == RowDefinition.HeightProperty && grid.RowDefinitions[2].Height.IsAbsolute)
+                {
+                    chosenHeight = grid.RowDefinitions[2].Height.Value;
+                }
+            };
+        }
     }
 
     private bool loadingOlder;
+
+    private bool fitting;
+
+    private double chosenHeight = 120;
 
     /// <inheritdoc />
     protected override void OnDataContextChanged(EventArgs args)
@@ -24,9 +45,31 @@ public sealed partial class HomeView : UserControl
 
         if (DataContext is HomeViewModel { IsDesktop: true } && this.FindControl<Grid>("ChatGrid") is { } grid && this.FindControl<TextBox>("ChatInput") is { } input)
         {
-            grid.RowDefinitions[2].Height = new GridLength(120);
+            fitting = true;
+            grid.RowDefinitions[2].Height = new GridLength(chosenHeight);
+            fitting = false;
             grid.RowDefinitions[2].MinHeight = 60;
             input.MaxHeight = double.PositiveInfinity;
+        }
+    }
+
+    private void FitChatInput()
+    {
+        if (DataContext is not HomeViewModel { IsDesktop: true } || this.FindControl<Grid>("ChatGrid") is not { } grid || this.FindControl<TextBox>("ChatInput") is not { } input || this.FindControl<Grid>("ChatInputRow") is not { } inputRow || input.Bounds.Width <= 0)
+        {
+            return;
+        }
+
+        RowDefinition row = grid.RowDefinitions[2];
+        input.Measure(new Size(input.Bounds.Width, double.PositiveInfinity));
+        double needed = row.ActualHeight - inputRow.Bounds.Height + Math.Max(input.DesiredSize.Height, inputRow.MinHeight);
+        double target = Math.Min(Math.Max(chosenHeight, needed), Math.Max(chosenHeight, grid.Bounds.Height - 120));
+
+        if (Math.Abs(target - row.ActualHeight) > 0.5)
+        {
+            fitting = true;
+            row.Height = new GridLength(target);
+            fitting = false;
         }
     }
 

@@ -185,7 +185,27 @@
                     <Panel Margin="0,8">
                       <Border IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.User}}"
                               Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Accent}" BorderThickness="1" CornerRadius="6" Padding="12,8">
-                        <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Foreground="{DynamicResource Text}" />
+                        <StackPanel Spacing="8">
+                          <SelectableTextBlock Text="{Binding Text, Converter={x:Static local:MessageConverters.Body}}" TextWrapping="Wrap" Foreground="{DynamicResource Text}"
+                                               IsVisible="{Binding Text, Converter={x:Static local:MessageConverters.HasBody}}" />
+                          <ItemsControl ItemsSource="{Binding Text, Converter={x:Static local:MessageConverters.Files}}" IsVisible="{Binding Text, Converter={x:Static local:MessageConverters.HasFiles}}">
+                            <ItemsControl.ItemsPanel>
+                              <ItemsPanelTemplate>
+                                <WrapPanel />
+                              </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                              <DataTemplate>
+                                <Border Background="{DynamicResource Background}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="8,3" Margin="0,0,6,4" ToolTip.Tip="{Binding Path}">
+                                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                                    <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="11" Height="11" />
+                                    <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="260" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                                  </StackPanel>
+                                </Border>
+                              </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                          </ItemsControl>
+                        </StackPanel>
                       </Border>
                       <local:MarkdownView IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}"
                                           Source="{Binding Text}" />
@@ -227,7 +247,7 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
+            <Grid Name="ChatInputRow" Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
               <Button Grid.Column="0" Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center" Margin="0,0,6,0">
                 <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
               </Button>
