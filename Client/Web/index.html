@@ -1552,7 +1552,7 @@ class WorkspaceView {
   build() {
     this.list = h("div", { class: "inner" });
     this.scroller = h("div", { class: "messages", onscroll: () => this.scrolled() }, this.list);
-    this.boxHeight = 120;
+    this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary", disabled: true, title: "Send", onclick: () => this.send() }, "↑");
     this.attachments = [];
@@ -2257,11 +2257,11 @@ class WorkspaceView {
   resizeInput(event) {
     event.preventDefault();
     const startY = event.clientY;
-    const startHeight = this.boxHeight;
+    const startHeight = this.box.offsetHeight;
     const move = moved => {
       const limit = Math.max(60, this.chatBody.clientHeight - 120);
-      this.boxHeight = Math.min(limit, Math.max(60, startHeight + startY - moved.clientY));
-      this.fitInput();
+      this.box.style.height = `${Math.min(limit, Math.max(60, startHeight + startY - moved.clientY))}px`;
+      this.restoreHeight = null;
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
@@ -2323,8 +2323,17 @@ class WorkspaceView {
     this.input.style.height = "0";
     const wanted = this.input.scrollHeight;
     this.input.style.height = `${wanted}px`;
-    const limit = Math.max(this.boxHeight, this.chatBody.clientHeight - 120);
-    this.box.style.height = `${Math.min(limit, Math.max(this.boxHeight, wanted + 8))}px`;
+    const current = this.box.offsetHeight;
+
+    if (this.input.value.length === 0) {
+      if (this.restoreHeight !== null) {
+        this.box.style.height = `${this.restoreHeight}px`;
+        this.restoreHeight = null;
+      }
+    } else if (wanted + 8 > current + 1) {
+      this.restoreHeight ??= current;
+      this.box.style.height = `${Math.min(Math.max(current, this.chatBody.clientHeight - 120), wanted + 8)}px`;
+    }
   }
 
   inputChanged() {

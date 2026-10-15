@@ -16,17 +16,16 @@ public sealed partial class HomeView : UserControl
 
         if (this.FindControl<TextBox>("ChatInput") is { } input)
         {
-            input.TextChanged += (_, _) => FitChatInput();
-            input.SizeChanged += (_, _) => FitChatInput();
+            input.TextChanged += (_, _) => OnChatTextChanged();
         }
 
         if (this.FindControl<Grid>("ChatGrid") is { } grid)
         {
             grid.RowDefinitions[2].PropertyChanged += (_, args) =>
             {
-                if (!fitting && args.Property == RowDefinition.HeightProperty && grid.RowDefinitions[2].Height.IsAbsolute)
+                if (!fitting && args.Property == RowDefinition.HeightProperty)
                 {
-                    chosenHeight = grid.RowDefinitions[2].Height.Value;
+                    restoreHeight = null;
                 }
             };
         }
@@ -36,7 +35,7 @@ public sealed partial class HomeView : UserControl
 
     private bool fitting;
 
-    private double chosenHeight = 120;
+    private double? restoreHeight;
 
     /// <inheritdoc />
     protected override void OnDataContextChanged(EventArgs args)
@@ -46,31 +45,57 @@ public sealed partial class HomeView : UserControl
         if (DataContext is HomeViewModel { IsDesktop: true } && this.FindControl<Grid>("ChatGrid") is { } grid && this.FindControl<TextBox>("ChatInput") is { } input)
         {
             fitting = true;
-            grid.RowDefinitions[2].Height = new GridLength(chosenHeight);
+            grid.RowDefinitions[2].Height = new GridLength(120);
             fitting = false;
             grid.RowDefinitions[2].MinHeight = 60;
             input.MaxHeight = double.PositiveInfinity;
         }
     }
 
-    private void FitChatInput()
+    private void OnChatTextChanged()
     {
-        if (DataContext is not HomeViewModel { IsDesktop: true } || this.FindControl<Grid>("ChatGrid") is not { } grid || this.FindControl<TextBox>("ChatInput") is not { } input || this.FindControl<Grid>("ChatInputRow") is not { } inputRow || input.Bounds.Width <= 0)
+        if (DataContext is not HomeViewModel { IsDesktop: true } || this.FindControl<Grid>("ChatGrid") is not { } grid || this.FindControl<TextBox>("ChatInput") is not { } input)
+        {
+            return;
+        }
+
+        if (string.IsNullOrEmpty(input.Text))
+        {
+            if (restoreHeight is { } height)
+            {
+                SetChatHeight(grid.RowDefinitions[2], height);
+                restoreHeight = null;
+            }
+
+            return;
+        }
+
+        Dispatcher.UIThread.Post(GrowChatInput, DispatcherPriority.Loaded);
+    }
+
+    private void GrowChatInput()
+    {
+        if (this.FindControl<Grid>("ChatGrid") is not { } grid || this.FindControl<TextBox>("ChatInput") is not { } input || input.GetVisualDescendants().OfType<ScrollViewer>().FirstOrDefault() is not { } scroller)
         {
             return;
         }
 
         RowDefinition row = grid.RowDefinitions[2];
-        input.Measure(new Size(input.Bounds.Width, double.PositiveInfinity));
-        double needed = row.ActualHeight - inputRow.Bounds.Height + Math.Max(input.DesiredSize.Height, inputRow.MinHeight);
-        double target = Math.Min(Math.Max(chosenHeight, needed), Math.Max(chosenHeight, grid.Bounds.Height - 120));
+        double current = row.ActualHeight;
+        double target = Math.Min(current + scroller.Extent.Height - scroller.Viewport.Height, Math.Max(current, grid.Bounds.Height - 120));
 
-        if (Math.Abs(target - row.ActualHeight) > 0.5)
+        if (scroller.Extent.Height - scroller.Viewport.Height > 1 && target > current + 0.5)
         {
-            fitting = true;
-            row.Height = new GridLength(target);
-            fitting = false;
+            restoreHeight ??= current;
+            SetChatHeight(row, target);
         }
+    }
+
+    private void SetChatHeight(RowDefinition row, double height)
+    {
+        fitting = true;
+        row.Height = new GridLength(height);
+        fitting = false;
     }
 
     private ChatViewModel? Chat => (DataContext as HomeViewModel)?.Active?.Chat;
