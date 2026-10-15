@@ -35,6 +35,8 @@ public sealed partial class HomeView : UserControl
 
     private bool fitting;
 
+    private ChatViewModel? followed;
+
     private double? restoreHeight;
 
     /// <inheritdoc />
@@ -309,9 +311,25 @@ public sealed partial class HomeView : UserControl
 
     private void OnOutputScrolled(object? sender, ScrollChangedEventArgs args)
     {
-        if (sender is ScrollViewer scroller && args.ExtentDelta.Y > 0 && scroller.Offset.Y - args.OffsetDelta.Y + scroller.Viewport.Height >= scroller.Extent.Height - args.ExtentDelta.Y - 2)
+        if (sender is ScrollViewer { DataContext: ScriptsViewModel { AutoScroll: true } } scroller && args.ExtentDelta.Y > 0)
         {
             scroller.ScrollToEnd();
+        }
+    }
+
+    private void OnOutputAutoScrollToggled(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Avalonia.Controls.Primitives.ToggleButton { IsChecked: true })
+        {
+            this.FindControl<ScrollViewer>("OutputScroller")?.ScrollToEnd();
+        }
+    }
+
+    private void OnChatAutoScrollToggled(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Avalonia.Controls.Primitives.ToggleButton { IsChecked: true })
+        {
+            this.FindControl<ScrollViewer>("MessageScroller")?.ScrollToEnd();
         }
     }
 
@@ -369,7 +387,7 @@ public sealed partial class HomeView : UserControl
                 return;
             }
 
-            if (scroller.Offset.Y - args.OffsetDelta.Y + scroller.Viewport.Height >= scroller.Extent.Height - args.ExtentDelta.Y - 2)
+            if (chat.AutoScroll)
             {
                 scroller.ScrollToEnd();
                 return;
@@ -391,7 +409,29 @@ public sealed partial class HomeView : UserControl
     {
         loadingOlder = false;
 
-        if (sender is ScrollViewer scroller)
+        if (sender is not ScrollViewer scroller)
+        {
+            return;
+        }
+
+        if (followed is not null)
+        {
+            followed.Loaded -= ScrollMessagesToEnd;
+        }
+
+        followed = scroller.DataContext as ChatViewModel;
+
+        if (followed is not null)
+        {
+            followed.Loaded += ScrollMessagesToEnd;
+        }
+
+        ScrollMessagesToEnd();
+    }
+
+    private void ScrollMessagesToEnd()
+    {
+        if (this.FindControl<ScrollViewer>("MessageScroller") is { } scroller)
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(scroller.ScrollToEnd, Avalonia.Threading.DispatcherPriority.Background);
         }

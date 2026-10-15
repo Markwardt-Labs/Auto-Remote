@@ -178,6 +178,7 @@
             <StackPanel DockPanel.Dock="Bottom" Margin="20,4" Spacing="4" IsVisible="{Binding HasError}">
               <TextBlock Text="{Binding Error}" Classes="error" />
             </StackPanel>
+            <Panel>
             <ScrollViewer Name="MessageScroller" Padding="16,0" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMessagesScrolled" DataContextChanged="OnMessagesChanged">
               <ItemsControl ItemsSource="{Binding Messages}" Margin="0,8">
                 <ItemsControl.ItemTemplate>
@@ -214,6 +215,11 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </ScrollViewer>
+            <ToggleButton Classes="icon" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,8" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                          ToolTip.Tip="Auto scroll to new messages" IsChecked="{Binding AutoScroll, Mode=TwoWay}" Click="OnChatAutoScrollToggled">
+              <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" Width="12" Height="12" />
+            </ToggleButton>
+            </Panel>
             </DockPanel>
             <GridSplitter Grid.Row="1" Height="4" Background="Transparent" ResizeDirection="Rows" ResizeBehavior="PreviousAndNext" HorizontalAlignment="Stretch" Cursor="SizeNorthSouth"
                           IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop, FallbackValue=False}" />
@@ -309,6 +315,9 @@
                   <TextBlock Text="✗ Failed" IsVisible="{Binding ShowFailed}" FontSize="11" Foreground="Crimson" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
+                  <ToggleButton Classes="icon" ToolTip.Tip="Auto scroll to new output" IsChecked="{Binding AutoScroll, Mode=TwoWay}" Click="OnOutputAutoScrollToggled">
+                    <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" Width="12" Height="12" />
+                  </ToggleButton>
                   <Button Classes="icon" ToolTip.Tip="Copy output" Click="OnCopyOutputClick">
                     <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
                   </Button>
@@ -330,7 +339,7 @@
             <Grid>
               <TextBlock Text="No script selected. Pick one from the dropdown above, or double click (double tap on mobile) a .cs or .task file in the file system."
                          IsVisible="{Binding !HasScript}" TextWrapping="Wrap" TextAlignment="Center" Margin="24,0" HorizontalAlignment="Center" VerticalAlignment="Center" Classes="muted" FontSize="13" />
-              <ScrollViewer IsVisible="{Binding HasScript}" ScrollChanged="OnOutputScrolled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+              <ScrollViewer Name="OutputScroller" IsVisible="{Binding HasScript}" ScrollChanged="OnOutputScrolled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <SelectableTextBlock Text="{Binding OutputText}" TextWrapping="Wrap" Margin="14,10,14,14" FontFamily="Menlo, Consolas, DejaVu Sans Mono, monospace" FontSize="12" />
               </ScrollViewer>
             </Grid>

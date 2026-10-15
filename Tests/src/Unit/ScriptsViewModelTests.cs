@@ -19,6 +19,17 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public void AutoScroll_IsOnUntilTurnedOff()
+    {
+        ScriptsViewModel scripts = Create();
+        Assert.True(scripts.AutoScroll);
+
+        scripts.AutoScroll = false;
+
+        Assert.False(scripts.AutoScroll);
+    }
+
+    [Fact]
     public async Task Start_ShowsTheHeldRunsWithTheirScriptsUnderTheirTask()
     {
         ScriptsViewModel scripts = Create(Run("build.task", ScriptState.Running, isTask: true, scripts: ["a.cs", "b.cs"]), Run("a.cs", ScriptState.Running, "build.task"), Run("b.cs", ScriptState.Pending, "build.task"), Run("solo.cs", ScriptState.Succeeded, output: "done"));

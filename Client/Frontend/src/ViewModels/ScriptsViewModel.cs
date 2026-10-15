@@ -40,6 +40,8 @@ internal sealed class ScriptsViewModel : ViewModelBase, IDisposable
 
     private bool isRunning;
 
+    private bool autoScroll = true;
+
     private bool loaded;
 
     private bool subscribed;
@@ -53,6 +55,15 @@ internal sealed class ScriptsViewModel : ViewModelBase, IDisposable
     /// Gets the runs held, tasks and scripts that ran on their own, in the order they started.
     /// </summary>
     public ObservableCollection<ScriptEntryViewModel> Entries { get; } = [];
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the output scrolls to the bottom whenever it gets new content.
+    /// </summary>
+    public bool AutoScroll
+    {
+        get => autoScroll;
+        set => Set(ref autoScroll, value);
+    }
 
     /// <summary>
     /// Gets a value indicating whether a script or task is running, which keeps the AI and other scripts from starting.

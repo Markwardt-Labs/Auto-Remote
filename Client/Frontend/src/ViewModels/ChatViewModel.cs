@@ -50,9 +50,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool loaded;
 
+    private bool autoScroll = true;
+
     private bool subscribed;
 
     private bool loadingOlder;
+
+    /// <summary>
+    /// Raised once the stored conversation is shown, so the view can start at its end.
+    /// </summary>
+    public event Action? Loaded;
 
     /// <summary>
     /// Gets the messages in order.
@@ -108,6 +115,15 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 SaveDraft();
             }
         }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the conversation scrolls to the bottom whenever it gets new content.
+    /// </summary>
+    public bool AutoScroll
+    {
+        get => autoScroll;
+        set => Set(ref autoScroll, value);
     }
 
     /// <summary>
@@ -174,6 +190,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
 
         early.Clear();
+        Loaded?.Invoke();
     }
 
     /// <summary>

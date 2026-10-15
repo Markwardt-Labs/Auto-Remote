@@ -11,6 +11,31 @@ public sealed class ChatViewModelTests
     public ChatViewModelTests() => chat = new ChatViewModel(connection.Object, workspaceId);
 
     [Fact]
+    public void AutoScroll_IsOnUntilTurnedOff()
+    {
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        Assert.True(chat.AutoScroll);
+
+        chat.AutoScroll = false;
+
+        Assert.False(chat.AutoScroll);
+        Assert.Contains(nameof(ChatViewModel.AutoScroll), changed);
+    }
+
+    [Fact]
+    public async Task Start_RaisesLoadedOnceTheConversationIsShown()
+    {
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }], Start = 0 });
+        int shown = -1;
+        chat.Loaded += () => shown = chat.Messages.Count;
+
+        await chat.Start();
+
+        Assert.Equal(1, shown);
+    }
+
+    [Fact]
     public async Task Start_RestoresTheSavedDraft()
     {
         Mock<IDraftStore> drafts = new();
