@@ -144,7 +144,7 @@ public sealed class PromptServiceTests
         workspaces.Verify(x => x.AttachAiSession(workspace.Id, It.Is<Guid>(attached => attached != Guid.Empty), It.IsAny<CancellationToken>()), Times.Once);
 
         conversation.Output.Writer.TryWrite(new AiOutput { Kind = AiOutputKind.Finished });
-        await Until(() => !service.IsBusy(workspace.Id));
+        await Until(() => Events(RemoteEventKind.WorkingChanged).Count == 2);
 
         Assert.Equal([true, false], Events(RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working));
     }

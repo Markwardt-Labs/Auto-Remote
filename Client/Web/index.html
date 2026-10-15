@@ -3170,7 +3170,8 @@ class WorkspaceView {
       return;
     }
 
-    const go = () => {
+    let shown = null;
+    const go = async () => {
       const value = nameBox ? nameBox.value.trim() : "";
       const mail = emailBox ? emailBox.value.trim() : "";
 
@@ -3195,13 +3196,21 @@ class WorkspaceView {
           this.refreshGit(true);
         }
       };
-      this.home.submit(run, async () => {
-        this.home.closeDialog();
+      const mine = shown;
+      this.home.dialogHost.hidden = true;
+      const result = await attempt(run, this.home.dialogError);
+
+      if (result.ok) {
+        if (this.home.dialogHost.firstChild === mine) {
+          this.home.closeDialog();
+        }
 
         if (then) {
           await then();
         }
-      });
+      } else if (this.home.dialogHost.firstChild === mine) {
+        this.home.dialogHost.hidden = false;
+      }
     };
     const nameBox = input === null ? null : this.home.nameBox(text, go);
     const emailBox = email ? this.home.nameBox("", go) : null;
@@ -3215,6 +3224,7 @@ class WorkspaceView {
     }
 
     this.home.dialog(title, body, nameBox, emailBox, h("button", { class: `${destructive ? "danger" : "primary"} block`, onclick: go }, confirm));
+    shown = this.home.dialogHost.firstChild;
   }
 
   withIdentity(next) {

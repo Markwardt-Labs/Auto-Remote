@@ -837,13 +837,18 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
             return;
         }
 
+        GitPrompt asked = prompt;
+        Prompt = GitPrompt.None;
         bool worked = await Attempt(action);
 
         if (worked)
         {
-            Prompt = GitPrompt.None;
             confirmAction = null;
             afterwards = null;
+        }
+        else if (prompt == GitPrompt.None)
+        {
+            Prompt = asked;
         }
 
         await Refresh();

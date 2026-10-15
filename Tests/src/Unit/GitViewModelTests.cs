@@ -16,6 +16,16 @@ public sealed class GitViewModelTests
         connection.Setup(x => x.GetGitChanges(id, It.IsAny<CancellationToken>())).ReturnsAsync(() => changes);
     }
 
+    private async Task Until(Func<bool> condition)
+    {
+        for (int attempt = 0; attempt < 250 && !condition(); attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.True(condition());
+    }
+
     private RemoteEvent Event(RemoteEventKind kind, bool? working = null, Guid? workspace = null) => new() { Kind = kind, WorkspaceId = workspace ?? id, Working = working, Path = string.Empty };
 
     [Fact]
@@ -127,5 +137,48 @@ public sealed class GitViewModelTests
         Assert.True(git.IsChangesMode);
         git.ToggleChangesModeCommand.Execute(null);
         Assert.False(git.IsChangesMode);
+    }
+
+    [Fact]
+    public async Task Confirm_ClosesThePopupAtOnceAndReopensItWithTheErrorIfTheActionFails()
+    {
+        status = status with { HasIdentity = true };
+        TaskCompletionSource<bool> finished = new();
+        connection.Setup(x => x.GitCommit(id, "my message", It.IsAny<CancellationToken>())).Returns(async () =>
+        {
+            await finished.Task;
+            throw new RemoteException("nothing to commit");
+        });
+        GitViewModel git = new(connection.Object, id);
+        await git.Start();
+        git.CommitCommand.Execute(null);
+        await Until(() => git.IsPrompting);
+        git.PromptText = "my message";
+        Assert.True(git.IsPrompting);
+
+        git.ConfirmCommand.Execute(null);
+
+        Assert.False(git.IsPrompting);
+        finished.SetResult(true);
+        await Until(() => git.IsPrompting);
+        Assert.Equal("my message", git.PromptText);
+        Assert.Equal("nothing to commit", git.Error);
+    }
+
+    [Fact]
+    public async Task Confirm_LeavesThePopupClosedWhenTheActionSucceeds()
+    {
+        status = status with { HasIdentity = true };
+        GitViewModel git = new(connection.Object, id);
+        await git.Start();
+        git.CommitCommand.Execute(null);
+        await Until(() => git.IsPrompting);
+        git.PromptText = "done";
+
+        git.ConfirmCommand.Execute(null);
+        await Until(() => connection.Invocations.Any(call => call.Method.Name == nameof(IServerConnection.GitCommit)));
+
+        Assert.False(git.IsPrompting);
+        connection.Verify(x => x.GitCommit(id, "done", It.IsAny<CancellationToken>()), Times.Once);
     }
 }
