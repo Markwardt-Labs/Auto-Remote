@@ -247,7 +247,7 @@ button.icon.on { background: var(--selection); }
 .crow .slot { flex: none; width: 12px; height: 12px; display: flex; align-items: center; justify-content: center; color: var(--muted); }
 .crow .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .history { overflow-y: auto; }
-.history .head { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 4px 16px; }
+.history .head { display: flex; align-items: center; justify-content: flex-end; padding: 8px 8px 4px 16px; }
 .history .items { padding: 0 8px 12px 4px; }
 .commit { position: relative; display: grid; grid-template-columns: auto 1fr; }
 .commit .graph { grid-row: 1 / span 2; position: relative; }
@@ -1576,7 +1576,7 @@ class WorkspaceView {
       h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.input, this.sendButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
-      h("div", { class: "head" }, h("div", { class: "muted" }, "History"), h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
+      h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
       h("div", { style: "padding:0 16px" }, this.historyError.element),
       this.historyList);
     this.scriptSelect = h("select", { onchange: () => this.selectScript(this.scriptSelect.value) });

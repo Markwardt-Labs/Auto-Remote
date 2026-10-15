@@ -348,7 +348,6 @@
            <Panel IsVisible="{Binding ShowHistoryView}">
            <Grid DataContext="{Binding Git.History}" RowDefinitions="Auto,Auto,*">
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="16,8,8,4">
-              <TextBlock Grid.Column="0" Text="History" Classes="muted" VerticalAlignment="Center" />
               <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <Button Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}">
                   <Path Classes="lineIcon" Data="M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13" Width="13" Height="13" />
