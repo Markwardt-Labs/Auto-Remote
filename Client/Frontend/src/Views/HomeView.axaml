@@ -14,7 +14,14 @@
             <ColumnDefinition Width="{Binding HeaderSide}" />
           </Grid.ColumnDefinitions>
           <Button Grid.Column="0" Content="☰" Classes="flat" FontSize="20" HorizontalAlignment="Left" Command="{Binding ToggleDrawerCommand}" />
-          <TextBlock Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <TextBlock Name="TitleText" Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Background="Transparent">
+            <TextBlock.ContextMenu>
+              <ContextMenu>
+                <MenuItem Header="Stop" Command="{Binding StopWorkspaceCommand}" ToolTip.Tip="Stop the work at once and keep what it did" />
+                <MenuItem Header="Cancel" Command="{Binding CancelWorkspaceCommand}" ToolTip.Tip="Stop the work and revert what it did" />
+              </ContextMenu>
+            </TextBlock.ContextMenu>
+          </TextBlock>
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
               <Button Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">

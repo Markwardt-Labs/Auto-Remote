@@ -20,7 +20,9 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IEventHub> events = new();
 
-    private readonly WorkspaceActivity activity = new();
+    private readonly WorkspaceActivity activity;
+
+    private readonly Mock<IWorkspaceControl> control = new();
 
     private readonly object owner = new();
 
@@ -30,8 +32,9 @@ public sealed class RequestHandlerTests
 
     public RequestHandlerTests()
     {
+        activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object);
     }
 
     [Fact]
@@ -420,6 +423,43 @@ public sealed class RequestHandlerTests
         Assert.Null(ready.Error);
         Assert.Null(working.Error);
         prompts.Verify(x => x.Prompt(workspace.Id, "more", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_StopAndCancelWorkspace_GoToTheControlAndGetStateReadsTheTracker()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+
+        Assert.Null((await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.StopWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        Assert.Null((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.CancelWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        RemoteResponse state = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.GetWorkspaceState, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        control.Verify(x => x.Stop(workspace.Id), Times.Once);
+        control.Verify(x => x.Cancel(workspace.Id), Times.Once);
+        Assert.Equal(WorkspaceState.Running, state.State);
+    }
+
+    [Fact]
+    public async Task Handle_StopWorkspace_ReportsARefusal()
+    {
+        control.Setup(x => x.Stop(workspace.Id)).ThrowsAsync(new RequestException("Nothing is running in this workspace."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.StopWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal("Nothing is running in this workspace.", response.Error);
+        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.CancelWorkspace }, owner, CancellationToken.None)).Error);
+    }
+
+    [Fact]
+    public async Task Handle_GitCancel_UsesTheControlWhileManaging()
+    {
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
+
+        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GitCancel, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        control.Verify(x => x.Cancel(workspace.Id), Times.Once);
+        versioning.Verify(x => x.Cancel(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

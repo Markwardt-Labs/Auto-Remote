@@ -135,6 +135,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .script-input { display: flex; gap: 8px; padding: 6px 10px; background: var(--elevated); border-top: 1px solid var(--border); }
 .script-input input { flex: 1; }
 .row.running .name { font-weight: 700; }
+.topbar .title { user-select: none; -webkit-touch-callout: none; }
+.menu-list button:disabled { opacity: 0.45; cursor: default; }
 .tree .row { user-select: none; }
 .messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
 .messages { flex: 1; overflow-y: auto; padding: 0 16px; }
@@ -1207,6 +1209,9 @@ class Connection {
   }
 
   listWorkspaces() { return this.request("ListWorkspaces").then(r => r.catalog); }
+  stopWorkspace(workspaceId) { return this.request("StopWorkspace", { workspaceId }); }
+  cancelWorkspace(workspaceId) { return this.request("CancelWorkspace", { workspaceId }); }
+  getWorkspaceState(workspaceId) { return this.request("GetWorkspaceState", { workspaceId }).then(r => r.state); }
   getScripts(workspaceId) { return this.request("GetScripts", { workspaceId }).then(r => r.scripts); }
   runScript(workspaceId, path) { return this.request("RunScript", { workspaceId, path }); }
   stopScript(workspaceId, path) { return this.request("StopScript", { workspaceId, path }); }
@@ -1542,6 +1547,7 @@ class WorkspaceView {
     this.gitAgain = false;
     this.gitRefs = false;
     this.localBusy = false;
+    this.halting = null;
     this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
     this.scriptError = new ErrorLine();
     this.syncTimer = null;
@@ -1551,6 +1557,7 @@ class WorkspaceView {
     this.loadChat();
     this.refreshGit();
     this.loadScripts();
+    this.loadState();
   }
 
   build() {
@@ -1837,6 +1844,10 @@ class WorkspaceView {
   }
 
   state() {
+    return this.halting ?? this.workState();
+  }
+
+  workState() {
     return this.scriptsRunning() ? "Running" : this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
   }
 
@@ -1847,8 +1858,37 @@ class WorkspaceView {
       return false;
     }
 
-    this.home.notice("Git", state === "Managing" ? "A git action is already running." : "Wait for the AI or the script to finish before running git actions.");
+    this.home.notice("Git", state === "Managing" ? "A git action is already running." : state === "Stopping" || state === "Canceling" ? "Wait for the work to finish being stopped." : "Wait for the AI or the script to finish before running git actions.");
     return true;
+  }
+
+  followState(state) {
+    this.halting = state === "Stopping" || state === "Canceling" ? state : null;
+    this.applyState();
+  }
+
+  async loadState() {
+    try {
+      this.followState(await this.connection.getWorkspaceState(this.info.id));
+    } catch (exception) {
+    }
+  }
+
+  haltMenu(event) {
+    const state = this.state();
+
+    if (state !== "Working" && state !== "Running" && state !== "Managing") {
+      return;
+    }
+
+    this.showMenu(event, [
+      { label: "Stop", action: () => this.halt(() => this.connection.stopWorkspace(this.info.id)) },
+      { label: "Cancel", disabled: state !== "Managing" && !this.gitStatus.isRepo, action: () => this.halt(() => this.connection.cancelWorkspace(this.info.id)) },
+    ]);
+  }
+
+  async halt(action) {
+    await attempt(action, this.chatError);
   }
 
   scriptList() {
@@ -2063,7 +2103,7 @@ class WorkspaceView {
     const state = this.state();
 
     if (state !== "Ready") {
-      this.scriptError.set(state === "Running" ? "A script is already running." : state === "Managing" ? "Wait for git to finish before running a script." : "Wait for the AI to finish before running a script.");
+      this.scriptError.set({ Running: "A script is already running.", Managing: "Wait for git to finish before running a script.", Stopping: "Wait for the work to finish stopping before running a script.", Canceling: "Wait for the work to finish being cancelled before running a script." }[state] ?? "Wait for the AI to finish before running a script.");
       return;
     }
 
@@ -2121,7 +2161,7 @@ class WorkspaceView {
     }
 
     this.gitBar.hidden = state !== "Managing";
-    this.input.placeholder = state === "Running" ? "A script is running, wait for it to finish" : state === "Managing" ? "Git is working, wait for it to finish" : "Enter query...";
+    this.input.placeholder = { Running: "A script is running, wait for it to finish", Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
     this.updateSend();
     this.home.updateWorking(this);
   }
@@ -2187,6 +2227,11 @@ class WorkspaceView {
 
   receive(event) {
     if (event.workspaceId !== this.info.id) {
+      return;
+    }
+
+    if (event.kind === "StateChanged") {
+      this.followState(event.state);
       return;
     }
 
@@ -3393,7 +3438,7 @@ class WorkspaceView {
     event.stopPropagation();
     document.querySelector(".ctx-menu")?.remove();
     const menu = h("div", { class: "menu-list ctx-menu", style: `position:fixed;left:${Math.min(event.clientX, innerWidth - 260)}px;top:${Math.min(event.clientY, innerHeight - 300)}px` },
-      items.filter(item => item !== null).map(item => item === "-" ? h("hr") : h("button", { onclick: () => { menu.remove(); item.action(); } }, item.label)));
+      items.filter(item => item !== null).map(item => item === "-" ? h("hr") : h("button", { disabled: item.disabled === true, onclick: () => { menu.remove(); item.action(); } }, item.label)));
     document.body.append(menu);
     const close = () => { menu.remove(); document.removeEventListener("click", close); };
     setTimeout(() => document.addEventListener("click", close), 0);
@@ -3461,6 +3506,15 @@ class Home {
     this.remoteButton.innerHTML = '<svg viewBox="0 0 14 14" width="18" height="18"><path d="M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
     this.tools = h("div", { class: "tools", hidden: true }, this.remoteButton, this.usageButton, this.gearButton);
     this.topbar = h("div", { class: "topbar" }, this.menuButton, this.title, this.tools);
+    let hold = null;
+    const release = () => { clearTimeout(hold); hold = null; };
+    this.title.addEventListener("contextmenu", event => { event.preventDefault(); this.active?.haltMenu(event); });
+    this.title.addEventListener("touchstart", event => {
+      const touch = event.touches[0];
+      release();
+      hold = setTimeout(() => { hold = null; this.active?.haltMenu({ clientX: touch.clientX, clientY: touch.clientY, stopPropagation() {} }); }, 500);
+    }, { passive: true });
+    ["touchend", "touchmove", "touchcancel"].forEach(name => this.title.addEventListener(name, release, { passive: true }));
     this.content = h("div", { class: "content" });
     this.usageCard = h("div", { class: "usage-card" });
     this.usageWrap = h("div", { class: "usage-wrap", hidden: true, onclick: event => event.target === this.usageWrap && this.toggleUsage(false) }, this.usageCard);

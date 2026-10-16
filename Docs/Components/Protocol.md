@@ -87,6 +87,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `files` | files | `ListFiles` |
 | `searchResults` | array of search result | `SearchFiles` |
 | `content` | content | `ReadFile` |
+| `state` | string | `GetWorkspaceState`: the workspace's state, as in the `StateChanged` event. |
 | `git` | git status | `GetGitStatus` |
 | `gitBranch` | branch state | `GetGitBranchState` |
 | `gitChanges` | git changes | `GetGitChanges`, `GetGitCommitChanges` |
@@ -144,7 +145,10 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GitFetch` | `workspaceId` | none | Fetches `origin` with tags and pruning, moves local branches that have no commits of their own to match the remote, and detaches and deletes the checked out branch when its remote counterpart was deleted. Refused unless the workspace is Ready; does nothing without a remote. |
 | `GitSync` | `workspaceId` | none | `GitFetch`, then fast-forwards the checked out branch onto its remote counterpart, stashing changes that are not committed and restoring them (the AI resolves conflicts of the restore). Does nothing unless the workspace is Ready, without a remote, or when the branch has diverged. |
 | `GitSetIdentity` | `workspaceId`, `name`, `email` | none | Sets the git user name and email in the server user's global git configuration. |
-| `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone. |
+| `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone. While the workspace is Managing it is the same as `CancelWorkspace`. |
+| `StopWorkspace` | `workspaceId` | none | Ends the work of the AI, the script or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
+| `CancelWorkspace` | `workspaceId` | none | Ends the work and reverts what it did, answering when the workspace is Ready again. Refused when nothing runs, when it is already Stopping or Canceling, and for the work of the AI or a script in a workspace that is not a git repository. |
+| `GetWorkspaceState` | `workspaceId` | `state` | Reads the state, which a client does when it opens a workspace and then follows with `StateChanged` events. |
 | `GetScripts` | `workspaceId` | `scripts` | The runs the server holds for the workspace, with their output. |
 | `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Refused unless the workspace is Ready, for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. |
 | `StopScript` | `workspaceId`, `path` | none | Kills the script, or every script of the task, and the task stops. Does nothing when the run is not in progress. |
@@ -369,13 +373,14 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput` or `ScriptRemoved`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved` or `StateChanged`. |
 | `workspaceId` | GUID | The workspace concerned. |
 | `index` | number | `MessageAdded`: the message's position in the conversation. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
 | `path` | string | `FilesChanged`: the changed folder relative to the workspace folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
+| `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Running`, `Managing`, `Stopping` or `Canceling`. |
 | `text` | string | `ScriptOutput`: what the run wrote since the last event. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 

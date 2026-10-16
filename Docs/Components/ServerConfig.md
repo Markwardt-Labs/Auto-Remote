@@ -22,4 +22,4 @@ The server stores all its data in `dataFolder`, by default the `AutoRemote` fold
 
 ## Fixed behavior
 
-Prompts always run with `--dangerously-skip-permissions` (Claude Code) or `--dangerously-bypass-approvals-and-sandbox` (Codex), since they run unattended and cannot ask; `claudeArguments` and `codexArguments` come after them. Which service a workspace uses is a workspace setting, not a server setting; the executables are only needed for the services in use.
+Prompts always run with `--dangerously-skip-permissions` (Claude Code) or `--dangerously-bypass-approvals-and-sandbox` (Codex), since they run unattended and cannot ask, and always do their work in the foreground (see Workspaces); `claudeArguments` and `codexArguments` come after them. Which service a workspace uses is a workspace setting, not a server setting; the executables are only needed for the services in use.

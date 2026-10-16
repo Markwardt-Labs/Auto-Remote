@@ -67,6 +67,18 @@ internal sealed class ClaudeConversation : IAiConversation
     }
 
     /// <inheritdoc />
+    public void Kill()
+    {
+        try
+        {
+            process.Kill(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+        }
+    }
+
+    /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         try

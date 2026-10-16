@@ -43,6 +43,13 @@ internal interface IScriptRunner
     void Stop(Guid id, string path);
 
     /// <summary>
+    /// Stops whatever script or task is running in a workspace and waits until its processes have ended; does nothing when none runs.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>A task that completes once nothing runs in the workspace.</returns>
+    Task StopAll(Guid id);
+
+    /// <summary>
     /// Writes a line to the standard input of a running script.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -62,7 +69,7 @@ internal interface IScriptRunner
 }
 
 /// <inheritdoc />
-internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity) : IScriptRunner
+internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IScriptRunner
 {
     private readonly ConcurrentDictionary<Guid, Workspace> workspaces = new();
 
@@ -146,6 +153,11 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
             state.Active = true;
         }
 
+        if (activity.Get(workspace.Id) == WorkspaceState.Running)
+        {
+            await snapshots.Capture(workspace, CancellationToken.None);
+        }
+
         _ = Task.Run(() => Execute(workspace, root, state, main, batches), CancellationToken.None);
     }
 
@@ -162,6 +174,32 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
             }
 
             entry?.Cancel();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task StopAll(Guid id)
+    {
+        if (!workspaces.TryGetValue(id, out Workspace? workspace))
+        {
+            return;
+        }
+
+        for (int attempt = 0; attempt < 200 && IsRunning(id); attempt++)
+        {
+            List<Entry> active;
+
+            lock (workspace.Lock)
+            {
+                active = [.. workspace.Entries.Where(entry => entry.TaskPath is null && entry.State is ScriptState.Running or ScriptState.Pending)];
+            }
+
+            foreach (Entry entry in active)
+            {
+                entry.Cancel();
+            }
+
+            await Task.Delay(50);
         }
     }
 
@@ -356,6 +394,11 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
             lock (state.Lock)
             {
                 state.Active = false;
+            }
+
+            if (activity.Get(workspace.Id) == WorkspaceState.Running)
+            {
+                snapshots.Discard(workspace.Id);
             }
 
             activity.Leave(workspace.Id, WorkspaceState.Running);

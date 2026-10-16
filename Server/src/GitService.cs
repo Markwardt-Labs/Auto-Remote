@@ -119,6 +119,18 @@ internal interface IGitService
     Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, CancellationToken cancellation, TimeSpan? timeout = null);
 
     /// <summary>
+    /// Runs git like <see cref="Run(string, IReadOnlyList{string}, CancellationToken, TimeSpan?)" /> with extra environment variables, such as the index file to use.
+    /// </summary>
+    /// <param name="folder">The folder git runs in.</param>
+    /// <param name="arguments">The arguments, passed without a shell.</param>
+    /// <param name="environment">The environment variables to set for the process.</param>
+    /// <param name="cancellation">Cancels the run and ends the process.</param>
+    /// <param name="timeout">How long it may run, or <see langword="null" /> for the default of two minutes.</param>
+    /// <returns>The outcome.</returns>
+    /// <exception cref="RequestException">Git is not installed, the folder is missing or git ran too long.</exception>
+    Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation, TimeSpan? timeout = null);
+
+    /// <summary>
     /// Clones a repository into a new folder.
     /// </summary>
     /// <param name="parent">The existing folder to create the clone's folder in.</param>
@@ -680,7 +692,10 @@ internal sealed class GitService : IGitService
     private string Message(GitOutput result) => (result.Error.Trim().Length > 0 ? result.Error : result.Output).Trim() is { Length: > 0 } text ? text : "Git failed.";
 
     /// <inheritdoc />
-    public async Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, CancellationToken cancellation, TimeSpan? limit = null)
+    public Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, CancellationToken cancellation, TimeSpan? limit = null) => Run(folder, arguments, new Dictionary<string, string>(), cancellation, limit);
+
+    /// <inheritdoc />
+    public async Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation, TimeSpan? limit = null)
     {
         ProcessStartInfo start = new("git")
         {
@@ -695,6 +710,11 @@ internal sealed class GitService : IGitService
         foreach (string argument in arguments)
         {
             start.ArgumentList.Add(argument);
+        }
+
+        foreach ((string name, string value) in environment)
+        {
+            start.Environment[name] = value;
         }
 
         start.Environment["GIT_TERMINAL_PROMPT"] = "0";

@@ -169,6 +169,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Shows a failure that happened outside the conversation, such as a refused stop, where the conversation shows its own.
+    /// </summary>
+    /// <param name="message">The failure.</param>
+    public void Show(string message) => Error = message;
+
+    /// <summary>
     /// Loads the newest chunk of the stored conversation and starts following it live.
     /// </summary>
     /// <returns>A task that completes once the conversation is shown.</returns>

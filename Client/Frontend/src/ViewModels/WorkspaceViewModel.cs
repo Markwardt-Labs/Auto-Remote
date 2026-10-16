@@ -15,6 +15,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public WorkspaceViewModel(IServerConnection connection, WorkspaceInfo workspace, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null)
     {
         this.layout = layout;
+        this.connection = connection;
         Workspace = workspace;
         Chat = new ChatViewModel(connection, workspace.Id, drafts);
         Git = new GitViewModel(connection, workspace.Id);
@@ -62,6 +63,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
             if (args.PropertyName == nameof(GitViewModel.IsRepo))
             {
+                Raise(nameof(CanCancel));
+
                 if (!Git.IsRepo && tab == WorkspaceTab.History)
                 {
                     Tab = WorkspaceTab.Chat;
@@ -111,6 +114,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     }
 
     private readonly ClientLayout layout;
+
+    private readonly IServerConnection connection;
+
+    private WorkspaceState? halting;
+
+    private bool subscribed;
 
     private WorkspaceTab tab;
 
@@ -166,7 +175,17 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets what the workspace is doing: only one kind of work runs at a time, and more work only starts once it is <see cref="WorkspaceState.Ready" />, except AI input, which is also accepted while <see cref="WorkspaceState.Working" />.
     /// </summary>
-    public WorkspaceState State => Scripts.IsRunning ? WorkspaceState.Running : Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready;
+    public WorkspaceState State => halting ?? (Scripts.IsRunning ? WorkspaceState.Running : Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
+
+    /// <summary>
+    /// Gets a value indicating whether the work in the workspace can be stopped: something runs and it is not already being stopped or canceled.
+    /// </summary>
+    public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing;
+
+    /// <summary>
+    /// Gets a value indicating whether the work in the workspace can be cancelled and reverted: it can be stopped, and either git is the one working or the workspace is a git repository whose files can be put back.
+    /// </summary>
+    public bool CanCancel => CanHalt && (State == WorkspaceState.Managing || Git.IsRepo);
 
     /// <summary>
     /// Gets a value indicating whether the workspace is in any state but <see cref="WorkspaceState.Ready" />, which turns the header blue.
@@ -314,10 +333,29 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <returns>A task that completes once the conversation is shown.</returns>
     public async Task Start()
     {
+        if (!subscribed)
+        {
+            subscribed = true;
+            connection.EventReceived += Receive;
+        }
+
+        _ = ReadState();
         _ = Git.Start();
         _ = Scripts.Start();
         await Chat.Start();
     }
+
+    /// <summary>
+    /// Stops the work in the workspace at once, keeping what it did; a refusal is shown in the conversation.
+    /// </summary>
+    /// <returns>A task that completes once the workspace is ready again.</returns>
+    public Task Stop() => Halt(connection.StopWorkspace);
+
+    /// <summary>
+    /// Stops the work in the workspace and reverts what it did; a refusal is shown in the conversation.
+    /// </summary>
+    /// <returns>A task that completes once the workspace is ready again.</returns>
+    public Task Cancel() => Halt(connection.CancelWorkspace);
 
     /// <summary>
     /// Called when the workspace gets the focus again, so the file browser, if showing, catches up and watches the right workspace.
@@ -340,6 +378,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void Dispose()
     {
+        if (subscribed)
+        {
+            subscribed = false;
+            connection.EventReceived -= Receive;
+        }
+
         Chat.Dispose();
         Scripts.Dispose();
         Files.Dispose();
@@ -353,11 +397,48 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             WorkspaceState.Running => "A script is running, wait for it to finish",
             WorkspaceState.Managing => "Git is working, wait for it to finish",
+            WorkspaceState.Stopping => "Stopping, wait for it to finish",
+            WorkspaceState.Canceling => "Cancelling and reverting, wait for it to finish",
             _ => null
         };
-        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Running;
+        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Stopping or WorkspaceState.Canceling;
         Raise(nameof(State));
+        Raise(nameof(CanHalt));
         Raise(nameof(IsWorking));
+        Raise(nameof(CanCancel));
+    }
+
+    private void Receive(RemoteEvent remoteEvent)
+    {
+        if (remoteEvent.WorkspaceId == Workspace.Id && remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
+        {
+            Follow(state);
+        }
+    }
+
+    private void Follow(WorkspaceState state)
+    {
+        halting = state is WorkspaceState.Stopping or WorkspaceState.Canceling ? state : null;
+        UpdateState();
+    }
+
+    private async Task ReadState()
+    {
+        try
+        {
+            Follow(await connection.GetWorkspaceState(Workspace.Id, CancellationToken.None));
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task Halt(Func<Guid, CancellationToken, Task> action)
+    {
+        if (!await Attempt(() => action(Workspace.Id, CancellationToken.None)) && Error is { } message)
+        {
+            Chat.Show(message);
+        }
     }
 
     private async Task RunScript(string path)
@@ -370,6 +451,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             {
                 WorkspaceState.Running => "A script is already running.",
                 WorkspaceState.Managing => "Wait for git to finish before running a script.",
+                WorkspaceState.Stopping => "Wait for the work to finish stopping before running a script.",
+                WorkspaceState.Canceling => "Wait for the work to finish being cancelled before running a script.",
                 _ => "Wait for the AI to finish before running a script."
             });
             return;

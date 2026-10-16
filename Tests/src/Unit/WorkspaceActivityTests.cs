@@ -2,9 +2,13 @@ namespace Markwardt.AutoRemote.Tests.Unit;
 
 public sealed class WorkspaceActivityTests
 {
-    private readonly WorkspaceActivity activity = new();
+    private readonly Mock<IEventHub> events = new();
+
+    private readonly WorkspaceActivity activity;
 
     private readonly Guid id = Guid.NewGuid();
+
+    public WorkspaceActivityTests() => activity = new WorkspaceActivity(events.Object);
 
     [Fact]
     public void Get_IsReadyUntilWorkIsEntered()
@@ -77,5 +81,49 @@ public sealed class WorkspaceActivityTests
         activity.TryEnter(id, state);
 
         Assert.Contains(text, activity.Describe(id));
+    }
+
+    [Theory]
+    [InlineData(WorkspaceState.Working)]
+    [InlineData(WorkspaceState.Running)]
+    [InlineData(WorkspaceState.Managing)]
+    public void Halt_MovesWorkIntoAStateNothingElseCanEnterUntilItLeaves(WorkspaceState held)
+    {
+        activity.TryEnter(id, held);
+
+        Assert.Equal(held, activity.Halt(id, WorkspaceState.Canceling));
+
+        Assert.Equal(WorkspaceState.Canceling, activity.Get(id));
+        Assert.False(activity.TryEnter(id, WorkspaceState.Working));
+        Assert.False(activity.TryEnter(id, WorkspaceState.Running));
+        Assert.Null(activity.Halt(id, WorkspaceState.Stopping));
+        activity.Leave(id, held);
+        Assert.Equal(WorkspaceState.Canceling, activity.Get(id));
+        activity.Leave(id, WorkspaceState.Canceling);
+        Assert.Equal(WorkspaceState.Ready, activity.Get(id));
+    }
+
+    [Fact]
+    public void Halt_DoesNothingForAReadyWorkspace()
+    {
+        Assert.Null(activity.Halt(id, WorkspaceState.Stopping));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(id));
+    }
+
+    [Fact]
+    public void EveryChangeOfStateIsPublishedAndRepeatsAreNot()
+    {
+        activity.TryEnter(id, WorkspaceState.Working);
+        activity.TryEnter(id, WorkspaceState.Working);
+        activity.Halt(id, WorkspaceState.Stopping);
+        activity.Leave(id, WorkspaceState.Working);
+        activity.Leave(id, WorkspaceState.Stopping);
+
+        foreach (WorkspaceState state in new[] { WorkspaceState.Working, WorkspaceState.Stopping, WorkspaceState.Ready })
+        {
+            events.Verify(x => x.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = id, State = state }), Times.Once);
+        }
+
+        events.Verify(x => x.Publish(It.IsAny<RemoteEvent>()), Times.Exactly(3));
     }
 }

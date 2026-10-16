@@ -28,6 +28,14 @@ internal interface IWorkspaceActivity
     void Leave(Guid id, WorkspaceState state);
 
     /// <summary>
+    /// Moves a workspace that is working, running or managing into <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />, which no other work can leave until it calls <see cref="Leave" />.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="halting">The state to enter: <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />.</param>
+    /// <returns>The state the workspace was in, or <see langword="null" /> when it was ready or already stopping or canceling, and nothing changed.</returns>
+    WorkspaceState? Halt(Guid id, WorkspaceState halting);
+
+    /// <summary>
     /// Describes what holds a workspace, for the refusal of work that cannot start.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -36,7 +44,7 @@ internal interface IWorkspaceActivity
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceActivity : IWorkspaceActivity
+internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
 {
     private readonly Dictionary<Guid, WorkspaceState> states = [];
 
@@ -54,34 +62,73 @@ internal sealed class WorkspaceActivity : IWorkspaceActivity
     /// <inheritdoc />
     public bool TryEnter(Guid id, WorkspaceState state)
     {
+        bool entered;
+        bool changed = false;
+
         lock (gate)
         {
             WorkspaceState current = states.GetValueOrDefault(id);
 
             if (current == WorkspaceState.Ready)
             {
-                if (state != WorkspaceState.Ready)
+                changed = state != WorkspaceState.Ready;
+
+                if (changed)
                 {
                     states[id] = state;
                 }
 
-                return true;
+                entered = true;
             }
-
-            return state == WorkspaceState.Working && current is WorkspaceState.Working or WorkspaceState.Managing;
+            else
+            {
+                entered = state == WorkspaceState.Working && current is WorkspaceState.Working or WorkspaceState.Managing;
+            }
         }
+
+        if (changed)
+        {
+            Publish(id, state);
+        }
+
+        return entered;
     }
 
     /// <inheritdoc />
     public void Leave(Guid id, WorkspaceState state)
     {
+        bool changed;
+
         lock (gate)
         {
-            if (states.GetValueOrDefault(id) == state)
-            {
-                states.Remove(id);
-            }
+            changed = states.GetValueOrDefault(id) == state && states.Remove(id);
         }
+
+        if (changed)
+        {
+            Publish(id, WorkspaceState.Ready);
+        }
+    }
+
+    /// <inheritdoc />
+    public WorkspaceState? Halt(Guid id, WorkspaceState halting)
+    {
+        WorkspaceState current;
+
+        lock (gate)
+        {
+            current = states.GetValueOrDefault(id);
+
+            if (current is not (WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing))
+            {
+                return null;
+            }
+
+            states[id] = halting;
+        }
+
+        Publish(id, halting);
+        return current;
     }
 
     /// <inheritdoc />
@@ -90,6 +137,10 @@ internal sealed class WorkspaceActivity : IWorkspaceActivity
         WorkspaceState.Working => "The AI is working in this workspace right now.",
         WorkspaceState.Running => "A script is running in this workspace right now.",
         WorkspaceState.Managing => "A git action is running in this workspace right now.",
+        WorkspaceState.Stopping => "The work in this workspace is being stopped right now.",
+        WorkspaceState.Canceling => "The work in this workspace is being cancelled and reverted right now.",
         _ => "The workspace is ready."
     };
+
+    private void Publish(Guid id, WorkspaceState state) => events.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = id, State = state });
 }

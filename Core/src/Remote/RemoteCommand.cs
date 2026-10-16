@@ -62,6 +62,21 @@ public enum RemoteCommand
     ShiftGroup,
 
     /// <summary>
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling.
+    /// </summary>
+    StopWorkspace,
+
+    /// <summary>
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused when nothing runs, when the workspace is already stopping or canceling, or when the work of the AI or a script cannot be reverted because the workspace is not a git repository.
+    /// </summary>
+    CancelWorkspace,
+
+    /// <summary>
+    /// Reads the <see cref="WorkspaceState" /> of <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.State" />.
+    /// </summary>
+    GetWorkspaceState,
+
+    /// <summary>
     /// Deletes <see cref="RemoteRequest.WorkspaceId" />, and its folder too when <see cref="RemoteRequest.DeleteFolder" /> is set.
     /// </summary>
     DeleteWorkspace,

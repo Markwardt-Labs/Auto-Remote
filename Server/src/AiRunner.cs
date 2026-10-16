@@ -23,6 +23,10 @@ internal interface IAiRunner
 /// <inheritdoc />
 internal sealed class AiRunner : IAiRunner
 {
+    private readonly string[] claudeDisabledTools = ["Agent", "Task", "Workflow", "Monitor", "ScheduleWakeup", "CronCreate", "CronDelete", "CronList", "RemoteTrigger", "SendMessage", "ListAgents", "TaskStop"];
+
+    private readonly string foregroundInstruction = "Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished.";
+
     /// <inheritdoc />
     public IAiConversation Start(ServerConfig config, AiService service, string folder, AiModel model, AiEffort effort, Guid aiSession, bool resume) => service switch
     {
@@ -40,7 +44,9 @@ internal sealed class AiRunner : IAiRunner
             RedirectStandardError = true,
         };
 
-        foreach (string argument in (string[])["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--model", model.ToString().ToLowerInvariant(), "--effort", effort.ToString().ToLowerInvariant(), .. config.ClaudeArguments, .. resume ? (string[])["--resume", aiSession.ToString()] : (string[])["--session-id", aiSession.ToString()]])
+        start.Environment["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] = "1";
+
+        foreach (string argument in (string[])["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--disallowedTools", string.Join(',', claudeDisabledTools), "--append-system-prompt", foregroundInstruction, "--model", model.ToString().ToLowerInvariant(), "--effort", effort.ToString().ToLowerInvariant(), .. config.ClaudeArguments, .. resume ? (string[])["--resume", aiSession.ToString()] : (string[])["--session-id", aiSession.ToString()]])
         {
             start.ArgumentList.Add(argument);
         }

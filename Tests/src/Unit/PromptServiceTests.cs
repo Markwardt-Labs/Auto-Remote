@@ -12,7 +12,9 @@ public sealed class PromptServiceTests
 
     private readonly List<RemoteEvent> events = [];
 
-    private readonly WorkspaceActivity activity = new();
+    private readonly WorkspaceActivity activity;
+
+    private readonly Mock<IWorkspaceSnapshots> snapshots = new();
 
     private readonly WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
 
@@ -31,7 +33,8 @@ public sealed class PromptServiceTests
                 events.Add(remoteEvent);
             }
         });
-        service = new PromptService(workspaces.Object, store.Object, runner.Object, hub.Object, activity);
+        activity = new WorkspaceActivity(hub.Object);
+        service = new PromptService(workspaces.Object, store.Object, runner.Object, hub.Object, activity, snapshots.Object);
         service.Configure(new ServerConfig { Port = 0, Key = "k" }, CancellationToken.None);
     }
 
@@ -106,6 +109,74 @@ public sealed class PromptServiceTests
         Assert.Empty(conversation.Sent);
         Assert.False(service.IsBusy(workspace.Id));
         Assert.Equal(busy, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Interrupt_KillsTheProcessAtOnceAndEndsTheWorkWithoutReportingAFailure()
+    {
+        Conversation conversation = Start();
+        conversation.Mock.Setup(x => x.Kill()).Callback(() => conversation.Output.Writer.TryComplete());
+        await service.Prompt(workspace.Id, "long job", CancellationToken.None);
+        Assert.True(service.IsBusy(workspace.Id));
+
+        await service.Interrupt(workspace.Id);
+
+        conversation.Mock.Verify(x => x.Kill(), Times.AtLeastOnce);
+        Assert.False(service.IsBusy(workspace.Id));
+        await Task.Delay(100);
+        Assert.Empty(Events(RemoteEventKind.Failed));
+        Assert.Contains(Events(RemoteEventKind.WorkingChanged), remoteEvent => remoteEvent.Working == false);
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Interrupt_LetsTheNextPromptStartANewProcess()
+    {
+        Conversation first = Start();
+        await service.Prompt(workspace.Id, "one", CancellationToken.None);
+        await service.Interrupt(workspace.Id);
+        Conversation second = Start();
+
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+
+        Assert.Equal(["two"], second.Sent);
+        Assert.True(service.IsBusy(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Interrupt_WithoutAProcessDoesNothing()
+    {
+        await service.Interrupt(workspace.Id);
+        await service.Interrupt(Guid.NewGuid());
+
+        Assert.Empty(Events(RemoteEventKind.WorkingChanged));
+    }
+
+    [Fact]
+    public async Task Prompt_TakesASnapshotOnlyWhenTheWorkspaceWasReady()
+    {
+        Conversation conversation = Start();
+
+        await service.Prompt(workspace.Id, "one", CancellationToken.None);
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+        conversation.Output.Writer.TryWrite(new AiOutput { Kind = AiOutputKind.Finished });
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        snapshots.Verify(x => x.Capture(workspace, It.IsAny<CancellationToken>()), Times.Once);
+        snapshots.Verify(x => x.Discard(workspace.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Prompt_IsRefusedWhileTheWorkIsBeingStopped()
+    {
+        Conversation conversation = Start();
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
+        activity.Halt(workspace.Id, WorkspaceState.Stopping);
+
+        await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "again", CancellationToken.None));
+
+        Assert.Empty(conversation.Sent);
+        Assert.Equal(WorkspaceState.Stopping, activity.Get(workspace.Id));
     }
 
     [Fact]

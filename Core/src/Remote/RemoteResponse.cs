@@ -56,6 +56,11 @@ public sealed record RemoteResponse
     public FileContent? Content { get; init; }
 
     /// <summary>
+    /// Gets the state answering <see cref="RemoteCommand.GetWorkspaceState" />.
+    /// </summary>
+    public WorkspaceState? State { get; init; }
+
+    /// <summary>
     /// Gets the usage limits answering <see cref="RemoteCommand.GetUsage" />.
     /// </summary>
     public UsageStatus? Usage { get; init; }

@@ -46,6 +46,8 @@ internal sealed class HomeViewModel : ViewModelBase
             ChangeServerRequested?.Invoke();
             return Task.CompletedTask;
         });
+        StopWorkspaceCommand = new AsyncCommand(_ => active?.Stop() ?? Task.CompletedTask, () => active?.CanHalt ?? false);
+        CancelWorkspaceCommand = new AsyncCommand(_ => active?.Cancel() ?? Task.CompletedTask, () => active?.CanCancel ?? false);
         BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => CanEditSelected);
         ConfirmRenameCommand = new AsyncCommand(_ => Rename());
         BeginDeleteCommand = new AsyncCommand(
@@ -230,6 +232,9 @@ internal sealed class HomeViewModel : ViewModelBase
             IsUsageOpen = false;
             EditMode = EditMode.None;
             Active = value is null ? null : Open(value);
+            StopWorkspaceCommand.Refresh();
+            CancelWorkspaceCommand.Refresh();
+            Raise(nameof(IsWorkHaltable));
             _ = Active?.Focus();
             _ = Usage.Show(value?.Service);
 
@@ -450,6 +455,21 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand ChangeServerCommand { get; }
 
     /// <summary>
+    /// Gets a value indicating whether the focused workspace has work that can be stopped, which is when the title offers its stop and cancel menu.
+    /// </summary>
+    public bool IsWorkHaltable => active?.CanHalt ?? false;
+
+    /// <summary>
+    /// Gets the command that stops the work in the focused workspace at once, keeping what it did.
+    /// </summary>
+    public AsyncCommand StopWorkspaceCommand { get; }
+
+    /// <summary>
+    /// Gets the command that stops the work in the focused workspace and reverts what it did.
+    /// </summary>
+    public AsyncCommand CancelWorkspaceCommand { get; }
+
+    /// <summary>
     /// Gets the command that opens the workspace rename dialog.
     /// </summary>
     public AsyncCommand BeginRenameCommand { get; }
@@ -616,6 +636,13 @@ internal sealed class HomeViewModel : ViewModelBase
                 Raise(nameof(IsWorking));
                 BeginRenameCommand.Refresh();
                 BeginDeleteCommand.Refresh();
+            }
+
+            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.CanCancel))
+            {
+                StopWorkspaceCommand.Refresh();
+                CancelWorkspaceCommand.Refresh();
+                Raise(nameof(IsWorkHaltable));
             }
         };
         opened[workspace.Id] = created;

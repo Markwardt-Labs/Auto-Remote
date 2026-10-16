@@ -56,10 +56,17 @@ internal interface IPromptService
     /// <param name="id">The workspace identifier.</param>
     /// <returns>A task that completes once the process has ended.</returns>
     Task Release(Guid id);
+
+    /// <summary>
+    /// Ends a workspace's AI process at once, whatever it is doing, and forgets the prompts it had not answered; the conversation stays and the next prompt starts a new process that resumes it. Does nothing when no process runs.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>A task that completes once the process has ended and the AI no longer counts as working.</returns>
+    Task Interrupt(Guid id);
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IAiRunner runner, IEventHub events, IWorkspaceActivity activity) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IAiRunner runner, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
 
@@ -111,7 +118,19 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
-            if (!live.Working && !activity.TryEnter(id, WorkspaceState.Working))
+            bool started = !live.Working;
+
+            if (started && !activity.TryEnter(id, WorkspaceState.Working))
+            {
+                throw new RequestException(activity.Describe(id));
+            }
+
+            if (started && activity.Get(id) == WorkspaceState.Working)
+            {
+                await snapshots.Capture(workspace, cancellation);
+            }
+
+            if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling)
             {
                 throw new RequestException(activity.Describe(id));
             }
@@ -144,6 +163,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
         catch (Exception) when (!live.Working)
         {
+            if (activity.Get(id) == WorkspaceState.Working)
+            {
+                snapshots.Discard(id);
+            }
+
             activity.Leave(id, WorkspaceState.Working);
             throw;
         }
@@ -195,6 +219,39 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
+    /// <inheritdoc />
+    public async Task Interrupt(Guid id)
+    {
+        if (!lives.TryGetValue(id, out Live? live))
+        {
+            return;
+        }
+
+        live.Interrupted = true;
+        live.Conversation?.Kill();
+        await live.Gate.WaitAsync(CancellationToken.None);
+
+        try
+        {
+            live.Idle?.Cancel();
+            live.Unanswered.Clear();
+
+            if (live.Conversation is { } conversation)
+            {
+                live.Conversation = null;
+                conversation.Kill();
+                await conversation.DisposeAsync();
+            }
+
+            SetWorking(id, live, false);
+        }
+        finally
+        {
+            live.Interrupted = false;
+            live.Gate.Release();
+        }
+    }
+
     private void Begin(Guid id, Live live, Guid aiSession, bool resume, WorkspaceInfo workspace)
     {
         IAiConversation conversation = runner.Start(config, workspace.Service, workspace.Folder, workspace.Model, workspace.Effort, aiSession, resume);
@@ -216,7 +273,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
                 try
                 {
-                    if (live.Conversation != conversation)
+                    if (live.Conversation != conversation || live.Interrupted)
                     {
                         return;
                     }
@@ -242,7 +299,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
-            if (live.Conversation == conversation)
+            if (live.Conversation == conversation && !live.Interrupted)
             {
                 if (live.Working)
                 {
@@ -357,6 +414,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (!working)
             {
+                if (activity.Get(id) == WorkspaceState.Working)
+                {
+                    snapshots.Discard(id);
+                }
+
                 activity.Leave(id, WorkspaceState.Working);
             }
 
@@ -398,6 +460,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public bool Confirmed { get; set; }
 
         public bool Working { get; set; }
+
+        public volatile bool Interrupted;
 
         public List<string> Unanswered { get; } = [];
 

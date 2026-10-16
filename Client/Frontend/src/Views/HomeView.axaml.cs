@@ -14,6 +14,8 @@ public sealed partial class HomeView : UserControl
         AddHandler(Avalonia.Input.InputElement.PointerPressedEvent, OnFilePointerPressed, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         this.FindControl<TextBox>("ChatInput")?.AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnChatKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
+        this.FindControl<TextBlock>("TitleText")?.AddHandler(Avalonia.Input.InputElement.ContextRequestedEvent, OnTitleContextRequested, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
         if (this.FindControl<TextBox>("ChatInput") is { } input)
         {
             input.TextChanged += (_, _) => OnChatTextChanged();
@@ -177,6 +179,8 @@ public sealed partial class HomeView : UserControl
 
         box?.Paste();
     }
+
+    private void OnTitleContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs args) => args.Handled = DataContext is not HomeViewModel { IsWorkHaltable: true };
 
     private void OnFileTapped(object? sender, Avalonia.Input.TappedEventArgs args)
     {

@@ -427,6 +427,31 @@ internal interface IServerConnection : IAsyncDisposable
     Task GitCancel(Guid id, CancellationToken cancellation);
 
     /// <summary>
+    /// Stops the work running in a workspace at once, keeping what it did.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused: nothing runs, or the workspace is already stopping or canceling.</exception>
+    Task StopWorkspace(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Stops the work running in a workspace and reverts what it did.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused: nothing runs, the workspace is already stopping or canceling, or its work cannot be reverted.</exception>
+    Task CancelWorkspace(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads the state a workspace is in.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The state.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<WorkspaceState> GetWorkspaceState(Guid id, CancellationToken cancellation);
+
+    /// <summary>
     /// Reads the usage limits of an AI service, as the server last read them (at most a minute old).
     /// </summary>
     /// <param name="service">The AI service.</param>
@@ -765,6 +790,15 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task GitCancel(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.GitCancel, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task StopWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StopWorkspace, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task CancelWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelWorkspace, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<WorkspaceState> GetWorkspaceState(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetWorkspaceState, WorkspaceId = id }, cancellation)).State ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetUsage, Service = service }, cancellation)).Usage ?? throw Malformed();

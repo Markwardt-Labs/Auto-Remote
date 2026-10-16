@@ -309,6 +309,44 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_TitleMenuOffersStopAndCancelOnlyWhileWorkIsRunning()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
+
+        (bool readyOpens, bool workingOpens, string[] headers, bool[] enabled) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            TextBlock title = window.GetVisualDescendants().OfType<TextBlock>().First(block => block.Name == "TitleText");
+            title.RaiseEvent(new Avalonia.Input.ContextRequestedEventArgs { RoutedEvent = Avalonia.Input.InputElement.ContextRequestedEvent });
+            bool readyOpens = title.ContextMenu!.IsOpen;
+            title.ContextMenu.Close();
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+            title.RaiseEvent(new Avalonia.Input.ContextRequestedEventArgs { RoutedEvent = Avalonia.Input.InputElement.ContextRequestedEvent });
+            bool workingOpens = title.ContextMenu.IsOpen;
+            MenuItem[] items = [.. title.ContextMenu.Items.OfType<MenuItem>()];
+            string[] headers = [.. items.Select(item => item.Header?.ToString() ?? string.Empty)];
+            bool[] enabled = [.. items.Select(item => item.Command?.CanExecute(null) ?? false)];
+            title.ContextMenu.Close();
+            window.Close();
+            return (readyOpens, workingOpens, headers, enabled);
+        });
+
+        Assert.False(readyOpens);
+        Assert.True(workingOpens);
+        Assert.Equal(["Stop", "Cancel"], headers);
+        Assert.Equal([true, false], enabled);
+    }
+
+    [Fact]
     public async Task HomeView_TabsLayoutHasNoWindowControlsButAScriptTab()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

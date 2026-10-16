@@ -11,7 +11,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
 
     private readonly GitService git = new();
 
-    private readonly WorkspaceActivity activity = new();
+    private readonly WorkspaceActivity activity;
 
     private readonly WorkspaceVersioning versioning;
 
@@ -27,6 +27,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
         Environment.SetEnvironmentVariable("GIT_AUTHOR_EMAIL", "tester@example.com");
         Environment.SetEnvironmentVariable("GIT_COMMITTER_NAME", "Tester");
         Environment.SetEnvironmentVariable("GIT_COMMITTER_EMAIL", "tester@example.com");
+        activity = new WorkspaceActivity(events.Object);
         versioning = new WorkspaceVersioning(git, prompts.Object, events.Object, activity);
         remote = temp.Combine("origin.git");
         work = temp.Combine("work");
@@ -624,9 +625,10 @@ public sealed class WorkspaceVersioningTests : IDisposable
             await Task.Delay(Timeout.Infinite, token);
         }, CancellationToken.None);
         await started.Task;
-        versioning.Cancel(workspace.Id);
+        Task cancelling = versioning.Cancel(workspace.Id);
 
         RequestException cancelled = await Refused(action);
+        await cancelling;
 
         Assert.Contains("cancelled", cancelled.Message);
         Assert.Equal("main", Current);
@@ -647,8 +649,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
             await Task.Delay(Timeout.Infinite, token);
         }, CancellationToken.None);
         await started.Task;
-        versioning.Cancel(workspace.Id);
-        await Refused(action);
+        await Task.WhenAll(versioning.Cancel(workspace.Id), Refused(action));
 
         Assert.Equal("mine", File.ReadAllText(Path.Combine(work, "a.txt")));
     }

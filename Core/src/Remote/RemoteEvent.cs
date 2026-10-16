@@ -26,6 +26,11 @@ public sealed record RemoteEvent
     public ChatMessage? Message { get; init; }
 
     /// <summary>
+    /// Gets the state the workspace entered, for <see cref="RemoteEventKind.StateChanged" />.
+    /// </summary>
+    public WorkspaceState? State { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the AI is working, for <see cref="RemoteEventKind.WorkingChanged" />.
     /// </summary>
     public bool? Working { get; init; }
@@ -95,5 +100,10 @@ public enum RemoteEventKind
     /// <summary>
     /// A run was forgotten.
     /// </summary>
-    ScriptRemoved
+    ScriptRemoved,
+
+    /// <summary>
+    /// A workspace entered a different <see cref="WorkspaceState" />.
+    /// </summary>
+    StateChanged
 }

@@ -304,4 +304,93 @@ public sealed class ScriptsViewModelTests
         Assert.False(model.ShowScriptView);
         Assert.True(model.ShowChatView);
     }
+
+    private async Task<WorkspaceViewModel> StartedWorkspace(bool repo)
+    {
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = repo, Branch = "main", Commit = "abc1234", Message = "second" });
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
+        WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
+        await model.Start();
+        await model.Git.Refresh();
+        return model;
+    }
+
+    private void Server(WorkspaceState state) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = workspace.Id, State = state });
+
+    [Fact]
+    public async Task Workspace_ShowsStoppingAndCancelingFromTheServerAndLocksEverythingMeanwhile()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+        Assert.True(model.CanHalt);
+        Assert.True(model.CanCancel);
+
+        Server(WorkspaceState.Stopping);
+
+        Assert.Equal(WorkspaceState.Stopping, model.State);
+        Assert.True(model.IsWorking);
+        Assert.False(model.CanHalt);
+        Assert.False(model.CanCancel);
+        Assert.False(model.Chat.SendCommand.CanExecute(null) && !string.IsNullOrEmpty(model.Chat.Input));
+        Assert.Equal("Stopping, wait for it to finish", model.Chat.Placeholder);
+        Assert.False(model.Git.CommitCommand.CanExecute(null));
+
+        Server(WorkspaceState.Canceling);
+        Assert.Equal(WorkspaceState.Canceling, model.State);
+        Assert.Equal("Cancelling and reverting, wait for it to finish", model.Chat.Placeholder);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
+        Server(WorkspaceState.Ready);
+
+        Assert.Equal(WorkspaceState.Ready, model.State);
+        Assert.False(model.IsWorking);
+        Assert.Null(model.Chat.BlockReason);
+    }
+
+    [Fact]
+    public async Task Workspace_ReadsAStateThatWasAlreadyStoppingWhenItOpened()
+    {
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Canceling);
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
+
+        await model.Start();
+        await Task.Delay(50);
+
+        Assert.Equal(WorkspaceState.Canceling, model.State);
+    }
+
+    [Fact]
+    public async Task Workspace_CanOnlyCancelWorkThatCanBeRevertedButAlwaysStopIt()
+    {
+        WorkspaceViewModel plain = await StartedWorkspace(false);
+        Assert.False(plain.CanHalt);
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+
+        Assert.True(plain.CanHalt);
+        Assert.False(plain.CanCancel);
+
+        WorkspaceViewModel repo = await StartedWorkspace(true);
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+
+        Assert.True(repo.CanCancel);
+    }
+
+    [Fact]
+    public async Task Workspace_StopAndCancelAskTheServerAndShowARefusalInTheChat()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        connection.Setup(x => x.CancelWorkspace(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("Nothing is running in this workspace."));
+
+        await model.Stop();
+        await model.Cancel();
+
+        connection.Verify(x => x.StopWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.CancelWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("Nothing is running in this workspace.", model.Chat.Error);
+    }
 }

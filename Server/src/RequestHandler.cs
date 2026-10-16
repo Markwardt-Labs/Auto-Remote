@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -185,8 +185,17 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await git.SetIdentity(await FolderOf(request, cancellation), Require(request.Name, "name"), Require(request.Email, "email"), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitCancel:
-                versioning.Cancel(RequireWorkspace(request));
+                await (activity.Get(RequireWorkspace(request)) == WorkspaceState.Managing ? control.Cancel(RequireWorkspace(request)) : versioning.Cancel(RequireWorkspace(request)));
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.StopWorkspace:
+                await control.Stop(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.CancelWorkspace:
+                await control.Cancel(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GetWorkspaceState:
+                await workspaces.Get(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, State = activity.Get(RequireWorkspace(request)) };
             case RemoteCommand.GetScripts:
                 await workspaces.Get(RequireWorkspace(request), cancellation);
                 return new RemoteResponse { Id = 0, Scripts = scripts.List(RequireWorkspace(request)) };

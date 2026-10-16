@@ -60,6 +60,23 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
     }
 
     /// <inheritdoc />
+    public void Kill()
+    {
+        lock (gate)
+        {
+            prompts.Clear();
+        }
+
+        try
+        {
+            current?.Kill(true);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
+        {
+        }
+    }
+
+    /// <inheritdoc />
     public async ValueTask DisposeAsync()
     {
         lock (gate)
@@ -129,7 +146,7 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
             RedirectStandardError = true,
         };
 
-        foreach (string argument in (string[])["exec", .. sessionId is null ? (string[])[] : ["resume"], "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "-m", Slug(), "-c", $"model_reasoning_effort=\"{effort.ToString().ToLowerInvariant()}\"", .. config.CodexArguments, .. sessionId is null ? (string[])[] : [sessionId], "-"])
+        foreach (string argument in (string[])["exec", .. sessionId is null ? (string[])[] : ["resume"], "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--disable", "multi_agent", "--disable", "unified_exec", "-m", Slug(), "-c", $"model_reasoning_effort=\"{effort.ToString().ToLowerInvariant()}\"", .. config.CodexArguments, .. sessionId is null ? (string[])[] : [sessionId], "-"])
         {
             start.ArgumentList.Add(argument);
         }

@@ -14,6 +14,11 @@ internal interface IAiConversation : IAsyncDisposable
     Task Send(string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Ends the AI's process at once, without waiting for the work in progress.
+    /// </summary>
+    void Kill();
+
+    /// <summary>
     /// Reports what the AI does until its process ends.
     /// </summary>
     /// <param name="cancellation">Stops reading.</param>

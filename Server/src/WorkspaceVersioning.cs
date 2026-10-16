@@ -16,7 +16,8 @@ internal interface IWorkspaceVersioning
     /// Cancels the git action running in a workspace, which undoes what it had done; does nothing when none runs.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    void Cancel(Guid id);
+    /// <returns>A task that completes once the action has ended and been undone.</returns>
+    Task Cancel(Guid id);
 
     /// <summary>
     /// Runs one git action in a workspace, alone: it refuses while another runs, tells every client when it starts and ends, and when it is cancelled or fails unexpectedly puts the repository back as it was.
@@ -132,20 +133,31 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     public bool IsBusy(Guid id) => running.TryGetValue(id, out Running? current) && !current.Background;
 
     /// <inheritdoc />
-    public void Cancel(Guid id)
+    public Task Cancel(Guid id)
     {
-        if (running.TryGetValue(id, out Running? current))
+        if (!running.TryGetValue(id, out Running? current))
+        {
+            return Task.CompletedTask;
+        }
+
+        try
         {
             current.Source.Cancel();
         }
+        catch (ObjectDisposedException)
+        {
+        }
+
+        return current.Done.Task;
     }
 
     /// <inheritdoc />
     public async Task Perform(WorkspaceInfo workspace, bool revert, Func<CancellationToken, Task> action, CancellationToken cancellation, bool background = false)
     {
         using CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        Running record = new(source, background, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
 
-        if (!running.TryAdd(workspace.Id, new Running(source, background)))
+        if (!running.TryAdd(workspace.Id, record))
         {
             throw new RequestException("A git action is already running in this workspace.");
         }
@@ -187,19 +199,26 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
         {
             running.TryRemove(workspace.Id, out _);
 
-            if (!background)
+            try
             {
-                activity.Leave(workspace.Id, WorkspaceState.Managing);
-
-                if (prompts.IsBusy(workspace.Id))
+                if (!background)
                 {
-                    activity.TryEnter(workspace.Id, WorkspaceState.Working);
+                    activity.Leave(workspace.Id, WorkspaceState.Managing);
+
+                    if (prompts.IsBusy(workspace.Id))
+                    {
+                        activity.TryEnter(workspace.Id, WorkspaceState.Working);
+                    }
+                }
+
+                if (!background || await Fingerprint(workspace.Folder) != before)
+                {
+                    Publish(workspace.Id);
                 }
             }
-
-            if (!background || await Fingerprint(workspace.Folder) != before)
+            finally
             {
-                Publish(workspace.Id);
+                record.Done.TrySetResult();
             }
         }
     }
@@ -879,7 +898,7 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
         Failed,
     }
 
-    private sealed record Running(CancellationTokenSource Source, bool Background);
+    private sealed record Running(CancellationTokenSource Source, bool Background, TaskCompletionSource Done);
 
     private sealed record Snapshot(string? Branch, string Head, bool Pending, IReadOnlyDictionary<string, string> Tips);
 }
