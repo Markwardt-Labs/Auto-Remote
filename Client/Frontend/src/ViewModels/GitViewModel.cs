@@ -83,6 +83,8 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
 
     private bool isDestructive;
 
+    private bool capitalizes = true;
+
     private Func<Task>? confirmAction;
 
     private Func<Task>? afterwards;
@@ -241,6 +243,16 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether confirming the question destroys work.
     /// </summary>
     public bool IsDestructive => isDestructive;
+
+    /// <summary>
+    /// Gets a value indicating whether the box's text starts with a capital letter by default on a touch keyboard, which everything but a URL does.
+    /// </summary>
+    public bool Capitalizes => capitalizes;
+
+    /// <summary>
+    /// Gets a value indicating whether pressing Enter anywhere in the showing prompt submits it: not for a destructive question, which only its button answers.
+    /// </summary>
+    public bool SubmitsOnEnter => prompt != GitPrompt.None && !(prompt == GitPrompt.Confirm && isDestructive);
 
     /// <summary>
     /// Gets or sets the text typed for the question, the name for an identity.
@@ -513,7 +525,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         FetchCommand.Refresh();
     }
 
-    private void Ask(GitPrompt kind, string title, string hint, string confirm, Func<Task>? action, string text = "", bool destructive = false, string empty = "", Func<Task>? then = null)
+    private void Ask(GitPrompt kind, string title, string hint, string confirm, Func<Task>? action, string text = "", bool destructive = false, string empty = "", Func<Task>? then = null, bool capitalize = true)
     {
         if (isLocked && kind != GitPrompt.Notice)
         {
@@ -526,6 +538,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         promptHint = hint;
         promptConfirm = confirm;
         isDestructive = destructive;
+        capitalizes = capitalize;
         emptyMessage = empty;
         confirmAction = action;
         afterwards = then;
@@ -536,6 +549,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         Raise(nameof(PromptPlaceholder));
         Raise(nameof(PromptConfirm));
         Raise(nameof(IsDestructive));
+        Raise(nameof(Capitalizes));
         Prompt = kind;
     }
 
@@ -582,7 +596,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
 
     private Task SetRemote()
     {
-        Ask(GitPrompt.Input, "Git remote", status.IsRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", "Set remote", () => connection.GitSetRemote(workspaceId, promptText.Trim(), CancellationToken.None), Remote, empty: "Enter the remote URL.");
+        Ask(GitPrompt.Input, "Git remote", status.IsRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", "Set remote", () => connection.GitSetRemote(workspaceId, promptText.Trim(), CancellationToken.None), Remote, empty: "Enter the remote URL.", capitalize: false);
         return Task.CompletedTask;
     }
 

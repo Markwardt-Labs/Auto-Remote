@@ -309,6 +309,54 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_GitPromptFocusesItsBoxEscapeCancelsAndEnterSubmits()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "base", HasIdentity = true, HasChanges = true });
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
+
+        (bool focused, bool capitalizes, GitPrompt afterEscape, bool urlCapitalizes, string submitted) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            model.Active!.Git.Refresh().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            GitViewModel git = model.Active.Git;
+            git.CommitCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            TextBox box = window.GetVisualDescendants().OfType<TextBox>().First(item => item.Name == "PromptInput");
+            bool focused = box.IsFocused;
+            bool capitalizes = Avalonia.Input.TextInput.TextInputOptions.GetAutoCapitalization(box);
+            window.KeyPress(Avalonia.Input.Key.Escape, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Escape, null);
+            GitPrompt afterEscape = git.Prompt;
+            git.RemoteCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool urlCapitalizes = Avalonia.Input.TextInput.TextInputOptions.GetAutoCapitalization(box);
+            window.KeyPress(Avalonia.Input.Key.Escape, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Escape, null);
+            git.CommitCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            git.PromptText = "my message";
+            window.KeyPress(Avalonia.Input.Key.Enter, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Enter, null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.Close();
+            return (focused, capitalizes, afterEscape, urlCapitalizes, "my message");
+        });
+        await Task.Delay(100);
+
+        Assert.True(focused);
+        Assert.True(capitalizes);
+        Assert.Equal(GitPrompt.None, afterEscape);
+        Assert.False(urlCapitalizes);
+        connection.Verify(x => x.GitCommit(workspace.Id, submitted, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task HomeView_TitleMenuOffersStopAndCancelOnlyWhileWorkIsRunning()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

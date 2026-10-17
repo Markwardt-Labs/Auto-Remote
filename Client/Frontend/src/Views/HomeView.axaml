@@ -619,14 +619,14 @@
       </Border>
     </Grid>
 
-    <Border IsVisible="{Binding Active.Git.IsPrompting, FallbackValue=False}" Background="{DynamicResource Scrim}">
+    <Border Name="PromptOverlay" IsVisible="{Binding Active.Git.IsPrompting, FallbackValue=False}" Background="{DynamicResource Scrim}">
       <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
         <StackPanel DataContext="{Binding Active.Git}" Spacing="12">
           <TextBlock Text="{Binding PromptTitle}" Classes="serif" FontSize="20" />
           <TextBlock Text="{Binding PromptHint}" IsVisible="{Binding !HasInput}" Classes="muted" TextWrapping="Wrap" />
           <TextBlock Text="{Binding PromptHint}" IsVisible="{Binding HasEmail}" Classes="muted" TextWrapping="Wrap" />
-          <TextBox Text="{Binding PromptText}" IsVisible="{Binding HasInput}" PlaceholderText="{Binding PromptPlaceholder}" AcceptsReturn="False" />
-          <TextBox Text="{Binding PromptEmail}" IsVisible="{Binding HasEmail}" PlaceholderText="Email" AcceptsReturn="False" />
+          <TextBox Name="PromptInput" Text="{Binding PromptText}" IsVisible="{Binding HasInput}" PlaceholderText="{Binding PromptPlaceholder}" AcceptsReturn="False" TextInputOptions.AutoCapitalization="{Binding Capitalizes}" />
+          <TextBox Text="{Binding PromptEmail}" IsVisible="{Binding HasEmail}" PlaceholderText="Email" AcceptsReturn="False" TextInputOptions.AutoCapitalization="False" />
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
           <Button Content="{Binding PromptConfirm}" Command="{Binding ConfirmCommand}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding ShowCancel}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />

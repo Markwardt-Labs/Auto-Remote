@@ -16,6 +16,26 @@ public sealed partial class HomeView : UserControl
 
         this.FindControl<TextBlock>("TitleText")?.AddHandler(Avalonia.Input.InputElement.ContextRequestedEvent, OnTitleContextRequested, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
+        AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnPromptKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        if (this.FindControl<Border>("PromptOverlay") is { } overlay && this.FindControl<TextBox>("PromptInput") is { } prompt)
+        {
+            overlay.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == Visual.IsVisibleProperty && overlay.IsVisible)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        if (prompt.IsEffectivelyVisible)
+                        {
+                            prompt.Focus();
+                            prompt.SelectAll();
+                        }
+                    }, Avalonia.Threading.DispatcherPriority.Background);
+                }
+            };
+        }
+
         if (this.FindControl<TextBox>("ChatInput") is { } input)
         {
             input.TextChanged += (_, _) => OnChatTextChanged();
@@ -178,6 +198,25 @@ public sealed partial class HomeView : UserControl
         }
 
         box?.Paste();
+    }
+
+    private void OnPromptKeyDown(object? sender, Avalonia.Input.KeyEventArgs args)
+    {
+        if (DataContext is not HomeViewModel { Active.Git: { IsPrompting: true } git } || args.KeyModifiers != Avalonia.Input.KeyModifiers.None)
+        {
+            return;
+        }
+
+        if (args.Key == Avalonia.Input.Key.Escape)
+        {
+            git.CancelCommand.Execute(null);
+            args.Handled = true;
+        }
+        else if (args.Key == Avalonia.Input.Key.Enter && git.SubmitsOnEnter)
+        {
+            git.ConfirmCommand.Execute(null);
+            args.Handled = true;
+        }
     }
 
     private void OnTitleContextRequested(object? sender, Avalonia.Input.ContextRequestedEventArgs args) => args.Handled = DataContext is not HomeViewModel { IsWorkHaltable: true };

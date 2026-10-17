@@ -3263,7 +3263,7 @@ class WorkspaceView {
       ...(this.history.hasMore ? [h("button", { class: "block", style: "margin-top:8px", onclick: () => this.loadHistory(false) }, "Load older commits")] : []));
   }
 
-  askGit({ title, body = null, confirm, input = null, text = "", email = false, destructive = false, empty = "", action, then }) {
+  askGit({ title, body = null, confirm, input = null, text = "", email = false, destructive = false, empty = "", capitalize = true, action, then }) {
     if (this.refuseWork()) {
       return;
     }
@@ -3315,10 +3315,12 @@ class WorkspaceView {
 
     if (nameBox) {
       nameBox.placeholder = input;
+      nameBox.setAttribute("autocapitalize", capitalize ? "sentences" : "off");
     }
 
     if (emailBox) {
       emailBox.placeholder = "Email";
+      emailBox.setAttribute("autocapitalize", "off");
     }
 
     this.home.dialog(title, body, nameBox, emailBox, h("button", { class: `${destructive ? "danger" : "primary"} block`, onclick: go }, confirm));
@@ -3355,7 +3357,7 @@ class WorkspaceView {
     } else if (kind === "tag") {
       this.withIdentity(() => this.askGit({ title: "New tag", confirm: "Create tag", input: "Tag name", empty: "Enter a name.", action: text => this.connection.gitCreateTag(id, text) }));
     } else {
-      this.askGit({ title: "Git remote", confirm: "Set remote", input: status.isRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", text: status.remote ?? "", empty: "Enter the remote URL.", action: text => this.connection.gitSetRemote(id, text) });
+      this.askGit({ title: "Git remote", confirm: "Set remote", input: status.isRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", text: status.remote ?? "", empty: "Enter the remote URL.", capitalize: false, action: text => this.connection.gitSetRemote(id, text) });
     }
   }
 
@@ -3594,6 +3596,8 @@ class Home {
         h("button", { class: "block", onclick: () => this.app.changeServer() }, "Change server")));
     this.scrim = h("div", { class: "overlay", hidden: true, onclick: () => this.setDrawer(false) });
     this.dialogHost = h("div", { class: "dialog-wrap", hidden: true });
+    this.dialogKeyListener = event => this.dialogKey(event);
+    document.addEventListener("keydown", this.dialogKeyListener);
     this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.scrim, this.drawer, this.dialogHost);
     this.drawerOpen = false;
   }
@@ -3872,6 +3876,24 @@ class Home {
     this.renderDrawer();
   }
 
+  dialogKey(event) {
+    if (this.dialogHost.hidden || event.defaultPrevented || event.isComposing) {
+      return;
+    }
+
+    if (event.key === "Escape") {
+      event.preventDefault();
+      this.closeDialog();
+    } else if (event.key === "Enter" && !["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(event.target.tagName)) {
+      const submit = this.dialogHost.querySelector("button.primary");
+
+      if (submit) {
+        event.preventDefault();
+        submit.click();
+      }
+    }
+  }
+
   closeDialog() {
     this.dialogHost.hidden = true;
     this.dialogHost.replaceChildren();
@@ -4038,6 +4060,8 @@ class Home {
   }
 
   dispose() {
+    document.removeEventListener("keydown", this.dialogKeyListener);
+
     for (const view of this.opened.values()) {
       view.dispose();
     }
