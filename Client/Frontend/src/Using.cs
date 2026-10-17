@@ -29,3 +29,4 @@ global using Avalonia.Controls.Platform;
 global using Avalonia.Data.Converters;
 global using Avalonia.Threading;
 global using Avalonia.VisualTree;
+global using Avalonia.Controls.ApplicationLifetimes;

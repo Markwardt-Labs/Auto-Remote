@@ -67,6 +67,116 @@ public sealed class HomeViewModelTests
         Assert.True(model.Entries[0].IsCollapsed);
     }
 
+    private void Working(WorkspaceInfo workspace, bool working) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = working });
+
+    private async Task<(HomeViewModel Model, Mock<IReadyNotifier> Notifier)> Notifying()
+    {
+        Mock<IReadyNotifier> notifier = new();
+        HomeViewModel notifying = new(connection.Object, ClientLayout.Tabs, null, null, null, notifier.Object);
+        await notifying.Start();
+        return (notifying, notifier);
+    }
+
+    [Fact]
+    public async Task Notifier_SaysTheWorkspaceIsReadyOnceWhenWorkThisClientGaveEnds()
+    {
+        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
+        notifying.Active!.Chat.Input = "do it";
+
+        notifying.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+        Working(first, true);
+        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Never);
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify("a"), Times.Once);
+
+        Working(first, true);
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Keeper_HoldsTheAppFromSubmittingAPromptUntilTheWorkspaceIsReady()
+    {
+        Mock<IWorkKeeper> keeper = new();
+        HomeViewModel keeping = new(connection.Object, ClientLayout.Tabs, null, null, null, null, keeper.Object);
+        await keeping.Start();
+        keeping.Active!.Chat.Input = "do it";
+
+        keeping.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+        keeper.Verify(x => x.Hold(first.Id, "a"), Times.Once);
+        keeper.Verify(x => x.Release(It.IsAny<Guid>()), Times.Never);
+
+        Working(first, true);
+        keeper.Verify(x => x.Release(It.IsAny<Guid>()), Times.Never);
+        Working(first, false);
+
+        keeper.Verify(x => x.Release(first.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Keeper_LetsGoWhenThePromptCouldNotBeSentAndIgnoresWorkAnotherClientGave()
+    {
+        Mock<IWorkKeeper> keeper = new();
+        HomeViewModel keeping = new(connection.Object, ClientLayout.Tabs, null, null, null, null, keeper.Object);
+        await keeping.Start();
+        Working(first, true);
+        Working(first, false);
+        keeper.Verify(x => x.Hold(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        connection.Setup(x => x.Prompt(first.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
+        keeping.Active!.Chat.Input = "do it";
+
+        keeping.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+
+        keeper.Verify(x => x.Hold(first.Id, "a"), Times.Once);
+        keeper.Verify(x => x.Release(first.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Notifier_StaysQuietForWorkAnotherClientGave()
+    {
+        (_, Mock<IReadyNotifier> notifier) = await Notifying();
+
+        Working(first, true);
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Notifier_StaysQuietWhenThePromptCouldNotBeSent()
+    {
+        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
+        connection.Setup(x => x.Prompt(first.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
+        notifying.Active!.Chat.Input = "do it";
+
+        notifying.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+        Working(first, true);
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Title_SaysWhenTheConnectionIsBeingReopened()
+    {
+        await model.Start();
+        Assert.Equal("a", model.Title);
+
+        connection.Raise(x => x.Lost += null);
+        Assert.True(model.IsOffline);
+        Assert.Equal("a (reconnecting…)", model.Title);
+
+        connection.Raise(x => x.Reconnected += null);
+        Assert.False(model.IsOffline);
+        Assert.Equal("a", model.Title);
+    }
+
     [Fact]
     public async Task ShiftCommands_AskTheServerAndShowTheNewOrder()
     {

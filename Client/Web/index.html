@@ -136,6 +136,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .script-input input { flex: 1; }
 .row.running .name { font-weight: 700; }
 .topbar .title { user-select: none; -webkit-touch-callout: none; }
+.topbar.offline .title::after { content: " (reconnecting…)"; font-size: 12px; opacity: 0.8; }
 .menu-list button:disabled { opacity: 0.45; cursor: default; }
 .tree .row { user-select: none; }
 .messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
@@ -1170,6 +1171,15 @@ class Connection {
     }
   }
 
+  drop() {
+    try {
+      this.socket.close();
+    } catch (exception) {
+    }
+
+    this.fail();
+  }
+
   fail() {
     if (this.closed) {
       return;
@@ -1548,6 +1558,8 @@ class WorkspaceView {
     this.gitRefs = false;
     this.localBusy = false;
     this.halting = null;
+    this.notifyWhenReady = false;
+    this.lastState = "Ready";
     this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
     this.scriptError = new ErrorLine();
     this.syncTimer = null;
@@ -1810,6 +1822,18 @@ class WorkspaceView {
       }
     } catch (exception) {
     }
+  }
+
+  reconnected(connection) {
+    this.connection.listeners.delete(this.listener);
+    this.connection = connection;
+    connection.listeners.add(this.listener);
+    this.watched = [];
+    this.loadChat();
+    this.refreshGit(true);
+    this.loadScripts();
+    this.loadState();
+    this.loadRoot(this.files?.path ?? "", false);
   }
 
   blur() {
@@ -2149,8 +2173,24 @@ class WorkspaceView {
     }
   }
 
+  announceReady(state) {
+    if (state === "Ready" && this.lastState !== "Ready" && this.notifyWhenReady) {
+      this.notifyWhenReady = false;
+
+      try {
+        if ("Notification" in window && Notification.permission === "granted") {
+          new Notification(`${folderName(this.info.folder)} is ready`);
+        }
+      } catch (exception) {
+      }
+    }
+
+    this.lastState = state;
+  }
+
   applyState() {
     const state = this.state();
+    this.announceReady(state);
     const previous = this.lastState ?? "Ready";
     this.lastState = state;
 
@@ -2430,6 +2470,15 @@ class WorkspaceView {
     this.input.value = "";
     this.fitInput();
     this.saveDraft();
+    this.notifyWhenReady = true;
+
+    try {
+      if ("Notification" in window && Notification.permission === "default") {
+        Notification.requestPermission();
+      }
+    } catch (exception) {
+    }
+
     this.attachments = [];
     this.renderAttachments();
     const result = await attempt(async () => {
@@ -2441,6 +2490,10 @@ class WorkspaceView {
 
       await this.connection.prompt(this.info.id, lines.join("\n"));
     }, this.chatError);
+
+    if (!result.ok) {
+      this.notifyWhenReady = false;
+    }
 
     if (!result.ok && this.input.value.length === 0 && this.attachments.length === 0) {
       this.input.value = text;
@@ -3549,6 +3602,19 @@ class Home {
     return this.selected ? this.opened.get(this.selected.id) ?? null : null;
   }
 
+  setOffline(offline) {
+    this.topbar.classList.toggle("offline", offline);
+  }
+
+  reconnected(connection) {
+    this.connection = connection;
+    this.setOffline(false);
+
+    for (const view of this.opened.values()) {
+      view.reconnected(connection);
+    }
+  }
+
   setDrawer(open) {
     this.drawerOpen = open;
     this.drawer.hidden = !open;
@@ -4236,6 +4302,15 @@ class App {
     this.root = root;
     this.connection = null;
     this.home = null;
+    let hiddenAt = 0;
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "hidden") {
+        hiddenAt = Date.now();
+      } else if (hiddenAt && Date.now() - hiddenAt > 3000) {
+        hiddenAt = 0;
+        this.connection?.drop();
+      }
+    });
   }
 
   show(element) {
@@ -4273,14 +4348,57 @@ class App {
     this.close();
     this.connection = connection;
     this.home = new Home(this, connection);
+    this.watch(connection);
+    this.show(this.home.element);
+    await this.home.start(null, false);
+  }
+
+  watch(connection) {
     connection.onclose = () => {
-      if (this.connection === connection) {
+      if (this.connection !== connection) {
+        return;
+      }
+
+      if (this.home && this.root.firstChild === this.home.element) {
+        this.home.setOffline(true);
+        this.recover(connection);
+      } else {
         this.close();
         this.showConnect(this.saved(), "The connection to the server was lost.");
       }
     };
-    this.show(this.home.element);
-    await this.home.start(null, false);
+  }
+
+  async recover(lost) {
+    const saved = this.saved();
+
+    for (let attempt = 0; this.connection === lost; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(1000 * 2 ** attempt, 15000)));
+
+      if (this.connection !== lost) {
+        return;
+      }
+
+      try {
+        const fresh = await Connection.open(saved);
+
+        if (this.connection !== lost) {
+          fresh.close();
+          return;
+        }
+
+        this.connection = fresh;
+        this.watch(fresh);
+        this.home.reconnected(fresh);
+        return;
+      } catch (exception) {
+        if (/refused/.test(exception.message)) {
+          this.close();
+          this.showConnect(saved, exception.message);
+          return;
+        }
+      }
+    }
   }
 
   showHome(home, focus = null) {

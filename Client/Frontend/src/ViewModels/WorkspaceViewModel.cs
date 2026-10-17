@@ -22,6 +22,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
+        Chat.PromptStarted += () => NotifyWhenReady = true;
+        Chat.PromptFailed += () => NotifyWhenReady = false;
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
@@ -129,6 +131,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the workspace as it was when it was focused.
     /// </summary>
     public WorkspaceInfo Workspace { get; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the user should be told once the workspace is ready again, which is the case while work this client gave it is running.
+    /// </summary>
+    public bool NotifyWhenReady { get; set; }
 
     /// <summary>
     /// Gets the conversation.
@@ -337,6 +344,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             subscribed = true;
             connection.EventReceived += Receive;
+            connection.Reconnected += Resync;
         }
 
         _ = ReadState();
@@ -382,6 +390,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             subscribed = false;
             connection.EventReceived -= Receive;
+            connection.Reconnected -= Resync;
         }
 
         Chat.Dispose();
@@ -406,6 +415,19 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(CanHalt));
         Raise(nameof(IsWorking));
         Raise(nameof(CanCancel));
+    }
+
+    private void Resync()
+    {
+        _ = ReadState();
+        _ = Chat.Resync();
+        _ = Scripts.Start();
+        _ = Git.Refresh();
+
+        if (layout == ClientLayout.Panels || Tab == WorkspaceTab.Files)
+        {
+            _ = Files.Start();
+        }
     }
 
     private void Receive(RemoteEvent remoteEvent)

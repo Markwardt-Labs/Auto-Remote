@@ -11,6 +11,23 @@ internal interface IServerConnection : IAsyncDisposable
     event Action<RemoteEvent>? EventReceived;
 
     /// <summary>
+    /// Raised when the connection to the server is lost. It keeps trying to reopen by itself, so <see cref="Reconnected" /> follows once it succeeds.
+    /// </summary>
+    event Action? Lost;
+
+    /// <summary>
+    /// Raised once the connection was reopened after it was lost, which means events were missed meanwhile and whatever follows them must be read again; on the thread the connection was opened on when it has a synchronization context.
+    /// </summary>
+    event Action? Reconnected;
+
+    /// <summary>
+    /// Drops the connection and opens a new one, for a connection that may have died silently, such as when the app was in the background; <see cref="Reconnected" /> is raised once it is open.
+    /// </summary>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="IOException">The server cannot be reached.</exception>
+    Task Reconnect(CancellationToken cancellation);
+
+    /// <summary>
     /// Lists the server's workspaces and the groups they are organized into.
     /// </summary>
     /// <param name="cancellation">Cancels the wait.</param>
@@ -658,6 +675,25 @@ internal sealed class ServerConnection : IServerConnection
     public event Action<RemoteEvent>? EventReceived;
 
     /// <inheritdoc />
+    public event Action? Lost;
+
+    /// <inheritdoc />
+    public event Action? Reconnected;
+
+    /// <inheritdoc />
+    public async Task Reconnect(CancellationToken cancellation)
+    {
+        if (stopping.IsCancellationRequested)
+        {
+            return;
+        }
+
+        socket.Abort();
+        await reading;
+        await Reopen(cancellation);
+    }
+
+    /// <inheritdoc />
     public async Task<WorkspaceCatalog> ListWorkspaces(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListWorkspaces }, cancellation)).Catalog ?? throw Malformed();
 
     /// <inheritdoc />
@@ -857,6 +893,7 @@ internal sealed class ServerConnection : IServerConnection
             channel = openedChannel;
             lost = false;
             reading = Read(openedChannel);
+            Post(Reconnected);
 
             if (watching is { } request)
             {
@@ -912,6 +949,37 @@ internal sealed class ServerConnection : IServerConnection
         }
     }
 
+    private void Post(Action? handler)
+    {
+        if (context is null)
+        {
+            handler?.Invoke();
+        }
+        else
+        {
+            context.Post(_ => handler?.Invoke(), null);
+        }
+    }
+
+    private async Task Recover()
+    {
+        for (int attempt = 0; lost && !stopping.IsCancellationRequested; attempt++)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(1 << Math.Min(attempt, 4), 15)), stopping.Token);
+                await Reopen(stopping.Token);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or SocketException or InvalidDataException or WebSocketException or OperationCanceledException or ObjectDisposedException)
+            {
+            }
+        }
+    }
+
     private void Raise(RemoteEvent remoteEvent)
     {
         if (context is null)
@@ -947,6 +1015,12 @@ internal sealed class ServerConnection : IServerConnection
         {
             lost = true;
             log.Write(stopping.IsCancellationRequested ? $"Disconnected from {server}" : $"Connection to {server} was lost");
+
+            if (!stopping.IsCancellationRequested)
+            {
+                Post(Lost);
+                _ = Recover();
+            }
 
             foreach (TaskCompletionSource<RemoteResponse> completion in pending.Values)
             {

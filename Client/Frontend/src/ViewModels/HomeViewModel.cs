@@ -13,13 +13,19 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <param name="drafts">Where the text typed in each workspace's message box is kept, or <see langword="null" /> to keep none.</param>
     /// <param name="chime">Plays the ding when a workspace becomes ready again, or <see langword="null" /> for silence.</param>
     /// <param name="time">The clock that times how long a workspace was busy, or <see langword="null" /> for the system clock.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null)
+    /// <param name="notifier">Tells the user outside the app that a workspace they gave work to is ready, or <see langword="null" /> for no notifications.</param>
+    /// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null)
     {
+        this.notifier = notifier;
+        this.keeper = keeper;
         this.chime = chime;
         this.time = time ?? TimeProvider.System;
         this.connection = connection;
         this.layout = layout;
         this.drafts = drafts;
+        connection.Lost += () => IsOffline = true;
+        connection.Reconnected += () => IsOffline = false;
         Usage = new UsageViewModel(connection);
         ToggleUsageCommand = new AsyncCommand(_ =>
         {
@@ -87,6 +93,10 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private readonly IChime? chime;
 
+    private readonly IReadyNotifier? notifier;
+
+    private readonly IWorkKeeper? keeper;
+
     private readonly TimeProvider time;
 
     private readonly TimeSpan minimumBusy = TimeSpan.FromSeconds(2);
@@ -118,6 +128,8 @@ internal sealed class HomeViewModel : ViewModelBase
     private bool building;
 
     private bool isDrawerOpen;
+
+    private bool isOffline;
 
     private string renameText = string.Empty;
 
@@ -300,9 +312,24 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool HasSelection => selected is not null;
 
     /// <summary>
+    /// Gets a value indicating whether the connection to the server is lost and being reopened, which the header says.
+    /// </summary>
+    public bool IsOffline
+    {
+        get => isOffline;
+        private set
+        {
+            if (Set(ref isOffline, value))
+            {
+                Raise(nameof(Title));
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets the header text: the focused workspace's name.
     /// </summary>
-    public string Title => selected?.Name ?? "Auto Remote";
+    public string Title => (selected?.Name ?? "Auto Remote") + (isOffline ? " (reconnecting…)" : string.Empty);
 
     /// <summary>
     /// Gets or sets a value indicating whether the workspace list drawer is open.
@@ -605,6 +632,8 @@ internal sealed class HomeViewModel : ViewModelBase
 
         WorkspaceViewModel created = new(connection, workspace, layout, drafts);
         created.Settings.Changed += Replace;
+        created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, workspace.Name);
+        created.Chat.PromptFailed += () => keeper?.Release(workspace.Id);
         WorkspaceState previous = created.State;
         DateTimeOffset busySince = time.GetUtcNow();
         created.PropertyChanged += (_, args) =>
@@ -618,9 +647,19 @@ internal sealed class HomeViewModel : ViewModelBase
             {
                 busySince = time.GetUtcNow();
             }
-            else if (created.State == WorkspaceState.Ready && time.GetUtcNow() - busySince >= minimumBusy)
+            else if (created.State == WorkspaceState.Ready)
             {
-                chime?.Play();
+                if (created.NotifyWhenReady)
+                {
+                    created.NotifyWhenReady = false;
+                    keeper?.Release(workspace.Id);
+                    notifier?.Notify(workspace.Name);
+                }
+
+                if (time.GetUtcNow() - busySince >= minimumBusy)
+                {
+                    chime?.Play();
+                }
             }
 
             previous = created.State;

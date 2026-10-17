@@ -393,4 +393,21 @@ public sealed class ScriptsViewModelTests
         connection.Verify(x => x.CancelWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal("Nothing is running in this workspace.", model.Chat.Error);
     }
+
+    [Fact]
+    public async Task Workspace_ReadsEverythingAgainWhenTheConnectionIsReopened()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        connection.Invocations.Clear();
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.Assistant, Text = "posted meanwhile" }], Start = 0, Working = true });
+
+        connection.Raise(x => x.Reconnected += null);
+        await Task.Delay(100);
+
+        Assert.Equal("posted meanwhile", Assert.Single(model.Chat.Messages).Text);
+        Assert.True(model.Chat.IsAiWorking);
+        connection.Verify(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
+        connection.Verify(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

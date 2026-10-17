@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
@@ -63,6 +63,26 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
     }
 
+    /// <summary>
+    /// Replaces the connection with a fresh one after the app was away for a while, since a connection that was open then may have died without telling, and the screens read what they missed.
+    /// </summary>
+    /// <returns>A task that completes once the new connection is open or the server cannot be reached.</returns>
+    public async Task Resume()
+    {
+        if (connection is not { } current)
+        {
+            return;
+        }
+
+        try
+        {
+            await current.Reconnect(CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
+        {
+        }
+    }
+
     private void HomeChanged(object? sender, PropertyChangedEventArgs e)
     {
         if (e.PropertyName == nameof(HomeViewModel.Title))
@@ -96,7 +116,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
 
         connection = opened;
-        HomeViewModel home = new(opened, layout, drafts, chime);
+        HomeViewModel home = new(opened, layout, drafts, chime, null, notifier, keeper);
         home.ChangeServerRequested += async () =>
         {
             ConnectionSettings? saved = await store.Load(CancellationToken.None);

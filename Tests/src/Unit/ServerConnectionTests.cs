@@ -53,4 +53,54 @@ public sealed class ServerConnectionTests
 
         await Assert.ThrowsAsync<IOException>(() => connection.ListWorkspaces(CancellationToken.None));
     }
+
+    [Fact]
+    public async Task ALostConnectionIsReopenedByItselfAndSaysSoSoScreensCanReadWhatTheyMissed()
+    {
+        Mock<IMessageChannel> first = Channel([], out Channel<RemoteResponse> firstReplies);
+        Mock<IMessageChannel> second = Channel([], out _);
+        int opened = 0;
+        int lost = 0;
+        TaskCompletionSource reconnected = new();
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, _ =>
+        {
+            opened++;
+            return Task.FromResult((new ClientWebSocket(), second.Object));
+        }, Mock.Of<ILog>(), "box:1");
+        connection.Lost += () => lost++;
+        connection.Reconnected += () => reconnected.TrySetResult();
+
+        firstReplies.Writer.Complete();
+        await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal(1, lost);
+        Assert.Equal(1, opened);
+        await connection.Prompt(Guid.NewGuid(), "x", CancellationToken.None);
+        Assert.Equal(1, opened);
+    }
+
+    [Fact]
+    public async Task Reconnect_ReplacesAConnectionThatLooksAlive()
+    {
+        List<RemoteRequest> sentSecond = [];
+        Mock<IMessageChannel> first = Channel([], out Channel<RemoteResponse> firstReplies);
+        Mock<IMessageChannel> second = Channel(sentSecond, out _);
+        int opened = 0;
+        int reconnected = 0;
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, _ =>
+        {
+            opened++;
+            return Task.FromResult((new ClientWebSocket(), second.Object));
+        }, Mock.Of<ILog>(), "box:1");
+        connection.Reconnected += () => reconnected++;
+
+        Task reconnecting = connection.Reconnect(CancellationToken.None);
+        firstReplies.Writer.Complete();
+        await reconnecting;
+        await connection.Prompt(Guid.NewGuid(), "x", CancellationToken.None);
+
+        Assert.Equal(1, opened);
+        Assert.Equal(1, reconnected);
+        Assert.Equal([RemoteCommand.Prompt], sentSecond.Select(request => request.Command));
+    }
 }

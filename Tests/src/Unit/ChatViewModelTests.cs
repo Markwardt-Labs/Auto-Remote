@@ -83,6 +83,23 @@ public sealed class ChatViewModelTests
     }
 
     [Fact]
+    public async Task Resync_ReadsTheMessagesAndWorkingStateThatWerePostedWhileTheConnectionWasDown()
+    {
+        ChatMessage one = new() { Role = MessageRole.User, Text = "one" };
+        ChatMessage two = new() { Role = MessageRole.Assistant, Text = "two" };
+        connection.SetupSequence(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ChatHistory { Messages = [one], Start = 0, Working = true })
+            .ReturnsAsync(new ChatHistory { Messages = [one, two], Start = 0, Working = false });
+        await chat.Start();
+        Assert.True(chat.IsAiWorking);
+
+        await chat.Resync();
+
+        Assert.Equal([one, two], chat.Messages);
+        Assert.False(chat.IsAiWorking);
+    }
+
+    [Fact]
     public async Task Send_UploadsAttachmentsAndRefersToThemInThePrompt()
     {
         connection.Setup(x => x.UploadAttachment(workspaceId, "a.png", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync("/srv/a.png");

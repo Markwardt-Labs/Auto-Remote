@@ -27,6 +27,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly IServerConnection connection;
 
+    /// <summary>
+    /// Raised when the user submits a prompt, before it is sent, so work this client gave can be told apart from work another client gave.
+    /// </summary>
+    public event Action? PromptStarted;
+
+    /// <summary>
+    /// Raised when a submitted prompt could not be sent, so no work started.
+    /// </summary>
+    public event Action? PromptFailed;
+
     private readonly Guid workspaceId;
 
     private readonly IDraftStore? drafts;
@@ -167,6 +177,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Error = null;
         Attachments.Add(new() { Name = name, Data = data });
     }
+
+    /// <summary>
+    /// Reads the newest messages again after the connection was lost and reopened, since messages and whether the AI works may have changed while no events arrived.
+    /// </summary>
+    /// <returns>A task that completes once the conversation is up to date.</returns>
+    public Task Resync() => loaded ? Load() : Task.CompletedTask;
 
     /// <summary>
     /// Shows a failure that happened outside the conversation, such as a refused stop, where the conversation shows its own.
@@ -370,6 +386,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Input = string.Empty;
         Attachments.Clear();
 
+        PromptStarted?.Invoke();
+
         bool sent = await Attempt(async () =>
         {
             List<string> lines = text.Length == 0 ? [] : [text];
@@ -381,6 +399,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
             await connection.Prompt(workspaceId, string.Join('\n', lines), CancellationToken.None);
         });
+
+        if (!sent)
+        {
+            PromptFailed?.Invoke();
+        }
 
         if (!sent && input.Length == 0 && Attachments.Count == 0)
         {
