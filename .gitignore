@@ -32,5 +32,5 @@ artifacts/
 .DS_Store
 Thumbs.db
 
-# Local dev run state (Scripts/Mobile/Server.cs)
-Scripts/Data/
+# Local dev run state (Scripts/Support/*Server.cs and DesktopClient.cs)
+Scripts/Support/Data/

@@ -2,8 +2,9 @@
 #:property TreatWarningsAsErrors=true
 
 // Serves Client/Web/index.html on http://localhost:8080/ for local development, reading the file on every
-// request so edits show on refresh, and opens it in the default browser. File-based app (dotnet run) - run from the repo root, e.g.
-// `dotnet run Scripts/Web/Client.cs`.
+// request so edits show on refresh, and opens it in the default browser. Supports RunWeb.task and is not run
+// directly. File-based app (dotnet run) - run from the repo root, e.g. `dotnet run
+// Scripts/Support/WebClient.cs`.
 
 using System.Diagnostics;
 using System.Net;

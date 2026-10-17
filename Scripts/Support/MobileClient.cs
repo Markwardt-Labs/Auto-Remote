@@ -1,12 +1,12 @@
 #:package Markwardt.ScriptUtilities@0.2.0
 #:property TreatWarningsAsErrors=true
 
-// Deploys the Android client to an emulator, starting the first AVD if no device is attached, then launches
-// it and streams its log output (console output, crashes) until interrupted. An emulator this script started
-// is stopped again when it ends (an already attached device is left alone). Needs the
-// Android workload and an Android SDK with at least one AVD, found via ANDROID_HOME, ANDROID_SDK_ROOT or
-// the default install folder. File-based app (dotnet run) - run from the repo root, e.g.
-// `dotnet run Scripts/Mobile/Client.cs`.
+// Deploys the Android client to an emulator, starting the first AVD if no device is attached, then launches it
+// and streams its log output (console output, crashes) until interrupted. An emulator this script started is
+// stopped again when it ends (an already attached device is left alone). Needs the Android workload and an
+// Android SDK with at least one AVD, found via ANDROID_HOME, ANDROID_SDK_ROOT or the default install folder.
+// Supports RunMobile.task and is not run directly. File-based app (dotnet run) - run from the repo root, e.g.
+// `dotnet run Scripts/Support/MobileClient.cs`.
 
 using System.Diagnostics;
 using Markwardt.ScriptUtilities;
