@@ -25,12 +25,12 @@ internal sealed class AiRunner : IAiRunner
 {
     private readonly string[] claudeDisabledTools = ["Agent", "Task", "Workflow", "Monitor", "ScheduleWakeup", "CronCreate", "CronDelete", "CronList", "RemoteTrigger", "SendMessage", "ListAgents", "TaskStop"];
 
-    private readonly string foregroundInstruction = "Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished.";
+    private readonly string workInstruction = "Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished. While you work, write a short status update as a normal message, saying what you have done and what comes next, at least once every five minutes so the user can follow along; split the work so that no single step runs much longer than five minutes.";
 
     /// <inheritdoc />
     public IAiConversation Start(ServerConfig config, AiService service, string folder, AiModel model, AiEffort effort, Guid aiSession, bool resume) => service switch
     {
-        AiService.Codex => new CodexConversation(config, folder, model, effort, resume ? aiSession : null),
+        AiService.Codex => new CodexConversation(config, folder, model, effort, resume ? aiSession : null, workInstruction),
         _ => StartClaude(config, folder, model, effort, aiSession, resume)
     };
 
@@ -46,7 +46,7 @@ internal sealed class AiRunner : IAiRunner
 
         start.Environment["CLAUDE_CODE_DISABLE_BACKGROUND_TASKS"] = "1";
 
-        foreach (string argument in (string[])["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--disallowedTools", string.Join(',', claudeDisabledTools), "--append-system-prompt", foregroundInstruction, "--model", model.ToString().ToLowerInvariant(), "--effort", effort.ToString().ToLowerInvariant(), .. config.ClaudeArguments, .. resume ? (string[])["--resume", aiSession.ToString()] : (string[])["--session-id", aiSession.ToString()]])
+        foreach (string argument in (string[])["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--dangerously-skip-permissions", "--disallowedTools", string.Join(',', claudeDisabledTools), "--append-system-prompt", workInstruction, "--model", model.ToString().ToLowerInvariant(), "--effort", effort.ToString().ToLowerInvariant(), .. config.ClaudeArguments, .. resume ? (string[])["--resume", aiSession.ToString()] : (string[])["--session-id", aiSession.ToString()]])
         {
             start.ArgumentList.Add(argument);
         }

@@ -8,7 +8,8 @@ namespace Markwardt.AutoRemote.Server;
 /// <param name="model">The model to run on.</param>
 /// <param name="effort">The effort to run with.</param>
 /// <param name="session">The identifier of the Codex session to resume, or <see langword="null" /> to start one with the first prompt.</param>
-internal sealed class CodexConversation(ServerConfig config, string folder, AiModel model, AiEffort effort, Guid? session) : IAiConversation
+/// <param name="instructions">What every run is told about how to work, passed as the developer instructions.</param>
+internal sealed class CodexConversation(ServerConfig config, string folder, AiModel model, AiEffort effort, Guid? session, string instructions) : IAiConversation
 {
     private readonly Channel<AiOutput> outputs = Channel.CreateUnbounded<AiOutput>();
 
@@ -146,7 +147,7 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
             RedirectStandardError = true,
         };
 
-        foreach (string argument in (string[])["exec", .. sessionId is null ? (string[])[] : ["resume"], "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--disable", "multi_agent", "--disable", "unified_exec", "-m", Slug(), "-c", $"model_reasoning_effort=\"{effort.ToString().ToLowerInvariant()}\"", .. config.CodexArguments, .. sessionId is null ? (string[])[] : [sessionId], "-"])
+        foreach (string argument in (string[])["exec", .. sessionId is null ? (string[])[] : ["resume"], "--json", "--skip-git-repo-check", "--dangerously-bypass-approvals-and-sandbox", "--disable", "multi_agent", "--disable", "unified_exec", "-c", $"developer_instructions=\"{instructions}\"", "-m", Slug(), "-c", $"model_reasoning_effort=\"{effort.ToString().ToLowerInvariant()}\"", .. config.CodexArguments, .. sessionId is null ? (string[])[] : [sessionId], "-"])
         {
             start.ArgumentList.Add(argument);
         }

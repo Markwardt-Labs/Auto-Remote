@@ -45,7 +45,10 @@ public sealed class AiRunnerTests : IDisposable
         Assert.True(disallowed >= 0);
         Assert.All(new[] { "Agent", "Task", "Workflow", "Monitor", "ScheduleWakeup", "CronCreate" }, tool => Assert.Contains(tool, arguments[disallowed + 1].Split(',')));
         Assert.Contains("--append-system-prompt", arguments);
-        Assert.Contains("foreground", arguments[Array.IndexOf(arguments, "--append-system-prompt") + 1]);
+        string prompt = arguments[Array.IndexOf(arguments, "--append-system-prompt") + 1];
+        Assert.Contains("foreground", prompt);
+        Assert.Contains("status update", prompt);
+        Assert.Contains("every five minutes", prompt);
         Assert.True(Array.IndexOf(arguments, "--extra") > disallowed);
         Assert.Equal("1", await File.ReadAllTextAsync(temp.Combine("env.txt")));
     }
@@ -62,5 +65,8 @@ public sealed class AiRunnerTests : IDisposable
         string joined = string.Join(' ', arguments);
         Assert.Contains("--disable multi_agent", joined);
         Assert.Contains("--disable unified_exec", joined);
+        Assert.Contains("developer_instructions=\"", joined);
+        Assert.Contains("status update", joined);
+        Assert.Contains("every five minutes", joined);
     }
 }
