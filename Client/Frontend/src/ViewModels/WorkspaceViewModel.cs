@@ -22,6 +22,13 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
+        Chat.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ChatViewModel.Input) || args.PropertyName == nameof(ChatViewModel.HasAttachments))
+            {
+                Raise(nameof(ShowHaltButtons));
+            }
+        };
         Chat.PromptStarted += () => NotifyWhenReady = true;
         Chat.PromptFailed += () => NotifyWhenReady = false;
         Chat.PropertyChanged += (_, args) =>
@@ -188,6 +195,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether the work in the workspace can be stopped: something runs and it is not already being stopped or canceled.
     /// </summary>
     public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box offers stopping and cancelling the work instead of sending: work runs and the AI cannot be given more input, or it can but nothing is typed.
+    /// </summary>
+    public bool ShowHaltButtons => CanHalt && (State != WorkspaceState.Working || string.IsNullOrWhiteSpace(Chat.Input) && Chat.Attachments.Count == 0);
 
     /// <summary>
     /// Gets a value indicating whether the work in the workspace can be cancelled and reverted: it can be stopped, and either git is the one working or the workspace is a git repository whose files can be put back.
@@ -413,6 +425,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Stopping or WorkspaceState.Canceling;
         Raise(nameof(State));
         Raise(nameof(CanHalt));
+        Raise(nameof(ShowHaltButtons));
         Raise(nameof(IsWorking));
         Raise(nameof(CanCancel));
     }

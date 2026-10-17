@@ -163,6 +163,38 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task StopAndCancel_AskFirstThenAskTheServerAndCloseWhenTheWorkEndsMeanwhile()
+    {
+        await model.Start();
+        Working(first, true);
+        Assert.True(model.BeginStopCommand.CanExecute(null));
+
+        model.BeginStopCommand.Execute(null);
+        Assert.True(model.IsStoppingWork);
+        Assert.Equal("Keep working", model.CancelEditText);
+        connection.Verify(x => x.StopWorkspace(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        model.ConfirmHaltCommand.Execute(null);
+        await Task.Delay(50);
+        Assert.False(model.IsEditing);
+        connection.Verify(x => x.StopWorkspace(first.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task StopQuestion_ClosesWhenTheWorkEndsWhileItIsShowing()
+    {
+        await model.Start();
+        Working(first, true);
+        model.BeginStopCommand.Execute(null);
+        Assert.True(model.IsStoppingWork);
+
+        Working(first, false);
+
+        Assert.False(model.IsEditing);
+        Assert.False(model.BeginStopCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Title_SaysWhenTheConnectionIsBeingReopened()
     {
         await model.Start();

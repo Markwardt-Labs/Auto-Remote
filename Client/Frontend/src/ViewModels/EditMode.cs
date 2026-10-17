@@ -43,5 +43,15 @@ internal enum EditMode
     /// <summary>
     /// Choosing the group to move a group into.
     /// </summary>
-    MoveGroup
+    MoveGroup,
+
+    /// <summary>
+    /// Confirming that the work in the focused workspace is stopped, keeping what it did.
+    /// </summary>
+    StopWork,
+
+    /// <summary>
+    /// Confirming that the work in the focused workspace is stopped and what it did reverted.
+    /// </summary>
+    CancelWork
 }

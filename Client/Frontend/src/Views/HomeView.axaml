@@ -14,14 +14,7 @@
             <ColumnDefinition Width="{Binding HeaderSide}" />
           </Grid.ColumnDefinitions>
           <Button Grid.Column="0" Content="☰" Classes="flat" FontSize="20" HorizontalAlignment="Left" Command="{Binding ToggleDrawerCommand}" />
-          <TextBlock Name="TitleText" Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" Background="Transparent">
-            <TextBlock.ContextMenu>
-              <ContextMenu>
-                <MenuItem Header="Stop" Command="{Binding StopWorkspaceCommand}" ToolTip.Tip="Stop the work at once and keep what it did" />
-                <MenuItem Header="Cancel" Command="{Binding CancelWorkspaceCommand}" ToolTip.Tip="Stop the work and revert what it did" />
-              </ContextMenu>
-            </TextBlock.ContextMenu>
-          </TextBlock>
+          <TextBlock Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
               <Button Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
@@ -265,8 +258,21 @@
                 <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
               </Button>
               <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
-              <Button Grid.Column="2" Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" Margin="6,0,0,0"
-                      VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
+              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0" VerticalAlignment="Center">
+                <Button Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding !$parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=True}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
+                <Button Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Data="M1,1 L11,1 L11,11 L1,11 Z" Fill="White" Width="12" Height="12" />
+                </Button>
+                <Button Command="{Binding $parent[local:HomeView].DataContext.BeginCancelCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Cancel the work and revert what it did"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="M4,2 L1,5 L4,8 M1,5 L8,5 A4,4 0 0 1 8,13 L4,13" Width="14" Height="14" />
+                </Button>
+              </StackPanel>
             </Grid>
             </Grid>
            </Grid>
@@ -650,6 +656,16 @@
           <Button IsVisible="{Binding IsRenaming}" Content="Rename" Command="{Binding ConfirmRenameCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <Button IsVisible="{Binding IsCreatingGroup}" Content="Create" Command="{Binding ConfirmNewGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <Button IsVisible="{Binding IsRenamingGroup}" Content="Rename" Command="{Binding ConfirmRenameGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <StackPanel IsVisible="{Binding IsStoppingWork}" Spacing="12">
+            <TextBlock Text="Stop the work?" Classes="serif" FontSize="20" />
+            <TextBlock Text="It stops at once and keeps what it did so far." Classes="muted" TextWrapping="Wrap" />
+            <Button Content="Stop" Command="{Binding ConfirmHaltCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          </StackPanel>
+          <StackPanel IsVisible="{Binding IsCancelingWork}" Spacing="12">
+            <TextBlock Text="Cancel the work?" Classes="serif" FontSize="20" />
+            <TextBlock Text="It stops and what it did is reverted, which cannot be undone." Classes="muted" TextWrapping="Wrap" />
+            <Button Content="Cancel and revert" Command="{Binding ConfirmHaltCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          </StackPanel>
           <StackPanel IsVisible="{Binding IsDeleting}" Spacing="12">
             <TextBlock Text="Delete workspace?" Classes="serif" FontSize="20" />
             <TextBlock Text="{Binding Title, StringFormat='{}{0} will be removed from the server.'}" Classes="muted" TextWrapping="Wrap" />
@@ -678,7 +694,7 @@
             <Button Content="Delete" Command="{Binding ConfirmDeleteGroupCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-          <Button Content="Cancel" Command="{Binding CancelEditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <Button Content="{Binding CancelEditText}" Command="{Binding CancelEditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         </StackPanel>
       </Border>
     </Border>

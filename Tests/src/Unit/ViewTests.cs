@@ -357,7 +357,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_TitleMenuOffersStopAndCancelOnlyWhileWorkIsRunning()
+    public async Task HomeView_MessageBoxShowsStopAndCancelInsteadOfSendWhileWorkRunsAndAsksFirst()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
@@ -366,32 +366,37 @@ public sealed class ViewTests(HeadlessFixture fixture)
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
         connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
 
-        (bool readyOpens, bool workingOpens, string[] headers, bool[] enabled) = await fixture.Run(() =>
+        (string[] ready, string[] working, bool[] enabled, bool typing, bool asking, string dismiss, bool askedAndNothingSent) = await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
             model.Start().GetAwaiter().GetResult();
             HomeView view = new() { DataContext = model };
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
-            TextBlock title = window.GetVisualDescendants().OfType<TextBlock>().First(block => block.Name == "TitleText");
-            title.RaiseEvent(new Avalonia.Input.ContextRequestedEventArgs { RoutedEvent = Avalonia.Input.InputElement.ContextRequestedEvent });
-            bool readyOpens = title.ContextMenu!.IsOpen;
-            title.ContextMenu.Close();
+            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
+            string[] ready = Shown();
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
-            title.RaiseEvent(new Avalonia.Input.ContextRequestedEventArgs { RoutedEvent = Avalonia.Input.InputElement.ContextRequestedEvent });
-            bool workingOpens = title.ContextMenu.IsOpen;
-            MenuItem[] items = [.. title.ContextMenu.Items.OfType<MenuItem>()];
-            string[] headers = [.. items.Select(item => item.Header?.ToString() ?? string.Empty)];
-            bool[] enabled = [.. items.Select(item => item.Command?.CanExecute(null) ?? false)];
-            title.ContextMenu.Close();
+            string[] working = Shown();
+            bool[] enabled = [model.BeginStopCommand.CanExecute(null), model.BeginCancelCommand.CanExecute(null)];
+            model.Active!.Chat.Input = "one more thing";
+            bool typing = Shown().Contains("send");
+            model.Active.Chat.Input = string.Empty;
+            model.BeginStopCommand.Execute(null);
+            bool asking = model.IsStoppingWork;
+            string dismiss = model.CancelEditText;
+            model.CancelEditCommand.Execute(null);
             window.Close();
-            return (readyOpens, workingOpens, headers, enabled);
+            return (ready, working, enabled, typing, asking, dismiss, !model.IsEditing);
         });
 
-        Assert.False(readyOpens);
-        Assert.True(workingOpens);
-        Assert.Equal(["Stop", "Cancel"], headers);
+        Assert.Equal(["send"], ready);
+        Assert.Equal(["stop", "cancel"], working);
         Assert.Equal([true, false], enabled);
+        Assert.True(typing);
+        Assert.True(asking);
+        Assert.Equal("Keep working", dismiss);
+        Assert.True(askedAndNothingSent);
+        connection.Verify(x => x.StopWorkspace(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

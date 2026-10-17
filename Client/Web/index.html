@@ -1332,6 +1332,8 @@ const icons = {
   file: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4", "4 1 9 14", 11],
   script: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6.5,7.5 L6.5,11.5 L10,9.5 Z", "4 1 9 14", 11],
   task: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6,6 L6,8.5 L8.5,7.25 Z M6,9.5 L6,12 L8.5,10.75 Z", "4 1 9 14", 11],
+  stop: ["M2,2 L12,2 L12,12 L2,12 Z", "2 2 10 10", 12],
+  undo: ["M4,2 L1,5 L4,8 M1,5 L8,5 A4,4 0 0 1 8,13 L4,13", "1 2 9 11", 14],
   folder: ["M1,3 L5,3 L6.3,4.5 L13,4.5 L13,15 L1,15 Z", "1 3 12 12", 12],
   collapse: ["M2,6 L7,1 L12,6 M2,13 L7,8 L12,13", "2 1 10 12", 13],
   up: ["M7,13 L7,2 M2,7 L7,2 L12,7", "2 2 10 11", 13],
@@ -1578,6 +1580,8 @@ class WorkspaceView {
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary", disabled: true, title: "Send", onclick: () => this.send() }, "↑");
+    this.stopButton = h("button", { class: "primary", hidden: true, title: "Stop the work and keep what it did", onclick: () => this.home.confirmHalt(this, false) }, icon("stop"));
+    this.cancelButton = h("button", { hidden: true, title: "Cancel the work and revert what it did", onclick: () => this.home.confirmHalt(this, true) }, icon("undo"));
     this.attachments = [];
     this.chips = h("div", { class: "chips", hidden: true });
     this.fileInput = h("input", { type: "file", multiple: true, hidden: true, onchange: () => this.pickFiles() });
@@ -1592,7 +1596,7 @@ class WorkspaceView {
       h("div", { class: "messages-wrap" }, this.scroller, this.chatAutoButton),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.input, this.sendButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.input, this.sendButton, this.stopButton, this.cancelButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -1898,19 +1902,6 @@ class WorkspaceView {
     }
   }
 
-  haltMenu(event) {
-    const state = this.state();
-
-    if (state !== "Working" && state !== "Running" && state !== "Managing") {
-      return;
-    }
-
-    this.showMenu(event, [
-      { label: "Stop", action: () => this.halt(() => this.connection.stopWorkspace(this.info.id)) },
-      { label: "Cancel", disabled: state !== "Managing" && !this.gitStatus.isRepo, action: () => this.halt(() => this.connection.cancelWorkspace(this.info.id)) },
-    ]);
-  }
-
   async halt(action) {
     await attempt(action, this.chatError);
   }
@@ -2184,8 +2175,6 @@ class WorkspaceView {
       } catch (exception) {
       }
     }
-
-    this.lastState = state;
   }
 
   applyState() {
@@ -2449,7 +2438,15 @@ class WorkspaceView {
   }
 
   updateSend() {
-    this.sendButton.disabled = !this.takesAiInput() || (this.input.value.trim().length === 0 && this.attachments.length === 0);
+    const state = this.state();
+    const empty = this.input.value.trim().length === 0 && this.attachments.length === 0;
+    const halt = (state === "Working" && empty) || state === "Running" || state === "Managing";
+    this.sendButton.disabled = !this.takesAiInput() || empty;
+    this.sendButton.hidden = halt;
+    this.stopButton.hidden = !halt;
+    this.cancelButton.hidden = !halt;
+    this.cancelButton.disabled = state !== "Managing" && !this.gitStatus.isRepo;
+    this.home.closeHaltDialogUnlessRunning(state);
   }
 
   keyed(event) {
@@ -3561,15 +3558,6 @@ class Home {
     this.remoteButton.innerHTML = '<svg viewBox="0 0 14 14" width="18" height="18"><path d="M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>';
     this.tools = h("div", { class: "tools", hidden: true }, this.remoteButton, this.usageButton, this.gearButton);
     this.topbar = h("div", { class: "topbar" }, this.menuButton, this.title, this.tools);
-    let hold = null;
-    const release = () => { clearTimeout(hold); hold = null; };
-    this.title.addEventListener("contextmenu", event => { event.preventDefault(); this.active?.haltMenu(event); });
-    this.title.addEventListener("touchstart", event => {
-      const touch = event.touches[0];
-      release();
-      hold = setTimeout(() => { hold = null; this.active?.haltMenu({ clientX: touch.clientX, clientY: touch.clientY, stopPropagation() {} }); }, 500);
-    }, { passive: true });
-    ["touchend", "touchmove", "touchcancel"].forEach(name => this.title.addEventListener(name, release, { passive: true }));
     this.content = h("div", { class: "content" });
     this.usageCard = h("div", { class: "usage-card" });
     this.usageWrap = h("div", { class: "usage-wrap", hidden: true, onclick: event => event.target === this.usageWrap && this.toggleUsage(false) }, this.usageCard);
@@ -3874,6 +3862,28 @@ class Home {
 
     this.buildEntries();
     this.renderDrawer();
+  }
+
+  confirmHalt(view, cancel) {
+    this.dialogError.set(null);
+    const go = () => {
+      this.closeDialog();
+      view.halt(() => cancel ? view.connection.cancelWorkspace(view.info.id) : view.connection.stopWorkspace(view.info.id));
+    };
+    this.haltDialog = h("div", { class: "dialog" },
+      h("h3", { class: "serif" }, cancel ? "Cancel the work?" : "Stop the work?"),
+      h("div", { class: "muted" }, cancel ? "It stops and what it did is reverted, which cannot be undone." : "It stops at once and keeps what it did so far."),
+      h("button", { class: `${cancel ? "danger" : "primary"} block`, onclick: go }, cancel ? "Cancel and revert" : "Stop"),
+      this.dialogError.element,
+      h("button", { class: "block", onclick: () => this.closeDialog() }, "Keep working"));
+    this.dialogHost.replaceChildren(this.haltDialog);
+    this.dialogHost.hidden = false;
+  }
+
+  closeHaltDialogUnlessRunning(state) {
+    if (this.haltDialog && this.dialogHost.firstChild === this.haltDialog && state !== "Working" && state !== "Running" && state !== "Managing") {
+      this.closeDialog();
+    }
   }
 
   dialogKey(event) {
