@@ -294,7 +294,7 @@ button.refbtn .ref { margin: 0; }
 .drawer { position: absolute; top: 0; bottom: 0; left: 0; width: min(340px, 88vw); background: var(--surface); padding: 12px; display: flex; flex-direction: column; z-index: 11; }
 .drawer h2 { font-size: 22px; margin: 8px 8px 12px; }
 .drawer input[type=text] { margin-bottom: 8px; flex: none; }
-.drawer .list { margin-bottom: 8px; }
+.drawer .list { margin-bottom: 8px; overscroll-behavior: contain; }
 .drawer .row { padding: 10px 8px 10px 14px; }
 .drawer .row .name small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .drawer .row.group .name { font-weight: 600; }
@@ -3563,8 +3563,16 @@ class Home {
     this.collapsed = new Set();
     this.opened = new Map();
     this.selected = null;
+    this.refreshing = false;
+    this.refreshAgain = false;
     this.error = new ErrorLine();
     this.dialogError = new ErrorLine();
+    this.catalogListener = event => {
+      if (event.kind === "WorkspacesChanged") {
+        this.refreshCatalog();
+      }
+    };
+    connection.listeners.add(this.catalogListener);
     this.build();
   }
 
@@ -3618,9 +3626,87 @@ class Home {
     this.topbar.classList.toggle("offline", offline);
   }
 
+  async refreshCatalog() {
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return;
+    }
+
+    this.refreshing = true;
+
+    try {
+      do {
+        this.refreshAgain = false;
+        let catalog;
+
+        try {
+          catalog = await this.connection.listWorkspaces();
+        } catch (exception) {
+          return;
+        }
+
+        this.applyCatalog(catalog);
+      } while (this.refreshAgain);
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  applyCatalog(catalog) {
+    const before = this.selected;
+    this.workspaces = catalog.workspaces;
+    this.groups = catalog.groups;
+
+    for (const id of [...this.collapsed]) {
+      if (!this.groups.some(group => group.id === id)) {
+        this.collapsed.delete(id);
+      }
+    }
+
+    let reopen = false;
+
+    for (const [id, view] of [...this.opened]) {
+      const now = this.workspaces.find(workspace => workspace.id === id);
+
+      if (!now || now.folder !== view.info.folder || now.service !== view.info.service || now.model !== view.info.model || now.effort !== view.info.effort) {
+        view.dispose();
+        view.element.remove();
+        this.opened.delete(id);
+        reopen = reopen || id === before?.id;
+      }
+    }
+
+    this.buildEntries();
+    this.renderDrawer();
+
+    if (!before) {
+      return;
+    }
+
+    const current = this.workspaces.find(workspace => workspace.id === before.id);
+
+    if (!current) {
+      this.select(null);
+      this.setDrawer(true);
+    } else if (reopen) {
+      this.select(null);
+      this.select(current);
+    } else {
+      this.selected = current;
+      const view = this.opened.get(current.id);
+
+      if (view) {
+        view.info = current;
+      }
+    }
+  }
+
   reconnected(connection) {
+    this.connection.listeners.delete(this.catalogListener);
     this.connection = connection;
+    connection.listeners.add(this.catalogListener);
     this.setOffline(false);
+    this.refreshCatalog();
 
     for (const view of this.opened.values()) {
       view.reconnected(connection);
@@ -4095,6 +4181,7 @@ class Home {
 
   dispose() {
     document.removeEventListener("keydown", this.dialogKeyListener);
+    this.connection.listeners.delete(this.catalogListener);
 
     for (const view of this.opened.values()) {
       view.dispose();

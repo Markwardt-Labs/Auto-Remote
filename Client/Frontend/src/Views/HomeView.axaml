@@ -13,17 +13,17 @@
             <ColumnDefinition Width="*" />
             <ColumnDefinition Width="{Binding HeaderSide}" />
           </Grid.ColumnDefinitions>
-          <Button Grid.Column="0" Content="☰" Classes="flat" FontSize="20" HorizontalAlignment="Left" Command="{Binding ToggleDrawerCommand}" />
+          <local:TouchButton Grid.Column="0" Content="☰" Classes="flat" FontSize="20" HorizontalAlignment="Left" Command="{Binding ToggleDrawerCommand}" />
           <TextBlock Grid.Column="1" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextTrimming="CharacterEllipsis" />
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
-              <Button Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
+              <local:TouchButton Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
                 <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource RemoteIconGeometry}" Width="18" Height="18" />
-              </Button>
-              <Button Classes="flat" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
+              </local:TouchButton>
+              <local:TouchButton Classes="flat" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
                 <Path Classes="usageIcon" Tag="{Binding Usage.SessionPace}" Data="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" Width="18" Height="18" />
-              </Button>
-              <Button Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="Workspace settings" Command="{Binding Active.ToggleSettingsCommand}" />
+              </local:TouchButton>
+              <local:TouchButton Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="Workspace settings" Command="{Binding Active.ToggleSettingsCommand}" />
             </StackPanel>
             <local:WindowControlsView IsVisible="{Binding IsDesktop}" Margin="12,0,4,0" VerticalAlignment="Center" />
           </StackPanel>
@@ -41,7 +41,7 @@
           <Panel Grid.Column="0" Grid.ColumnSpan="{Binding Span}" MinWidth="120" Background="{DynamicResource Surface}" IsVisible="{Binding ShowFilesPanel, FallbackValue=False}">
            <Grid DataContext="{Binding Files}" RowDefinitions="Auto,Auto,Auto,*">
             <Grid Grid.Row="0" DataContext="{Binding Git}" IsVisible="{Binding IsRepo}">
-              <Button Classes="versionSection" Classes.pending="{Binding HasChanges}">
+              <local:TouchButton Classes="versionSection" Classes.pending="{Binding HasChanges}">
                 <Button.Flyout>
                   <MenuFlyout Placement="BottomEdgeAlignedLeft">
                     <MenuItem Header="Commit" Command="{Binding CommitCommand}" />
@@ -61,17 +61,17 @@
                   </StackPanel>
                   <TextBlock Text="*" IsVisible="{Binding HasChanges}" FontSize="18" FontWeight="Bold" LineHeight="14" Foreground="{DynamicResource Accent}" HorizontalAlignment="Right" VerticalAlignment="Top" ToolTip.Tip="Uncommitted changes" />
                 </Grid>
-              </Button>
+              </local:TouchButton>
               <Border VerticalAlignment="Bottom" Height="1" Background="{DynamicResource Border}" IsHitTestVisible="False" />
             </Grid>
             <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" Margin="6,4,6,4">
               <TextBlock Grid.Column="1" Text="Changes" IsVisible="{Binding Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" />
-              <Button Grid.Column="2" Classes="icon" ToolTip.Tip="Open in file manager" Click="OnOpenFolderClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
+              <local:TouchButton Grid.Column="2" Classes="icon" ToolTip.Tip="Open in file manager" Click="OnOpenFolderClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
                 <Path Classes="lineIcon" Data="{StaticResource OpenExternalIconGeometry}" Width="13" Height="13" />
-              </Button>
-              <Button Grid.Column="3" Classes="icon" ToolTip.Tip="Copy workspace root path" Click="OnCopyPathClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
+              </local:TouchButton>
+              <local:TouchButton Grid.Column="3" Classes="icon" ToolTip.Tip="Copy workspace root path" Click="OnCopyPathClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
                 <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
-              </Button>
+              </local:TouchButton>
               <ToggleButton Grid.Column="4" Classes="icon" ToolTip.Tip="Search files" IsChecked="{Binding Search.IsOpen, Mode=TwoWay}" Click="OnSearchToggled">
                 <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="13" Height="13" />
               </ToggleButton>
@@ -81,9 +81,9 @@
               <ToggleButton Grid.Column="6" Classes="icon" ToolTip.Tip="See hidden files" IsChecked="{Binding ShowHidden, Mode=TwoWay}">
                 <Path Classes="lineIcon" Data="{StaticResource EyeIconGeometry}" Width="13" Height="13" />
               </ToggleButton>
-              <Button Grid.Column="7" Classes="icon" ToolTip.Tip="Collapse All" Command="{Binding CollapseAllCommand}">
+              <local:TouchButton Grid.Column="7" Classes="icon" ToolTip.Tip="Collapse All" Command="{Binding CollapseAllCommand}">
                 <Path Classes="lineIcon" Data="{StaticResource CollapseAllIconGeometry}" Width="13" Height="13" />
-              </Button>
+              </local:TouchButton>
             </Grid>
             <TextBlock Grid.Row="2" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="10,0,8,8" />
             <DockPanel Grid.Row="3" DataContext="{Binding Search}" IsVisible="{Binding IsOpen}" Margin="8,0,8,6">
@@ -96,12 +96,12 @@
                 <ItemsControl ItemsSource="{Binding Results}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Button Classes="flat" Padding="4,3" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding $parent[DockPanel].DataContext.ChooseCommand}" CommandParameter="{Binding}">
+                      <local:TouchButton Classes="flat" Padding="4,3" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Command="{Binding $parent[DockPanel].DataContext.ChooseCommand}" CommandParameter="{Binding}">
                         <StackPanel>
                           <TextBlock Text="{Binding Primary}" FontSize="12" TextTrimming="CharacterEllipsis" />
                           <TextBlock Text="{Binding Secondary}" FontSize="10.5" Classes="muted" TextTrimming="CharacterEllipsis" IsVisible="{Binding Secondary, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                         </StackPanel>
-                      </Button>
+                      </local:TouchButton>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -115,7 +115,7 @@
               </TreeView.Styles>
               <TreeView.ItemTemplate>
                 <TreeDataTemplate ItemsSource="{Binding Children}">
-                  <Button Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
+                  <local:TouchButton Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Panel Width="12" Height="12">
                         <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
@@ -123,7 +123,7 @@
                       </Panel>
                       <TextBlock Text="{Binding Name}" FontSize="12" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.deleted="{Binding IsDeleted}" />
                     </StackPanel>
-                  </Button>
+                  </local:TouchButton>
                 </TreeDataTemplate>
               </TreeView.ItemTemplate>
             </TreeView>
@@ -167,9 +167,9 @@
           <Border Grid.Column="3" HorizontalAlignment="Stretch" Background="{DynamicResource Border}" IsHitTestVisible="False" IsVisible="{Binding ShowSeparators, FallbackValue=False}" />
           <Grid Grid.Column="{Binding ChatColumn}" Grid.ColumnSpan="{Binding Span}" MinWidth="240" RowDefinitions="Auto,*" IsVisible="{Binding ShowChatPanel, FallbackValue=False}">
            <UniformGrid Grid.Row="0" Rows="1" IsVisible="{Binding ShowSideTabs}">
-             <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChatView}" />
-             <Button Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScriptView}" />
-             <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistoryView}" IsVisible="{Binding ShowHistoryTab}" />
+             <local:TouchButton Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChatView}" />
+             <local:TouchButton Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScriptView}" />
+             <local:TouchButton Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistoryView}" IsVisible="{Binding ShowHistoryTab}" />
            </UniformGrid>
            <Panel Grid.Row="1">
            <Panel IsVisible="{Binding ShowChatView}">
@@ -230,7 +230,7 @@
                     IsVisible="{Binding $parent[local:HomeView].DataContext.Active.Git.IsWorking, FallbackValue=False}">
               <Grid ColumnDefinitions="*,Auto" DataContext="{Binding $parent[local:HomeView].DataContext.Active.Git}">
                 <TextBlock Grid.Column="0" Text="Git is working on the server. If the AI is resolving conflicts, you can watch it here." Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
-                <Button Grid.Column="1" Content="Cancel and undo" Command="{Binding CancelWorkCommand}" Margin="8,0,0,0" Padding="8,3" FontSize="12" />
+                <local:TouchButton Grid.Column="1" Content="Cancel and undo" Command="{Binding CancelWorkCommand}" Margin="8,0,0,0" Padding="8,3" FontSize="12" />
               </Grid>
             </Border>
             <ItemsControl Grid.Row="1" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}" Margin="0,0,0,4">
@@ -245,43 +245,43 @@
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
                       <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" />
                       <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
-                      <Button Classes="icon" ToolTip.Tip="Remove" Command="{Binding $parent[ItemsControl].DataContext.RemoveAttachmentCommand}" CommandParameter="{Binding}">
+                      <local:TouchButton Classes="icon" ToolTip.Tip="Remove" Command="{Binding $parent[ItemsControl].DataContext.RemoveAttachmentCommand}" CommandParameter="{Binding}">
                         <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="8" Height="8" />
-                      </Button>
+                      </local:TouchButton>
                     </StackPanel>
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
             <Grid Name="ChatInputRow" Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
-              <Button Grid.Column="0" Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center" Margin="0,0,6,0">
+              <local:TouchButton Grid.Column="0" Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center" Margin="0,0,6,0">
                 <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
-              </Button>
+              </local:TouchButton>
               <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0" VerticalAlignment="Center">
-                <Button Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
+                <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding !$parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=True}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
-                <Button Command="{Binding $parent[local:HomeView].DataContext.PauseCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Pause the work"
+                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.PauseCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Pause the work"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowPauseButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="M3,1 L5,1 L5,13 L3,13 Z M9,1 L11,1 L11,13 L9,13 Z" Width="14" Height="14" />
-                </Button>
-                <Button Command="{Binding $parent[local:HomeView].DataContext.ResumeCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Resume the work"
+                </local:TouchButton>
+                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.ResumeCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Resume the work"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowResumeButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Data="M2,1 L12,7 L2,13 Z" Fill="White" Width="14" Height="14" />
-                </Button>
-                <Button Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did"
+                </local:TouchButton>
+                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Data="M1,1 L11,1 L11,11 L1,11 Z" Fill="White" Width="12" Height="12" />
-                </Button>
-                <Button Command="{Binding $parent[local:HomeView].DataContext.BeginCancelCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Cancel the work and revert what it did"
+                </local:TouchButton>
+                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginCancelCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Cancel the work and revert what it did"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowCancelButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="M4,2 L1,5 L4,8 M1,5 L8,5 A4,4 0 0 1 8,13 L4,13" Width="14" Height="14" />
-                </Button>
+                </local:TouchButton>
               </StackPanel>
             </Grid>
             </Grid>
@@ -296,10 +296,10 @@
                     <Grid ColumnDefinitions="Auto,*,Auto">
                       <TextBlock Grid.Column="0" Text="●" FontSize="8" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" Margin="0,0,6,0" IsVisible="{Binding IsRunning}" />
                       <TextBlock Grid.Column="1" Text="{Binding Path}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                      <Button Grid.Column="2" Classes="icon" ToolTip.Tip="Remove" Margin="6,0,0,0" IsVisible="{Binding !IsActive}"
+                      <local:TouchButton Grid.Column="2" Classes="icon" ToolTip.Tip="Remove" Margin="6,0,0,0" IsVisible="{Binding !IsActive}"
                               Command="{Binding $parent[ComboBox].DataContext.RemoveCommand}" CommandParameter="{Binding}">
                         <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="9" Height="9" />
-                      </Button>
+                      </local:TouchButton>
                     </Grid>
                   </DataTemplate>
                 </ComboBox.ItemTemplate>
@@ -314,12 +314,12 @@
                 </ItemsControl.ItemsPanel>
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <Button Classes="scriptSubTab" Classes.on="{Binding IsSelected}" Command="{Binding $parent[ItemsControl].DataContext.SelectChildCommand}" CommandParameter="{Binding}">
+                    <local:TouchButton Classes="scriptSubTab" Classes.on="{Binding IsSelected}" Command="{Binding $parent[ItemsControl].DataContext.SelectChildCommand}" CommandParameter="{Binding}">
                       <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock Text="●" FontSize="8" Foreground="{DynamicResource Accent}" VerticalAlignment="Center" IsVisible="{Binding IsRunning}" />
                         <TextBlock Text="{Binding Name}" FontSize="12" />
                       </StackPanel>
-                    </Button>
+                    </local:TouchButton>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
@@ -341,10 +341,10 @@
                   <ToggleButton Classes="icon" ToolTip.Tip="Auto scroll to new output" IsChecked="{Binding AutoScroll, Mode=TwoWay}" Click="OnOutputAutoScrollToggled">
                     <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" Width="12" Height="12" />
                   </ToggleButton>
-                  <Button Classes="icon" ToolTip.Tip="Copy output" Click="OnCopyOutputClick">
+                  <local:TouchButton Classes="icon" ToolTip.Tip="Copy output" Click="OnCopyOutputClick">
                     <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
-                  </Button>
-                  <Button Content="Stop" FontSize="11" Padding="8,4" Command="{Binding StopCommand}" IsVisible="{Binding ShowStop}" ToolTip.Tip="Forcefully stop this script" />
+                  </local:TouchButton>
+                  <local:TouchButton Content="Stop" FontSize="11" Padding="8,4" Command="{Binding StopCommand}" IsVisible="{Binding ShowStop}" ToolTip.Tip="Forcefully stop this script" />
                 </StackPanel>
               </Grid>
             </Border>
@@ -356,7 +356,7 @@
                     <KeyBinding Gesture="Enter" Command="{Binding SendInputCommand}" />
                   </TextBox.KeyBindings>
                 </TextBox>
-                <Button Grid.Column="1" Content="Send" Margin="8,0,0,0" Command="{Binding SendInputCommand}" />
+                <local:TouchButton Grid.Column="1" Content="Send" Margin="8,0,0,0" Command="{Binding SendInputCommand}" />
               </Grid>
             </Border>
             <Grid>
@@ -372,12 +372,12 @@
            <Grid DataContext="{Binding Git.History}" RowDefinitions="Auto,Auto,*">
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="16,8,8,4">
               <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <Button Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}">
+                <local:TouchButton Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}">
                   <Path Classes="lineIcon" Data="M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13" Width="13" Height="13" />
-                </Button>
-                <Button Classes="icon" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
+                </local:TouchButton>
+                <local:TouchButton Classes="icon" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
                   <Path Classes="lineIcon" Data="M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5" Width="13" Height="13" />
-                </Button>
+                </local:TouchButton>
               </StackPanel>
             </Grid>
             <TextBlock Grid.Row="1" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="16,0,16,8" />
@@ -390,13 +390,13 @@
                       <Grid ColumnDefinitions="Auto,*" RowDefinitions="28,Auto">
                         <local:GitGraphView Grid.Column="0" Grid.RowSpan="2" Row="{Binding Graph}" Lanes="{Binding GraphLanes}" />
                         <Grid Grid.Column="1" Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
-                          <Button Grid.ColumnSpan="3" Classes="flat" Command="{Binding ToggleCommand}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" CornerRadius="4" ToolTip.Tip="{Binding FullHash}">
+                          <local:TouchButton Grid.ColumnSpan="3" Classes="flat" Command="{Binding ToggleCommand}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" CornerRadius="4" ToolTip.Tip="{Binding FullHash}">
                             <Button.ContextMenu>
                               <ContextMenu>
                                 <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" />
                               </ContextMenu>
                             </Button.ContextMenu>
-                          </Button>
+                          </local:TouchButton>
                           <ItemsControl Grid.Column="0" ItemsSource="{Binding Refs}" IsVisible="{Binding HasRefs}" VerticalAlignment="Center" Margin="4,0,0,0">
                             <ItemsControl.ItemsPanel>
                               <ItemsPanelTemplate>
@@ -405,7 +405,7 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                               <DataTemplate>
-                                <Button Classes="flat" Padding="0" Margin="0" Command="{Binding ToggleCommand}">
+                                <local:TouchButton Classes="flat" Padding="0" Margin="0" Command="{Binding ToggleCommand}">
                                   <Button.ContextMenu>
                                     <ContextMenu>
                                       <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" IsVisible="{Binding CanCheckout}" />
@@ -428,7 +428,7 @@
                                       <TextBlock Text="{Binding RemoteLabel}" IsVisible="{Binding HasRemote}" FontSize="10.5" Opacity="0.65" />
                                     </StackPanel>
                                   </Border>
-                                </Button>
+                                </local:TouchButton>
                               </DataTemplate>
                             </ItemsControl.ItemTemplate>
                           </ItemsControl>
@@ -452,7 +452,7 @@
                               </TreeView.Styles>
                               <TreeView.ItemTemplate>
                                 <TreeDataTemplate ItemsSource="{Binding Children}">
-                                  <Button Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
+                                  <local:TouchButton Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                       <Panel Width="12" Height="12">
                                         <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
@@ -460,7 +460,7 @@
                                       </Panel>
                                       <TextBlock Text="{Binding Name}" FontSize="12" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.deleted="{Binding IsDeleted}" />
                                     </StackPanel>
-                                  </Button>
+                                  </local:TouchButton>
                                 </TreeDataTemplate>
                               </TreeView.ItemTemplate>
                             </TreeView>
@@ -470,7 +470,7 @@
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
-                <Button Content="Load older commits" Command="{Binding LoadMoreCommand}" IsVisible="{Binding HasMore}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="8,8,8,0" />
+                <local:TouchButton Content="Load older commits" Command="{Binding LoadMoreCommand}" IsVisible="{Binding HasMore}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="8,8,8,0" />
               </StackPanel>
             </ScrollViewer>
            </Grid>
@@ -496,9 +496,9 @@
                     <ToggleButton Classes="icon" ToolTip.Tip="Word wrap" IsChecked="{Binding WrapLines, Mode=TwoWay}" IsVisible="{Binding !IsMarkdownPreview}">
                       <Path Classes="lineIcon" Data="{StaticResource WrapIconGeometry}" Width="12" Height="12" />
                     </ToggleButton>
-                    <Button Classes="icon" ToolTip.Tip="Close" Command="{Binding ClosePreviewCommand}">
+                    <local:TouchButton Classes="icon" ToolTip.Tip="Close" Command="{Binding ClosePreviewCommand}">
                       <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
-                    </Button>
+                    </local:TouchButton>
                   </StackPanel>
                 </Grid>
               </Border>
@@ -514,11 +514,11 @@
                   <TextBlock Grid.Column="1" Text="{Binding Display}" Classes="muted" FontSize="11" VerticalAlignment="Center" Margin="8,0" MinWidth="50" />
                   <ToggleButton Grid.Column="2" Classes="icon" Content="Aa" IsChecked="{Binding MatchCase, Mode=TwoWay}" ToolTip.Tip="Match case" FontSize="11" Padding="6,3" />
                   <ToggleButton Grid.Column="3" Classes="icon" Content="&quot;W&quot;" IsChecked="{Binding WholeWord, Mode=TwoWay}" ToolTip.Tip="Match whole word" FontSize="11" Padding="6,3" />
-                  <Button Grid.Column="4" Classes="icon" Content="▲" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous match (Shift+Enter)" FontSize="10" Padding="6,3" />
-                  <Button Grid.Column="5" Classes="icon" Content="▼" Command="{Binding NextCommand}" ToolTip.Tip="Next match (Enter)" FontSize="10" Padding="6,3" />
-                  <Button Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}" ToolTip.Tip="Close (Esc)">
+                  <local:TouchButton Grid.Column="4" Classes="icon" Content="▲" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous match (Shift+Enter)" FontSize="10" Padding="6,3" />
+                  <local:TouchButton Grid.Column="5" Classes="icon" Content="▼" Command="{Binding NextCommand}" ToolTip.Tip="Next match (Enter)" FontSize="10" Padding="6,3" />
+                  <local:TouchButton Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}" ToolTip.Tip="Close (Esc)">
                     <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
-                  </Button>
+                  </local:TouchButton>
                 </Grid>
               </Border>
               <Border Grid.Row="2" Background="Transparent" Padding="14,8">
@@ -552,8 +552,8 @@
               <TextBlock Text="Effort" Classes="muted" Margin="0,8,0,0" />
               <ComboBox ItemsSource="{Binding Efforts}" SelectedItem="{Binding Effort}" HorizontalAlignment="Stretch" />
               <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-              <Button Content="Rename workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,16,0,0" />
-              <Button Content="Delete workspace" Command="{Binding $parent[UserControl].DataContext.BeginDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+              <local:TouchButton Content="Rename workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,16,0,0" />
+              <local:TouchButton Content="Delete workspace" Command="{Binding $parent[UserControl].DataContext.BeginDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             </StackPanel>
            </ScrollViewer>
           </Panel>
@@ -562,10 +562,10 @@
 
       <Border Grid.Row="2" IsVisible="{Binding Active.ShowTabs, FallbackValue=False}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,1,0,0">
         <UniformGrid Rows="1" DataContext="{Binding Active}">
-          <Button Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChat}" Padding="0,12" />
-          <Button Content="Files" Command="{Binding ShowFilesCommand}" Classes="tab" Classes.on="{Binding ShowFiles}" Padding="0,12" />
-          <Button Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScript}" Padding="0,12" />
-          <Button Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistory}" IsVisible="{Binding ShowHistoryTab}" Padding="0,12" />
+          <local:TouchButton Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChat}" Padding="0,12" />
+          <local:TouchButton Content="Files" Command="{Binding ShowFilesCommand}" Classes="tab" Classes.on="{Binding ShowFiles}" Padding="0,12" />
+          <local:TouchButton Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScript}" Padding="0,12" />
+          <local:TouchButton Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistory}" IsVisible="{Binding ShowHistoryTab}" Padding="0,12" />
         </UniformGrid>
       </Border>
     </Grid>
@@ -604,21 +604,21 @@
                 <Panel>
                   <Grid IsVisible="{Binding IsGroup}" ColumnDefinitions="*,Auto,Auto,Auto,Auto,Auto,Auto" Margin="{Binding Indent}">
                     <TextBlock Grid.Column="0" Text="{Binding Text}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-                    <Button Grid.Column="1" Content="▲" Classes="flat" Padding="8,4" ToolTip.Tip="Move up" Command="{Binding $parent[ListBox].DataContext.ShiftGroupUpCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="2" Content="▼" Classes="flat" Padding="8,4" ToolTip.Tip="Move down" Command="{Binding $parent[ListBox].DataContext.ShiftGroupDownCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="3" Content="+" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginNewGroupCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="4" Content="✎" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginRenameGroupCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="5" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveGroupCommand}" CommandParameter="{Binding Group}" />
-                    <Button Grid.Column="6" Content="✕" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginDeleteGroupCommand}" CommandParameter="{Binding Group}" />
+                    <local:TouchButton Grid.Column="1" Content="▲" Classes="flat" Padding="8,4" ToolTip.Tip="Move up" Command="{Binding $parent[ListBox].DataContext.ShiftGroupUpCommand}" CommandParameter="{Binding Group}" />
+                    <local:TouchButton Grid.Column="2" Content="▼" Classes="flat" Padding="8,4" ToolTip.Tip="Move down" Command="{Binding $parent[ListBox].DataContext.ShiftGroupDownCommand}" CommandParameter="{Binding Group}" />
+                    <local:TouchButton Grid.Column="3" Content="+" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginNewGroupCommand}" CommandParameter="{Binding Group}" />
+                    <local:TouchButton Grid.Column="4" Content="✎" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginRenameGroupCommand}" CommandParameter="{Binding Group}" />
+                    <local:TouchButton Grid.Column="5" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveGroupCommand}" CommandParameter="{Binding Group}" />
+                    <local:TouchButton Grid.Column="6" Content="✕" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginDeleteGroupCommand}" CommandParameter="{Binding Group}" />
                   </Grid>
                   <Grid IsVisible="{Binding IsWorkspace}" ColumnDefinitions="*,Auto,Auto,Auto" Margin="{Binding Indent}">
                     <StackPanel Grid.Column="0">
                       <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" />
                       <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
-                    <Button Grid.Column="1" Content="▲" Classes="flat" Padding="8,4" ToolTip.Tip="Move up" Command="{Binding $parent[ListBox].DataContext.ShiftWorkspaceUpCommand}" CommandParameter="{Binding Workspace}" />
-                    <Button Grid.Column="2" Content="▼" Classes="flat" Padding="8,4" ToolTip.Tip="Move down" Command="{Binding $parent[ListBox].DataContext.ShiftWorkspaceDownCommand}" CommandParameter="{Binding Workspace}" />
-                    <Button Grid.Column="3" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />
+                    <local:TouchButton Grid.Column="1" Content="▲" Classes="flat" Padding="8,4" ToolTip.Tip="Move up" Command="{Binding $parent[ListBox].DataContext.ShiftWorkspaceUpCommand}" CommandParameter="{Binding Workspace}" />
+                    <local:TouchButton Grid.Column="2" Content="▼" Classes="flat" Padding="8,4" ToolTip.Tip="Move down" Command="{Binding $parent[ListBox].DataContext.ShiftWorkspaceDownCommand}" CommandParameter="{Binding Workspace}" />
+                    <local:TouchButton Grid.Column="3" Content="↪" Classes="flat" Padding="8,4" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />
                   </Grid>
                 </Panel>
               </DataTemplate>
@@ -626,10 +626,10 @@
           </ListBox>
           <TextBlock Grid.Row="2" Text="No workspaces match." IsVisible="{Binding HasNoMatches}" Classes="muted" Margin="8,4" VerticalAlignment="Top" />
           <StackPanel Grid.Row="3" Spacing="8" Margin="0,8,0,0">
-            <Button Content="New workspace" Command="{Binding NewWorkspaceCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-            <Button Content="Clone workspace" Command="{Binding CloneWorkspaceCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-            <Button Content="New group" Command="{Binding BeginNewGroupCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-            <Button Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="New workspace" Command="{Binding NewWorkspaceCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="Clone workspace" Command="{Binding CloneWorkspaceCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="New group" Command="{Binding BeginNewGroupCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
         </Grid>
       </Border>
@@ -644,8 +644,8 @@
           <TextBox Name="PromptInput" Text="{Binding PromptText}" IsVisible="{Binding HasInput}" PlaceholderText="{Binding PromptPlaceholder}" AcceptsReturn="False" TextInputOptions.AutoCapitalization="{Binding Capitalizes}" />
           <TextBox Text="{Binding PromptEmail}" IsVisible="{Binding HasEmail}" PlaceholderText="Email" AcceptsReturn="False" TextInputOptions.AutoCapitalization="False" />
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-          <Button Content="{Binding PromptConfirm}" Command="{Binding ConfirmCommand}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <Button Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding ShowCancel}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="{Binding PromptConfirm}" Command="{Binding ConfirmCommand}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding ShowCancel}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         </StackPanel>
       </Border>
     </Border>
@@ -663,24 +663,24 @@
           </StackPanel>
           <TextBlock IsVisible="{Binding IsRenamingGroup}" Text="Rename group" Classes="serif" FontSize="20" />
           <TextBox IsVisible="{Binding NeedsName}" Text="{Binding RenameText}" />
-          <Button IsVisible="{Binding IsRenaming}" Content="Rename" Command="{Binding ConfirmRenameCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <Button IsVisible="{Binding IsCreatingGroup}" Content="Create" Command="{Binding ConfirmNewGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <Button IsVisible="{Binding IsRenamingGroup}" Content="Rename" Command="{Binding ConfirmRenameGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton IsVisible="{Binding IsRenaming}" Content="Rename" Command="{Binding ConfirmRenameCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton IsVisible="{Binding IsCreatingGroup}" Content="Create" Command="{Binding ConfirmNewGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton IsVisible="{Binding IsRenamingGroup}" Content="Rename" Command="{Binding ConfirmRenameGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <StackPanel IsVisible="{Binding IsStoppingWork}" Spacing="12">
             <TextBlock Text="Stop the work?" Classes="serif" FontSize="20" />
             <TextBlock Text="It stops at once and keeps what it did so far." Classes="muted" TextWrapping="Wrap" />
-            <Button Content="Stop" Command="{Binding ConfirmHaltCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="Stop" Command="{Binding ConfirmHaltCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsCancelingWork}" Spacing="12">
             <TextBlock Text="Cancel the work?" Classes="serif" FontSize="20" />
             <TextBlock Text="It stops and what it did is reverted, which cannot be undone." Classes="muted" TextWrapping="Wrap" />
-            <Button Content="Cancel and revert" Command="{Binding ConfirmHaltCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="Cancel and revert" Command="{Binding ConfirmHaltCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsDeleting}" Spacing="12">
             <TextBlock Text="Delete workspace?" Classes="serif" FontSize="20" />
             <TextBlock Text="{Binding Title, StringFormat='{}{0} will be removed from the server.'}" Classes="muted" TextWrapping="Wrap" />
             <CheckBox IsChecked="{Binding DeleteFolder}" Content="Also delete the workspace folder and everything in it" />
-            <Button Content="Delete" Command="{Binding ConfirmDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="Delete" Command="{Binding ConfirmDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsMovingWorkspace}" Spacing="12">
             <TextBlock Text="Move workspace" Classes="serif" FontSize="20" />
@@ -697,14 +697,14 @@
               </DataTemplate>
             </ComboBox.ItemTemplate>
           </ComboBox>
-          <Button IsVisible="{Binding IsMoving}" Content="Move" Command="{Binding ConfirmMoveCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton IsVisible="{Binding IsMoving}" Content="Move" Command="{Binding ConfirmMoveCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <StackPanel IsVisible="{Binding IsDeletingGroup}" Spacing="12">
             <TextBlock Text="Delete group?" Classes="serif" FontSize="20" />
             <TextBlock Text="{Binding EditingGroupName, StringFormat='{}{0} will be removed. The workspaces and groups in it are kept and move up into its parent.'}" Classes="muted" TextWrapping="Wrap" />
-            <Button Content="Delete" Command="{Binding ConfirmDeleteGroupCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Content="Delete" Command="{Binding ConfirmDeleteGroupCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-          <Button Content="{Binding CancelEditText}" Command="{Binding CancelEditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="{Binding CancelEditText}" Command="{Binding CancelEditCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         </StackPanel>
       </Border>
     </Border>

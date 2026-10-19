@@ -27,8 +27,8 @@ public sealed class EndToEndTests : IAsyncLifetime
         ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), ClaudeCommand = fake, ClaudeArguments = [] };
         FolderBrowser folders = new();
         WorkspaceStore store = new();
-        WorkspaceManager workspaces = new(store, folders);
         EventHub hub = new();
+        WorkspaceManager workspaces = new(store, folders, hub);
         GitService git = new();
         WorkspaceActivity activity = new(hub);
         WorkspaceSnapshots snapshots = new(git);

@@ -375,8 +375,8 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved` or `StateChanged`. |
-| `workspaceId` | GUID | The workspace concerned. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged` or `WorkspacesChanged`. |
+| `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `index` | number | `MessageAdded`: the message's position in the conversation. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
@@ -387,6 +387,8 @@ The server pushes events to every authenticated connection, as responses with `i
 | `error` | string | `Failed`: why the AI could not do its work. |
 
 `ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.
+
+`WorkspacesChanged` says the workspaces or groups changed on the server (one was created, deleted, renamed, moved, reordered or configured, by any client); it carries no details, so a client lists the workspaces again with `ListWorkspaces`, which it also does after reconnecting. A new AI session being attached to a workspace is not announced. The client keeps what it has open: the focused workspace stays open untouched unless it was deleted (the view clears and the drawer opens) or its folder or AI settings changed (it is reopened).
 
 `GitChanged` says a git action started or finished in the workspace (the automatic fetch and pull only say it when they changed something), so a client reads the git state again; it does the same when a `FilesChanged` event arrives, when a `WorkingChanged` event says the AI stopped, and after its own git actions.
 

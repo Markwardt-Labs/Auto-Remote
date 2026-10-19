@@ -6,13 +6,15 @@ public sealed class WorkspaceManagerTests
 
     private readonly Mock<IFolderBrowser> folders = new();
 
+    private readonly Mock<IEventHub> events = new();
+
     private readonly WorkspaceManager manager;
 
     public WorkspaceManagerTests()
     {
         store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
         folders.Setup(x => x.Exists(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        manager = new WorkspaceManager(store.Object, folders.Object);
+        manager = new WorkspaceManager(store.Object, folders.Object, events.Object);
     }
 
     [Fact]
@@ -349,4 +351,35 @@ public sealed class WorkspaceManagerTests
     public async Task Get_ThrowsForUnknownWorkspace() => await Assert.ThrowsAsync<RequestException>(() => manager.Get(Guid.NewGuid(), CancellationToken.None));
 
     private async Task<IReadOnlyList<string>> Names(Guid? groupId) => [.. (await manager.List(CancellationToken.None)).Workspaces.Where(workspace => workspace.GroupId == groupId).Select(workspace => workspace.Name)];
+
+    private void VerifyAnnounced(int times) => events.Verify(x => x.Publish(It.Is<RemoteEvent>(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkspacesChanged && remoteEvent.WorkspaceId == Guid.Empty)), Times.Exactly(times));
+
+    [Fact]
+    public async Task EveryChangeToTheWorkspacesOrGroupsIsAnnouncedToTheClients()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
+        VerifyAnnounced(2);
+
+        await manager.Move(workspace.Id, group.Id, CancellationToken.None);
+        await manager.RenameGroup(group.Id, "Play", CancellationToken.None);
+        await manager.ShiftWorkspace(workspace.Id, 1, CancellationToken.None);
+        await manager.Configure(workspace.Id, AiService.ClaudeCode, AiModel.Haiku, AiEffort.Low, CancellationToken.None);
+        VerifyAnnounced(6);
+
+        await manager.DeleteGroup(group.Id, CancellationToken.None);
+        await manager.Delete(workspace.Id, false, CancellationToken.None);
+        VerifyAnnounced(8);
+    }
+
+    [Fact]
+    public async Task AttachingAnAiSessionIsNotAnnouncedAndARefusalIsNot()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+
+        await manager.AttachAiSession(workspace.Id, Guid.NewGuid(), CancellationToken.None);
+        await Assert.ThrowsAsync<RequestException>(() => manager.CreateGroup("  ", null, CancellationToken.None));
+
+        VerifyAnnounced(1);
+    }
 }

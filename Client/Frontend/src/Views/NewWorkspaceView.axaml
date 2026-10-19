@@ -1,16 +1,17 @@
 <UserControl xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
              x:Class="Markwardt.AutoRemote.Client.NewWorkspaceView"
              x:CompileBindings="False">
   <Grid RowDefinitions="Auto,Auto,Auto,*,Auto,Auto" Margin="16">
     <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,4">
       <TextBlock Grid.Column="0" Text="New workspace" Classes="serif" FontSize="26" VerticalAlignment="Center" />
-      <Button Grid.Column="1" Content="Cancel" Command="{Binding CancelCommand}" Classes="flat" />
+      <local:TouchButton Grid.Column="1" Content="Cancel" Command="{Binding CancelCommand}" Classes="flat" />
     </Grid>
     <TextBlock Grid.Row="1" Text="Choose the folder on the server that will host the workspace. The workspace is named after it." Classes="muted" TextWrapping="Wrap" Margin="0,0,0,12" />
 
     <Grid Grid.Row="2" DataContext="{Binding Browser}" ColumnDefinitions="Auto,*" Margin="0,0,0,8">
-      <Button Grid.Column="0" Content="↑ Up" Command="{Binding UpCommand}" />
+      <local:TouchButton Grid.Column="0" Content="↑ Up" Command="{Binding UpCommand}" />
       <TextBlock Grid.Column="1" Text="{Binding CurrentPath, FallbackValue='Computer'}" VerticalAlignment="Center" Margin="12,0,0,0" TextTrimming="PrefixCharacterEllipsis" />
     </Grid>
 
@@ -30,14 +31,14 @@
     <StackPanel Grid.Row="4" DataContext="{Binding Browser}" Spacing="8" Margin="0,12,0,0">
       <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
         <TextBox Grid.Column="0" Text="{Binding NewFolderName}" PlaceholderText="New folder name" />
-        <Button Grid.Column="1" Content="Create" Command="{Binding CreateFolderCommand}" />
+        <local:TouchButton Grid.Column="1" Content="Create" Command="{Binding CreateFolderCommand}" />
       </Grid>
       <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
     </StackPanel>
 
     <StackPanel Grid.Row="5" Spacing="8" Margin="0,12,0,0">
       <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-      <Button Content="Start workspace in this folder" Command="{Binding StartCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+      <local:TouchButton Content="Start workspace in this folder" Command="{Binding StartCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
     </StackPanel>
   </Grid>
 </UserControl>

@@ -25,7 +25,18 @@ internal sealed class HomeViewModel : ViewModelBase
         this.layout = layout;
         this.drafts = drafts;
         connection.Lost += () => IsOffline = true;
-        connection.Reconnected += () => IsOffline = false;
+        connection.Reconnected += () =>
+        {
+            IsOffline = false;
+            _ = Refresh();
+        };
+        connection.EventReceived += remoteEvent =>
+        {
+            if (remoteEvent.Kind == RemoteEventKind.WorkspacesChanged)
+            {
+                _ = Refresh();
+            }
+        };
         Usage = new UsageViewModel(connection);
         ToggleUsageCommand = new AsyncCommand(_ =>
         {
@@ -133,6 +144,10 @@ internal sealed class HomeViewModel : ViewModelBase
     private bool isDrawerOpen;
 
     private bool isOffline;
+
+    private bool refreshing;
+
+    private bool refreshAgain;
 
     private string renameText = string.Empty;
 
@@ -676,6 +691,84 @@ internal sealed class HomeViewModel : ViewModelBase
         }
     }
 
+    private async Task Refresh()
+    {
+        if (refreshing)
+        {
+            refreshAgain = true;
+            return;
+        }
+
+        refreshing = true;
+
+        try
+        {
+            do
+            {
+                refreshAgain = false;
+                WorkspaceCatalog catalog;
+
+                try
+                {
+                    catalog = await connection.ListWorkspaces(CancellationToken.None);
+                }
+                catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
+                {
+                    return;
+                }
+
+                Apply(catalog);
+            }
+            while (refreshAgain);
+        }
+        finally
+        {
+            refreshing = false;
+        }
+    }
+
+    private void Apply(WorkspaceCatalog catalog)
+    {
+        WorkspaceInfo? before = selected;
+        Fill(catalog);
+        bool reopen = false;
+
+        foreach ((Guid id, WorkspaceViewModel view) in opened.ToList())
+        {
+            WorkspaceInfo? now = workspaces.FirstOrDefault(workspace => workspace.Id == id);
+
+            if (now is null || now.Folder != view.Workspace.Folder || now.Service != view.Workspace.Service || now.Model != view.Workspace.Model || now.Effort != view.Workspace.Effort)
+            {
+                view.Dispose();
+                opened.Remove(id);
+                reopen |= id == before?.Id;
+            }
+        }
+
+        BuildEntries();
+
+        if (before is null)
+        {
+            return;
+        }
+
+        if (workspaces.FirstOrDefault(workspace => workspace.Id == before.Id) is not { } current)
+        {
+            Selected = null;
+            IsDrawerOpen = true;
+        }
+        else if (reopen)
+        {
+            Selected = null;
+            Selected = current;
+        }
+        else if (current != before)
+        {
+            selected = current;
+            SyncSelectedEntry();
+        }
+    }
+
     private void Fill(WorkspaceCatalog catalog)
     {
         workspaces.Clear();
@@ -835,9 +928,42 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private void BuildEntries()
     {
+        List<DrawerEntry> wanted = [];
+        AddEntries(null, 0, false, wanted);
         building = true;
-        Entries.Clear();
-        AddEntries(null, 0, false);
+
+        for (int index = 0; index < wanted.Count; index++)
+        {
+            if (index < Entries.Count && Entries[index] == wanted[index])
+            {
+                continue;
+            }
+
+            int found = -1;
+
+            for (int later = index + 1; later < Entries.Count && found < 0; later++)
+            {
+                if (Entries[later] == wanted[index])
+                {
+                    found = later;
+                }
+            }
+
+            if (found >= 0)
+            {
+                Entries.Move(found, index);
+            }
+            else
+            {
+                Entries.Insert(index, wanted[index]);
+            }
+        }
+
+        while (Entries.Count > wanted.Count)
+        {
+            Entries.RemoveAt(Entries.Count - 1);
+        }
+
         building = false;
         Raise(nameof(HasNoMatches));
         SyncSelectedEntry();
@@ -849,7 +975,7 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private bool HoldsMatch(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && Matches(workspace)) || Children(group).Any(child => Matches(child) || HoldsMatch(child.Id));
 
-    private void AddEntries(Guid? parent, int depth, bool showAll)
+    private void AddEntries(Guid? parent, int depth, bool showAll, List<DrawerEntry> into)
     {
         foreach (WorkspaceGroup group in Children(parent))
         {
@@ -861,24 +987,31 @@ internal sealed class HomeViewModel : ViewModelBase
             }
 
             bool isCollapsed = !IsFiltering && collapsed.Contains(group.Id);
-            Entries.Add(new DrawerEntry { Group = group, IsCollapsed = isCollapsed, Depth = depth });
+            into.Add(new DrawerEntry { Group = group, IsCollapsed = isCollapsed, Depth = depth });
 
             if (!isCollapsed)
             {
-                AddEntries(group.Id, depth + 1, shown && IsFiltering);
+                AddEntries(group.Id, depth + 1, shown && IsFiltering, into);
             }
         }
 
         foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))))
         {
-            Entries.Add(new DrawerEntry { Workspace = workspace, Depth = depth });
+            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth });
         }
     }
 
     private void SyncSelectedEntry()
     {
+        DrawerEntry? wanted = Entries.FirstOrDefault(entry => entry.Workspace is { } workspace && workspace.Id == selected?.Id);
+
+        if (ReferenceEquals(wanted, selectedEntry))
+        {
+            return;
+        }
+
         building = true;
-        selectedEntry = Entries.FirstOrDefault(entry => entry.Workspace is { } workspace && workspace.Id == selected?.Id);
+        selectedEntry = wanted;
         Raise(nameof(SelectedEntry));
         building = false;
     }

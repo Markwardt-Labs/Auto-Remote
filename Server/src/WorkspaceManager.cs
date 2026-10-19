@@ -146,7 +146,7 @@ internal interface IWorkspaceManager
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser folders) : IWorkspaceManager
+internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser folders, IEventHub events) : IWorkspaceManager
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -208,7 +208,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full };
             workspaces.Add(created);
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             return created;
         }
     }
@@ -227,7 +227,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             WorkspaceInfo renamed = workspace with { Folder = await folders.Rename(workspace.Folder, name, cancellation) };
             workspaces[workspaces.IndexOf(workspace)] = renamed;
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             return renamed;
         }
     }
@@ -252,7 +252,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     {
         using (await Lock(cancellation))
         {
-            await Replace(Find(id) with { AiSessionId = aiSessionId }, cancellation);
+            await Replace(Find(id) with { AiSessionId = aiSessionId }, cancellation, false);
         }
     }
 
@@ -276,7 +276,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             WorkspaceInfo moved = workspace with { GroupId = groupId };
             workspaces.Remove(workspace);
             workspaces.Add(moved);
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             return moved;
         }
     }
@@ -293,7 +293,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             WorkspaceGroup created = new() { Id = Guid.NewGuid(), Name = ValidateGroupName(name, parentId, null), ParentId = parentId };
             groups.Add(created);
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             return created;
         }
     }
@@ -306,7 +306,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             WorkspaceGroup group = FindGroup(id);
             WorkspaceGroup renamed = group with { Name = ValidateGroupName(name, group.ParentId, id) };
             groups[groups.IndexOf(group)] = renamed;
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             return renamed;
         }
     }
@@ -340,7 +340,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 groups.Add(moved);
             }
 
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             return moved;
         }
     }
@@ -352,7 +352,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         {
             WorkspaceInfo workspace = Find(id);
             Shift(workspaces, workspace, offset, other => other.GroupId == workspace.GroupId);
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
         }
     }
 
@@ -363,7 +363,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         {
             WorkspaceGroup group = FindGroup(id);
             Shift(groups, group, offset, other => other.ParentId == group.ParentId);
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
         }
     }
 
@@ -391,7 +391,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 }
             }
 
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
         }
     }
 
@@ -413,7 +413,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             }
 
             workspaces.Remove(workspace);
-            await store.Save(Snapshot(), cancellation);
+            await Save(cancellation);
             store.DeleteHistory(id);
         }
     }
@@ -450,11 +450,21 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         }
     }
 
-    private async Task<WorkspaceInfo> Replace(WorkspaceInfo updated, CancellationToken cancellation)
+    private async Task<WorkspaceInfo> Replace(WorkspaceInfo updated, CancellationToken cancellation, bool announce = true)
     {
         workspaces[workspaces.FindIndex(workspace => workspace.Id == updated.Id)] = updated;
-        await store.Save(Snapshot(), cancellation);
+        await Save(cancellation, announce);
         return updated;
+    }
+
+    private async Task Save(CancellationToken cancellation, bool announce = true)
+    {
+        await store.Save(Snapshot(), cancellation);
+
+        if (announce)
+        {
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkspacesChanged, WorkspaceId = Guid.Empty });
+        }
     }
 
     private string ValidateGroupName(string name, Guid? parentId, Guid? ignore)

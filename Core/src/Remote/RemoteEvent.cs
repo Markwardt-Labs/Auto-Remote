@@ -11,7 +11,7 @@ public sealed record RemoteEvent
     public required RemoteEventKind Kind { get; init; }
 
     /// <summary>
-    /// Gets the workspace the event is about.
+    /// Gets the workspace the event is about, or <see cref="Guid.Empty" /> for <see cref="RemoteEventKind.WorkspacesChanged" />, which is about all of them.
     /// </summary>
     public required Guid WorkspaceId { get; init; }
 
@@ -105,5 +105,10 @@ public enum RemoteEventKind
     /// <summary>
     /// A workspace entered a different <see cref="WorkspaceState" />.
     /// </summary>
-    StateChanged
+    StateChanged,
+
+    /// <summary>
+    /// The workspaces or the groups changed on the server: one was created, deleted, renamed, moved, reordered or configured. The event carries no details, so a client lists the workspaces again.
+    /// </summary>
+    WorkspacesChanged
 }

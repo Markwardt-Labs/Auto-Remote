@@ -308,6 +308,40 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Contains("hello", output);
     }
 
+    [Theory]
+    [InlineData(false, 3, true)]
+    [InlineData(true, 3, false)]
+    [InlineData(false, 25, false)]
+    public async Task TouchButton_ClicksOnATapButNeverCapturesTheFingerSoDraggingFromItScrolls(bool scrolls, int movement, bool clicks)
+    {
+        (bool captured, int clicked) = await fixture.Run(() =>
+        {
+            int count = 0;
+            TouchButton button = new() { Content = "x", Width = 100, Height = 40 };
+            button.Click += (_, _) => count++;
+            Window window = new() { Width = 300, Height = 100, Content = button };
+            window.Show();
+            Avalonia.Input.Pointer pointer = new(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true);
+            Avalonia.Input.PointerPointProperties properties = new(Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PointerUpdateKind.LeftButtonPressed);
+            button.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(button, pointer, window, new Avalonia.Point(20, 20), 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+            bool captured = pointer.Captured is not null;
+            Avalonia.Point end = new(20, 20 + movement);
+            button.RaiseEvent(new Avalonia.Input.PointerEventArgs(Avalonia.Input.InputElement.PointerMovedEvent, button, pointer, window, end, 1, properties, Avalonia.Input.KeyModifiers.None));
+
+            if (scrolls)
+            {
+                button.RaiseEvent(new Avalonia.Input.PointerCaptureLostEventArgs(button, pointer));
+            }
+
+            button.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(button, pointer, window, end, 2, properties, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left) { RoutedEvent = Avalonia.Input.InputElement.PointerReleasedEvent });
+            window.Close();
+            return (captured, count);
+        });
+
+        Assert.False(captured);
+        Assert.Equal(clicks ? 1 : 0, clicked);
+    }
+
     [Fact]
     public async Task EveryPieceOfSelectableTextTheClientShowsIgnoresASingleTouch()
     {

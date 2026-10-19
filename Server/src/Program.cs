@@ -22,8 +22,8 @@ internal static class Program
         IAppInfo info = new IAppInfo.Factory().Create(typeof(Program).Assembly);
         IFolderBrowser folders = new FolderBrowser();
         IWorkspaceStore store = new WorkspaceStore();
-        IWorkspaceManager workspaces = new WorkspaceManager(store, folders);
         IEventHub events = new EventHub();
+        IWorkspaceManager workspaces = new WorkspaceManager(store, folders, events);
         IGitService git = new GitService();
         IWorkspaceActivity activity = new WorkspaceActivity(events);
         IWorkspaceSnapshots snapshots = new WorkspaceSnapshots(git);

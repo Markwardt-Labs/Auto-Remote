@@ -242,6 +242,130 @@ public sealed class HomeViewModelTests
         Assert.Equal(added, model.Selected);
     }
 
+    private async Task Changed(WorkspaceCatalog catalog)
+    {
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(catalog);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkspacesChanged, WorkspaceId = Guid.Empty });
+
+        await Task.Delay(120);
+    }
+
+    [Fact]
+    public async Task WorkspacesChanged_ShowsNewGroupsAndWorkspacesWithoutDisturbingTheOneOpen()
+    {
+        await model.Start();
+        WorkspaceViewModel? open = model.Active;
+        model.IsDrawerOpen = true;
+        WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceInfo added = new() { Id = Guid.NewGuid(), Folder = "/work/new" };
+
+        await Changed(Catalog([group], first with { GroupId = group.Id }, second, added));
+
+        Assert.Equal([(object)group, first with { GroupId = group.Id }, second, added], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.Same(open, model.Active);
+        Assert.Equal(first.Id, model.Selected?.Id);
+        Assert.True(model.IsDrawerOpen);
+    }
+
+    [Fact]
+    public async Task WorkspacesChanged_ClearsTheViewWhenTheOpenWorkspaceWasDeletedElsewhere()
+    {
+        await model.Start();
+        Assert.Equal(first, model.Selected);
+
+        await Changed(Catalog([], second));
+
+        Assert.Null(model.Selected);
+        Assert.Null(model.Active);
+        Assert.True(model.IsDrawerOpen);
+        Assert.Equal([second], model.Entries.Select(entry => entry.Workspace));
+    }
+
+    [Fact]
+    public async Task WorkspacesChanged_ReopensTheOpenWorkspaceWhenItWasRenamedOrReconfiguredElsewhere()
+    {
+        await model.Start();
+        WorkspaceViewModel? old = model.Active;
+
+        await Changed(Catalog([], first with { Folder = "/work/renamed" }, second));
+
+        Assert.Equal("renamed", model.Title);
+        Assert.NotSame(old, model.Active);
+        Assert.Equal("/work/renamed", model.Active?.Workspace.Folder);
+
+        WorkspaceViewModel? renamed = model.Active;
+        await Changed(Catalog([], first with { Folder = "/work/renamed", Model = AiModel.Opus, Effort = AiEffort.Low }, second));
+
+        Assert.NotSame(renamed, model.Active);
+        Assert.Equal(AiModel.Opus, model.Active?.Workspace.Model);
+    }
+
+    [Fact]
+    public async Task WorkspacesChanged_ForgetsTheViewsOfWorkspacesThatWereDeleted()
+    {
+        await model.Start();
+        model.Selected = second;
+        model.Selected = first;
+
+        await Changed(Catalog([], first));
+        model.Selected = null;
+        await Changed(Catalog([], first, second));
+        model.Selected = second;
+
+        Assert.Equal(second, model.Selected);
+        Assert.Equal(second.Id, model.Active?.Workspace.Id);
+    }
+
+    [Fact]
+    public async Task Reconnecting_ReadsTheWorkspacesAgainBecauseEventsWereMissed()
+    {
+        await model.Start();
+        WorkspaceInfo added = new() { Id = Guid.NewGuid(), Folder = "/work/new" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([], first, second, added));
+
+        connection.Raise(x => x.Reconnected += null);
+        await Task.Delay(150);
+
+        Assert.Contains(model.Entries, entry => entry.Workspace == added);
+    }
+
+    [Fact]
+    public async Task WorkspacesChanged_UpdatesTheListInPlaceSoItsScrollPositionAndSelectionAreNotDisturbed()
+    {
+        WorkspaceInfo third = new() { Id = Guid.NewGuid(), Folder = "/work/c" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([], first, second, third));
+        await model.Start();
+        model.Selected = second;
+        DrawerEntry[] before = [.. model.Entries];
+        DrawerEntry? selectedBefore = model.SelectedEntry;
+        List<string> collectionChanges = [];
+        List<string> propertyChanges = [];
+        model.Entries.CollectionChanged += (_, args) => collectionChanges.Add(args.Action.ToString());
+        model.PropertyChanged += (_, args) => propertyChanges.Add(args.PropertyName ?? string.Empty);
+
+        await Changed(Catalog([], first, second, third));
+
+        Assert.Empty(collectionChanges);
+        Assert.DoesNotContain(nameof(HomeViewModel.SelectedEntry), propertyChanges);
+        Assert.Equal(before, model.Entries.ToArray());
+        Assert.Same(selectedBefore, model.SelectedEntry);
+
+        WorkspaceInfo added = new() { Id = Guid.NewGuid(), Folder = "/work/d" };
+        collectionChanges.Clear();
+        await Changed(Catalog([], first, second, third, added));
+
+        Assert.Equal(["Add"], collectionChanges);
+        Assert.Same(before[0], model.Entries[0]);
+        Assert.Same(before[2], model.Entries[2]);
+        Assert.Same(selectedBefore, model.SelectedEntry);
+
+        collectionChanges.Clear();
+        await Changed(Catalog([], second, first, third, added));
+
+        Assert.Equal(["Move"], collectionChanges);
+        Assert.Same(selectedBefore, model.SelectedEntry);
+    }
+
     [Fact]
     public async Task Title_SaysWhenTheConnectionIsBeingReopened()
     {
