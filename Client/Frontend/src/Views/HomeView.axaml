@@ -262,13 +262,23 @@
                 <Button Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding !$parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=True}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
+                <Button Command="{Binding $parent[local:HomeView].DataContext.PauseCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Pause the work"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowPauseButton, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="M3,1 L5,1 L5,13 L3,13 Z M9,1 L11,1 L11,13 L9,13 Z" Width="14" Height="14" />
+                </Button>
+                <Button Command="{Binding $parent[local:HomeView].DataContext.ResumeCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Resume the work"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowResumeButton, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Data="M2,1 L12,7 L2,13 Z" Fill="White" Width="14" Height="14" />
+                </Button>
                 <Button Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Data="M1,1 L11,1 L11,11 L1,11 Z" Fill="White" Width="12" Height="12" />
                 </Button>
                 <Button Command="{Binding $parent[local:HomeView].DataContext.BeginCancelCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Cancel the work and revert what it did"
-                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowCancelButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="M4,2 L1,5 L4,8 M1,5 L8,5 A4,4 0 0 1 8,13 L4,13" Width="14" Height="14" />
                 </Button>

@@ -9,13 +9,17 @@ internal sealed class ClaudeConversation : IAiConversation
     /// Initializes a new instance of the <see cref="ClaudeConversation" /> class.
     /// </summary>
     /// <param name="process">The started Claude Code process with redirected streams.</param>
-    public ClaudeConversation(Process process)
+    /// <param name="freezer">Suspends and continues the process and what it started.</param>
+    public ClaudeConversation(Process process, IProcessFreezer freezer)
     {
         this.process = process;
+        this.freezer = freezer;
         errors = process.StandardError.ReadToEndAsync();
     }
 
     private readonly Process process;
+
+    private readonly IProcessFreezer freezer;
 
     private readonly Task<string> errors;
 
@@ -65,6 +69,12 @@ internal sealed class ClaudeConversation : IAiConversation
             yield return new AiOutput { Kind = AiOutputKind.Failed, Text = detail.Length > 0 ? detail : "Claude Code stopped." };
         }
     }
+
+    /// <inheritdoc />
+    public Task Pause() => freezer.Freeze(process.Id);
+
+    /// <inheritdoc />
+    public Task Continue() => freezer.Thaw(process.Id);
 
     /// <inheritdoc />
     public void Kill()

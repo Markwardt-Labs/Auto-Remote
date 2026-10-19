@@ -20,6 +20,20 @@ internal interface IWorkspaceSnapshots
     Task Capture(WorkspaceInfo workspace, CancellationToken cancellation);
 
     /// <summary>
+    /// Reads the snapshot kept for a workspace, so it can be stored.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>The snapshot, or <see langword="null" /> when none is kept.</returns>
+    WorkspaceSnapshot? Export(Guid id);
+
+    /// <summary>
+    /// Keeps a snapshot read from storage, as if it had been taken now.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="snapshot">The snapshot.</param>
+    void Import(Guid id, WorkspaceSnapshot snapshot);
+
+    /// <summary>
     /// Puts the files, the head, the branch and the index of a workspace back as the snapshot saw them, then forgets the snapshot. Files git ignores, other branches and anything pushed are not touched.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -36,7 +50,7 @@ internal interface IWorkspaceSnapshots
 /// <inheritdoc />
 internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
 {
-    private readonly ConcurrentDictionary<Guid, Snapshot> snapshots = new();
+    private readonly ConcurrentDictionary<Guid, WorkspaceSnapshot> snapshots = new();
 
     private readonly int batch = 100;
 
@@ -65,7 +79,7 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
                 return;
             }
 
-            snapshots[workspace.Id] = new Snapshot(folder, await Text(folder, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellation), await Text(folder, ["symbolic-ref", "--quiet", "HEAD"], cancellation), indexTree, tree);
+            snapshots[workspace.Id] = new WorkspaceSnapshot { Folder = folder, Head = await Text(folder, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellation), Branch = await Text(folder, ["symbolic-ref", "--quiet", "HEAD"], cancellation), IndexTree = indexTree, Tree = tree };
         }
         catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException or Win32Exception)
         {
@@ -75,7 +89,7 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
     /// <inheritdoc />
     public async Task Revert(Guid id)
     {
-        if (!snapshots.TryRemove(id, out Snapshot? snapshot))
+        if (!snapshots.TryRemove(id, out WorkspaceSnapshot? snapshot))
         {
             throw new RequestException("This workspace has nothing to revert to.");
         }
@@ -118,6 +132,12 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
 
         Check(await Run(folder, ["read-tree", snapshot.IndexTree], literal));
     }
+
+    /// <inheritdoc />
+    public WorkspaceSnapshot? Export(Guid id) => snapshots.GetValueOrDefault(id);
+
+    /// <inheritdoc />
+    public void Import(Guid id, WorkspaceSnapshot snapshot) => snapshots[id] = snapshot;
 
     /// <inheritdoc />
     public void Discard(Guid id) => snapshots.TryRemove(id, out _);
@@ -179,6 +199,4 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
     private Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment) => git.Run(folder, arguments, environment, CancellationToken.None);
 
     private GitOutput Check(GitOutput result) => result.ExitCode == 0 ? result : throw new RequestException((result.Error.Trim().Length > 0 ? result.Error : result.Output).Trim() is { Length: > 0 } text ? text : "Git failed.");
-
-    private sealed record Snapshot(string Folder, string? Head, string? Branch, string IndexTree, string Tree);
 }

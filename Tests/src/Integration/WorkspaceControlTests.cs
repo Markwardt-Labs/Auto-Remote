@@ -48,9 +48,9 @@ public sealed class WorkspaceControlTests : IDisposable
         GitService git = new();
         activity = new WorkspaceActivity(hub);
         WorkspaceSnapshots snapshots = new(git);
-        prompts = new PromptService(workspaces.Object, store.Object, new AiRunner(), hub, activity, snapshots);
+        prompts = new PromptService(workspaces.Object, store.Object, new AiRunner(new ProcessFreezer()), hub, activity, snapshots);
         prompts.Configure(new ServerConfig { Port = 0, Key = "k", ClaudeCommand = fake, ClaudeArguments = [] }, CancellationToken.None);
-        control = new WorkspaceControl(activity, prompts, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots);
+        control = new WorkspaceControl(activity, prompts, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots, store.Object, workspaces.Object, hub);
     }
 
     public void Dispose() => temp.Dispose();

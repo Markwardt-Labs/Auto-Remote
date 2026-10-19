@@ -27,6 +27,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             if (args.PropertyName == nameof(ChatViewModel.Input) || args.PropertyName == nameof(ChatViewModel.HasAttachments))
             {
                 Raise(nameof(ShowHaltButtons));
+                Raise(nameof(ShowPauseButton));
+                Raise(nameof(ShowCancelButton));
             }
         };
         Chat.PromptStarted += () => NotifyWhenReady = true;
@@ -126,7 +128,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private readonly IServerConnection connection;
 
-    private WorkspaceState? halting;
+    private WorkspaceState? forced;
 
     private bool subscribed;
 
@@ -189,22 +191,47 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets what the workspace is doing: only one kind of work runs at a time, and more work only starts once it is <see cref="WorkspaceState.Ready" />, except AI input, which is also accepted while <see cref="WorkspaceState.Working" />.
     /// </summary>
-    public WorkspaceState State => halting ?? (Scripts.IsRunning ? WorkspaceState.Running : Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
+    public WorkspaceState State => forced ?? (Scripts.IsRunning ? WorkspaceState.Running : Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
 
     /// <summary>
-    /// Gets a value indicating whether the work in the workspace can be stopped: something runs and it is not already being stopped or canceled.
+    /// Gets a value indicating whether the work in the workspace can be stopped: the AI works or is paused, a script runs or git works.
     /// </summary>
-    public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing;
+    public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Paused or WorkspaceState.Running or WorkspaceState.Managing;
 
     /// <summary>
-    /// Gets a value indicating whether the message box offers stopping and cancelling the work instead of sending: work runs and the AI cannot be given more input, or it can but nothing is typed.
+    /// Gets a value indicating whether the AI's work can be paused: the AI is working.
     /// </summary>
-    public bool ShowHaltButtons => CanHalt && (State != WorkspaceState.Working || string.IsNullOrWhiteSpace(Chat.Input) && Chat.Attachments.Count == 0);
+    public bool CanPause => State == WorkspaceState.Working;
 
     /// <summary>
-    /// Gets a value indicating whether the work in the workspace can be cancelled and reverted: it can be stopped, and either git is the one working or the workspace is a git repository whose files can be put back.
+    /// Gets a value indicating whether the AI's work can be resumed: it is paused.
     /// </summary>
-    public bool CanCancel => CanHalt && (State == WorkspaceState.Managing || Git.IsRepo);
+    public bool CanResume => State == WorkspaceState.Paused;
+
+    /// <summary>
+    /// Gets a value indicating whether the AI's work can be cancelled and reverted: the AI works or is paused, and the workspace is a git repository whose files can be put back.
+    /// </summary>
+    public bool CanCancel => State is WorkspaceState.Working or WorkspaceState.Paused && Git.IsRepo;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box offers the work buttons instead of sending: the AI is paused, a script or git runs or work is being ended, or the AI works and nothing is typed, so more input could not be sent.
+    /// </summary>
+    public bool ShowHaltButtons => State is WorkspaceState.Paused or WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && string.IsNullOrWhiteSpace(Chat.Input) && Chat.Attachments.Count == 0;
+
+    /// <summary>
+    /// Gets a value indicating whether the pause button shows: the AI works and the work buttons show.
+    /// </summary>
+    public bool ShowPauseButton => ShowHaltButtons && State == WorkspaceState.Working;
+
+    /// <summary>
+    /// Gets a value indicating whether the resume button shows: the AI is paused.
+    /// </summary>
+    public bool ShowResumeButton => ShowHaltButtons && State == WorkspaceState.Paused;
+
+    /// <summary>
+    /// Gets a value indicating whether the cancel button shows, which only AI work has: it is working or paused and the work buttons show.
+    /// </summary>
+    public bool ShowCancelButton => ShowHaltButtons && State is WorkspaceState.Working or WorkspaceState.Paused;
 
     /// <summary>
     /// Gets a value indicating whether the workspace is in any state but <see cref="WorkspaceState.Ready" />, which turns the header blue.
@@ -372,6 +399,18 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public Task Stop() => Halt(connection.StopWorkspace);
 
     /// <summary>
+    /// Pauses the AI's work in the workspace; a refusal is shown in the conversation.
+    /// </summary>
+    /// <returns>A task that completes once the AI is paused.</returns>
+    public Task Pause() => Halt(connection.PauseWorkspace);
+
+    /// <summary>
+    /// Lets the paused AI work in the workspace carry on; a refusal is shown in the conversation.
+    /// </summary>
+    /// <returns>A task that completes once the AI works again.</returns>
+    public Task Resume() => Halt(connection.ResumeWorkspace);
+
+    /// <summary>
     /// Stops the work in the workspace and reverts what it did; a refusal is shown in the conversation.
     /// </summary>
     /// <returns>A task that completes once the workspace is ready again.</returns>
@@ -418,14 +457,20 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             WorkspaceState.Running => "A script is running, wait for it to finish",
             WorkspaceState.Managing => "Git is working, wait for it to finish",
+            WorkspaceState.Paused => "Paused, resume or stop the work to carry on",
             WorkspaceState.Stopping => "Stopping, wait for it to finish",
             WorkspaceState.Canceling => "Cancelling and reverting, wait for it to finish",
             _ => null
         };
-        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Stopping or WorkspaceState.Canceling;
+        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Paused or WorkspaceState.Running or WorkspaceState.Stopping or WorkspaceState.Canceling;
         Raise(nameof(State));
         Raise(nameof(CanHalt));
+        Raise(nameof(CanPause));
+        Raise(nameof(CanResume));
         Raise(nameof(ShowHaltButtons));
+        Raise(nameof(ShowPauseButton));
+        Raise(nameof(ShowResumeButton));
+        Raise(nameof(ShowCancelButton));
         Raise(nameof(IsWorking));
         Raise(nameof(CanCancel));
     }
@@ -453,7 +498,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private void Follow(WorkspaceState state)
     {
-        halting = state is WorkspaceState.Stopping or WorkspaceState.Canceling ? state : null;
+        forced = state is WorkspaceState.Paused or WorkspaceState.Stopping or WorkspaceState.Canceling ? state : null;
         UpdateState();
     }
 
@@ -486,6 +531,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             {
                 WorkspaceState.Running => "A script is already running.",
                 WorkspaceState.Managing => "Wait for git to finish before running a script.",
+                WorkspaceState.Paused => "Resume or stop the paused AI before running a script.",
                 WorkspaceState.Stopping => "Wait for the work to finish stopping before running a script.",
                 WorkspaceState.Canceling => "Wait for the work to finish being cancelled before running a script.",
                 _ => "Wait for the AI to finish before running a script."

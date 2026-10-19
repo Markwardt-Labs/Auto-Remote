@@ -42,6 +42,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         usage.Configure(config);
         folders.Configure(config.DefaultFolder);
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
+        await control.Restore(cancellation);
     }
 
     /// <inheritdoc />
@@ -185,7 +186,13 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await git.SetIdentity(await FolderOf(request, cancellation), Require(request.Name, "name"), Require(request.Email, "email"), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitCancel:
-                await (activity.Get(RequireWorkspace(request)) == WorkspaceState.Managing ? control.Cancel(RequireWorkspace(request)) : versioning.Cancel(RequireWorkspace(request)));
+                await (activity.Get(RequireWorkspace(request)) == WorkspaceState.Managing ? control.Stop(RequireWorkspace(request)) : versioning.Cancel(RequireWorkspace(request)));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.PauseWorkspace:
+                await control.Pause(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.ResumeWorkspace:
+                await control.Resume(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.StopWorkspace:
                 await control.Stop(RequireWorkspace(request));

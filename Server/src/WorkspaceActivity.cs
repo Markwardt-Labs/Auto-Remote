@@ -28,7 +28,27 @@ internal interface IWorkspaceActivity
     void Leave(Guid id, WorkspaceState state);
 
     /// <summary>
-    /// Moves a workspace that is working, running or managing into <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />, which no other work can leave until it calls <see cref="Leave" />.
+    /// Puts a workspace into <see cref="WorkspaceState.Paused" /> as the server starts, for work that was paused before it stopped; does nothing when the workspace is not ready.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    void RestorePaused(Guid id);
+
+    /// <summary>
+    /// Pauses a workspace whose AI is working.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if the workspace was <see cref="WorkspaceState.Working" /> and is now <see cref="WorkspaceState.Paused" />.</returns>
+    bool Pause(Guid id);
+
+    /// <summary>
+    /// Takes a paused workspace back to <see cref="WorkspaceState.Working" />.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if the workspace was <see cref="WorkspaceState.Paused" /> and is working again.</returns>
+    bool Resume(Guid id);
+
+    /// <summary>
+    /// Moves a workspace that is working, paused, running or managing into <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />, which no other work can leave until it calls <see cref="Leave" />.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="halting">The state to enter: <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />.</param>
@@ -94,13 +114,31 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
     }
 
     /// <inheritdoc />
+    public void RestorePaused(Guid id)
+    {
+        lock (gate)
+        {
+            if (states.GetValueOrDefault(id) == WorkspaceState.Ready)
+            {
+                states[id] = WorkspaceState.Paused;
+            }
+        }
+    }
+
+    /// <inheritdoc />
+    public bool Pause(Guid id) => Move(id, WorkspaceState.Working, WorkspaceState.Paused);
+
+    /// <inheritdoc />
+    public bool Resume(Guid id) => Move(id, WorkspaceState.Paused, WorkspaceState.Working);
+
+    /// <inheritdoc />
     public WorkspaceState? Halt(Guid id, WorkspaceState halting)
     {
         lock (gate)
         {
             WorkspaceState current = states.GetValueOrDefault(id);
 
-            if (current is not (WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing))
+            if (current is not (WorkspaceState.Working or WorkspaceState.Paused or WorkspaceState.Running or WorkspaceState.Managing))
             {
                 return null;
             }
@@ -117,10 +155,26 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
         WorkspaceState.Working => "The AI is working in this workspace right now.",
         WorkspaceState.Running => "A script is running in this workspace right now.",
         WorkspaceState.Managing => "A git action is running in this workspace right now.",
+        WorkspaceState.Paused => "The AI is paused in this workspace right now.",
         WorkspaceState.Stopping => "The work in this workspace is being stopped right now.",
         WorkspaceState.Canceling => "The work in this workspace is being cancelled and reverted right now.",
         _ => "The workspace is ready."
     };
+
+    private bool Move(Guid id, WorkspaceState from, WorkspaceState to)
+    {
+        lock (gate)
+        {
+            if (states.GetValueOrDefault(id) != from)
+            {
+                return false;
+            }
+
+            states[id] = to;
+            Publish(id, to);
+            return true;
+        }
+    }
 
     // Published while the lock is held so events leave in the order the states changed; the hub only queues them, so this never blocks.
     private void Publish(Guid id, WorkspaceState state) => events.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = id, State = state });

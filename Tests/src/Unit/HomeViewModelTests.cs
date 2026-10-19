@@ -181,6 +181,28 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task PauseAndResume_AreOnlyAvailableInTheirStatesAndGoStraightToTheServer()
+    {
+        await model.Start();
+        Assert.False(model.PauseCommand.CanExecute(null));
+        Working(first, true);
+        Assert.True(model.PauseCommand.CanExecute(null));
+        Assert.False(model.ResumeCommand.CanExecute(null));
+
+        model.PauseCommand.Execute(null);
+        await Task.Delay(50);
+        connection.Verify(x => x.PauseWorkspace(first.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = first.Id, State = WorkspaceState.Paused });
+
+        Assert.False(model.PauseCommand.CanExecute(null));
+        Assert.True(model.ResumeCommand.CanExecute(null));
+        Assert.True(model.BeginStopCommand.CanExecute(null));
+        model.ResumeCommand.Execute(null);
+        await Task.Delay(50);
+        connection.Verify(x => x.ResumeWorkspace(first.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task StopQuestion_ClosesWhenTheWorkEndsWhileItIsShowing()
     {
         await model.Start();

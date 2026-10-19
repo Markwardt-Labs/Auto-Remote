@@ -4,7 +4,7 @@ public sealed class AiRunnerTests : IDisposable
 {
     private readonly TempFolder temp = new();
 
-    private readonly AiRunner runner = new();
+    private readonly AiRunner runner = new(new ProcessFreezer());
 
     public void Dispose() => temp.Dispose();
 

@@ -14,6 +14,20 @@ internal interface IAiConversation : IAsyncDisposable
     Task Send(string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Pauses the AI: its process and everything it started are suspended, and no queued prompt starts, until <see cref="Continue" />.
+    /// </summary>
+    /// <returns>A task that completes once the AI is paused.</returns>
+    /// <exception cref="RequestException">The AI could not be paused.</exception>
+    Task Pause();
+
+    /// <summary>
+    /// Lets a paused AI carry on where it stopped.
+    /// </summary>
+    /// <returns>A task that completes once the AI runs again.</returns>
+    /// <exception cref="RequestException">The AI could not be continued.</exception>
+    Task Continue();
+
+    /// <summary>
     /// Ends the AI's process at once, without waiting for the work in progress.
     /// </summary>
     void Kill();

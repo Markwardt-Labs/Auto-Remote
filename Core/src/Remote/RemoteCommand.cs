@@ -62,12 +62,22 @@ public enum RemoteCommand
     ShiftGroup,
 
     /// <summary>
-    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling.
+    /// Pauses the AI's work in <see cref="RemoteRequest.WorkspaceId" />: its process is suspended and the workspace is paused until <see cref="ResumeWorkspace" />, <see cref="StopWorkspace" /> or <see cref="CancelWorkspace" />; refused unless the AI is working.
+    /// </summary>
+    PauseWorkspace,
+
+    /// <summary>
+    /// Lets the paused AI work in <see cref="RemoteRequest.WorkspaceId" /> carry on; refused unless the workspace is paused.
+    /// </summary>
+    ResumeWorkspace,
+
+    /// <summary>
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling; it works for the AI (also paused), a script and a git action, which it undoes.
     /// </summary>
     StopWorkspace,
 
     /// <summary>
-    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused when nothing runs, when the workspace is already stopping or canceling, or when the work of the AI or a script cannot be reverted because the workspace is not a git repository.
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused unless the AI is working or paused, and when its work cannot be reverted because the workspace is not a git repository. Scripts and git actions are stopped, not cancelled.
     /// </summary>
     CancelWorkspace,
 

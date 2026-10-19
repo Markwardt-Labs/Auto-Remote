@@ -69,7 +69,7 @@ internal interface IScriptRunner
 }
 
 /// <inheritdoc />
-internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IScriptRunner
+internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity) : IScriptRunner
 {
     private readonly ConcurrentDictionary<Guid, Workspace> workspaces = new();
 
@@ -151,11 +151,6 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
             }
 
             state.Active = true;
-        }
-
-        if (activity.Get(workspace.Id) == WorkspaceState.Running)
-        {
-            await snapshots.Capture(workspace, CancellationToken.None);
         }
 
         _ = Task.Run(() => Execute(workspace, root, state, main, batches), CancellationToken.None);
@@ -394,11 +389,6 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
             lock (state.Lock)
             {
                 state.Active = false;
-            }
-
-            if (activity.Get(workspace.Id) == WorkspaceState.Running)
-            {
-                snapshots.Discard(workspace.Id);
             }
 
             activity.Leave(workspace.Id, WorkspaceState.Running);

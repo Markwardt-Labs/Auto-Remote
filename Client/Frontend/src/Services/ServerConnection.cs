@@ -444,6 +444,22 @@ internal interface IServerConnection : IAsyncDisposable
     Task GitCancel(Guid id, CancellationToken cancellation);
 
     /// <summary>
+    /// Pauses the AI's work in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused: the AI is not working.</exception>
+    Task PauseWorkspace(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Lets the paused AI work in a workspace carry on.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused: the workspace is not paused.</exception>
+    Task ResumeWorkspace(Guid id, CancellationToken cancellation);
+
+    /// <summary>
     /// Stops the work running in a workspace at once, keeping what it did.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -452,7 +468,7 @@ internal interface IServerConnection : IAsyncDisposable
     Task StopWorkspace(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Stops the work running in a workspace and reverts what it did.
+    /// Stops the AI's work in a workspace and reverts what it did.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="cancellation">Cancels the wait.</param>
@@ -826,6 +842,12 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task GitCancel(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.GitCancel, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task PauseWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.PauseWorkspace, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task ResumeWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ResumeWorkspace, WorkspaceId = id }, cancellation);
 
     /// <inheritdoc />
     public async Task StopWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StopWorkspace, WorkspaceId = id }, cancellation);

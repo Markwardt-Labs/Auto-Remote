@@ -52,6 +52,8 @@ internal sealed class HomeViewModel : ViewModelBase
             ChangeServerRequested?.Invoke();
             return Task.CompletedTask;
         });
+        PauseCommand = new AsyncCommand(_ => active?.Pause() ?? Task.CompletedTask, () => active?.CanPause ?? false);
+        ResumeCommand = new AsyncCommand(_ => active?.Resume() ?? Task.CompletedTask, () => active?.CanResume ?? false);
         BeginStopCommand = new AsyncCommand(_ => Begin(EditMode.StopWork, string.Empty), () => active?.CanHalt ?? false);
         BeginCancelCommand = new AsyncCommand(_ => Begin(EditMode.CancelWork, string.Empty), () => active?.CanCancel ?? false);
         ConfirmHaltCommand = new AsyncCommand(_ => Halt());
@@ -252,6 +254,8 @@ internal sealed class HomeViewModel : ViewModelBase
             Active = value is null ? null : Open(value);
             BeginStopCommand.Refresh();
             BeginCancelCommand.Refresh();
+            PauseCommand.Refresh();
+            ResumeCommand.Refresh();
             _ = Active?.Focus();
             _ = Usage.Show(value?.Service);
 
@@ -511,6 +515,16 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand ChangeServerCommand { get; }
 
     /// <summary>
+    /// Gets the command that pauses the AI's work in the focused workspace.
+    /// </summary>
+    public AsyncCommand PauseCommand { get; }
+
+    /// <summary>
+    /// Gets the command that lets the paused AI work in the focused workspace carry on.
+    /// </summary>
+    public AsyncCommand ResumeCommand { get; }
+
+    /// <summary>
     /// Gets the command that asks whether to stop the work in the focused workspace at once, keeping what it did.
     /// </summary>
     public AsyncCommand BeginStopCommand { get; }
@@ -729,6 +743,8 @@ internal sealed class HomeViewModel : ViewModelBase
             {
                 BeginStopCommand.Refresh();
                 BeginCancelCommand.Refresh();
+                PauseCommand.Refresh();
+                ResumeCommand.Refresh();
 
                 if (editMode is EditMode.StopWork or EditMode.CancelWork && !created.CanHalt)
                 {

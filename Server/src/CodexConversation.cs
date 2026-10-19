@@ -9,7 +9,8 @@ namespace Markwardt.AutoRemote.Server;
 /// <param name="effort">The effort to run with.</param>
 /// <param name="session">The identifier of the Codex session to resume, or <see langword="null" /> to start one with the first prompt.</param>
 /// <param name="instructions">What every run is told about how to work, passed as the developer instructions.</param>
-internal sealed class CodexConversation(ServerConfig config, string folder, AiModel model, AiEffort effort, Guid? session, string instructions) : IAiConversation
+/// <param name="freezer">Suspends and continues the Codex process and what it started.</param>
+internal sealed class CodexConversation(ServerConfig config, string folder, AiModel model, AiEffort effort, Guid? session, string instructions, IProcessFreezer freezer) : IAiConversation
 {
     private readonly Channel<AiOutput> outputs = Channel.CreateUnbounded<AiOutput>();
 
@@ -28,6 +29,8 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
     private bool running;
 
     private bool disposed;
+
+    private TaskCompletionSource? paused;
 
     /// <inheritdoc />
     public Task Send(string text, CancellationToken cancellation)
@@ -61,11 +64,51 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
     }
 
     /// <inheritdoc />
+    public async Task Pause()
+    {
+        Process? running;
+
+        lock (gate)
+        {
+            paused ??= new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            running = current;
+        }
+
+        if (running is not null)
+        {
+            await freezer.Freeze(running.Id);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task Continue()
+    {
+        Process? running;
+        TaskCompletionSource? waiting;
+
+        lock (gate)
+        {
+            waiting = paused;
+            paused = null;
+            running = current;
+        }
+
+        if (running is not null)
+        {
+            await freezer.Thaw(running.Id);
+        }
+
+        waiting?.TrySetResult();
+    }
+
+    /// <inheritdoc />
     public void Kill()
     {
         lock (gate)
         {
             prompts.Clear();
+            paused?.TrySetResult();
+            paused = null;
         }
 
         try
@@ -84,6 +127,8 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
         {
             disposed = true;
             prompts.Clear();
+            paused?.TrySetResult();
+            paused = null;
         }
 
         await stopping.CancelAsync();
@@ -106,6 +151,17 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
         while (true)
         {
             string text;
+            Task? holding;
+
+            lock (gate)
+            {
+                holding = paused?.Task;
+            }
+
+            if (holding is not null)
+            {
+                await holding;
+            }
 
             lock (gate)
             {
@@ -163,7 +219,25 @@ internal sealed class CodexConversation(ServerConfig config, string folder, AiMo
             return new AiOutput { Kind = AiOutputKind.Failed, Text = $"Codex could not be started ('{config.CodexCommand}'): {exception.Message}" };
         }
 
-        current = process;
+        bool startPaused;
+
+        lock (gate)
+        {
+            current = process;
+            startPaused = paused is not null;
+        }
+
+        if (startPaused)
+        {
+            try
+            {
+                await freezer.Freeze(process.Id);
+            }
+            catch (RequestException)
+            {
+            }
+        }
+
         Task<string> errors = process.StandardError.ReadToEndAsync();
         string? failure = null;
         bool completed = false;

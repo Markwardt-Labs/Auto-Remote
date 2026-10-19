@@ -104,6 +104,37 @@ public sealed class WorkspaceActivityTests
     }
 
     [Fact]
+    public void Pause_AndResume_MoveOnlyBetweenWorkingAndPausedAndBlockOtherWorkWhilePaused()
+    {
+        Assert.False(activity.Pause(id));
+        activity.TryEnter(id, WorkspaceState.Running);
+        Assert.False(activity.Pause(id));
+        activity.Leave(id, WorkspaceState.Running);
+        activity.TryEnter(id, WorkspaceState.Working);
+
+        Assert.True(activity.Pause(id));
+        Assert.Equal(WorkspaceState.Paused, activity.Get(id));
+        Assert.False(activity.TryEnter(id, WorkspaceState.Working));
+        Assert.False(activity.TryEnter(id, WorkspaceState.Running));
+        Assert.False(activity.Pause(id));
+        Assert.Contains("paused", activity.Describe(id));
+        Assert.True(activity.Resume(id));
+        Assert.Equal(WorkspaceState.Working, activity.Get(id));
+        Assert.False(activity.Resume(id));
+        events.Verify(x => x.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = id, State = WorkspaceState.Paused }), Times.Once);
+    }
+
+    [Fact]
+    public void Halt_MovesAPausedWorkspaceToStoppingAndReportsItWasPaused()
+    {
+        activity.TryEnter(id, WorkspaceState.Working);
+        activity.Pause(id);
+
+        Assert.Equal(WorkspaceState.Paused, activity.Halt(id, WorkspaceState.Stopping));
+        Assert.Equal(WorkspaceState.Stopping, activity.Get(id));
+    }
+
+    [Fact]
     public void Halt_DoesNothingForAReadyWorkspace()
     {
         Assert.Null(activity.Halt(id, WorkspaceState.Stopping));

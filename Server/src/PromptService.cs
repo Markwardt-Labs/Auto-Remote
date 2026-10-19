@@ -58,6 +58,36 @@ internal interface IPromptService
     Task Release(Guid id);
 
     /// <summary>
+    /// Reads the prompts a workspace's AI has not answered yet.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>The prompts in the order they were given, empty if there are none.</returns>
+    Task<IReadOnlyList<string>> Unanswered(Guid id);
+
+    /// <summary>
+    /// Takes up the work that was paused when the server stopped: nothing runs yet, and <see cref="Resume" /> starts the AI again where it left off.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="unanswered">The prompts the AI had not answered.</param>
+    void Restore(Guid id, IReadOnlyList<string> unanswered);
+
+    /// <summary>
+    /// Pauses a workspace's AI: its process and what it started are suspended, so it keeps its place; the prompts it has are kept.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>A task that completes once the AI is paused.</returns>
+    /// <exception cref="RequestException">The AI is not working, or could not be paused.</exception>
+    Task Pause(Guid id);
+
+    /// <summary>
+    /// Lets a paused AI carry on. When its process is gone, because the server was restarted while it was paused, the AI is started again in the same session and told to carry on.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>A task that completes once the AI runs again.</returns>
+    /// <exception cref="RequestException">The AI is not paused, or could not be continued.</exception>
+    Task Resume(Guid id);
+
+    /// <summary>
     /// Ends a workspace's AI process at once, whatever it is doing, and forgets the prompts it had not answered; the conversation stays and the next prompt starts a new process that resumes it. Does nothing when no process runs.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -69,6 +99,8 @@ internal interface IPromptService
 internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IAiRunner runner, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
+
+    private readonly string restartInstruction = "The server was restarted while your work was paused, so what you were running was interrupted. Check where things stand, carry on with the work you were doing and finish it.";
 
     private readonly int defaultChunk = 50;
 
@@ -130,7 +162,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 await snapshots.Capture(workspace, cancellation);
             }
 
-            if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling)
+            if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling or WorkspaceState.Paused)
             {
                 throw new RequestException(activity.Describe(id));
             }
@@ -211,6 +243,86 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             if (!live.Working && live.Conversation is not null)
             {
                 await End(id, live, live.Conversation);
+            }
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task Pause(Guid id)
+    {
+        Live live = lives.TryGetValue(id, out Live? found) ? found : throw new RequestException("The AI is not working in this workspace.");
+        await live.Gate.WaitAsync(stopping);
+
+        try
+        {
+            await (live.Working && live.Conversation is { } conversation ? conversation.Pause() : throw new RequestException("The AI is not working in this workspace."));
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> Unanswered(Guid id)
+    {
+        if (!lives.TryGetValue(id, out Live? live))
+        {
+            return [];
+        }
+
+        await live.Gate.WaitAsync(stopping);
+
+        try
+        {
+            return [.. live.Unanswered];
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Restore(Guid id, IReadOnlyList<string> unanswered)
+    {
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        live.Unanswered.Clear();
+        live.Unanswered.AddRange(unanswered);
+    }
+
+    /// <inheritdoc />
+    public async Task Resume(Guid id)
+    {
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        await live.Gate.WaitAsync(stopping);
+
+        try
+        {
+            if (live.Working && live.Conversation is { } conversation)
+            {
+                await conversation.Continue();
+                return;
+            }
+
+            WorkspaceInfo workspace = await workspaces.Get(id, stopping);
+            Begin(id, live, workspace.AiSessionId ?? Guid.NewGuid(), workspace.AiSessionId is not null, workspace);
+            SetWorking(id, live, true);
+            string text = workspace.AiSessionId is null && live.Unanswered.Count > 0 ? string.Join("\n\n", live.Unanswered) : restartInstruction;
+
+            try
+            {
+                await live.Conversation!.Send(text, stopping);
+            }
+            catch (RequestException)
+            {
+                live.Unanswered.Clear();
+                await End(id, live, live.Conversation!);
+                throw;
             }
         }
         finally
@@ -414,12 +526,13 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (!working)
             {
-                if (activity.Get(id) == WorkspaceState.Working)
+                if (activity.Get(id) is WorkspaceState.Working or WorkspaceState.Paused)
                 {
                     snapshots.Discard(id);
                 }
 
                 activity.Leave(id, WorkspaceState.Working);
+                activity.Leave(id, WorkspaceState.Paused);
             }
 
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = id, Working = working });

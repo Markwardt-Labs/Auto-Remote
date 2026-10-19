@@ -441,6 +441,22 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
+    public async Task Handle_PauseAndResumeWorkspace_GoToTheControlAndPromptsAreRefusedWhilePaused()
+    {
+        Assert.Null((await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.PauseWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        Assert.Null((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ResumeWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.PauseWorkspace }, owner, CancellationToken.None)).Error);
+        control.Verify(x => x.Pause(workspace.Id), Times.Once);
+        control.Verify(x => x.Resume(workspace.Id), Times.Once);
+
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
+        activity.Pause(workspace.Id);
+        RemoteResponse prompt = await handler.Handle(new RemoteRequest { Id = 4, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+
+        Assert.Equal("The AI is paused in this workspace right now.", prompt.Error);
+    }
+
+    [Fact]
     public async Task Handle_StopWorkspace_ReportsARefusal()
     {
         control.Setup(x => x.Stop(workspace.Id)).ThrowsAsync(new RequestException("Nothing is running in this workspace."));
@@ -452,13 +468,13 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_GitCancel_UsesTheControlWhileManaging()
+    public async Task Handle_GitCancel_StopsThroughTheControlWhileManaging()
     {
         activity.TryEnter(workspace.Id, WorkspaceState.Managing);
 
         await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GitCancel, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
 
-        control.Verify(x => x.Cancel(workspace.Id), Times.Once);
+        control.Verify(x => x.Stop(workspace.Id), Times.Once);
         versioning.Verify(x => x.Cancel(It.IsAny<Guid>()), Times.Never);
     }
 

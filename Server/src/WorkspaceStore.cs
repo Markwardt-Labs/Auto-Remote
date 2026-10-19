@@ -27,6 +27,20 @@ internal interface IWorkspaceStore
     Task Save(WorkspaceCatalog catalog, CancellationToken cancellation);
 
     /// <summary>
+    /// Reads the AI work that was paused when the server last stopped.
+    /// </summary>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The paused work, empty if there is none or the file is not valid.</returns>
+    Task<IReadOnlyList<PausedWork>> LoadPaused(CancellationToken cancellation);
+
+    /// <summary>
+    /// Replaces the stored paused AI work.
+    /// </summary>
+    /// <param name="paused">The paused work; an empty list removes the file.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    Task SavePaused(IReadOnlyList<PausedWork> paused, CancellationToken cancellation);
+
+    /// <summary>
     /// Reads a workspace's conversation.
     /// </summary>
     /// <param name="id">The workspace.</param>
@@ -110,6 +124,59 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     }
 
     /// <inheritdoc />
+    public async Task<IReadOnlyList<PausedWork>> LoadPaused(CancellationToken cancellation)
+    {
+        string file = PausedPath();
+
+        if (!File.Exists(file))
+        {
+            return [];
+        }
+
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            await using FileStream stream = File.OpenRead(file);
+            return await JsonSerializer.DeserializeAsync<List<PausedWork>>(stream, options, cancellation) ?? [];
+        }
+        catch (Exception exception) when (exception is JsonException or IOException)
+        {
+            return [];
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SavePaused(IReadOnlyList<PausedWork> paused, CancellationToken cancellation)
+    {
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            string file = PausedPath();
+
+            if (paused.Count == 0)
+            {
+                File.Delete(file);
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(file)!);
+            string temporary = file + ".tmp";
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(paused, options), cancellation);
+            File.Move(temporary, file, true);
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<IReadOnlyList<ChatMessage>> ReadHistory(Guid id, CancellationToken cancellation)
     {
         string file = HistoryPath(id);
@@ -184,6 +251,8 @@ internal sealed class WorkspaceStore : IWorkspaceStore
             Directory.Delete(AttachmentsPath(id), true);
         }
     }
+
+    private string PausedPath() => Path.Combine(Path.GetDirectoryName(path)!, "paused.json");
 
     private string AttachmentsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "attachments", id.ToString("N"));
 

@@ -365,17 +365,23 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_CanOnlyCancelWorkThatCanBeRevertedButAlwaysStopIt()
+    public async Task Workspace_CanOnlyCancelAiWorkInAGitRepositoryButStopsAnyWork()
     {
         WorkspaceViewModel plain = await StartedWorkspace(false);
         Assert.False(plain.CanHalt);
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-
+        Assert.True(plain.CanHalt);
+        Assert.False(plain.CanCancel);
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Succeeded)));
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
         Assert.True(plain.CanHalt);
         Assert.False(plain.CanCancel);
 
         WorkspaceViewModel repo = await StartedWorkspace(true);
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+        Assert.False(repo.CanCancel);
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Succeeded)));
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
 
         Assert.True(repo.CanCancel);
     }
@@ -409,5 +415,81 @@ public sealed class ScriptsViewModelTests
         connection.Verify(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
         connection.Verify(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>()), Times.AtLeastOnce);
         connection.Verify(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Workspace_OffersPauseStopAndCancelForAiWorkResumeStopAndCancelWhenPausedAndOnlyStopOtherwise()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        Assert.False(model.ShowHaltButtons);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+        Assert.Equal((true, true, true, true, false), (model.ShowHaltButtons, model.ShowPauseButton, model.ShowCancelButton, model.CanCancel, model.ShowResumeButton));
+
+        Server(WorkspaceState.Paused);
+        Assert.Equal(WorkspaceState.Paused, model.State);
+        Assert.Equal((true, false, true, true, true, true), (model.ShowHaltButtons, model.ShowPauseButton, model.ShowCancelButton, model.CanCancel, model.ShowResumeButton, model.CanHalt));
+        Assert.False(model.Chat.SendCommand.CanExecute(null));
+        Assert.Equal("Paused, resume or stop the work to carry on", model.Chat.Placeholder);
+        Assert.False(model.Git.CommitCommand.CanExecute(null));
+        Assert.True(model.IsWorking);
+
+        Server(WorkspaceState.Working);
+        Assert.Equal(WorkspaceState.Working, model.State);
+
+        Server(WorkspaceState.Canceling);
+        Assert.Equal((true, false, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowCancelButton, model.ShowPauseButton));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
+        Server(WorkspaceState.Ready);
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+        Assert.Equal((true, true, false, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowPauseButton, model.ShowCancelButton, model.ShowResumeButton));
+        Assert.False(model.CanCancel);
+    }
+
+    [Fact]
+    public async Task Workspace_OffersOnlyStopForGitWork()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        GitStatus busy = new() { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second", Busy = true };
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(busy);
+
+        await model.Git.Refresh();
+
+        Assert.Equal(WorkspaceState.Managing, model.State);
+        Assert.Equal((true, true, false, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowPauseButton, model.ShowCancelButton, model.CanCancel));
+    }
+
+    [Fact]
+    public async Task Workspace_PauseAndResumeAskTheServerAndRefusalsShowInTheChat()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        connection.Setup(x => x.ResumeWorkspace(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The AI is not paused in this workspace."));
+
+        await model.Pause();
+        await model.Resume();
+
+        connection.Verify(x => x.PauseWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.ResumeWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("The AI is not paused in this workspace.", model.Chat.Error);
+    }
+
+    [Fact]
+    public async Task Workspace_ReadsAPauseThatSurvivedAServerRestartWhenItOpens()
+    {
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Paused);
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" });
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
+
+        await model.Start();
+        await model.Git.Refresh();
+        await Task.Delay(50);
+
+        Assert.Equal(WorkspaceState.Paused, model.State);
+        Assert.True(model.ShowResumeButton);
+        Assert.True(model.CanCancel);
     }
 }

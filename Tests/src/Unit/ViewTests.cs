@@ -428,7 +428,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             HomeView view = new() { DataContext = model };
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
-            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
+            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.PauseCommand ? "pause" : button.Command == model.ResumeCommand ? "resume" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
             string[] ready = Shown();
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
             string[] working = Shown();
@@ -445,7 +445,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal(["send"], ready);
-        Assert.Equal(["stop", "cancel"], working);
+        Assert.Equal(["pause", "stop", "cancel"], working);
         Assert.Equal([true, false], enabled);
         Assert.True(typing);
         Assert.True(asking);

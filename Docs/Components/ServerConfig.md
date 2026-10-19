@@ -18,7 +18,7 @@ The server reads one JSON file at startup (the path passed as the first argument
 
 ## Data location
 
-The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (workspaces, groups and settings), the per-workspace conversations in a `history` folder, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
+The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (workspaces, groups and settings), the per-workspace conversations in a `history` folder, `paused.json` (AI work that is paused, only while some is), and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
 
 ## Fixed behavior
 

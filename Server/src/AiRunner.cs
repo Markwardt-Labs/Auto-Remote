@@ -21,7 +21,7 @@ internal interface IAiRunner
 }
 
 /// <inheritdoc />
-internal sealed class AiRunner : IAiRunner
+internal sealed class AiRunner(IProcessFreezer freezer) : IAiRunner
 {
     private readonly string[] claudeDisabledTools = ["Agent", "Task", "Workflow", "Monitor", "ScheduleWakeup", "CronCreate", "CronDelete", "CronList", "RemoteTrigger", "SendMessage", "ListAgents", "TaskStop"];
 
@@ -30,7 +30,7 @@ internal sealed class AiRunner : IAiRunner
     /// <inheritdoc />
     public IAiConversation Start(ServerConfig config, AiService service, string folder, AiModel model, AiEffort effort, Guid aiSession, bool resume) => service switch
     {
-        AiService.Codex => new CodexConversation(config, folder, model, effort, resume ? aiSession : null, workInstruction),
+        AiService.Codex => new CodexConversation(config, folder, model, effort, resume ? aiSession : null, workInstruction, freezer),
         _ => StartClaude(config, folder, model, effort, aiSession, resume)
     };
 
@@ -63,6 +63,6 @@ internal sealed class AiRunner : IAiRunner
             throw new RequestException($"Claude Code could not be started ('{config.ClaudeCommand}'): {exception.Message}");
         }
 
-        return new ClaudeConversation(process);
+        return new ClaudeConversation(process, freezer);
     }
 }
