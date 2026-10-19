@@ -7,6 +7,10 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
 {
     private IServerConnection? connection;
 
+    private HomeViewModel? home;
+
+    private Guid? requested;
+
     private object? current;
 
     /// <summary>
@@ -64,6 +68,24 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     }
 
     /// <summary>
+    /// Brings a workspace to the front, as opening its notification does. Before the app is connected, which is when it was started by the notification, the request waits and is carried out as soon as the workspaces are shown.
+    /// </summary>
+    /// <param name="workspaceId">The workspace identifier.</param>
+    /// <returns>A task that completes once the workspace is shown, or at once when the request is left waiting.</returns>
+    public async Task Focus(Guid workspaceId)
+    {
+        if (home is { } shown && connection is not null)
+        {
+            Current = shown;
+            await shown.Show(workspaceId);
+        }
+        else
+        {
+            requested = workspaceId;
+        }
+    }
+
+    /// <summary>
     /// Replaces the connection with a fresh one after the app was away for a while, since a connection that was open then may have died without telling, and the screens read what they missed.
     /// </summary>
     /// <returns>A task that completes once the new connection is open or the server cannot be reached.</returns>
@@ -116,31 +138,34 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
 
         connection = opened;
-        HomeViewModel home = new(opened, layout, drafts, chime, null, notifier, keeper);
-        home.ChangeServerRequested += async () =>
+        HomeViewModel opening = new(opened, layout, drafts, chime, null, notifier, keeper);
+        home = opening;
+        opening.ChangeServerRequested += async () =>
         {
             ConnectionSettings? saved = await store.Load(CancellationToken.None);
             await Close();
             ShowConnect(saved, null);
         };
-        home.NewWorkspaceRequested += async () =>
+        opening.NewWorkspaceRequested += async () =>
         {
             NewWorkspaceViewModel creating = new(opened);
             creating.Created += async workspace => await Open(opened, workspace.Id);
-            creating.Cancelled += () => Current = home;
+            creating.Cancelled += () => Current = opening;
             Current = creating;
             await creating.Open();
         };
-        home.CloneWorkspaceRequested += async () =>
+        opening.CloneWorkspaceRequested += async () =>
         {
             CloneWorkspaceViewModel cloning = new(opened);
             cloning.Created += async workspace => await Open(opened, workspace.Id);
-            cloning.Cancelled += () => Current = home;
+            cloning.Cancelled += () => Current = opening;
             Current = cloning;
             await cloning.Open();
         };
-        Current = home;
-        await home.Start(focus, false);
+        Current = opening;
+        Guid? target = requested ?? focus;
+        requested = null;
+        await opening.Start(target, false);
     }
 
     private async Task Close()
@@ -148,6 +173,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         if (connection is { } old)
         {
             connection = null;
+            home = null;
             await old.DisposeAsync();
         }
     }

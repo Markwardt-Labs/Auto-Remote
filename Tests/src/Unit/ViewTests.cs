@@ -309,6 +309,61 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task EveryPieceOfSelectableTextTheClientShowsIgnoresASingleTouch()
+    {
+        (int plain, int safe) = await fixture.Run(() =>
+        {
+            MarkdownView view = new() { Source = "# Title\n\nSome **bold** text\n\n```\ncode\n```\n\n| a | b |\n| - | - |\n| 1 | 2 |" };
+            Window window = new() { Width = 400, Height = 400, Content = view };
+            window.Show();
+            List<SelectableTextBlock> blocks = [.. view.GetVisualDescendants().OfType<SelectableTextBlock>()];
+            window.Close();
+            return (blocks.Count(block => block is not ScrollSafeTextBlock), blocks.Count(block => block is ScrollSafeTextBlock));
+        });
+
+        Assert.Equal(0, plain);
+        Assert.True(safe >= 4);
+    }
+
+    [Theory]
+    [InlineData(Avalonia.Input.PointerType.Touch, 1, false, false, false, "")]
+    [InlineData(Avalonia.Input.PointerType.Touch, 1, true, false, true, "some")]
+    [InlineData(Avalonia.Input.PointerType.Touch, 1, true, true, false, "")]
+    [InlineData(Avalonia.Input.PointerType.Touch, 2, false, false, true, "some")]
+    [InlineData(Avalonia.Input.PointerType.Mouse, 1, false, false, true, "")]
+    public async Task ScrollSafeTextBlock_SelectsOnAMouseADoubleTapOrATouchHeldStillButNotATouchThatScrolls(Avalonia.Input.PointerType type, int clicks, bool waits, bool moves, bool selects, string word)
+    {
+        (bool captured, string selected) = await fixture.Run(() =>
+        {
+            ScrollSafeTextBlock block = new() { Text = "some text to select", Width = 200, HoldDelay = TimeSpan.FromMilliseconds(30) };
+            Window window = new() { Width = 300, Height = 100, Content = block };
+            window.Show();
+            Avalonia.Input.Pointer pointer = new(Avalonia.Input.Pointer.GetNextFreeId(), type, true);
+            Avalonia.Input.PointerPointProperties properties = new(type == Avalonia.Input.PointerType.Mouse ? Avalonia.Input.RawInputModifiers.LeftMouseButton : Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PointerUpdateKind.LeftButtonPressed);
+            block.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(block, pointer, window, new Avalonia.Point(5, 5), 0, properties, Avalonia.Input.KeyModifiers.None, clicks) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+
+            if (moves)
+            {
+                block.RaiseEvent(new Avalonia.Input.PointerEventArgs(Avalonia.Input.InputElement.PointerMovedEvent, block, pointer, window, new Avalonia.Point(5, 40), 1, properties, Avalonia.Input.KeyModifiers.None));
+            }
+
+            if (waits)
+            {
+                Thread.Sleep(150);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+
+            bool captured = pointer.Captured == block;
+            string selected = block.SelectedText;
+            window.Close();
+            return (captured, selected);
+        });
+
+        Assert.Equal(selects, captured);
+        Assert.Equal(word, selected);
+    }
+
+    [Fact]
     public async Task HomeView_GitPromptFocusesItsBoxEscapeCancelsAndEnterSubmits()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

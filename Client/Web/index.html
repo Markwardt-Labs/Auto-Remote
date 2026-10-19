@@ -2170,7 +2170,17 @@ class WorkspaceView {
 
       try {
         if ("Notification" in window && Notification.permission === "granted") {
-          new Notification(`${folderName(this.info.folder)} is ready`);
+          const note = new Notification(`${folderName(this.info.folder)} is ready`, { tag: `ready-${this.info.id}` });
+          note.onclick = () => {
+            window.focus();
+
+            if (this.home.selected?.id !== this.info.id) {
+              this.home.select(this.info);
+            }
+
+            this.home.setDrawer(false);
+            note.close();
+          };
         }
       } catch (exception) {
       }
@@ -3856,6 +3866,10 @@ class Home {
   }
 
   toggleGroup(id) {
+    if (this.filtering) {
+      return;
+    }
+
     if (!this.collapsed.delete(id)) {
       this.collapsed.add(id);
     }

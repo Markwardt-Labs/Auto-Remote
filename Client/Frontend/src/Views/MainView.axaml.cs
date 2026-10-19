@@ -12,6 +12,13 @@ public sealed partial class MainView : UserControl
 
     private IInputPane? inputPane;
 
+    /// <summary>
+    /// Brings a workspace to the front, as opening its notification does; it waits for the connection when the app is still starting.
+    /// </summary>
+    /// <param name="workspaceId">The workspace identifier.</param>
+    /// <returns>A task that completes once the workspace is shown.</returns>
+    public Task Open(Guid workspaceId) => DataContext is MainViewModel model ? model.Focus(workspaceId) : Task.CompletedTask;
+
     /// <inheritdoc />
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {

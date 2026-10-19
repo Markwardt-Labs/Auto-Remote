@@ -12,7 +12,7 @@ internal sealed class DiffView : ContentControl
     {
         before = Gutter();
         after = Gutter();
-        block = new SelectableTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
+        block = new ScrollSafeTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
         scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = block };
         Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*") };
         block.LayoutUpdated += (_, _) => NumberLines();

@@ -32,13 +32,13 @@ internal sealed class MarkdownView : ContentControl
 
     private readonly StringBuilder plain = new();
 
-    private SelectableTextBlock? block;
+    private ScrollSafeTextBlock? block;
 
     private int blockStart;
 
     private int matchIndex;
 
-    private (SelectableTextBlock Block, int Offset)? current;
+    private (ScrollSafeTextBlock Block, int Offset)? current;
 
     /// <summary>
     /// Gets or sets the markdown text to render.
@@ -89,7 +89,7 @@ internal sealed class MarkdownView : ContentControl
         }
     }
 
-    private void Begin(SelectableTextBlock target)
+    private void Begin(ScrollSafeTextBlock target)
     {
         block = target;
         blockStart = plain.Length;
@@ -167,24 +167,24 @@ internal sealed class MarkdownView : ContentControl
         _ => null,
     };
 
-    private SelectableTextBlock Plain(string text, double size)
+    private ScrollSafeTextBlock Plain(string text, double size)
     {
-        SelectableTextBlock result = new() { FontSize = size, TextWrapping = TextWrapping.Wrap };
+        ScrollSafeTextBlock result = new() { FontSize = size, TextWrapping = TextWrapping.Wrap };
         Begin(result);
         Emit(result.Inlines!, text);
         End();
         return result;
     }
 
-    private SelectableTextBlock Heading(HeadingBlock heading)
+    private ScrollSafeTextBlock Heading(HeadingBlock heading)
     {
         double[] sizes = [26, 22, 19, 17, 15, 14];
         return Text(heading.Inline, sizes[Math.Clamp(heading.Level, 1, 6) - 1], FontWeight.SemiBold);
     }
 
-    private SelectableTextBlock Text(ContainerInline? inline, double size, FontWeight weight)
+    private ScrollSafeTextBlock Text(ContainerInline? inline, double size, FontWeight weight)
     {
-        SelectableTextBlock result = new() { FontSize = size, FontWeight = weight, TextWrapping = TextWrapping.Wrap };
+        ScrollSafeTextBlock result = new() { FontSize = size, FontWeight = weight, TextWrapping = TextWrapping.Wrap };
         Begin(result);
 
         if (inline is not null)
@@ -199,7 +199,7 @@ internal sealed class MarkdownView : ContentControl
     private Border Code(Block source)
     {
         string text = string.Join('\n', ((LeafBlock)source).Lines.Lines.Take(((LeafBlock)source).Lines.Count).Select(line => line.ToString()));
-        SelectableTextBlock result = new() { FontFamily = mono, FontSize = 12 };
+        ScrollSafeTextBlock result = new() { FontFamily = mono, FontSize = 12 };
         Begin(result);
         Emit(result.Inlines!, text);
         End();
@@ -266,7 +266,7 @@ internal sealed class MarkdownView : ContentControl
 
             foreach (TableCell cell in row.OfType<TableCell>())
             {
-                SelectableTextBlock text = new() { FontSize = 13, FontWeight = row.IsHeader ? FontWeight.SemiBold : FontWeight.Normal, TextWrapping = TextWrapping.Wrap, MaxWidth = 360 };
+                ScrollSafeTextBlock text = new() { FontSize = 13, FontWeight = row.IsHeader ? FontWeight.SemiBold : FontWeight.Normal, TextWrapping = TextWrapping.Wrap, MaxWidth = 360 };
                 Begin(text);
 
                 if (cell.OfType<ParagraphBlock>().FirstOrDefault()?.Inline is { } inline)

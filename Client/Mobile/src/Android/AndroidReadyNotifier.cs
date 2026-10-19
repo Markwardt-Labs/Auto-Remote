@@ -13,7 +13,7 @@ internal sealed class AndroidReadyNotifier : IReadyNotifier
     private readonly Context context = global::Android.App.Application.Context;
 
     /// <inheritdoc />
-    public void Notify(string workspace)
+    public void Notify(Guid workspaceId, string workspace)
     {
         if (context.GetSystemService(Context.NotificationService) is not NotificationManager manager)
         {
@@ -34,14 +34,17 @@ internal sealed class AndroidReadyNotifier : IReadyNotifier
 #pragma warning restore CS0618
         }
 
-        Intent? launch = context.PackageManager?.GetLaunchIntentForPackage(context.PackageName ?? string.Empty);
-        PendingIntent? open = launch is null ? null : PendingIntent.GetActivity(context, 0, launch, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
+        Intent launch = new Intent(context, typeof(MainActivity))
+            .SetAction($"{context.PackageName}.OPEN_WORKSPACE.{workspaceId:N}")!
+            .PutExtra(MainActivity.WorkspaceKey, workspaceId.ToString())!
+            .AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop | ActivityFlags.ClearTop)!;
+        PendingIntent? open = PendingIntent.GetActivity(context, workspaceId.GetHashCode(), launch, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         Notification notification = builder
             .SetSmallIcon(context.ApplicationInfo?.Icon ?? 0)!
             .SetContentTitle($"{workspace} is ready")!
             .SetAutoCancel(true)!
             .SetContentIntent(open)!
             .Build()!;
-        manager.Notify(workspace.GetHashCode(), notification);
+        manager.Notify(workspaceId.GetHashCode(), notification);
     }
 }

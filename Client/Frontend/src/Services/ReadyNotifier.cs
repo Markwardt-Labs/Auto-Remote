@@ -6,8 +6,9 @@ namespace Markwardt.AutoRemote.Client;
 public interface IReadyNotifier
 {
     /// <summary>
-    /// Shows a notification saying the workspace is ready; a platform that cannot show one, or where the user did not allow it, does nothing.
+    /// Shows a notification saying the workspace is ready; a platform that cannot show one, or where the user did not allow it, does nothing. Each workspace has its own notification, and activating it is meant to open that workspace.
     /// </summary>
+    /// <param name="workspaceId">The workspace identifier.</param>
     /// <param name="workspace">The workspace's name.</param>
-    void Notify(string workspace);
+    void Notify(Guid workspaceId, string workspace);
 }

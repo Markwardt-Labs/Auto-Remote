@@ -74,4 +74,40 @@ public sealed class MainViewModelTests
         Assert.Equal("acme", model.WindowTitle);
         Assert.Contains(nameof(MainViewModel.WindowTitle), raised);
     }
+
+    [Fact]
+    public async Task Focus_OpensTheWorkspaceOnceTheAppConnectsWhenItWasAskedBeforehand()
+    {
+        WorkspaceInfo wanted = new() { Id = Guid.NewGuid(), Folder = "/work/wanted" };
+        WorkspaceInfo other = new() { Id = Guid.NewGuid(), Folder = "/work/other" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [other, wanted] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+
+        await model.Focus(wanted.Id);
+        await model.Start();
+
+        Assert.Equal(wanted, Assert.IsType<HomeViewModel>(model.Current).Selected);
+    }
+
+    [Fact]
+    public async Task Focus_SwitchesAnAlreadyOpenAppToTheWorkspaceEvenFromAnotherScreen()
+    {
+        WorkspaceInfo first = new() { Id = Guid.NewGuid(), Folder = "/work/first" };
+        WorkspaceInfo second = new() { Id = Guid.NewGuid(), Folder = "/work/second" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [first, second] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        await model.Start();
+        HomeViewModel home = Assert.IsType<HomeViewModel>(model.Current);
+        home.NewWorkspaceCommand.Execute(null);
+        Assert.IsNotType<HomeViewModel>(model.Current);
+
+        await model.Focus(second.Id);
+
+        Assert.Same(home, model.Current);
+        Assert.Equal(second, home.Selected);
+    }
 }

@@ -13,7 +13,7 @@ internal interface IWorkspaceSnapshots
     bool Has(Guid id);
 
     /// <summary>
-    /// Takes the snapshot of a workspace: its head, branch, index and the content of every file git does not ignore, untracked ones included. Does nothing when the folder is not the root of a git repository or git fails.
+    /// Takes the snapshot of a workspace: its head, branch, index and the content of every file git does not ignore, untracked ones included. Does nothing when the folder is not the root of a git repository or git or the disk fails, so work never waits on or fails because of its snapshot.
     /// </summary>
     /// <param name="workspace">The workspace.</param>
     /// <param name="cancellation">Cancels the call.</param>
@@ -67,7 +67,7 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
 
             snapshots[workspace.Id] = new Snapshot(folder, await Text(folder, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellation), await Text(folder, ["symbolic-ref", "--quiet", "HEAD"], cancellation), indexTree, tree);
         }
-        catch (RequestException)
+        catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException or Win32Exception)
         {
         }
     }

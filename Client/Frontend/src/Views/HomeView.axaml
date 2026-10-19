@@ -187,7 +187,7 @@
                       <Border IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.User}}"
                               Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Accent}" BorderThickness="1" CornerRadius="6" Padding="12,8">
                         <StackPanel Spacing="8">
-                          <SelectableTextBlock Text="{Binding Text, Converter={x:Static local:MessageConverters.Body}}" TextWrapping="Wrap" Foreground="{DynamicResource Text}"
+                          <local:ScrollSafeTextBlock Text="{Binding Text, Converter={x:Static local:MessageConverters.Body}}" TextWrapping="Wrap" Foreground="{DynamicResource Text}"
                                                IsVisible="{Binding Text, Converter={x:Static local:MessageConverters.HasBody}}" />
                           <ItemsControl ItemsSource="{Binding Text, Converter={x:Static local:MessageConverters.Files}}" IsVisible="{Binding Text, Converter={x:Static local:MessageConverters.HasFiles}}">
                             <ItemsControl.ItemsPanel>
@@ -353,7 +353,7 @@
               <TextBlock Text="No script selected. Pick one from the dropdown above, or double click (double tap on mobile) a .cs or .task file in the file system."
                          IsVisible="{Binding !HasScript}" TextWrapping="Wrap" TextAlignment="Center" Margin="24,0" HorizontalAlignment="Center" VerticalAlignment="Center" Classes="muted" FontSize="13" />
               <ScrollViewer Name="OutputScroller" IsVisible="{Binding HasScript}" ScrollChanged="OnOutputScrolled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                <SelectableTextBlock Text="{Binding OutputText}" TextWrapping="Wrap" Margin="14,10,14,14" FontFamily="Menlo, Consolas, DejaVu Sans Mono, monospace" FontSize="12" />
+                <local:ScrollSafeTextBlock Text="{Binding OutputText}" TextWrapping="Wrap" Margin="14,10,14,14" FontFamily="Menlo, Consolas, DejaVu Sans Mono, monospace" FontSize="12" />
               </ScrollViewer>
             </Grid>
            </DockPanel>

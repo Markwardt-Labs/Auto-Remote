@@ -62,62 +62,43 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
     /// <inheritdoc />
     public bool TryEnter(Guid id, WorkspaceState state)
     {
-        bool entered;
-        bool changed = false;
-
         lock (gate)
         {
             WorkspaceState current = states.GetValueOrDefault(id);
 
             if (current == WorkspaceState.Ready)
             {
-                changed = state != WorkspaceState.Ready;
-
-                if (changed)
+                if (state != WorkspaceState.Ready)
                 {
                     states[id] = state;
+                    Publish(id, state);
                 }
 
-                entered = true;
+                return true;
             }
-            else
-            {
-                entered = state == WorkspaceState.Working && current is WorkspaceState.Working or WorkspaceState.Managing;
-            }
-        }
 
-        if (changed)
-        {
-            Publish(id, state);
+            return state == WorkspaceState.Working && current is WorkspaceState.Working or WorkspaceState.Managing;
         }
-
-        return entered;
     }
 
     /// <inheritdoc />
     public void Leave(Guid id, WorkspaceState state)
     {
-        bool changed;
-
         lock (gate)
         {
-            changed = states.GetValueOrDefault(id) == state && states.Remove(id);
-        }
-
-        if (changed)
-        {
-            Publish(id, WorkspaceState.Ready);
+            if (states.GetValueOrDefault(id) == state && states.Remove(id))
+            {
+                Publish(id, WorkspaceState.Ready);
+            }
         }
     }
 
     /// <inheritdoc />
     public WorkspaceState? Halt(Guid id, WorkspaceState halting)
     {
-        WorkspaceState current;
-
         lock (gate)
         {
-            current = states.GetValueOrDefault(id);
+            WorkspaceState current = states.GetValueOrDefault(id);
 
             if (current is not (WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing))
             {
@@ -125,10 +106,9 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
             }
 
             states[id] = halting;
+            Publish(id, halting);
+            return current;
         }
-
-        Publish(id, halting);
-        return current;
     }
 
     /// <inheritdoc />
@@ -142,5 +122,6 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
         _ => "The workspace is ready."
     };
 
+    // Published while the lock is held so events leave in the order the states changed; the hub only queues them, so this never blocks.
     private void Publish(Guid id, WorkspaceState state) => events.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = id, State = state });
 }

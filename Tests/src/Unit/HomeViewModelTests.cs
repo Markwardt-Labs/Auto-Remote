@@ -86,15 +86,15 @@ public sealed class HomeViewModelTests
         notifying.Active.Chat.SendCommand.Execute(null);
         await Task.Delay(50);
         Working(first, true);
-        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Never);
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
         Working(first, false);
 
-        notifier.Verify(x => x.Notify("a"), Times.Once);
+        notifier.Verify(x => x.Notify(first.Id, "a"), Times.Once);
 
         Working(first, true);
         Working(first, false);
 
-        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Once);
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Once);
     }
 
     [Fact]
@@ -144,7 +144,7 @@ public sealed class HomeViewModelTests
         Working(first, true);
         Working(first, false);
 
-        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Never);
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
@@ -159,7 +159,7 @@ public sealed class HomeViewModelTests
         Working(first, true);
         Working(first, false);
 
-        notifier.Verify(x => x.Notify(It.IsAny<string>()), Times.Never);
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
     }
 
     [Fact]
@@ -195,6 +195,32 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task Show_FocusesTheWorkspaceAndClosesTheDrawerAndDialogs()
+    {
+        await model.Start();
+        model.IsDrawerOpen = true;
+        model.BeginRenameCommand.Execute(null);
+
+        await model.Show(second.Id);
+
+        Assert.Equal(second, model.Selected);
+        Assert.False(model.IsDrawerOpen);
+        Assert.False(model.IsEditing);
+    }
+
+    [Fact]
+    public async Task Show_ReadsTheWorkspacesAgainForOneItDoesNotKnowYet()
+    {
+        await model.Start();
+        WorkspaceInfo added = new() { Id = Guid.NewGuid(), Folder = "/work/new" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([], first, second, added));
+
+        await model.Show(added.Id);
+
+        Assert.Equal(added, model.Selected);
+    }
+
+    [Fact]
     public async Task Title_SaysWhenTheConnectionIsBeingReopened()
     {
         await model.Start();
@@ -207,6 +233,22 @@ public sealed class HomeViewModelTests
         connection.Raise(x => x.Reconnected += null);
         Assert.False(model.IsOffline);
         Assert.Equal("a", model.Title);
+    }
+
+    [Fact]
+    public async Task Filter_IgnoresTapsOnGroupsSoTheirOpenStateIsKeptForWhenItIsCleared()
+    {
+        WorkspaceGroup clients = new() { Id = Guid.NewGuid(), Name = "Clients" };
+        WorkspaceInfo acme = new() { Id = Guid.NewGuid(), Folder = "/work/acme", GroupId = clients.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([clients], acme, first));
+        await model.Start();
+        model.Filter = "acme";
+
+        model.SelectedEntry = model.Entries.First(entry => entry.Group == clients);
+        model.Filter = string.Empty;
+
+        Assert.False(model.Entries.First(entry => entry.Group == clients).IsCollapsed);
+        Assert.Contains(model.Entries, entry => entry.Workspace == acme);
     }
 
     [Fact]

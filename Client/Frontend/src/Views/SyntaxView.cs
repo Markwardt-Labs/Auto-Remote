@@ -11,7 +11,7 @@ internal sealed class SyntaxView : ContentControl
     public SyntaxView()
     {
         gutter = new TextBlock { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, Margin = new Thickness(0, 0, 12, 0), IsHitTestVisible = false };
-        block = new SelectableTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
+        block = new ScrollSafeTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
         scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = block };
         Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
         block.LayoutUpdated += (_, _) => NumberLines();

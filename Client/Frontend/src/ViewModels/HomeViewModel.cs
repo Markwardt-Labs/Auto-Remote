@@ -195,6 +195,11 @@ internal sealed class HomeViewModel : ViewModelBase
 
             if (value.Group is { } group)
             {
+                if (IsFiltering)
+                {
+                    return;
+                }
+
                 if (!collapsed.Remove(group.Id))
                 {
                     collapsed.Add(group.Id);
@@ -611,6 +616,25 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand CancelEditCommand { get; }
 
     /// <summary>
+    /// Brings a workspace to the front, as opening its notification does: it is focused with the drawer and any dialog closed, and the workspaces are read again when it is not known yet.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>A task that completes once the workspace is shown.</returns>
+    public async Task Show(Guid id)
+    {
+        if (workspaces.FirstOrDefault(workspace => workspace.Id == id) is { } known)
+        {
+            Selected = known;
+            EditMode = EditMode.None;
+            IsDrawerOpen = false;
+        }
+        else
+        {
+            await Start(id, false);
+        }
+    }
+
+    /// <summary>
     /// Loads the workspaces and groups and focuses a workspace.
     /// </summary>
     /// <param name="focus">The workspace to focus; the first workspace when <see langword="null" /> or not found, unless <paramref name="focusFirst" /> is <see langword="false" />.</param>
@@ -677,7 +701,7 @@ internal sealed class HomeViewModel : ViewModelBase
                 {
                     created.NotifyWhenReady = false;
                     keeper?.Release(workspace.Id);
-                    notifier?.Notify(workspace.Name);
+                    notifier?.Notify(workspace.Id, workspace.Name);
                 }
 
                 if (time.GetUtcNow() - busySince >= minimumBusy)
