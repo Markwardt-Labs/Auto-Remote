@@ -126,7 +126,7 @@ public sealed record RemoteRequest
     public bool? SearchContent { get; init; }
 
     /// <summary>
-    /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" />.
+    /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" /> and the base64 WAV audio for <see cref="RemoteCommand.Transcribe" />.
     /// </summary>
     public string? Data { get; init; }
 }

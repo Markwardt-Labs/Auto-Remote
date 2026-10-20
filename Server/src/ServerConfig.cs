@@ -56,6 +56,21 @@ internal sealed record ServerConfig
     public string CodexCommand { get; init; } = "codex";
 
     /// <summary>
+    /// Gets the Whisper model that turns speech into text inside the server for voice input: a model name such as <c>small.en</c>, downloaded into the <c>models</c> folder of the data folder the first time, or the path of an existing <c>ggml</c> model file. Empty turns the built-in voice input off, unless <see cref="SpeechCommand" /> is set.
+    /// </summary>
+    public string? SpeechModel { get; init; } = "small.en";
+
+    /// <summary>
+    /// Gets the executable that turns speech into text for voice input instead of the built-in <see cref="SpeechModel" />; when empty, the built-in one is used.
+    /// </summary>
+    public string? SpeechCommand { get; init; }
+
+    /// <summary>
+    /// Gets the arguments of the speech command, in which <c>{file}</c> stands for the path of the recorded WAV file; the command prints the text to its standard output.
+    /// </summary>
+    public IReadOnlyList<string> SpeechArguments { get; init; } = [];
+
+    /// <summary>
     /// Gets the extra arguments passed to every Codex run, after the always present <c>--dangerously-bypass-approvals-and-sandbox</c>.
     /// </summary>
     public IReadOnlyList<string> CodexArguments { get; init; } = [];

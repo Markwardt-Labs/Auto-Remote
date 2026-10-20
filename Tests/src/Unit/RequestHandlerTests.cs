@@ -24,6 +24,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IWorkspaceControl> control = new();
 
+    private readonly Mock<ISpeechService> speech = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -34,7 +36,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object, speech.Object);
     }
 
     [Fact]
@@ -45,6 +47,7 @@ public sealed class RequestHandlerTests
         await handler.Open(config, CancellationToken.None);
 
         prompts.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
+        speech.Verify(x => x.Configure(config), Times.Once);
         scripts.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
         folders.Verify(x => x.Configure(config.DefaultFolder), Times.Once);
         workspaces.Verify(x => x.Open(Path.Combine("d", "workspaces.json"), It.IsAny<CancellationToken>()), Times.Once);
@@ -132,6 +135,28 @@ public sealed class RequestHandlerTests
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.UploadAttachment, WorkspaceId = workspace.Id, Name = "a.txt", Data = "AQ==" }, owner, CancellationToken.None);
 
         Assert.Equal("/srv/a.txt", response.AttachmentPath);
+    }
+
+    [Fact]
+    public async Task Handle_Transcribe_AnswersTheTextOfTheSpeech()
+    {
+        speech.Setup(x => x.Transcribe("AQ==", It.IsAny<CancellationToken>())).ReturnsAsync("hello there");
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Transcribe, Data = "AQ==" }, owner, CancellationToken.None);
+
+        Assert.Equal("hello there", response.Transcript);
+    }
+
+    [Fact]
+    public async Task Handle_Transcribe_ReportsAFailureOrMissingData()
+    {
+        speech.Setup(x => x.Transcribe("AQ==", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("not set up"));
+
+        RemoteResponse failed = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Transcribe, Data = "AQ==" }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.Transcribe }, owner, CancellationToken.None);
+
+        Assert.Equal("not set up", failed.Error);
+        Assert.NotNull(missing.Error);
     }
 
     [Fact]

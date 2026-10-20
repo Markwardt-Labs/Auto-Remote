@@ -1,11 +1,16 @@
 Third-party notices for redistributed binaries
 
-The published Server executable is self-contained and bundles the .NET runtime. It has no NuGet
-package dependencies. The .NET runtime is licensed under the MIT License:
+The published Server executable is self-contained: it bundles the .NET runtime and, for voice input,
+the Whisper.net library with the whisper.cpp and ggml native libraries (with Vulkan support) and
+Microsoft.Extensions.AI.Abstractions. The speech model is not bundled; the server downloads it on first
+use. All of these are licensed under the MIT License:
 
 MIT License
 
 Copyright (c) .NET Foundation and Contributors
+Copyright (c) Microsoft Corporation (Microsoft.Extensions.AI.Abstractions)
+Copyright (c) 2024 sandrohanea (Whisper.net)
+Copyright (c) 2023-2024 The ggml authors (whisper.cpp and ggml)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

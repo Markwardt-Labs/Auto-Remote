@@ -191,6 +191,15 @@ internal interface IServerConnection : IAsyncDisposable
     Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation);
 
     /// <summary>
+    /// Has the server turn recorded speech into text.
+    /// </summary>
+    /// <param name="audio">The WAV recording, 16 kHz, mono, 16 bit.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The text, empty when nothing was heard.</returns>
+    /// <exception cref="RemoteException">The server has no speech command set up, or it failed.</exception>
+    Task<string> Transcribe(ReadOnlyMemory<byte> audio, CancellationToken cancellation);
+
+    /// <summary>
     /// Asks to be told when any of some folders inside a workspace's folder changes, in place of the folders watched before.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -756,6 +765,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task Prompt(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<string> Transcribe(ReadOnlyMemory<byte> audio, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.Transcribe, Data = Convert.ToBase64String(audio.Span) }, cancellation)).Transcript ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.UploadAttachment, WorkspaceId = id, Name = name, Data = Convert.ToBase64String(data.Span) }, cancellation)).AttachmentPath ?? throw Malformed();

@@ -51,7 +51,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `model` | string | `ConfigureWorkspace` | For `ClaudeCode`: `Sonnet`, `Opus` or `Haiku`. For `Codex`: `Terra`, `Sol` or `Luna`. Refused when the service does not offer it. |
 | `effort` | string | `ConfigureWorkspace` | `Low`, `Medium`, `High`, `XHigh` or `Max`. |
 | `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
-| `data` | string | `UploadAttachment` | The file content, base64 encoded. |
+| `data` | string | `UploadAttachment`, `Transcribe` | The file content or the WAV recording, base64 encoded. |
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
 | `url` | string | `CloneWorkspace`, `GitSetRemote` | A git repository URL. |
 | `commit` | string | per command | A commit hash, 4 to 64 hexadecimal characters. |
@@ -120,6 +120,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
 | `Prompt` | `workspaceId`, `text` | none | Answers as soon as the text is handed to the AI, also while it is working, when it joins the work in progress. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
+| `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
 | `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |

@@ -274,5 +274,10 @@ public enum RemoteCommand
     /// <summary>
     /// Stores the file <see cref="RemoteRequest.Name" /> with the base64 content <see cref="RemoteRequest.Data" /> on the server for <see cref="RemoteRequest.WorkspaceId" /> and answers with its path in <see cref="RemoteResponse.AttachmentPath" />, for a prompt to refer to. Fails above the size limit.
     /// </summary>
-    UploadAttachment
+    UploadAttachment,
+
+    /// <summary>
+    /// Turns the speech in the base64 WAV audio <see cref="RemoteRequest.Data" /> (16 kHz, mono, 16 bit) into text with the server's speech command and answers with it in <see cref="RemoteResponse.Transcript" />. Fails when the server has no speech command, the audio is larger than the limit or the command fails.
+    /// </summary>
+    Transcribe
 }

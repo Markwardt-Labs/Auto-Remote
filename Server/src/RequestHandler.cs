@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -40,6 +40,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         prompts.Configure(config, cancellation);
         scripts.Configure(config, cancellation);
         usage.Configure(config);
+        speech.Configure(config);
         folders.Configure(config.DefaultFolder);
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
         await control.Restore(cancellation);
@@ -108,6 +109,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.UploadAttachment:
                 RequireAiInput(request);
                 return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
+            case RemoteCommand.Transcribe:
+                return new RemoteResponse { Id = 0, Transcript = await speech.Transcribe(Require(request.Data, "data"), cancellation) };
             case RemoteCommand.ListFiles:
                 return new RemoteResponse { Id = 0, Files = await files.List(await workspaces.Get(RequireWorkspace(request), cancellation), request.Path ?? string.Empty, request.ShowHidden == true, cancellation) };
             case RemoteCommand.SearchFiles:

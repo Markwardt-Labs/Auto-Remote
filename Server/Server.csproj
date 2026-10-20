@@ -16,11 +16,22 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <WhisperNative Condition="'$(RuntimeIdentifier)' == 'win-x64' or ('$(RuntimeIdentifier)' == '' and $([MSBuild]::IsOSPlatform('Windows')))">win-x64</WhisperNative>
+    <WhisperNative Condition="'$(WhisperNative)' == ''">linux-x64</WhisperNative>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="$(PkgWhisper_net_Runtime_Vulkan)/build/$(WhisperNative)/*" LogicalName="whisper-native/%(Filename)%(Extension)" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\Core\Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="10.0.13" PrivateAssets="all" />
+    <PackageReference Include="Whisper.net" Version="1.9.2-preview1" />
+    <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.2-preview1" GeneratePathProperty="true" ExcludeAssets="build" />
   </ItemGroup>
 </Project>

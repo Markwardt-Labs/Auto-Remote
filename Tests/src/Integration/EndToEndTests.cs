@@ -24,7 +24,7 @@ public sealed class EndToEndTests : IAsyncLifetime
             File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
         }
 
-        ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), ClaudeCommand = fake, ClaudeArguments = [] };
+        ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), ClaudeCommand = fake, ClaudeArguments = [], SpeechCommand = "sh", SpeechArguments = ["-c", "echo said $(wc -c < \"$1\")", "speech", "{file}"] };
         FolderBrowser folders = new();
         WorkspaceStore store = new();
         EventHub hub = new();
@@ -35,7 +35,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         PromptService prompts = new(workspaces, store, new AiRunner(new ProcessFreezer()), hub, activity, snapshots);
         WorkspaceVersioning versioning = new(git, prompts, hub, activity);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, Mock.Of<IUsageService>(), hub, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots, store, workspaces, hub));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, Mock.Of<IUsageService>(), hub, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots, store, workspaces, hub), new SpeechService(Mock.Of<IWhisperEngine>()));
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -145,6 +145,12 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal("hello", (await connection.ReadFile(cloned.Id, "a.txt", CancellationToken.None)).Text);
         Assert.Equal("first", (await connection.GetGitStatus(cloned.Id, CancellationToken.None)).Message);
         await Assert.ThrowsAsync<RemoteException>(() => connection.CloneWorkspace(source.Path, parent.Path, "copy", CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task Transcribe_SendsTheRecordingToTheSpeechCommandAndAnswersItsText()
+    {
+        Assert.Equal("said 3", await connection.Transcribe(new byte[] { 1, 2, 3 }, CancellationToken.None));
     }
 
     [Fact]

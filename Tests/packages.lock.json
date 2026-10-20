@@ -154,6 +154,11 @@
         "resolved": "17.13.0",
         "contentHash": "9LIUy0y+DvUmEPtbRDw6Bay3rzwqFV8P4efTrK4CZhQle3M/QwLPjISghfcolmEGAPWxuJi6m98ZEfk4VR4Lfg=="
       },
+      "Microsoft.Extensions.AI.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.9.0",
+        "contentHash": "//nASHMCJVxnYfE/WSzfaLOao6/q816kPpgB9rxU0gfSmAny1u3rfQT0D4xAmcIo4yQqJs7rAeBB+M/dIMdZYA=="
+      },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
         "resolved": "17.13.0",
@@ -177,6 +182,32 @@
         "type": "Transitive",
         "resolved": "6.0.0",
         "contentHash": "lcyUiXTsETK2ALsZrX+nWuHSIQeazhqPphLfaRxzdGaG93+0kELqpgEHtwWOlQe7+jSFnKwaCAgL4kjeZCQJnw=="
+      },
+      "Whisper.net": {
+        "type": "Transitive",
+        "resolved": "1.9.2-preview1",
+        "contentHash": "gn5r7ZoXEbDQULU1pzLVaLEJxk61ziGxz7HDf2IJ7+TQvNFKZk/FwM0rOz2r1G3hP/F+ng2vACPipqXmTzBe/A==",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.9.0"
+        }
+      },
+      "Whisper.net.Runtime": {
+        "type": "Transitive",
+        "resolved": "1.9.2-preview1",
+        "contentHash": "8VLBcApuOPyTLVDlp5iyEXAG/in7IURXPUy6UK3uaBRNOk761+c1R2b2lMVI4qhgnMWApzT5VkdkEI4pXaAa4w==",
+        "dependencies": {
+          "Whisper.net.Runtime.Metal": "1.9.2-preview1"
+        }
+      },
+      "Whisper.net.Runtime.Metal": {
+        "type": "Transitive",
+        "resolved": "1.9.2-preview1",
+        "contentHash": "/AfMAf7bpaasgbByuQMkiHD+oDQj3Br3LdYPKpDOtKOkn7FYEyqrQ47LyBptaOmEnCXgvUsqaXY7YeGqoPd9Eg=="
+      },
+      "Whisper.net.Runtime.Vulkan": {
+        "type": "Transitive",
+        "resolved": "1.9.2-preview1",
+        "contentHash": "TmYAndi4E6yenXqWk4sExSG45Xbl09sEkUfVM1J+84Qt/kNFCHhFTG2W4e39gbpfLnwL46ezfhJ4WPofLK2HPg=="
       },
       "xunit.abstractions": {
         "type": "Transitive",
@@ -233,7 +264,10 @@
       "Markwardt.AutoRemote.Server": {
         "type": "Project",
         "dependencies": {
-          "Markwardt.AutoRemote": "[1.0.0, )"
+          "Markwardt.AutoRemote": "[1.0.0, )",
+          "Whisper.net": "[1.9.2-preview1, )",
+          "Whisper.net.Runtime": "[1.9.2-preview1, )",
+          "Whisper.net.Runtime.Vulkan": "[1.9.2-preview1, )"
         }
       }
     }

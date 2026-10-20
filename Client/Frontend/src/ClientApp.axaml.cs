@@ -19,12 +19,13 @@ public class ClientApp : Avalonia.Application
     /// <param name="chime">Plays the ding when a workspace becomes ready again, or <see langword="null" /> for silence.</param>
     /// <param name="notifier">Tells the user outside the app that a workspace they gave work to is ready, or <see langword="null" /> for no notifications.</param>
     /// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
+    /// <param name="recorder">Records speech for the voice input button of the message box, or <see langword="null" /> when this client cannot record, which hides the button.</param>
     /// <returns>The root view, already starting up.</returns>
-    public MainView CreateMainView(Assembly head, ClientLayout layout, string? dataFolder = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null)
+    public MainView CreateMainView(Assembly head, ClientLayout layout, string? dataFolder = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null)
     {
         string folder = dataFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoRemote");
         IAppInfo info = new IAppInfo.Factory().Create(head);
-        MainViewModel model = new(info, new IServerConnection.Factory(new IMessageChannel.Factory(), new ConsoleLog()), new SettingsStore(Path.Combine(folder, "settings.json")), layout, new DraftStore(Path.Combine(folder, "drafts.json")), chime, notifier, keeper);
+        MainViewModel model = new(info, new IServerConnection.Factory(new IMessageChannel.Factory(), new ConsoleLog()), new SettingsStore(Path.Combine(folder, "settings.json")), layout, new DraftStore(Path.Combine(folder, "drafts.json")), chime, notifier, keeper, recorder);
         MainView view = new() { DataContext = model };
         _ = model.Start();
 

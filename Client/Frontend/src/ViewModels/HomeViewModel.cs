@@ -15,8 +15,10 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <param name="time">The clock that times how long a workspace was busy, or <see langword="null" /> for the system clock.</param>
     /// <param name="notifier">Tells the user outside the app that a workspace they gave work to is ready, or <see langword="null" /> for no notifications.</param>
     /// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null)
+    /// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null)
     {
+        this.recorder = recorder;
         this.notifier = notifier;
         this.keeper = keeper;
         this.chime = chime;
@@ -104,6 +106,8 @@ internal sealed class HomeViewModel : ViewModelBase
     private readonly ClientLayout layout;
 
     private readonly IDraftStore? drafts;
+
+    private readonly IVoiceRecorder? recorder;
 
     private readonly IChime? chime;
 
@@ -785,7 +789,7 @@ internal sealed class HomeViewModel : ViewModelBase
             return existing;
         }
 
-        WorkspaceViewModel created = new(connection, workspace, layout, drafts);
+        WorkspaceViewModel created = new(connection, workspace, layout, drafts, recorder);
         created.Settings.Changed += Replace;
         created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, workspace.Name);
         created.Chat.PromptFailed += () => keeper?.Release(workspace.Id);

@@ -8,6 +8,26 @@
         "resolved": "10.0.13",
         "contentHash": "40yrBMsLEcjixBR4G+FiUaBPvxXIPSKJ2OgSrbOZcmSDBda4Sb0k7BWrfDpIvn3IvvDzwOL/tEPa6gDQfh6aRw=="
       },
+      "Whisper.net": {
+        "type": "Direct",
+        "requested": "[1.9.2-preview1, )",
+        "resolved": "1.9.2-preview1",
+        "contentHash": "gn5r7ZoXEbDQULU1pzLVaLEJxk61ziGxz7HDf2IJ7+TQvNFKZk/FwM0rOz2r1G3hP/F+ng2vACPipqXmTzBe/A==",
+        "dependencies": {
+          "Microsoft.Extensions.AI.Abstractions": "10.9.0"
+        }
+      },
+      "Whisper.net.Runtime.Vulkan": {
+        "type": "Direct",
+        "requested": "[1.9.2-preview1, )",
+        "resolved": "1.9.2-preview1",
+        "contentHash": "TmYAndi4E6yenXqWk4sExSG45Xbl09sEkUfVM1J+84Qt/kNFCHhFTG2W4e39gbpfLnwL46ezfhJ4WPofLK2HPg=="
+      },
+      "Microsoft.Extensions.AI.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.9.0",
+        "contentHash": "//nASHMCJVxnYfE/WSzfaLOao6/q816kPpgB9rxU0gfSmAny1u3rfQT0D4xAmcIo4yQqJs7rAeBB+M/dIMdZYA=="
+      },
       "Markwardt.AutoRemote": {
         "type": "Project"
       }

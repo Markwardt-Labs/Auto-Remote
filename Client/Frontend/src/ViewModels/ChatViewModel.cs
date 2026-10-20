@@ -11,13 +11,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <param name="connection">The server connection.</param>
     /// <param name="workspaceId">The workspace whose conversation this is.</param>
     /// <param name="drafts">Where the text typed in the message box is kept, or <see langword="null" /> to keep none.</param>
-    public ChatViewModel(IServerConnection connection, Guid workspaceId, IDraftStore? drafts = null)
+    /// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
+    public ChatViewModel(IServerConnection connection, Guid workspaceId, IDraftStore? drafts = null, IVoiceRecorder? recorder = null)
     {
+        this.recorder = recorder;
         this.connection = connection;
         this.workspaceId = workspaceId;
         this.drafts = drafts;
         SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && (!string.IsNullOrWhiteSpace(input) || Attachments.Count > 0));
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
+        DictateCommand = new AsyncCommand(_ => recording ? StopDictation() : StartDictation(), () => !transcribing && (recording || blockReason is null));
         Attachments.CollectionChanged += (_, _) =>
         {
             Raise(nameof(HasAttachments));
@@ -26,6 +29,18 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     private readonly IServerConnection connection;
+
+    private readonly IVoiceRecorder? recorder;
+
+    private readonly TimeSpan longestRecording = TimeSpan.FromSeconds(60);
+
+    private readonly TimeSpan shortestRecording = TimeSpan.FromMilliseconds(300);
+
+    private CancellationTokenSource? recordingLimit;
+
+    private bool recording;
+
+    private bool transcribing;
 
     /// <summary>
     /// Raised when the user submits a prompt, before it is sent, so work this client gave can be told apart from work another client gave.
@@ -97,9 +112,35 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(Placeholder));
                 SendCommand.Refresh();
+                DictateCommand.Refresh();
             }
         }
     }
+
+    /// <summary>
+    /// Gets a value indicating whether this client can record speech, which shows the voice input button.
+    /// </summary>
+    public bool CanDictate => recorder is not null;
+
+    /// <summary>
+    /// Gets a value indicating whether speech is being recorded for the message box.
+    /// </summary>
+    public bool IsRecording => recording;
+
+    /// <summary>
+    /// Gets a value indicating whether a recording is being turned into text on the server.
+    /// </summary>
+    public bool IsTranscribing => transcribing;
+
+    /// <summary>
+    /// Gets the tooltip of the voice input button.
+    /// </summary>
+    public string DictateTip => recording ? "Stop recording and add the text" : transcribing ? "Turning speech into text" : "Voice input";
+
+    /// <summary>
+    /// Gets the command that starts recording speech, or ends the recording and adds what was said to <see cref="Input" />; it is unavailable while a recording is being turned into text.
+    /// </summary>
+    public AsyncCommand DictateCommand { get; }
 
     /// <summary>
     /// Gets the hint shown in the empty message box.
@@ -220,6 +261,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// </summary>
     public void Dispose()
     {
+        if (recording)
+        {
+            recording = false;
+            recordingLimit?.Cancel();
+            _ = recorder!.Stop();
+        }
+
         if (subscribed)
         {
             subscribed = false;
@@ -377,6 +425,113 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         catch (Exception exception) when (exception is OperationCanceledException or IOException or UnauthorizedAccessException)
         {
         }
+    }
+
+    private void SetDictation(bool isRecording, bool isTranscribing)
+    {
+        recording = isRecording;
+        transcribing = isTranscribing;
+        Raise(nameof(IsRecording));
+        Raise(nameof(IsTranscribing));
+        Raise(nameof(DictateTip));
+        DictateCommand.Refresh();
+    }
+
+    private async Task StartDictation()
+    {
+        Error = null;
+
+        try
+        {
+            await recorder!.Start(CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Error = exception.Message;
+            return;
+        }
+
+        SetDictation(true, false);
+        CancellationTokenSource limit = new();
+        recordingLimit = limit;
+        _ = StopWhenTooLong(limit.Token);
+    }
+
+    private async Task StopWhenTooLong(CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(longestRecording, cancellation);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        await StopDictation();
+    }
+
+    private async Task StopDictation()
+    {
+        recordingLimit?.Cancel();
+        recordingLimit = null;
+        SetDictation(false, true);
+
+        try
+        {
+            ReadOnlyMemory<byte> pcm = await recorder!.Stop();
+
+            if (pcm.Length < recorder.SampleRate * 2 * shortestRecording.TotalSeconds)
+            {
+                Error = "Nothing was recorded.";
+                return;
+            }
+
+            string text = string.Empty;
+
+            if (await Attempt(async () => text = await connection.Transcribe(Wav(pcm, recorder.SampleRate), CancellationToken.None)))
+            {
+                Dictated(text.Trim());
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or IOException or UnauthorizedAccessException)
+        {
+            Error = exception.Message;
+        }
+        finally
+        {
+            SetDictation(false, false);
+        }
+    }
+
+    private void Dictated(string text)
+    {
+        if (text.Length == 0)
+        {
+            Error = "Nothing was heard.";
+            return;
+        }
+
+        Input = input.Length == 0 || char.IsWhiteSpace(input[^1]) ? input + text : $"{input} {text}";
+    }
+
+    private ReadOnlyMemory<byte> Wav(ReadOnlyMemory<byte> pcm, int sampleRate)
+    {
+        byte[] wav = new byte[44 + pcm.Length];
+        Encoding.ASCII.GetBytes("RIFF").CopyTo(wav, 0);
+        BitConverter.TryWriteBytes(wav.AsSpan(4), 36 + pcm.Length);
+        Encoding.ASCII.GetBytes("WAVEfmt ").CopyTo(wav, 8);
+        BitConverter.TryWriteBytes(wav.AsSpan(16), 16);
+        BitConverter.TryWriteBytes(wav.AsSpan(20), (short)1);
+        BitConverter.TryWriteBytes(wav.AsSpan(22), (short)1);
+        BitConverter.TryWriteBytes(wav.AsSpan(24), sampleRate);
+        BitConverter.TryWriteBytes(wav.AsSpan(28), sampleRate * 2);
+        BitConverter.TryWriteBytes(wav.AsSpan(32), (short)2);
+        BitConverter.TryWriteBytes(wav.AsSpan(34), (short)16);
+        Encoding.ASCII.GetBytes("data").CopyTo(wav, 36);
+        BitConverter.TryWriteBytes(wav.AsSpan(40), pcm.Length);
+        pcm.CopyTo(wav.AsMemory(44));
+        return wav;
     }
 
     private async Task Send()

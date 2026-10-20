@@ -254,9 +254,14 @@
               </ItemsControl.ItemTemplate>
             </ItemsControl>
             <Grid Name="ChatInputRow" Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
-              <local:TouchButton Grid.Column="0" Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center" Margin="0,0,6,0">
-                <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
-              </local:TouchButton>
+              <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+                <local:TouchButton Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
+                </local:TouchButton>
+                <local:TouchButton Classes="icon" Classes.recording="{Binding IsRecording}" ToolTip.Tip="{Binding DictateTip}" Command="{Binding DictateCommand}" IsVisible="{Binding CanDictate}" VerticalAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource MicIconGeometry}" Width="14" Height="14" />
+                </local:TouchButton>
+              </StackPanel>
               <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0" VerticalAlignment="Center">
                 <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"

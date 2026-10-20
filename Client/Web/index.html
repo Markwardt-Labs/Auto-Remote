@@ -173,6 +173,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .icon { overflow: visible; }
 button.icon { padding: 4px; min-width: 24px; min-height: 24px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; color: var(--muted); }
 button.icon.on { background: var(--selection); }
+button.icon.recording { color: var(--danger); }
 .searchpane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 0 8px 6px; overflow: hidden; }
 .searchpane label { display: flex; align-items: center; gap: 6px; }
 .searchpane .list { display: flex; flex-direction: column; }
@@ -1288,6 +1289,7 @@ class Connection {
   createFolder(path, name) { return this.request("CreateFolder", { path, name }).then(r => r.listing); }
   getHistory(workspaceId, before, limit) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit }).then(r => r.history); }
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
+  transcribe(data) { return this.request("Transcribe", { data }).then(r => r.transcript ?? ""); }
   uploadAttachment(workspaceId, name, data) { return this.request("UploadAttachment", { workspaceId, name, data }).then(r => r.attachmentPath); }
   listFiles(workspaceId, path, showHidden) { return this.request("ListFiles", { workspaceId, path, showHidden }).then(r => r.files); }
   searchFiles(workspaceId, text, content, showHidden) { return this.request("SearchFiles", { workspaceId, text, searchContent: content, showHidden }).then(r => r.searchResults); }
@@ -1373,6 +1375,41 @@ async function attempt(action, errors) {
   }
 }
 
+async function recordingToWav(blob) {
+  const rate = 16000;
+  const context = new AudioContext();
+  let decoded;
+
+  try {
+    decoded = await context.decodeAudioData(await blob.arrayBuffer());
+  } finally {
+    context.close();
+  }
+
+  const offline = new OfflineAudioContext(1, Math.max(1, Math.ceil(decoded.duration * rate)), rate);
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start();
+  const samples = (await offline.startRendering()).getChannelData(0);
+  const view = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const text = (at, value) => [...value].forEach((c, i) => view.setUint8(at + i, c.charCodeAt(0)));
+  text(0, "RIFF");
+  view.setUint32(4, 36 + samples.length * 2, true);
+  text(8, "WAVEfmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, rate, true);
+  view.setUint32(28, rate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  text(36, "data");
+  view.setUint32(40, samples.length * 2, true);
+  samples.forEach((sample, i) => view.setInt16(44 + i * 2, Math.round(Math.max(-1, Math.min(1, sample)) * 32767), true));
+  return new Blob([view], { type: "audio/wav" });
+}
+
 const icons = {
   file: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4", "4 1 9 14", 11],
   script: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6.5,7.5 L6.5,11.5 L10,9.5 Z", "4 1 9 14", 11],
@@ -1392,6 +1429,7 @@ const icons = {
   eye: ["M1,7 C3,3 11,3 13,7 C11,11 3,11 1,7 Z M5,7 A2,2 0 1,1 9,7 A2,2 0 1,1 5,7 Z", "1 3 12 8", 13],
   changes: ["M2,3 L8,3 M2,7 L12,7 M2,11 L6,11", "2 3 10 8", 13],
   refresh: ["M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5", "1 1 12 12", 13],
+  mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 1 10 13", 14],
   foldAll: ["M2,1 L7,6 L12,1 M2,13 L7,8 L12,13", "2 1 10 12", 13],
   unfoldAll: ["M2,6 L7,1 L12,6 M2,8 L7,13 L12,8", "2 1 10 12", 13],
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
@@ -1637,6 +1675,9 @@ class WorkspaceView {
     this.chips = h("div", { class: "chips", hidden: true });
     this.fileInput = h("input", { type: "file", multiple: true, hidden: true, onchange: () => this.pickFiles() });
     this.attachButton = h("button", { class: "flat icon", title: "Attach files", onclick: () => this.fileInput.click() }, icon("attach"));
+    this.voiceButton = h("button", { class: "flat icon", title: "Voice input", hidden: !(navigator.mediaDevices?.getUserMedia && window.MediaRecorder), onclick: () => this.toggleVoice() }, icon("mic"));
+    this.voice = null;
+    this.transcribing = false;
     this.input.addEventListener("paste", event => this.pasted(event));
     this.grip = h("div", { class: "composer-grip", onpointerdown: event => this.resizeInput(event) });
     this.gitBar = h("div", { class: "git-working", hidden: true },
@@ -1647,7 +1688,7 @@ class WorkspaceView {
       h("div", { class: "messages-wrap" }, this.scroller, this.chatAutoButton),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.input, this.sendButton, this.pauseButton, this.resumeButton, this.stopButton, this.cancelButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.sendButton, this.pauseButton, this.resumeButton, this.stopButton, this.cancelButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2263,6 +2304,13 @@ class WorkspaceView {
     document.removeEventListener("keydown", this.keyListener);
     document.removeEventListener("click", this.menuListener);
     this.stopSync();
+
+    if (this.voice) {
+      clearTimeout(this.voice.limit);
+      this.voice.recorder.stop();
+      this.voice.stream.getTracks().forEach(track => track.stop());
+      this.voice = null;
+    }
   }
 
   setWorking(value) {
@@ -2513,7 +2561,74 @@ class WorkspaceView {
     this.stopButton.disabled = state === "Canceling";
     this.cancelButton.hidden = !(halt && ai);
     this.cancelButton.disabled = !this.gitStatus.isRepo;
+    this.voiceButton.disabled = this.transcribing || (!this.voice && !this.takesAiInput());
+    this.voiceButton.classList.toggle("on", this.voice !== null);
+    this.voiceButton.classList.toggle("recording", this.voice !== null);
+    this.voiceButton.title = this.voice ? "Stop recording and add the text" : this.transcribing ? "Turning speech into text" : "Voice input";
     this.home.closeHaltDialogUnlessRunning(state);
+  }
+
+  toggleVoice() {
+    return this.voice ? this.stopVoice() : this.startVoice();
+  }
+
+  async startVoice() {
+    this.chatError.set(null);
+    let stream;
+
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (exception) {
+      this.chatError.set(`Voice input needs the microphone: ${exception.message || exception.name}`);
+      return;
+    }
+
+    const recorder = new MediaRecorder(stream);
+    const chunks = [];
+    recorder.ondataavailable = event => chunks.push(event.data);
+    const stopped = new Promise(resolve => { recorder.onstop = resolve; });
+    recorder.start();
+    this.voice = { stream, recorder, chunks, stopped, limit: setTimeout(() => this.stopVoice(), 60000) };
+    this.updateSend();
+  }
+
+  async stopVoice() {
+    const voice = this.voice;
+
+    if (!voice) {
+      return;
+    }
+
+    clearTimeout(voice.limit);
+    this.voice = null;
+    this.transcribing = true;
+    this.updateSend();
+    voice.recorder.stop();
+    await voice.stopped;
+    voice.stream.getTracks().forEach(track => track.stop());
+
+    try {
+      const result = await attempt(async () => {
+        const wav = await recordingToWav(new Blob(voice.chunks, { type: voice.recorder.mimeType }));
+
+        if (wav.size < 44 + 16000 * 2 * 0.3) {
+          throw new Error("Nothing was recorded.");
+        }
+
+        return (await this.connection.transcribe(await this.encode(wav))).trim();
+      }, this.chatError);
+
+      if (result.ok && !result.value) {
+        this.chatError.set("Nothing was heard.");
+      } else if (result.ok) {
+        const before = this.input.value;
+        this.input.value = !before || /\s$/.test(before) ? before + result.value : `${before} ${result.value}`;
+        this.inputChanged();
+      }
+    } finally {
+      this.transcribing = false;
+      this.updateSend();
+    }
   }
 
   keyed(event) {

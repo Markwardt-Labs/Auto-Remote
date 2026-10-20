@@ -104,4 +104,9 @@ public sealed record RemoteResponse
     /// Gets the server path of the file answering <see cref="RemoteCommand.UploadAttachment" />.
     /// </summary>
     public string? AttachmentPath { get; init; }
+
+    /// <summary>
+    /// Gets the text of the speech answering <see cref="RemoteCommand.Transcribe" />, empty when nothing was heard.
+    /// </summary>
+    public string? Transcript { get; init; }
 }
