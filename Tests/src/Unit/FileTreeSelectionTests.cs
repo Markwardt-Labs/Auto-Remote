@@ -60,6 +60,59 @@ public sealed class FileTreeSelectionTests
     }
 
     [Fact]
+    public async Task Desktop_AFolderAboveTheOpenFileCanBeCollapsedAndStaysCollapsed()
+    {
+        FilesViewModel files = Create(true);
+        await files.Start();
+        files.Nodes[0].IsExpanded = true;
+        await Settle();
+        files.Nodes[0].Children[0].IsExpanded = true;
+        await Settle();
+        await files.Choose(files.Nodes[0].Children[0].Children[0]);
+        await Settle();
+
+        await files.Choose(files.Nodes[0].Children[0]);
+        await Settle();
+
+        Assert.False(files.Nodes[0].Children[0].IsExpanded);
+        Assert.True(files.Nodes[0].IsExpanded);
+        Assert.Null(files.Selected);
+
+        await files.Choose(files.Nodes[0]);
+        await Settle();
+
+        Assert.False(files.Nodes[0].IsExpanded);
+        Assert.False(files.Nodes[0].Children[0].IsExpanded);
+        Assert.Equal("src/deep/b.txt", files.Preview?.Path);
+    }
+
+    [Fact]
+    public async Task Desktop_ReadingTheSameFileAgainDoesNotOpenItsCollapsedFoldersButAnotherFileDoes()
+    {
+        FilesViewModel files = Create(true);
+        await files.Start();
+        files.Nodes[0].IsExpanded = true;
+        await Settle();
+        FileNode file = files.Nodes[0].Children[1];
+        await files.Choose(file);
+        await Settle();
+        files.Nodes[0].IsExpanded = false;
+
+        await files.Choose(file);
+        await Settle();
+
+        Assert.False(files.Nodes[0].IsExpanded);
+
+        files.Nodes[0].Children[0].IsExpanded = true;
+        await Settle();
+        await files.Choose(files.Nodes[0].Children[0].Children[0]);
+        await Settle();
+
+        Assert.True(files.Nodes[0].IsExpanded);
+        Assert.Equal("src/deep/b.txt", files.Selected?.Path);
+    }
+
+    [Fact]
     public async Task Desktop_ARevealedFileInACollapsedTreeLoadsAndOpensEveryFolderAboveIt()
     {
         FilesViewModel files = Create(true);

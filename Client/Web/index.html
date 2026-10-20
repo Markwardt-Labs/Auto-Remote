@@ -2728,7 +2728,7 @@ class WorkspaceView {
       this.applyChangesMode();
       this.renderTree();
       await this.watch();
-      this.reveal();
+      this.reveal(newRoot);
     }
   }
 
@@ -2736,10 +2736,10 @@ class WorkspaceView {
     return this.preview?.path ?? this.diffState?.path ?? null;
   }
 
-  async reveal() {
+  async reveal(expand) {
     const path = this.openPath();
 
-    if (path !== null) {
+    if (expand && path !== null) {
       const parts = path.split("/");
       let level = this.nodes;
       let changed = false;
@@ -2766,7 +2766,10 @@ class WorkspaceView {
     }
 
     this.renderTree();
-    this.fileList.querySelector(".row.on")?.scrollIntoView({ block: "nearest" });
+
+    if (expand) {
+      this.fileList.querySelector(".row.on")?.scrollIntoView({ block: "nearest" });
+    }
   }
 
   copyPath(node, absolute) {
@@ -2887,7 +2890,7 @@ class WorkspaceView {
     this.gutter.textContent = markdown ? "" : Array.from({ length: content.text.split("\n").length }, (_, i) => i + 1).join("\n");
     this.previewPane.hidden = false;
     this.placeholder.hidden = true;
-    this.reveal();
+    this.reveal(other);
 
     this.search(other, other);
   }
@@ -3359,6 +3362,7 @@ class WorkspaceView {
   }
 
   showDiff(diff, path, commit) {
+    const opened = this.openPath();
     this.preview = null;
     this.setFind(false);
     this.diffState = { path, commit: commit ?? null };
@@ -3386,7 +3390,7 @@ class WorkspaceView {
     this.previewDiff.hidden = false;
     this.previewPane.hidden = false;
     this.placeholder.hidden = true;
-    this.reveal();
+    this.reveal(this.openPath() !== opened);
   }
 
   showSide(name) {

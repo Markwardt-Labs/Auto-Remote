@@ -128,6 +128,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         private set
         {
             string? before = preview?.Path;
+            string? opened = OpenPath;
 
             if (Set(ref preview, value))
             {
@@ -155,7 +156,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
                 Raise(nameof(IsMarkdownPreview));
                 Raise(nameof(IsTextPreview));
                 Raise(nameof(PreviewTitle));
-                _ = Reveal();
+                _ = Reveal(OpenPath != opened);
             }
         }
     }
@@ -202,13 +203,15 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         get => diff;
         private set
         {
+            string? opened = OpenPath;
+
             if (Set(ref diff, value))
             {
                 Raise(nameof(IsDiffPreview));
                 Raise(nameof(IsPreviewing));
                 Raise(nameof(PreviewKind));
                 Raise(nameof(PreviewTitle));
-                _ = Reveal();
+                _ = Reveal(OpenPath != opened);
             }
         }
     }
@@ -411,7 +414,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private string? OpenPath => preview?.Path ?? (diff is not null ? diffPath : null);
 
-    private async Task Reveal()
+    private async Task Reveal(bool expand)
     {
         if (!desktop)
         {
@@ -436,6 +439,18 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             if (level.FirstOrDefault(node => node.IsFolder && node.Path == current) is not { } folder)
             {
                 return;
+            }
+
+            if (!expand)
+            {
+                if (!folder.IsExpanded || !folder.IsLoaded)
+                {
+                    Selected = null;
+                    return;
+                }
+
+                level = folder.Children;
+                continue;
             }
 
             if (!folder.IsLoaded)
@@ -486,7 +501,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
         if (desktop)
         {
-            await Reveal();
+            await Reveal(false);
         }
         else
         {
@@ -687,7 +702,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
             Sync(Nodes, result!.Entries);
             await Watch();
-            _ = Reveal();
+            _ = Reveal(newRoot);
         }
     }
 }
