@@ -493,9 +493,11 @@ public sealed class ViewTests(HeadlessFixture fixture)
     [InlineData(Avalonia.Input.PointerType.Touch, 1, false, false, false, "")]
     [InlineData(Avalonia.Input.PointerType.Touch, 1, true, false, true, "some")]
     [InlineData(Avalonia.Input.PointerType.Touch, 1, true, true, false, "")]
-    [InlineData(Avalonia.Input.PointerType.Touch, 2, false, false, true, "some")]
+    [InlineData(Avalonia.Input.PointerType.Touch, 2, false, false, false, "")]
+    [InlineData(Avalonia.Input.PointerType.Touch, 3, false, false, false, "")]
+    [InlineData(Avalonia.Input.PointerType.Touch, 2, true, false, true, "some")]
     [InlineData(Avalonia.Input.PointerType.Mouse, 1, false, false, true, "")]
-    public async Task ScrollSafeTextBlock_SelectsOnAMouseADoubleTapOrATouchHeldStillButNotATouchThatScrolls(Avalonia.Input.PointerType type, int clicks, bool waits, bool moves, bool selects, string word)
+    public async Task ScrollSafeTextBlock_SelectsOnAMouseOrATouchHeldStillButNotATouchThatIsTappedRepeatedlyOrScrolls(Avalonia.Input.PointerType type, int clicks, bool waits, bool moves, bool selects, string word)
     {
         (bool captured, string selected) = await fixture.Run(() =>
         {
@@ -525,6 +527,31 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         Assert.Equal(selects, captured);
         Assert.Equal(word, selected);
+    }
+
+    [Fact]
+    public async Task ScrollSafeTextBlock_ATouchAnywhereDropsTheSelectionAHoldMade()
+    {
+        (string held, string after) = await fixture.Run(() =>
+        {
+            ScrollSafeTextBlock first = new() { Text = "some text to select", HoldDelay = TimeSpan.FromMilliseconds(30) };
+            ScrollSafeTextBlock second = new() { Text = "other text", HoldDelay = TimeSpan.FromMilliseconds(30) };
+            Window window = new() { Width = 300, Height = 100, Content = new StackPanel { Children = { first, second } } };
+            window.Show();
+            Avalonia.Input.PointerPointProperties properties = new(Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PointerUpdateKind.LeftButtonPressed);
+            Avalonia.Input.Pointer pointer = new(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true);
+            first.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(first, pointer, window, new Avalonia.Point(5, 5), 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+            Thread.Sleep(150);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string held = first.SelectedText;
+            second.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(second, new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true), window, new Avalonia.Point(5, 25), 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+            string after = first.SelectedText;
+            window.Close();
+            return (held, after);
+        });
+
+        Assert.Equal("some", held);
+        Assert.Equal(string.Empty, after);
     }
 
     [Fact]
