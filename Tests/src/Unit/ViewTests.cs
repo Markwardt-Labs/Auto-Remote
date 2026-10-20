@@ -68,6 +68,100 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal(2, marked.Count);
     }
 
+    private readonly string foldable = "# One\n\nfirst body\n\n## Two\n\nsecond body\n\n### Three\n\nthird body\n\n## Four\n\nfourth body\n\n# Five\n\nfifth body";
+
+    private async Task<T> Fold<T>(bool collapsible, Func<MarkdownView, List<Button>, T> act) => await fixture.Run(() =>
+    {
+        MarkdownView view = new() { Source = foldable, Collapsible = collapsible };
+        Window window = new() { Width = 390, Height = 800, Content = view };
+        window.Show();
+        T result = act(view, [.. view.GetVisualDescendants().OfType<Button>()]);
+        window.Close();
+        return result;
+    });
+
+    private List<string> VisibleText(MarkdownView view) => [.. view.GetVisualDescendants().OfType<SelectableTextBlock>().Where(block => block.IsEffectivelyVisible).Select(block => block.Text ?? FlattenInlines(block.Inlines!))];
+
+    [Fact]
+    public async Task Collapsible_GivesEveryHeadingAFoldThatHidesItsContentUpToTheNextHeadingOfTheSameOrAHigherLevel()
+    {
+        (int folds, List<string> before, List<string> afterTwo, List<string> afterOne) = await Fold(true, (view, buttons) =>
+        {
+            List<string> before = VisibleText(view);
+            buttons[1].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            List<string> afterTwo = VisibleText(view);
+            buttons[0].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            return (buttons.Count, before, afterTwo, VisibleText(view));
+        });
+
+        Assert.Equal(5, folds);
+        Assert.Contains("third body", before);
+        Assert.DoesNotContain("second body", afterTwo);
+        Assert.DoesNotContain("third body", afterTwo);
+        Assert.Contains("fourth body", afterTwo);
+        Assert.DoesNotContain("fourth body", afterOne);
+        Assert.Contains("fifth body", afterOne);
+        Assert.Contains("Five", afterOne);
+    }
+
+    [Fact]
+    public async Task Collapsible_IsOffByDefaultSoChatMarkdownHasNoFolds()
+    {
+        int folds = await Fold(false, (_, buttons) => buttons.Count);
+
+        Assert.Equal(0, folds);
+    }
+
+    [Fact]
+    public async Task AllCollapsed_CollapsesAndExpandsEveryHeadingAndFollowsTheFoldsOneByOne()
+    {
+        (List<string> collapsed, bool afterOpening, List<string> expanded, bool afterFolding) = await Fold(true, (view, buttons) =>
+        {
+            view.AllCollapsed = true;
+            List<string> collapsed = VisibleText(view);
+            buttons[3].RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            bool afterOpening = view.AllCollapsed;
+            view.AllCollapsed = true;
+            view.AllCollapsed = false;
+            List<string> expanded = VisibleText(view);
+            foreach (Button button in buttons)
+            {
+                if (view.AllCollapsed)
+                {
+                    break;
+                }
+
+                button.RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            }
+
+            return (collapsed, afterOpening, expanded, view.AllCollapsed);
+        });
+
+        Assert.DoesNotContain("first body", collapsed);
+        Assert.False(afterOpening);
+        Assert.Contains("fourth body", expanded);
+        Assert.Contains("third body", expanded);
+        Assert.True(afterFolding);
+    }
+
+    [Fact]
+    public async Task Matches_ExpandTheFoldsAroundTheCurrentMatchWhenNavigatingAndKeepTheOthersCollapsedAcrossRenders()
+    {
+        (List<string> visible, bool all) = await Fold(true, (view, _) =>
+        {
+            view.AllCollapsed = true;
+            int at = view.PlainText.IndexOf("third", StringComparison.Ordinal);
+            view.Matches = new TextMatches { Starts = [at], Length = 5, Current = 0, Navigate = true };
+            return (VisibleText(view), view.AllCollapsed);
+        });
+
+        Assert.Contains("third body", visible);
+        Assert.Contains("second body", visible);
+        Assert.DoesNotContain("fourth body", visible);
+        Assert.DoesNotContain("fifth body", visible);
+        Assert.False(all);
+    }
+
     [Fact]
     public async Task Source_RendersEveryKindOfBlock()
     {

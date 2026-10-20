@@ -80,6 +80,8 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private bool wrapLines;
 
+    private bool markdownCollapsed;
+
     private bool showHidden;
 
     /// <summary>
@@ -166,6 +168,26 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         get => wrapLines;
         set => Set(ref wrapLines, value);
     }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether every heading of the rendered markdown is collapsed, which the markdown view keeps up to date as headings are folded.
+    /// </summary>
+    public bool MarkdownCollapsed
+    {
+        get => markdownCollapsed;
+        set
+        {
+            if (Set(ref markdownCollapsed, value))
+            {
+                Raise(nameof(CollapseTip));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets the tooltip of the button that collapses or expands every heading of the rendered markdown.
+    /// </summary>
+    public string CollapseTip => markdownCollapsed ? "Expand all" : "Collapse all";
 
     /// <summary>
     /// Gets the tag shown for the previewed content: "Diff" for a diff, empty for a plain file.

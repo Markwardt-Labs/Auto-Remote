@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// Renders markdown text, including tables, task lists and code blocks, as native Avalonia controls, with the matches of a search marked.
+/// Renders markdown text, including tables, task lists and code blocks, as native Avalonia controls, with the matches of a search marked. When collapsible, each heading folds away the content under it up to the next heading of the same or a higher level.
 /// </summary>
 internal sealed class MarkdownView : ContentControl
 {
@@ -20,11 +20,27 @@ internal sealed class MarkdownView : ContentControl
     /// </summary>
     public static readonly StyledProperty<string> PlainTextProperty = AvaloniaProperty.Register<MarkdownView, string>(nameof(PlainText), string.Empty, defaultBindingMode: Avalonia.Data.BindingMode.OneWayToSource);
 
+    /// <summary>
+    /// Identifies the <see cref="Collapsible" /> property.
+    /// </summary>
+    public static readonly StyledProperty<bool> CollapsibleProperty = AvaloniaProperty.Register<MarkdownView, bool>(nameof(Collapsible));
+
+    /// <summary>
+    /// Identifies the <see cref="AllCollapsed" /> property.
+    /// </summary>
+    public static readonly StyledProperty<bool> AllCollapsedProperty = AvaloniaProperty.Register<MarkdownView, bool>(nameof(AllCollapsed), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
+
     private static readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
     static MarkdownView()
     {
-        SourceProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+        SourceProperty.Changed.AddClassHandler<MarkdownView>((view, _) =>
+        {
+            view.collapsed.Clear();
+            view.Render();
+        });
+        CollapsibleProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+        AllCollapsedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.CollapseAll());
         MatchesProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
     }
 
@@ -38,7 +54,15 @@ internal sealed class MarkdownView : ContentControl
 
     private int matchIndex;
 
-    private (ScrollSafeTextBlock Block, int Offset)? current;
+    private (ScrollSafeTextBlock Block, int Offset, int Section)? current;
+
+    private readonly List<Section> sections = [];
+
+    private readonly List<bool> collapsed = [];
+
+    private int containing = -1;
+
+    private bool syncing;
 
     /// <summary>
     /// Gets or sets the markdown text to render.
@@ -59,6 +83,24 @@ internal sealed class MarkdownView : ContentControl
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether headings fold away the content under them.
+    /// </summary>
+    public bool Collapsible
+    {
+        get => GetValue(CollapsibleProperty);
+        set => SetValue(CollapsibleProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether every heading is collapsed. Setting it collapses or expands them all, and folding a single heading updates it.
+    /// </summary>
+    public bool AllCollapsed
+    {
+        get => GetValue(AllCollapsedProperty);
+        set => SetValue(AllCollapsedProperty, value);
+    }
+
+    /// <summary>
     /// Gets the text as laid out on screen, the text blocks in order separated by line breaks, which is what the matches index into.
     /// </summary>
     public string PlainText
@@ -73,10 +115,29 @@ internal sealed class MarkdownView : ContentControl
         matchIndex = 0;
         current = null;
         block = null;
-        Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0);
+        sections.Clear();
+        containing = -1;
+        Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0, Collapsible);
         PlainText = plain.ToString();
 
-        if (Matches is { Navigate: true } && current is var (target, offset))
+        while (collapsed.Count < sections.Count)
+        {
+            collapsed.Add(false);
+        }
+
+        collapsed.RemoveRange(sections.Count, collapsed.Count - sections.Count);
+
+        if (Matches is { Navigate: true } && current is var (_, _, section))
+        {
+            for (int at = section; at >= 0; at = sections[at].Parent)
+            {
+                collapsed[at] = false;
+            }
+        }
+
+        Fold();
+
+        if (Matches is { Navigate: true } && current is var (target, offset, _))
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {
@@ -87,6 +148,53 @@ internal sealed class MarkdownView : ContentControl
                 }
             }, Avalonia.Threading.DispatcherPriority.Loaded);
         }
+    }
+
+    private void Fold()
+    {
+        for (int i = 0; i < sections.Count; i++)
+        {
+            sections[i].Body.IsVisible = !collapsed[i];
+            sections[i].Chevron.Content = collapsed[i] ? "▸" : "▾";
+        }
+
+        syncing = true;
+        AllCollapsed = sections.Count > 0 && collapsed.All(state => state);
+        syncing = false;
+    }
+
+    private void CollapseAll()
+    {
+        if (syncing)
+        {
+            return;
+        }
+
+        for (int i = 0; i < collapsed.Count; i++)
+        {
+            collapsed[i] = AllCollapsed;
+        }
+
+        Fold();
+    }
+
+    private void Toggle(int index)
+    {
+        collapsed[index] = !collapsed[index];
+        Fold();
+    }
+
+    private Section NewSection(HeadingBlock heading, int parent, ScrollSafeTextBlock title, int index)
+    {
+        Button chevron = new() { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 4, 0), FontSize = 12 };
+        chevron.Classes.Add("icon");
+        chevron.Click += (_, _) => Toggle(index);
+        Grid head = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        Grid.SetColumn(title, 1);
+        head.Children.Add(chevron);
+        head.Children.Add(title);
+        StackPanel body = new() { Spacing = 10 };
+        return new Section { Body = body, Chevron = chevron, Parent = parent, Level = heading.Level, Root = new StackPanel { Spacing = 10, Children = { head, body } } };
     }
 
     private void Begin(ScrollSafeTextBlock target)
@@ -125,7 +233,7 @@ internal sealed class MarkdownView : ContentControl
 
                 if (isCurrent && current is null && block is not null)
                 {
-                    current = (block, position - blockStart);
+                    current = (block, position - blockStart, containing);
                 }
             }
 
@@ -136,20 +244,40 @@ internal sealed class MarkdownView : ContentControl
 
     private IBrush Brush(string key, IBrush fallback) => Application.Current?.Resources.TryGetResource(key, ActualThemeVariant, out object? value) == true && value is IBrush brush ? brush : fallback;
 
-    private StackPanel Blocks(IEnumerable<Block> blocks, double indent)
+    private StackPanel Blocks(IEnumerable<Block> blocks, double indent, bool sectioned = false)
     {
         StackPanel panel = new() { Spacing = 10 };
+        List<int> open = [];
 
         foreach (Block block in blocks)
         {
+            if (sectioned && block is HeadingBlock heading)
+            {
+                while (open.Count > 0 && sections[open[^1]].Level >= heading.Level)
+                {
+                    open.RemoveAt(open.Count - 1);
+                }
+
+                int parent = open.Count > 0 ? open[^1] : -1;
+                containing = parent;
+                int index = sections.Count;
+                Section section = NewSection(heading, parent, Heading(heading), index);
+                sections.Add(section);
+                (parent >= 0 ? sections[parent].Body : panel).Children.Add(section.Root);
+                open.Add(index);
+                containing = index;
+                continue;
+            }
+
             Control? control = Build(block, indent);
 
             if (control is not null)
             {
-                panel.Children.Add(control);
+                (open.Count > 0 ? sections[open[^1]].Body : panel).Children.Add(control);
             }
         }
 
+        containing = -1;
         return panel;
     }
 
@@ -360,5 +488,18 @@ internal sealed class MarkdownView : ContentControl
                     break;
             }
         }
+    }
+
+    private sealed class Section
+    {
+        public required StackPanel Body { get; init; }
+
+        public required StackPanel Root { get; init; }
+
+        public required Button Chevron { get; init; }
+
+        public required int Parent { get; init; }
+
+        public required int Level { get; init; }
     }
 }

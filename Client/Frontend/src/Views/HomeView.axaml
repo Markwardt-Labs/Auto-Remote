@@ -493,6 +493,12 @@
                     <ToggleButton Classes="icon" ToolTip.Tip="Find (Ctrl+F)" IsChecked="{Binding Find.IsOpen, Mode=TwoWay}" IsVisible="{Binding IsFindable}" Click="OnFindToggled">
                       <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="12" Height="12" />
                     </ToggleButton>
+                    <ToggleButton Classes="icon" ToolTip.Tip="{Binding CollapseTip}" IsChecked="{Binding MarkdownCollapsed, Mode=TwoWay}" IsVisible="{Binding IsMarkdownPreview}">
+                      <Panel>
+                        <Path Classes="lineIcon" Data="{StaticResource FoldAllIconGeometry}" Width="12" Height="12" IsVisible="{Binding !MarkdownCollapsed}" />
+                        <Path Classes="lineIcon" Data="{StaticResource UnfoldAllIconGeometry}" Width="12" Height="12" IsVisible="{Binding MarkdownCollapsed}" />
+                      </Panel>
+                    </ToggleButton>
                     <ToggleButton Classes="icon" ToolTip.Tip="Word wrap" IsChecked="{Binding WrapLines, Mode=TwoWay}" IsVisible="{Binding !IsMarkdownPreview}">
                       <Path Classes="lineIcon" Data="{StaticResource WrapIconGeometry}" Width="12" Height="12" />
                     </ToggleButton>
@@ -525,7 +531,7 @@
                 <Panel>
                   <local:SyntaxView IsVisible="{Binding IsTextPreview}" File="{Binding Preview}" Matches="{Binding Find.Matches}" Wrap="{Binding WrapLines}" />
                   <ScrollViewer IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <local:MarkdownView Source="{Binding Preview.Text}" Matches="{Binding Find.Matches}" PlainText="{Binding MarkdownText, Mode=OneWayToSource}" />
+                    <local:MarkdownView Collapsible="True" AllCollapsed="{Binding MarkdownCollapsed, Mode=TwoWay}" Source="{Binding Preview.Text}" Matches="{Binding Find.Matches}" PlainText="{Binding MarkdownText, Mode=OneWayToSource}" />
                   </ScrollViewer>
                   <local:DiffView IsVisible="{Binding IsDiffPreview}" Diff="{Binding Diff}" Wrap="{Binding WrapLines}" />
                 </Panel>
