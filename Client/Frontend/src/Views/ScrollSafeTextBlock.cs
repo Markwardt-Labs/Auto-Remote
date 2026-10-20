@@ -15,6 +15,8 @@ public sealed class ScrollSafeTextBlock : SelectableTextBlock
 
     private Avalonia.Point start;
 
+    private bool selecting;
+
     /// <summary>
     /// Gets or sets how long a touch has to stay still before it starts selecting.
     /// </summary>
@@ -32,6 +34,7 @@ public sealed class ScrollSafeTextBlock : SelectableTextBlock
         {
             selected?.ClearSelection();
             selected = null;
+            selecting = false;
             pressed = e;
             start = e.GetPosition(this);
             hold = Avalonia.Threading.DispatcherTimer.RunOnce(Select, HoldDelay);
@@ -49,14 +52,23 @@ public sealed class ScrollSafeTextBlock : SelectableTextBlock
             Stop();
         }
 
-        base.OnPointerMoved(e);
+        if (e.Pointer.Type != Avalonia.Input.PointerType.Touch || selecting)
+        {
+            base.OnPointerMoved(e);
+        }
     }
 
     /// <inheritdoc />
     protected override void OnPointerReleased(Avalonia.Input.PointerReleasedEventArgs e)
     {
         Stop();
-        base.OnPointerReleased(e);
+
+        if (e.Pointer.Type != Avalonia.Input.PointerType.Touch || selecting)
+        {
+            base.OnPointerReleased(e);
+        }
+
+        selecting = false;
     }
 
     /// <inheritdoc />
@@ -66,6 +78,8 @@ public sealed class ScrollSafeTextBlock : SelectableTextBlock
         {
             Stop();
         }
+
+        selecting = false;
 
         base.OnPointerCaptureLost(e);
     }
@@ -88,6 +102,7 @@ public sealed class ScrollSafeTextBlock : SelectableTextBlock
         }
 
         selected = this;
+        selecting = true;
         base.OnPointerPressed(new Avalonia.Input.PointerPressedEventArgs(this, original.Pointer, root, original.GetPosition(root), original.Timestamp, original.GetCurrentPoint(root).Properties, original.KeyModifiers, 2));
     }
 }

@@ -529,6 +529,39 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal(word, selected);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ScrollSafeTextBlock_ATouchThatDragsOverTextThePlatformCapturedForItDoesNotSelect(bool released)
+    {
+        string selected = await fixture.Run(() =>
+        {
+            ScrollSafeTextBlock block = new() { Text = "some text\nto drag over\nand more text", Background = Avalonia.Media.Brushes.Transparent };
+            Window window = new() { Width = 300, Height = 200, Content = block };
+            window.Show();
+            Avalonia.Input.PointerPointProperties properties = new(Avalonia.Input.RawInputModifiers.LeftMouseButton, Avalonia.Input.PointerUpdateKind.LeftButtonPressed);
+            Avalonia.Input.Pointer pointer = new(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true);
+            block.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(block, pointer, window, new Avalonia.Point(5, 5), 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+            pointer.Capture(block);
+
+            for (int y = 5; y < 50; y += 10)
+            {
+                block.RaiseEvent(new Avalonia.Input.PointerEventArgs(Avalonia.Input.InputElement.PointerMovedEvent, block, pointer, window, new Avalonia.Point(60, y), 1, properties, Avalonia.Input.KeyModifiers.None));
+            }
+
+            if (released)
+            {
+                block.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(block, pointer, window, new Avalonia.Point(60, 50), 2, properties, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left) { RoutedEvent = Avalonia.Input.InputElement.PointerReleasedEvent });
+            }
+
+            string selected = block.SelectedText;
+            window.Close();
+            return selected;
+        });
+
+        Assert.Equal(string.Empty, selected);
+    }
+
     [Fact]
     public async Task ScrollSafeTextBlock_ATouchAnywhereDropsTheSelectionAHoldMade()
     {
