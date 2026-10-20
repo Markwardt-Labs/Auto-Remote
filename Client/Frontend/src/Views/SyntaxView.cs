@@ -10,15 +10,18 @@ internal sealed class SyntaxView : ContentControl
     /// </summary>
     public SyntaxView()
     {
-        gutter = new TextBlock { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, Margin = new Thickness(0, 0, 12, 0), IsHitTestVisible = false };
+        gutter = new TextBlock { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, IsHitTestVisible = false };
         block = new ScrollSafeTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
-        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = block };
+        sticky = new TranslateTransform();
+        numbers = new Border { Child = gutter, Padding = new Thickness(0, 0, 12, 0), RenderTransform = sticky, ZIndex = 1 };
         Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Content = grid };
         block.LayoutUpdated += (_, _) => NumberLines();
-        Grid.SetColumn(scroller, 1);
-        grid.Children.Add(gutter);
-        grid.Children.Add(scroller);
-        Content = grid;
+        scroller.ScrollChanged += (_, _) => sticky.X = scroller.Offset.X;
+        Grid.SetColumn(block, 1);
+        grid.Children.Add(block);
+        grid.Children.Add(numbers);
+        Content = scroller;
     }
 
     /// <summary>
@@ -48,6 +51,10 @@ internal sealed class SyntaxView : ContentControl
     private readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
     private readonly TextBlock gutter;
+
+    private readonly Border numbers;
+
+    private readonly TranslateTransform sticky;
 
     private readonly SelectableTextBlock block;
 
@@ -82,6 +89,13 @@ internal sealed class SyntaxView : ContentControl
     {
         get => GetValue(MatchesProperty);
         set => SetValue(MatchesProperty, value);
+    }
+
+    /// <inheritdoc />
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        numbers.Background = Brush("Background");
     }
 
     private IBrush? Brush(string key) => Application.Current?.Resources.TryGetResource(key, ActualThemeVariant, out object? value) == true ? value as IBrush : null;
@@ -126,7 +140,7 @@ internal sealed class SyntaxView : ContentControl
 
         numbered = layout;
 
-        StringBuilder numbers = new();
+        StringBuilder labels = new();
         int number = 0;
 
         foreach (TextLine line in layout.TextLines)
@@ -136,13 +150,13 @@ internal sealed class SyntaxView : ContentControl
             if (start == 0 || (start <= text.Length && text[start - 1] == '\n'))
             {
                 number++;
-                numbers.Append(number);
+                labels.Append(number);
             }
 
-            numbers.Append('\n');
+            labels.Append('\n');
         }
 
-        gutter.Text = numbers.ToString().TrimEnd('\n');
+        gutter.Text = labels.ToString().TrimEnd('\n');
     }
 
     private void Render()

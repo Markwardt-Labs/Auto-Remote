@@ -13,15 +13,16 @@ internal sealed class DiffView : ContentControl
         before = Gutter();
         after = Gutter();
         block = new ScrollSafeTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
-        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled, Content = block };
-        Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*") };
+        sticky = new TranslateTransform();
+        numbers = new Border { Child = new StackPanel { Orientation = Avalonia.Layout.Orientation.Horizontal, Children = { before, after } }, RenderTransform = sticky, ZIndex = 1 };
+        Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Content = grid };
         block.LayoutUpdated += (_, _) => NumberLines();
-        Grid.SetColumn(after, 1);
-        Grid.SetColumn(scroller, 2);
-        grid.Children.Add(before);
-        grid.Children.Add(after);
-        grid.Children.Add(scroller);
-        Content = grid;
+        scroller.ScrollChanged += (_, _) => sticky.X = scroller.Offset.X;
+        Grid.SetColumn(block, 1);
+        grid.Children.Add(block);
+        grid.Children.Add(numbers);
+        Content = scroller;
     }
 
     /// <summary>
@@ -43,6 +44,10 @@ internal sealed class DiffView : ContentControl
     private readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
     private readonly TextBlock before;
+
+    private readonly Border numbers;
+
+    private readonly TranslateTransform sticky;
 
     private readonly TextBlock after;
 
@@ -74,6 +79,13 @@ internal sealed class DiffView : ContentControl
     {
         get => GetValue(WrapProperty);
         set => SetValue(WrapProperty, value);
+    }
+
+    /// <inheritdoc />
+    protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnAttachedToVisualTree(e);
+        numbers.Background = Brush("Background");
     }
 
     private TextBlock Gutter() => new() { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, Margin = new Thickness(0, 0, 8, 0), IsHitTestVisible = false };

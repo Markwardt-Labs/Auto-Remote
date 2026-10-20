@@ -523,15 +523,11 @@
               </Border>
               <Border Grid.Row="2" Background="Transparent" Padding="14,8">
                 <Panel>
-                  <ScrollViewer IsVisible="{Binding IsTextPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <local:SyntaxView File="{Binding Preview}" Matches="{Binding Find.Matches}" Wrap="{Binding WrapLines}" />
-                  </ScrollViewer>
+                  <local:SyntaxView IsVisible="{Binding IsTextPreview}" File="{Binding Preview}" Matches="{Binding Find.Matches}" Wrap="{Binding WrapLines}" />
                   <ScrollViewer IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                     <local:MarkdownView Source="{Binding Preview.Text}" Matches="{Binding Find.Matches}" PlainText="{Binding MarkdownText, Mode=OneWayToSource}" />
                   </ScrollViewer>
-                  <ScrollViewer IsVisible="{Binding IsDiffPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <local:DiffView Diff="{Binding Diff}" Wrap="{Binding WrapLines}" />
-                  </ScrollViewer>
+                  <local:DiffView IsVisible="{Binding IsDiffPreview}" Diff="{Binding Diff}" Wrap="{Binding WrapLines}" />
                 </Panel>
               </Border>
             </Grid>

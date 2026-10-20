@@ -342,6 +342,42 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal(clicks ? 1 : 0, clicked);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task FilePreviews_ScrollBothWaysFromAnywhereWithTheSidewaysBarAlwaysInViewAndTheNumbersStayPut(bool diff)
+    {
+        string longLine = string.Join(' ', Enumerable.Repeat("word", 80));
+        string text = string.Join('\n', Enumerable.Range(0, 120).Select(number => $"{number} {longLine}"));
+
+        (double extentHeight, double viewportHeight, double extentWidth, double viewportWidth, double barBottom, double height, double shifted, int scrollers) = await fixture.Run(() =>
+        {
+            Control view = diff
+                ? new DiffView { Diff = new GitDiff { Path = "a.txt", Lines = [.. Enumerable.Range(0, 120).Select(number => new GitDiffLine { Kind = GitDiffKind.Unchanged, OldNumber = number + 1, NewNumber = number + 1, Text = $"{number} {longLine}" })] } }
+                : new SyntaxView { File = new FileContent { Path = "a.txt", Text = text } };
+            Window window = new() { Width = 400, Height = 300, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            ScrollViewer scroller = view.GetVisualDescendants().OfType<ScrollViewer>().First();
+            Avalonia.Controls.Primitives.ScrollBar bar = scroller.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ScrollBar>().First(item => item.Orientation == Avalonia.Layout.Orientation.Horizontal);
+            double barBottom = Avalonia.VisualExtensions.TranslatePoint(bar, new Avalonia.Point(0, bar.Bounds.Height), view)?.Y ?? -1;
+            scroller.Offset = new Avalonia.Vector(60, 0);
+            window.UpdateLayout();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            double shifted = view.GetVisualDescendants().OfType<Border>().Select(border => border.RenderTransform).OfType<Avalonia.Media.TranslateTransform>().First().X;
+            (double, double, double, double, double, double, double, int) result = (scroller.Extent.Height, scroller.Viewport.Height, scroller.Extent.Width, scroller.Viewport.Width, barBottom, view.Bounds.Height, shifted, view.GetVisualDescendants().OfType<ScrollViewer>().Count());
+            window.Close();
+            return result;
+        });
+
+        Assert.True(extentHeight > viewportHeight * 3);
+        Assert.True(extentWidth > viewportWidth * 2);
+        Assert.InRange(barBottom, height - 2, height + 2);
+        Assert.Equal(60, shifted);
+        Assert.Equal(1, scrollers);
+    }
+
     [Fact]
     public async Task EveryPieceOfSelectableTextTheClientShowsIgnoresASingleTouch()
     {
