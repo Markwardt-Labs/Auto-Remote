@@ -310,8 +310,8 @@
       <Geometry x:Key="AutoScrollIconGeometry">M2,1 L7,6 L12,1 M2,6 L7,11 L12,6 M2,14 L12,14</Geometry>
       <Geometry x:Key="WrapIconGeometry">M1,3 L13,3 M1,7 L10,7 A2,2 0 0,1 10,11 L6,11 M8,9 L6,11 L8,13 M1,11 L3,11</Geometry>
       <Geometry x:Key="MicIconGeometry">M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5</Geometry>
-      <Geometry x:Key="FoldAllIconGeometry">M2,1 L7,6 L12,1 M2,13 L7,8 L12,13</Geometry>
-      <Geometry x:Key="UnfoldAllIconGeometry">M2,6 L7,1 L12,6 M2,8 L7,13 L12,8</Geometry>
+      <Geometry x:Key="FoldAllIconGeometry">M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12</Geometry>
+      <Geometry x:Key="UnfoldAllIconGeometry">M1,7 L13,7 M4,5 L7,2 L10,5 M4,9 L7,12 L10,9</Geometry>
       <Geometry x:Key="MinimizeIconGeometry">M1,1 M13,13 M1,10.6 L13,10.6 L13,12 L1,12 Z</Geometry>
       <Geometry x:Key="MaximizeIconGeometry">M1,1 L13,1 L13,13 L1,13 Z</Geometry>
       <Geometry x:Key="RestoreIconGeometry">M4,1 L13,1 L13,10 L10,10 M1,4 L10,4 L10,13 L1,13 Z</Geometry>
