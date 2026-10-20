@@ -12,7 +12,8 @@ public sealed class App : ClientApp
     {
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
-            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()), new DesktopReadyNotifier());
+            DesktopReadyNotifier notifier = new();
+            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()), notifier);
             Window window = new()
             {
                 Title = "Auto Remote",
@@ -27,6 +28,25 @@ public sealed class App : ClientApp
 
             window.Bind(Window.TitleProperty, new Binding("DataContext.WindowTitle") { Source = view });
             window.Loaded += (_, _) => window.WindowState = WindowState.Maximized;
+            WindowState restore = WindowState.Maximized;
+            window.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == Window.WindowStateProperty && window.WindowState != WindowState.Minimized)
+                {
+                    restore = window.WindowState;
+                }
+            };
+            notifier.Opened += workspace => Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+            {
+                if (window.WindowState == WindowState.Minimized)
+                {
+                    window.WindowState = restore;
+                }
+
+                window.Show();
+                window.Activate();
+                _ = view.Open(workspace);
+            });
             desktop.MainWindow = window;
         }
 
