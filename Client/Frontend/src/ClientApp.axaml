@@ -127,6 +127,9 @@
     <Style Selector="Border.topbar.working">
       <Setter Property="Background" Value="{DynamicResource Working}" />
     </Style>
+    <Style Selector="Border.topbar.working.paused">
+      <Setter Property="Background" Value="{DynamicResource Paused}" />
+    </Style>
     <Style Selector="Border.topbar.working TextBlock">
       <Setter Property="Foreground" Value="{DynamicResource OnWorking}" />
     </Style>
@@ -280,6 +283,7 @@
       <SolidColorBrush x:Key="AccentHover" Color="#1F8AD2" />
       <SolidColorBrush x:Key="Working" Color="#007ACC" />
       <SolidColorBrush x:Key="OnWorking" Color="White" />
+      <SolidColorBrush x:Key="Paused" Color="#A85F00" />
       <SolidColorBrush x:Key="Danger" Color="#C74E39" />
       <SolidColorBrush x:Key="PaceVeryLow" Color="#6FBF73" />
       <SolidColorBrush x:Key="PaceLow" Color="#569CD6" />

@@ -305,6 +305,7 @@ internal sealed class HomeViewModel : ViewModelBase
 
                 Raise(nameof(IsAiWorking));
                 Raise(nameof(IsWorking));
+                Raise(nameof(IsPaused));
             }
         }
     }
@@ -315,9 +316,14 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool IsAiWorking => active?.IsAiWorking ?? false;
 
     /// <summary>
-    /// Gets a value indicating whether the AI is working or a script is running in the focused workspace, which turns the header blue.
+    /// Gets a value indicating whether the AI is working or a script is running in the focused workspace, which turns the header blue, or orange while it is paused.
     /// </summary>
     public bool IsWorking => active?.IsWorking ?? false;
+
+    /// <summary>
+    /// Gets a value indicating whether the focused workspace's work is paused, which turns the header orange instead of blue.
+    /// </summary>
+    public bool IsPaused => active?.State == WorkspaceState.Paused;
 
     /// <summary>
     /// Gets a value indicating whether the client is the desktop one, which has its own window controls and offers the workspace folder on the machine.
@@ -838,6 +844,7 @@ internal sealed class HomeViewModel : ViewModelBase
 
             if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.CanCancel))
             {
+                Raise(nameof(IsPaused));
                 BeginStopCommand.Refresh();
                 BeginCancelCommand.Refresh();
                 PauseCommand.Refresh();

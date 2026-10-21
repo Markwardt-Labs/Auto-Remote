@@ -6,7 +6,7 @@
              x:CompileBindings="False">
   <Grid>
     <Grid RowDefinitions="Auto,*,Auto">
-      <Border Grid.Row="0" Classes="topbar" Classes.working="{Binding IsWorking}" Padding="8" PointerPressed="OnTopBarPointerPressed">
+      <Border Grid.Row="0" Classes="topbar" Classes.working="{Binding IsWorking}" Classes.paused="{Binding IsPaused}" Padding="8" PointerPressed="OnTopBarPointerPressed">
         <Grid>
           <Grid.ColumnDefinitions>
             <ColumnDefinition Width="{Binding HeaderSide}" />

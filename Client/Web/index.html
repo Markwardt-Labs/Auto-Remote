@@ -20,6 +20,7 @@
   --accent-hover: #1F8AD2;
   --working: #007ACC;
   --on-working: #FFFFFF;
+  --paused: #A85F00;
   --danger: #C74E39;
   --scrim: #00000099;
   --pace-very-low: #6FBF73;
@@ -98,6 +99,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .usage-card .value { font-size: 18px; }
 .topbar button:hover:not(:disabled) { background: #ffffff40; }
 .topbar.working { background: var(--working); color: var(--on-working); border-bottom-color: var(--working); }
+.topbar.paused { background: var(--paused); border-bottom-color: var(--paused); }
 .topbar.working button { color: var(--on-working); }
 .topbar.working button:hover:not(:disabled) { background: #ffffff40; }
 .content { flex: 1; min-height: 0; position: relative; }
@@ -4002,6 +4004,7 @@ class Home {
   updateWorking(view) {
     if (view === this.active) {
       this.topbar.classList.toggle("working", view.state() !== "Ready");
+      this.topbar.classList.toggle("paused", view.state() === "Paused");
     }
   }
 
@@ -4058,7 +4061,7 @@ class Home {
     this.toggleUsage(false);
     this.showUsage(workspace?.service ?? null);
     this.title.textContent = workspace ? folderName(workspace.folder) : "Auto Remote";
-    this.topbar.classList.remove("working");
+    this.topbar.classList.remove("working", "paused");
 
     if (workspace) {
       let view = this.opened.get(workspace.id);

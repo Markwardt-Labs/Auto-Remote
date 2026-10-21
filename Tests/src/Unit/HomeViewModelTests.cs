@@ -203,6 +203,28 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task IsPaused_IsOnlyTrueWhileTheFocusedWorkspaceIsPausedAndTellsTheHeaderSo()
+    {
+        await model.Start();
+        List<string?> changed = [];
+        model.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        Working(first, true);
+        Assert.True(model.IsWorking);
+        Assert.False(model.IsPaused);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = first.Id, State = WorkspaceState.Paused });
+
+        Assert.True(model.IsPaused);
+        Assert.True(model.IsWorking);
+        Assert.Contains(nameof(HomeViewModel.IsPaused), changed);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = first.Id, State = WorkspaceState.Working });
+
+        Assert.False(model.IsPaused);
+        Assert.True(model.IsWorking);
+    }
+
+    [Fact]
     public async Task StopQuestion_ClosesWhenTheWorkEndsWhileItIsShowing()
     {
         await model.Start();
