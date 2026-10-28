@@ -12,6 +12,9 @@ public sealed partial class HomeView : UserControl
     {
         InitializeComponent();
         AddHandler(Avalonia.Input.InputElement.PointerPressedEvent, OnFilePointerPressed, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        AddHandler(Avalonia.Input.InputElement.PointerPressedEvent, OnFileHoldStart, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        AddHandler(Avalonia.Input.InputElement.PointerMovedEvent, OnFileHoldMoved, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        AddHandler(Avalonia.Input.InputElement.PointerReleasedEvent, OnFileHoldEnd, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         this.FindControl<TextBox>("ChatInput")?.AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnChatKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnPromptKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
@@ -50,6 +53,15 @@ public sealed partial class HomeView : UserControl
             };
         }
     }
+
+    private readonly double holdSlop = 10;
+
+    private CancellationTokenSource? fileHold;
+
+    private Avalonia.Point holdStart;
+
+    private bool held;
+
 
     private bool loadingOlder;
 
@@ -224,8 +236,19 @@ public sealed partial class HomeView : UserControl
         }
     }
 
+    /// <summary>
+    /// Gets or sets how long a finger has to stay on a script or task file of the file system on mobile before it is run.
+    /// </summary>
+    internal TimeSpan FileHoldDelay { get; set; } = TimeSpan.FromMilliseconds(500);
+
     private void OnFileTapped(object? sender, Avalonia.Input.TappedEventArgs args)
     {
+        if (held)
+        {
+            held = false;
+            return;
+        }
+
         if (sender is TreeView { DataContext: FilesViewModel files } && NodeOf(args.Source) is { } node)
         {
             _ = files.Choose(node);
@@ -243,11 +266,57 @@ public sealed partial class HomeView : UserControl
                     _ = files.Enter(node);
                 }
             }
-            else
+            else if (!files.ShowNavigation)
             {
                 files.Run(node);
             }
         }
+    }
+
+    private void OnFileHoldStart(object? sender, Avalonia.Input.PointerPressedEventArgs args)
+    {
+        EndFileHold();
+        held = false;
+
+        if (args.Pointer.Type == Avalonia.Input.PointerType.Touch && DataContext is HomeViewModel { IsDesktop: false, Active.Files: { } files } && NodeOf(args.Source) is { IsRunnable: true } node)
+        {
+            holdStart = args.GetPosition(this);
+            CancellationTokenSource source = new();
+            fileHold = source;
+            _ = RunAfterHold(files, node, source.Token);
+        }
+    }
+
+    private async Task RunAfterHold(FilesViewModel files, FileNode node, CancellationToken cancellation)
+    {
+        try
+        {
+            await Task.Delay(FileHoldDelay, cancellation);
+        }
+        catch (OperationCanceledException)
+        {
+            return;
+        }
+
+        fileHold = null;
+        held = true;
+        files.Run(node);
+    }
+
+    private void OnFileHoldMoved(object? sender, Avalonia.Input.PointerEventArgs args)
+    {
+        if (fileHold is not null && (Math.Abs(args.GetPosition(this).X - holdStart.X) > holdSlop || Math.Abs(args.GetPosition(this).Y - holdStart.Y) > holdSlop))
+        {
+            EndFileHold();
+        }
+    }
+
+    private void OnFileHoldEnd(object? sender, Avalonia.Input.PointerReleasedEventArgs args) => EndFileHold();
+
+    private void EndFileHold()
+    {
+        fileHold?.Cancel();
+        fileHold = null;
     }
 
     private void OnFilePointerPressed(object? sender, Avalonia.Input.PointerPressedEventArgs args)

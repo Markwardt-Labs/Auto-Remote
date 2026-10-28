@@ -2801,14 +2801,21 @@ class WorkspaceView {
     const open = this.openPath();
     const active = new Set(this.scriptList().filter(entry => this.scriptActive(entry)).map(entry => entry.path));
     const runnable = node => !node.entry.isFolder && /\.(cs|task)$/i.test(node.entry.name);
+    const touch = () => matchMedia("(pointer: coarse)").matches;
     const rows = (nodes, depth) => nodes.flatMap(node => [
       h("div", {
         class: `row${this.statusClass(this.statusOf(node.entry.path, node.entry.isFolder))}${!node.entry.isFolder && node.entry.path === open ? " on" : ""}${runnable(node) && active.has(node.entry.path) ? " running" : ""}`,
         style: `padding-left:${8 + depth * 16}px`,
         onclick: () => this.choose(node),
-        ondblclick: () => runnable(node) && this.runScript(node.entry.path),
+        ondblclick: () => runnable(node) && !touch() && this.runScript(node.entry.path),
         oncontextmenu: event => {
           event.preventDefault();
+
+          if (runnable(node) && touch()) {
+            this.runScript(node.entry.path);
+            return;
+          }
+
           this.showMenu(event, [{ label: "Copy Name", action: () => navigator.clipboard?.writeText(node.entry.name) }, { label: "Copy Relative Path", action: () => this.copyPath(node, false) }, { label: "Copy Absolute Path", action: () => this.copyPath(node, true) }]);
         } },
         h("span", { class: "slot" }, icon(node.entry.isFolder ? "folder" : runnable(node) ? (/\.task$/i.test(node.entry.name) ? "task" : "script") : "file")),

@@ -365,7 +365,7 @@
               </Grid>
             </Border>
             <Grid>
-              <TextBlock Text="No script selected. Pick one from the dropdown above, or double click (double tap on mobile) a .cs or .task file in the file system."
+              <TextBlock Text="No script selected. Pick one from the dropdown above, or double click (long tap on mobile) a .cs or .task file in the file system."
                          IsVisible="{Binding !HasScript}" TextWrapping="Wrap" TextAlignment="Center" Margin="24,0" HorizontalAlignment="Center" VerticalAlignment="Center" Classes="muted" FontSize="13" />
               <ScrollViewer Name="OutputScroller" IsVisible="{Binding HasScript}" ScrollChanged="OnOutputScrolled" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
                 <local:ScrollSafeTextBlock Text="{Binding OutputText}" TextWrapping="Wrap" Margin="14,10,14,14" FontFamily="Menlo, Consolas, DejaVu Sans Mono, monospace" FontSize="12" />

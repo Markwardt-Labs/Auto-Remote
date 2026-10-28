@@ -332,7 +332,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     public void Fail(string message) => Error = message;
 
     /// <summary>
-    /// Asks for a script or task file to be run, as double tapping it does; does nothing for any other node.
+    /// Asks for a script or task file to be run, as double clicking it does on the desktop and long tapping it does on mobile; does nothing for any other node.
     /// </summary>
     /// <param name="node">The node.</param>
     public void Run(FileNode node)

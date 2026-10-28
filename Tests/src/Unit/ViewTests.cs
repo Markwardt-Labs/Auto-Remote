@@ -587,6 +587,63 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal(string.Empty, after);
     }
 
+    [Theory]
+    [InlineData(false, true, true, false)]
+    [InlineData(true, true, false, true)]
+    [InlineData(false, false, false, true)]
+    public async Task HomeView_LongTapRunsAScriptOnMobileButNotATapOrAMovingFinger(bool move, bool wait, bool runs, bool previews)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }] });
+        connection.Setup(x => x.ReadFile(workspace.Id, "a.cs", It.IsAny<CancellationToken>())).ReturnsAsync(new FileContent { Path = "a.cs", Text = "x" });
+
+        (List<string> requested, string? previewed) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            model.Active!.Files.Start().GetAwaiter().GetResult();
+            model.Active.ShowFilesCommand.Execute(null);
+            List<string> requested = [];
+            model.Active.Files.ScriptRequested += requested.Add;
+            HomeView view = new() { DataContext = model, FileHoldDelay = TimeSpan.FromMilliseconds(30) };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            TextBlock name = window.GetVisualDescendants().OfType<TextBlock>().First(block => block.Text == "a.cs" && block.IsEffectivelyVisible);
+            Avalonia.Input.PointerPointProperties properties = new(Avalonia.Input.RawInputModifiers.LeftMouseButton, Avalonia.Input.PointerUpdateKind.LeftButtonPressed);
+            Avalonia.Input.Pointer pointer = new(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true);
+            Avalonia.Point point = Avalonia.VisualExtensions.TranslatePoint(name, new Avalonia.Point(2, 2), window)!.Value;
+            name.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(name, pointer, window, point, 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+
+            if (move)
+            {
+                name.RaiseEvent(new Avalonia.Input.PointerEventArgs(Avalonia.Input.InputElement.PointerMovedEvent, name, pointer, window, new Avalonia.Point(point.X, point.Y + 40), 1, properties, Avalonia.Input.KeyModifiers.None));
+            }
+
+            if (wait)
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    Thread.Sleep(100);
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                }
+            }
+
+            name.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(name, pointer, window, point, 1, properties, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left) { RoutedEvent = Avalonia.Input.InputElement.PointerReleasedEvent });
+            string? previewed = model.Active.Files.Preview?.Path;
+            window.Close();
+            return (requested, previewed);
+        });
+
+        Assert.Equal(runs, requested.Contains("a.cs"));
+        Assert.Equal(previews, previewed is not null);
+    }
+
     [Fact]
     public async Task HomeView_GitPromptFocusesItsBoxEscapeCancelsAndEnterSubmits()
     {
