@@ -24,6 +24,73 @@ public sealed class ChatViewModelTests
     }
 
     [Fact]
+    public void HasContent_IsTrueForTextOrAFileAndOtherwiseTheReviewCommandIsOffered()
+    {
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        Assert.Equal((false, true, false), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null)));
+
+        chat.Input = "  ";
+        Assert.False(chat.HasContent);
+
+        chat.Input = "fix it";
+        Assert.Equal((true, false, true), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null)));
+
+        chat.Input = string.Empty;
+        chat.Attach("a.txt", new byte[] { 1 });
+        Assert.Equal((true, false, true), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null)));
+        Assert.Contains(nameof(ChatViewModel.HasContent), changed);
+    }
+
+    [Fact]
+    public async Task Review_SendsTheReviewPromptAsTheUsersMessageWithoutTouchingTheMessageBox()
+    {
+        string? sent = null;
+        connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => sent = text).Returns(Task.CompletedTask);
+        int started = 0;
+        chat.PromptStarted += () => started++;
+
+        chat.ReviewCommand.Execute(null);
+        for (int attempt = 0; attempt < 100 && sent is null; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal("review workspace and changes, fix any problems or inconsistencies", sent);
+        Assert.Equal(("review workspace and changes, fix any problems or inconsistencies", 1, string.Empty), (chat.ReviewPrompt, started, chat.Input));
+        connection.Verify(x => x.UploadAttachment(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Review_WhenTheServerRefusesReportsTheFailureAndDoesNotPutThePromptInTheMessageBox()
+    {
+        connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("A script is running."));
+        bool failed = false;
+        chat.PromptFailed += () => failed = true;
+
+        chat.ReviewCommand.Execute(null);
+        for (int attempt = 0; attempt < 100 && !failed; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.True(failed);
+        Assert.Equal("A script is running.", chat.Error);
+        Assert.Equal(string.Empty, chat.Input);
+    }
+
+    [Fact]
+    public void Review_IsUnavailableWhileAScriptOrGitBlocksTheAi()
+    {
+        chat.BlockReason = "A script is running, wait for it to finish";
+
+        Assert.False(chat.ReviewCommand.CanExecute(null));
+
+        chat.BlockReason = null;
+        Assert.True(chat.ReviewCommand.CanExecute(null));
+    }
+
+    [Fact]
     public async Task Start_RaisesLoadedOnceTheConversationIsShown()
     {
         connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }] });

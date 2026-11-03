@@ -18,13 +18,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         this.connection = connection;
         this.workspaceId = workspaceId;
         this.drafts = drafts;
-        SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && (!string.IsNullOrWhiteSpace(input) || Attachments.Count > 0));
+        SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && HasContent);
+        ReviewCommand = new AsyncCommand(_ => Review(), () => blockReason is null && !HasContent);
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
         DictateCommand = new AsyncCommand(_ => recording ? StopDictation() : StartDictation(), () => !transcribing && (recording || blockReason is null));
         Attachments.CollectionChanged += (_, _) =>
         {
             Raise(nameof(HasAttachments));
+            Raise(nameof(HasContent));
             SendCommand.Refresh();
+            ReviewCommand.Refresh();
         };
     }
 
@@ -114,6 +117,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(Placeholder));
                 SendCommand.Refresh();
+                ReviewCommand.Refresh();
                 DictateCommand.Refresh();
             }
         }
@@ -164,7 +168,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         {
             if (Set(ref input, value))
             {
+                Raise(nameof(HasContent));
                 SendCommand.Refresh();
+                ReviewCommand.Refresh();
                 SaveDraft();
             }
         }
@@ -185,6 +191,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public int MaxAttachment { get; } = 2 * 1024 * 1024;
 
     /// <summary>
+    /// Gets the prompt the review command sends.
+    /// </summary>
+    public string ReviewPrompt { get; } = "review workspace and changes, fix any problems or inconsistencies";
+
+    /// <summary>
+    /// Gets a value indicating whether there is anything to send: text in the message box or a file waiting to go with it. Without it the message box offers the review button instead of the send button.
+    /// </summary>
+    public bool HasContent => !string.IsNullOrWhiteSpace(input) || Attachments.Count > 0;
+
+    /// <summary>
     /// Gets the files waiting to be sent with the next prompt.
     /// </summary>
     public ObservableCollection<ChatAttachment> Attachments { get; } = [];
@@ -203,6 +219,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work, but not while a script or git runs.
     /// </summary>
     public AsyncCommand SendCommand { get; }
+
+    /// <summary>
+    /// Gets the command that asks the AI to review the workspace and its changes and fix any problems or inconsistencies by sending <see cref="ReviewPrompt" />; it is available while nothing is typed, in the same states as <see cref="SendCommand" />.
+    /// </summary>
+    public AsyncCommand ReviewCommand { get; }
 
     /// <summary>
     /// Adds a file to send with the next prompt, unless it is empty or larger than the server accepts.
@@ -581,6 +602,21 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Input = string.Empty;
         Attachments.Clear();
 
+        if (!await Deliver(text, sending) && input.Length == 0 && Attachments.Count == 0)
+        {
+            Input = text;
+
+            foreach (ChatAttachment attachment in sending)
+            {
+                Attachments.Add(attachment);
+            }
+        }
+    }
+
+    private async Task Review() => await Deliver(ReviewPrompt, []);
+
+    private async Task<bool> Deliver(string text, List<ChatAttachment> sending)
+    {
         PromptStarted?.Invoke();
 
         bool sent = await Attempt(async () =>
@@ -600,14 +636,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             PromptFailed?.Invoke();
         }
 
-        if (!sent && input.Length == 0 && Attachments.Count == 0)
-        {
-            Input = text;
-
-            foreach (ChatAttachment attachment in sending)
-            {
-                Attachments.Add(attachment);
-            }
-        }
+        return sent;
     }
 }

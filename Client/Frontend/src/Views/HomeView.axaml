@@ -264,8 +264,13 @@
               </StackPanel>
               <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0" VerticalAlignment="Center">
+                <local:TouchButton Classes="icon" Command="{Binding ReviewCommand}" ToolTip.Tip="Review the workspace and its changes and fix any problems"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowReviewButton, FallbackValue=False}"
+                        VerticalAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource ReviewIconGeometry}" Width="14" Height="14" />
+                </local:TouchButton>
                 <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
-                        IsVisible="{Binding !$parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=True}"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowSendButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
                 <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"

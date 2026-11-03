@@ -436,6 +436,25 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_OffersReviewWhileNothingIsTypedSendOnceSomethingIsAndTheWorkButtonsInsteadWhenTheyApply()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        Assert.Equal((false, true, false), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+
+        model.Chat.Input = "look at Parser.cs";
+        Assert.Equal((false, false, true), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+
+        model.Chat.Input = string.Empty;
+        Assert.Equal((false, true, false), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+        Assert.Equal((true, false, false), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+
+        model.Chat.Input = "and also this";
+        Assert.Equal((false, false, true), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+    }
+
+    [Fact]
     public async Task Workspace_OffersOnlyStopForGitWork()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);

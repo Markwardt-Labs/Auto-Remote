@@ -25,10 +25,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Settings = new SettingsViewModel(connection, workspace);
         Chat.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(ChatViewModel.Input) || args.PropertyName == nameof(ChatViewModel.HasAttachments))
+            if (args.PropertyName == nameof(ChatViewModel.HasContent))
             {
                 Raise(nameof(ShowHaltButtons));
                 Raise(nameof(ShowCancelButton));
+                Raise(nameof(ShowSendButton));
+                Raise(nameof(ShowReviewButton));
             }
         };
         Chat.PromptStarted += () => NotifyWhenReady = true;
@@ -207,7 +209,17 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether the message box offers the work buttons instead of sending: a script or git runs or work is being ended, or the AI works and nothing is typed, so more input could not be sent.
     /// </summary>
-    public bool ShowHaltButtons => State is WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && string.IsNullOrWhiteSpace(Chat.Input) && Chat.Attachments.Count == 0;
+    public bool ShowHaltButtons => State is WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the send button: something is typed or attached and the work buttons do not show.
+    /// </summary>
+    public bool ShowSendButton => !ShowHaltButtons && Chat.HasContent;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and the work buttons do not show.
+    /// </summary>
+    public bool ShowReviewButton => !ShowHaltButtons && !Chat.HasContent;
 
     /// <summary>
     /// Gets a value indicating whether the cancel button shows, which only AI work has: it is working and the work buttons show.
@@ -435,6 +447,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(CanHalt));
         Raise(nameof(ShowHaltButtons));
         Raise(nameof(ShowCancelButton));
+        Raise(nameof(ShowSendButton));
+        Raise(nameof(ShowReviewButton));
         Raise(nameof(IsWorking));
         Raise(nameof(CanCancel));
     }

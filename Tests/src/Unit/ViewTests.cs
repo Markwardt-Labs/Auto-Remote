@@ -376,6 +376,47 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsAReviewIconWhereTheSendButtonIsWhileNothingIsTypedAndSendsTheReviewPrompt()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        string? prompted = null;
+        connection.Setup(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => prompted = text).Returns(Task.CompletedTask);
+
+        (bool emptyReview, bool emptySend, bool typedReview, bool typedSend, bool reviewIsIcon, string? sent) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            TouchButton? Review() => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString()?.StartsWith("Review the workspace", StringComparison.Ordinal) == true);
+            TouchButton? Send() => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && button.Content?.ToString() == "\u2191");
+            bool emptyReview = Review() is not null;
+            bool emptySend = Send() is not null;
+            bool reviewIsIcon = Review() is { } review && review.Classes.Contains("icon") && review.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Any();
+
+            model.Active!.Chat.ReviewCommand.Execute(null);
+            for (int attempt = 0; attempt < 100 && prompted is null; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            model.Active.Chat.Input = "check the parser";
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool typedReview = Review() is not null;
+            bool typedSend = Send() is not null;
+            window.Close();
+            return (emptyReview, emptySend, typedReview, typedSend, reviewIsIcon, prompted);
+        });
+
+        Assert.Equal((true, false, false, true, true), (emptyReview, emptySend, typedReview, typedSend, reviewIsIcon));
+        Assert.Equal("review workspace and changes, fix any problems or inconsistencies", sent);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsAnEqualHistoryTabOnlyWhenTheWorkspaceIsAGitRepository()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
@@ -743,7 +784,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_MessageBoxShowsStopAndCancelInsteadOfSendWhileWorkRunsAndAsksFirst()
+    public async Task HomeView_MessageBoxShowsStopAndCancelInsteadOfReviewAndSendWhileWorkRunsAndAsksFirst()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
@@ -759,7 +800,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             HomeView view = new() { DataContext = model };
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
-            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
+            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.Active?.Chat.ReviewCommand ? "review" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
             string[] ready = Shown();
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
             string[] working = Shown();
@@ -775,7 +816,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (ready, working, enabled, typing, asking, dismiss, !model.IsEditing);
         });
 
-        Assert.Equal(["send"], ready);
+        Assert.Equal(["review"], ready);
         Assert.Equal(["stop", "cancel"], working);
         Assert.Equal([true, false], enabled);
         Assert.True(typing);
