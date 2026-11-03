@@ -37,7 +37,9 @@ internal static class Program
         IPromptService prompts = new PromptService(workspaces, store, providers.Create, events, activity, snapshots);
         IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity);
         IScriptRunner scripts = new ScriptRunner(events, activity);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, new UsageService(providers.Create), events, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), new ModelService(providers.Create));
+        IUsageService usage = new UsageService(providers.Create);
+        IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, events, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), new ModelService(providers.Create), loops);
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, new ConsoleLog()), Console.Out);
         try
         {

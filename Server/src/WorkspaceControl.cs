@@ -6,7 +6,7 @@ namespace Markwardt.AutoRemote.Server;
 internal interface IWorkspaceControl
 {
     /// <summary>
-    /// Stops the work running in a workspace at once and keeps what it did: the workspace is <see cref="WorkspaceState.Stopping" /> meanwhile and <see cref="WorkspaceState.Ready" /> afterwards. A git action cannot be left half done, so stopping it undoes it.
+    /// Stops the work running in a workspace at once, cancels its loop if one runs, and keeps what it did: the workspace is <see cref="WorkspaceState.Stopping" /> meanwhile and <see cref="WorkspaceState.Ready" /> afterwards. A git action cannot be left half done, so stopping it undoes it.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <returns>A task that completes once the workspace is ready.</returns>
@@ -23,7 +23,7 @@ internal interface IWorkspaceControl
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptService prompts, IScriptRunner scripts, IWorkspaceVersioning versioning, IWorkspaceSnapshots snapshots) : IWorkspaceControl
+internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptService prompts, IWorkspaceLoops loops, IScriptRunner scripts, IWorkspaceVersioning versioning, IWorkspaceSnapshots snapshots) : IWorkspaceControl
 {
     /// <inheritdoc />
     public Task Stop(Guid id) => Halt(id, WorkspaceState.Stopping);
@@ -52,6 +52,8 @@ internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptServi
 
         try
         {
+            await loops.Cancel(id);
+
             switch (previous)
             {
                 case WorkspaceState.Working:

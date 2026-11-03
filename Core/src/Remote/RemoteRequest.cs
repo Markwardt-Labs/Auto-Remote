@@ -31,6 +31,11 @@ public sealed record RemoteRequest
     public Guid? ParentId { get; init; }
 
     /// <summary>
+    /// Gets the settings of the loop for <see cref="RemoteCommand.StartLoop" />.
+    /// </summary>
+    public LoopSettings? Loop { get; init; }
+
+    /// <summary>
     /// Gets the AI service for <see cref="RemoteCommand.ConfigureWorkspace" />, <see cref="RemoteCommand.GetUsage" /> or <see cref="RemoteCommand.ListModels" />.
     /// </summary>
     public AiService? Service { get; init; }

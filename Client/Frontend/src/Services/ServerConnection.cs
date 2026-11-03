@@ -487,6 +487,32 @@ internal interface IServerConnection : IAsyncDisposable
     Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation);
 
     /// <summary>
+    /// Starts a loop of the AI in a workspace: the prompt is sent over and over on the interval until the condition ends the loop or it is cancelled.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="loop">The prompt, the interval and the condition.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task StartLoop(Guid id, LoopSettings loop, CancellationToken cancellation);
+
+    /// <summary>
+    /// Cancels the loop of a workspace without stopping the run in progress.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task CancelLoop(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads the loop that runs in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The loop, or <see langword="null" /> when none runs.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<LoopInfo?> GetLoop(Guid id, CancellationToken cancellation);
+
+    /// <summary>
     /// Reads the model and the values of its settings that a workspace's AI session runs with.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -868,6 +894,15 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetUsage, Service = service }, cancellation)).Usage ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task StartLoop(Guid id, LoopSettings loop, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StartLoop, WorkspaceId = id, Loop = loop }, cancellation);
+
+    /// <inheritdoc />
+    public async Task CancelLoop(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelLoop, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<LoopInfo?> GetLoop(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetLoop, WorkspaceId = id }, cancellation)).Loop;
 
     /// <inheritdoc />
     public async Task<WorkspaceAi> GetWorkspaceAi(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetWorkspaceAi, WorkspaceId = id }, cancellation)).Ai ?? throw Malformed();

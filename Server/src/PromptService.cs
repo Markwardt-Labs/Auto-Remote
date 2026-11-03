@@ -50,13 +50,30 @@ internal interface IPromptService
     Task SetAi(Guid id, string model, IReadOnlyDictionary<string, string> settings, CancellationToken cancellation);
 
     /// <summary>
-    /// Sends a prompt to the AI in a workspace. A prompt sent while the AI is working is given to it at once and taken into that work. The prompt and the replies, and the state of the work, are published as events.
+    /// Keeps a workspace's AI session open, or lets the idle timer close it again. A loop holds it for as long as it runs, since the session closing between two runs would only cost the next run a start.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="held">Whether the session is held open.</param>
+    void Hold(Guid id, bool held);
+
+    /// <summary>
+    /// Sends a prompt to the AI in a workspace. A prompt sent while the AI is working is steered into the work at once, and because the AI may have taken it for noise, it is followed up with a turn of its own after the work unless the conversation shows the AI got it. A prompt that arrives as the work ends is queued and sent right after, in order, so none is ever lost; the workspace stays working until all of them are done. The prompt and the replies, and the state of the work, are published as events.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The prompt.</param>
     /// <param name="cancellation">Cancels the send.</param>
     /// <exception cref="RequestException">The workspace is unknown, the prompt is empty, or the AI could not take it.</exception>
     Task Prompt(Guid id, string text, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sends a prompt to the AI in a workspace like <see cref="Prompt(Guid, string, CancellationToken)" />, but only when the AI is not working at that moment, so the prompt is never steered into or queued behind work it did not start.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="onlyWhenIdle">Whether to refuse the prompt while the AI is working.</param>
+    /// <param name="cancellation">Cancels the send.</param>
+    /// <exception cref="RequestException">The workspace is unknown, the prompt is empty, the AI could not take it, or the AI is working and <paramref name="onlyWhenIdle" /> is set.</exception>
+    Task Prompt(Guid id, string text, bool onlyWhenIdle, CancellationToken cancellation);
 
     /// <summary>
     /// Stores a file the user attached to a prompt, so the AI can read it by its path.
@@ -77,7 +94,7 @@ internal interface IPromptService
     Task Release(Guid id);
 
     /// <summary>
-    /// Stops a workspace's AI at once, whatever it is doing; the conversation stays, so the next prompt carries on from what the AI had done. Does nothing when the AI is not working.
+    /// Stops a workspace's AI at once, whatever it is doing, and forgets the prompts steered into the work or waiting behind it; the conversation stays, so the next prompt carries on from what the AI had done. Does nothing when the AI is not working.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <returns>A task that completes once the AI no longer counts as working.</returns>
@@ -119,6 +136,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly TimeSpan shutdownWait = TimeSpan.FromSeconds(10);
 
+    private readonly TimeSpan windowInterval = TimeSpan.FromMinutes(1);
+
     private readonly string[] images = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
 
     private readonly string interruptedMarker = "[Request interrupted by user";
@@ -126,6 +145,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     private readonly string reminderMarker = "<system-reminder>";
 
     private readonly string attachedPrefix = "Attached file: ";
+
+    private readonly string steeringNote = "You were sent this message while you were working and it may have been missed. If you already acted on it, say so briefly instead of doing it again; otherwise do it now.";
 
     private ServerConfig config = new() { Port = 0, Key = string.Empty };
 
@@ -195,7 +216,10 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     /// <inheritdoc />
-    public async Task Prompt(Guid id, string text, CancellationToken cancellation)
+    public Task Prompt(Guid id, string text, CancellationToken cancellation) => Prompt(id, text, false, cancellation);
+
+    /// <inheritdoc />
+    public async Task Prompt(Guid id, string text, bool onlyWhenIdle, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -209,6 +233,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         try
         {
             bool started = !live.Working;
+
+            if (!started && onlyWhenIdle)
+            {
+                throw new RequestException("The AI is working.");
+            }
 
             if (started && !activity.TryEnter(id, WorkspaceState.Working))
             {
@@ -240,10 +269,44 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             PromptOptions options = await Options(text, cancellation);
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.User, Text = text } });
 
+            bool queued = false;
+            bool steering = false;
+
             lock (live.Sync)
             {
-                live.Expecting = session.State == PromptSessionState.Waiting;
+                bool busy = live.Working || session.State != PromptSessionState.Waiting;
+
+                if (busy && onlyWhenIdle)
+                {
+                    throw new RequestException("The AI is working.");
+                }
+
+                if (busy && session.State == PromptSessionState.Working)
+                {
+                    steering = true;
+                    live.Steered.Add((text, options));
+                }
+                else if (busy)
+                {
+                    live.Pending.Enqueue((text, options));
+                    queued = true;
+                }
+                else
+                {
+                    live.Expecting = true;
+                }
+
+                if (!queued)
+                {
+                    live.Sending++;
+                }
+
                 SetWorking(id, live, true);
+            }
+
+            if (queued)
+            {
+                return;
             }
 
             try
@@ -254,15 +317,32 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             {
                 lock (live.Sync)
                 {
-                    live.Expecting = false;
+                    live.Sending--;
 
-                    if (session.State == PromptSessionState.Waiting)
+                    if (steering)
                     {
-                        SetWorking(id, live, false);
+                        int index = live.Steered.FindLastIndex(item => item.Text == text);
+
+                        if (index >= 0)
+                        {
+                            live.Steered.RemoveAt(index);
+                        }
                     }
+                    else
+                    {
+                        live.Expecting = false;
+                    }
+
+                    Reconcile(id, live, session);
                 }
 
                 throw new RequestException(exception.Message);
+            }
+
+            lock (live.Sync)
+            {
+                live.Sending--;
+                Reconcile(id, live, session);
             }
         }
         catch (Exception) when (!live.Working)
@@ -340,6 +420,22 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     /// <inheritdoc />
+    public void Hold(Guid id, bool held)
+    {
+        Live live = lives.GetOrAdd(id, _ => new Live());
+
+        lock (live.Sync)
+        {
+            live.Held = held;
+
+            if (!held && !live.Working && live.Session is not null)
+            {
+                Expire(id, live);
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<string> Attach(Guid id, string name, string data, CancellationToken cancellation)
     {
         await workspaces.Get(id, cancellation);
@@ -370,7 +466,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
-            if (!live.Working && Detach(live) is { } session)
+            if (!live.Working && !live.Held && Detach(live) is { } session)
             {
                 await session.DisposeAsync();
             }
@@ -396,6 +492,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             lock (live.Sync)
             {
+                live.Pending.Clear();
+                live.Steered.Clear();
+                live.Epoch++;
                 StopIdle(live);
                 session = live.Session;
             }
@@ -403,6 +502,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         finally
         {
             live.Gate.Release();
+        }
+
+        for (int attempt = 0; attempt < 100 && session is not null && live.Working && Starting(live); attempt++)
+        {
+            await Task.Delay(20);
         }
 
         if (session is not null && live.Working)
@@ -442,6 +546,14 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             catch (Exception exception) when (exception is PromptSessionException or IOException or UnauthorizedAccessException or ArgumentException)
             {
             }
+        }
+    }
+
+    private bool Starting(Live live)
+    {
+        lock (live.Sync)
+        {
+            return live.Expecting;
         }
     }
 
@@ -520,7 +632,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private async Task<IPromptSession> Session(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
     {
-        if (live.Session is not null && live.Service != workspace.Service && !live.Working)
+        if (live.Session is not null && live.Service != workspace.Service && !live.Working && !live.Held)
         {
             IPromptSession? old = Detach(live);
 
@@ -763,6 +875,13 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = reply } });
                 break;
             case PromptFailureEvent failure:
+                lock (live.Sync)
+                {
+                    live.Pending.Clear();
+                    live.Steered.Clear();
+                    live.Epoch++;
+                }
+
                 events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = failure.Exception is PromptToolStartException ? $"{service.Label()} could not be started: {failure.Message}" : failure.Message });
                 break;
             case PromptStateEvent changed:
@@ -773,6 +892,158 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
                 break;
         }
+    }
+
+    private async Task Drain(Guid id, Live live, IPromptSession session)
+    {
+        bool again = true;
+
+        try
+        {
+            while (again)
+            {
+                List<(string Text, PromptOptions Options)> steered;
+                int epoch;
+
+                lock (live.Sync)
+                {
+                    steered = [.. live.Steered];
+                    live.Steered.Clear();
+                    epoch = live.Epoch;
+                }
+
+                if (steered.Count > 0)
+                {
+                    List<(string Text, PromptOptions Options)> missed = await Unanswered(session, steered);
+
+                    lock (live.Sync)
+                    {
+                        foreach ((string text, PromptOptions options) in live.Epoch == epoch ? missed : [])
+                        {
+                            live.Pending.Enqueue((text, options with { Notes = [.. options.Notes, steeringNote] }));
+                        }
+                    }
+                }
+
+                await live.Gate.WaitAsync(CancellationToken.None);
+
+                try
+                {
+                    (string Text, PromptOptions Options) next;
+
+                    lock (live.Sync)
+                    {
+                        if (!ReferenceEquals(live.Session, session))
+                        {
+                            live.Pending.Clear();
+                            live.Steered.Clear();
+                            live.Draining = false;
+                            SetWorking(id, live, false);
+                            return;
+                        }
+
+                        if (!live.Pending.TryDequeue(out next))
+                        {
+                            if (live.Steered.Count == 0)
+                            {
+                                live.Draining = false;
+                                SetWorking(id, live, false);
+                                Expire(id, live);
+                                return;
+                            }
+
+                            continue;
+                        }
+
+                        live.Expecting = true;
+                    }
+
+                    await session.Send(next.Text, next.Options, CancellationToken.None);
+                }
+                finally
+                {
+                    live.Gate.Release();
+                }
+
+                lock (live.Sync)
+                {
+                    again = (live.Pending.Count > 0 || live.Steered.Count > 0) && session.State == PromptSessionState.Waiting && !live.Expecting && live.Sending == 0;
+                    live.Draining = again;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or IOException)
+        {
+            lock (live.Sync)
+            {
+                live.Pending.Clear();
+                live.Steered.Clear();
+                live.Expecting = false;
+                live.Draining = false;
+                SetWorking(id, live, false);
+            }
+
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = exception.Message });
+        }
+    }
+
+    private async Task<List<(string Text, PromptOptions Options)>> Unanswered(IPromptSession session, List<(string Text, PromptOptions Options)> steered)
+    {
+        List<string> inputs = [];
+
+        try
+        {
+            await foreach (PromptHistoryEntry entry in session.GetHistory().Take(60))
+            {
+                if (entry.Event is PromptInputEvent)
+                {
+                    inputs.Add(entry.Text);
+                }
+            }
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException or ObjectDisposedException)
+        {
+        }
+
+        List<(string Text, PromptOptions Options)> missed = [];
+
+        foreach ((string text, PromptOptions options) in steered)
+        {
+            int found = inputs.FindIndex(input => input.Contains(text.Trim(), StringComparison.Ordinal));
+
+            if (found >= 0)
+            {
+                inputs.RemoveAt(found);
+            }
+            else
+            {
+                missed.Add((text, options));
+            }
+        }
+
+        return missed;
+    }
+
+    private void Reconcile(Guid id, Live live, IPromptSession session)
+    {
+        if (!ReferenceEquals(live.Session, session) || live.Expecting || live.Sending > 0 || session.State != PromptSessionState.Waiting)
+        {
+            return;
+        }
+
+        if (live.Pending.Count > 0 || live.Steered.Count > 0)
+        {
+            if (!live.Draining)
+            {
+                live.Draining = true;
+                _ = Drain(id, live, session);
+            }
+
+            return;
+        }
+
+        SetWorking(id, live, false);
+        Expire(id, live);
     }
 
     private void Sync(Guid id, Live live, IPromptSession session, PromptSessionState state)
@@ -787,10 +1058,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             live.Expecting = false;
             SetWorking(id, live, true);
         }
-        else if (!live.Expecting)
+        else
         {
-            SetWorking(id, live, false);
-            Expire(id, live);
+            Reconcile(id, live, session);
         }
     }
 
@@ -877,6 +1147,18 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public AiService Service { get; set; }
 
         public Carry? Carried { get; set; }
+
+        public bool Held { get; set; }
+
+        public Queue<(string Text, PromptOptions Options)> Pending { get; } = new();
+
+        public bool Draining { get; set; }
+
+        public int Epoch { get; set; }
+
+        public int Sending { get; set; }
+
+        public List<(string Text, PromptOptions Options)> Steered { get; } = [];
 
         public Tally Tally { get; set; } = new();
 

@@ -28,6 +28,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IModelService> models = new();
 
+    private readonly Mock<IWorkspaceLoops> loops = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -38,7 +40,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object, speech.Object, models.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object, speech.Object, models.Object, loops.Object);
     }
 
     [Fact]
@@ -281,6 +283,48 @@ public sealed class RequestHandlerTests
         Assert.Contains("Stop the AI's work", switching.Error);
         Assert.Null(same.Error);
         prompts.Verify(x => x.SetAi(workspace.Id, "opus", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_StartLoop_PassesTheSettingsOnWhileTheAiCanTakeInput()
+    {
+        LoopSettings settings = new() { Prompt = "check", Condition = LoopCondition.Runs, Runs = 3, IntervalSeconds = 60 };
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.StartLoop, WorkspaceId = workspace.Id, Loop = settings }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.StartLoop, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        RemoteResponse busy = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.StartLoop, WorkspaceId = workspace.Id, Loop = settings }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        Assert.Contains("needs a loop", missing.Error);
+        Assert.NotNull(busy.Error);
+        loops.Verify(x => x.Start(workspace.Id, settings, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_CancelLoopAndGetLoop_CancelTheLoopAndAnswerWithIt()
+    {
+        LoopInfo info = new() { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UtcNow, Runs = 2 };
+        loops.Setup(x => x.Get(workspace.Id)).Returns(info);
+
+        RemoteResponse read = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetLoop, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        RemoteResponse cancelled = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.CancelLoop, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal(info, read.Loop);
+        Assert.Null(cancelled.Error);
+        loops.Verify(x => x.Cancel(workspace.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_ConfigureWorkspace_RefusesSwitchingTheServiceWhileALoopRuns()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        loops.Setup(x => x.Get(workspace.Id)).Returns(new LoopInfo { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UtcNow });
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex, Model = "gpt-5.6-terra" }, owner, CancellationToken.None);
+
+        Assert.Contains("Cancel the loop", response.Error);
+        workspaces.Verify(x => x.Configure(It.IsAny<Guid>(), It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

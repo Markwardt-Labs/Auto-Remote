@@ -455,6 +455,65 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_FollowsTheLoopOfTheServerAndOffersTheLoopButtonOnlyWhileNoneRuns()
+    {
+        LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 300, Condition = LoopCondition.Runs, Runs = 3 }, StartedAt = DateTimeOffset.UtcNow, Runs = 1 };
+        connection.Setup(x => x.GetLoop(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync((LoopInfo?)null);
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        Assert.Equal((true, false, false, false), (model.ShowLoopButton, model.IsLooping, model.ShowCancelLoopButton, model.ShowSendButton));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop });
+
+        Assert.Equal((false, true, true), (model.ShowLoopButton, model.IsLooping, model.ShowCancelLoopButton));
+        Assert.Contains("every 5 min", model.LoopTip);
+        Assert.Contains("3 runs in all", model.LoopTip);
+        Assert.Contains("1 run so far", model.LoopTip);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Text = "The loop made all its runs." });
+
+        Assert.Equal((true, false, false), (model.ShowLoopButton, model.IsLooping, model.ShowCancelLoopButton));
+        Assert.Equal("The loop made all its runs.", model.Chat.Notice);
+        Assert.True(model.Chat.HasNotice);
+    }
+
+    [Fact]
+    public async Task Workspace_IgnoresTheLoopEventsOfOtherWorkspacesAndReadsTheLoopWhenItStartsAndAfterAReconnect()
+    {
+        LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UtcNow };
+        connection.Setup(x => x.GetLoop(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(loop);
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        await Task.Delay(100);
+        Assert.True(model.IsLooping);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = Guid.NewGuid() });
+        Assert.True(model.IsLooping);
+
+        connection.Setup(x => x.GetLoop(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync((LoopInfo?)null);
+        connection.Raise(x => x.Reconnected += null);
+        await Task.Delay(150);
+        Assert.False(model.IsLooping);
+    }
+
+    [Fact]
+    public async Task Workspace_KeepsTheCancelLoopButtonNextToTheWorkButtonsAndCancellingTheLoopDoesNotStopTheWork()
+    {
+        LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UtcNow };
+        connection.Setup(x => x.GetLoop(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(loop);
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        await Task.Delay(100);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+
+        Assert.Equal((true, true, true), (model.ShowHaltButtons, model.ShowCancelLoopButton, model.IsLooping));
+
+        model.CancelLoopCommand.Execute(null);
+        await Task.Delay(100);
+
+        connection.Verify(x => x.CancelLoop(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.StopWorkspace(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        connection.Verify(x => x.CancelWorkspace(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
     public async Task Workspace_OffersOnlyStopForGitWork()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);

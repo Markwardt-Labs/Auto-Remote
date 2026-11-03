@@ -149,25 +149,137 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Prompt_SentWhileTheAiWorksIsGivenToTheWorkAtOnceInTheSameWorkingSpan()
+    public async Task Prompt_SentWhileTheAiWorksIsSteeredIntoTheWorkAtOnceAndFollowedUpAfterwardsBecauseTheAiMayHaveMissedIt()
     {
         TaskCompletionSource release = new();
-        prompter.OnCreate = session => session.ReplyWith(prompt => Slow(release.Task, "the reply"));
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
 
         await service.Prompt(workspace.Id, "one", CancellationToken.None);
         await Until(() => Session.Prompts.Count == 1);
         await service.Prompt(workspace.Id, "two", CancellationToken.None);
-        Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
         await Until(() => Session.Prompts[0].Steered.Count == 1);
+
+        Assert.Equal(["two"], Session.Prompts[0].Steered);
+        Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
+        Assert.Single(Session.Prompts);
 
         release.SetResult();
         await Until(() => !service.IsBusy(workspace.Id));
 
-        Assert.Equal(["two"], Session.Prompts.Single().Steered);
+        Assert.Equal(["one", "two"], Session.Prompts.Select(prompt => prompt.Text).ToList());
+        Assert.Contains("may have been missed", Session.Prompts[1].Notes.Single());
         Assert.Equal(["one", "two"], Messages(MessageRole.User));
-        Assert.Equal(["the reply"], Messages(MessageRole.Assistant));
+        Assert.Equal(["first reply", "reply to two"], Messages(MessageRole.Assistant));
         Assert.Equal([true, false], Events(RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working == true).ToList());
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
         snapshots.Verify(x => x.Capture(It.IsAny<WorkspaceInfo>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Prompt_SentWhileTheAiWorksStaysWorkingUntilTheFollowUpIsDoneSoTheWorkspaceNeverReturnsToReadyWithInputOutstanding()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        List<string> order;
+
+        lock (events)
+        {
+            order = [.. events.Select(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged ? remoteEvent.Working == true ? "working" : "idle" : remoteEvent.Kind == RemoteEventKind.MessageAdded ? remoteEvent.Message!.Text : string.Empty).Where(item => item.Length > 0)];
+        }
+
+        Assert.Equal(["one", "working", "two", "first reply", "reply to two", "idle"], order);
+    }
+
+    [Fact]
+    public async Task Prompt_ThatIsOnlyForAnIdleAiIsRefusedWhileTheAiWorksAndSentOtherwise()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one", true, CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+
+        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "two", true, CancellationToken.None));
+
+        Assert.Equal("The AI is working.", exception.Message);
+        Assert.Empty(Session.Prompts[0].Steered);
+        Assert.Equal(["one"], Messages(MessageRole.User));
+
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+        await service.Prompt(workspace.Id, "three", true, CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Equal(["one", "three"], Session.Prompts.Select(prompt => prompt.Text).ToList());
+    }
+
+    [Fact]
+    public async Task Prompt_SentRightAsTheWorkFinishesIsNeverLostWhateverTheTiming()
+    {
+        prompter.OnCreate = session => session.ReplyWith(prompt => [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        Random random = new(7);
+        int count = 60;
+
+        for (int number = 0; number < count; number++)
+        {
+            await service.Prompt(workspace.Id, $"p{number}", CancellationToken.None);
+
+            if (random.Next(3) == 0)
+            {
+                await Task.Delay(random.Next(0, 4));
+            }
+        }
+
+        await Until(() => !service.IsBusy(workspace.Id) && Events(RemoteEventKind.WorkingChanged).Count(remoteEvent => remoteEvent.Working == true) == Events(RemoteEventKind.WorkingChanged).Count(remoteEvent => remoteEvent.Working == false));
+
+        List<string> expected = [.. Enumerable.Range(0, count).Select(number => $"p{number}")];
+        Assert.Equal(expected, Messages(MessageRole.User));
+        HashSet<string> worked = [.. Session.Prompts.SelectMany(prompt => prompt.Text.Split("\n\n"))];
+        Assert.Equal(expected.Count, expected.Count(worked.Contains));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+        Assert.False(Events(RemoteEventKind.WorkingChanged).Last().Working);
+    }
+
+    [Fact]
+    public async Task Prompt_SentWhileTheAiWorksIsNotFollowedUpWhenTheConversationShowsItAsInputTheAiGot()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one and two" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one and two", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+        await Until(() => Session.Prompts[0].Steered.Count == 1);
+
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+        await Task.Delay(300);
+
+        Assert.Single(Session.Prompts);
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Interrupt_ForgetsTheInputSteeredIntoTheWorkButNotTheOnesSentAfterwards()
+    {
+        prompter.OnCreate = session => session.Hang().Reply("fine");
+        await service.Prompt(workspace.Id, "long", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "waiting", CancellationToken.None);
+
+        await service.Interrupt(workspace.Id);
+        await Task.Delay(300);
+
+        Assert.Single(Session.Prompts);
+        Assert.False(service.IsBusy(workspace.Id));
+        await service.Prompt(workspace.Id, "again", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+        Assert.Equal(["long", "again"], Session.Prompts.Select(prompt => prompt.Text).ToList());
     }
 
     [Theory]
@@ -510,12 +622,18 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Failure_IsReportedEndsTheWorkAndTheNextPromptStartsAgain()
+    public async Task Failure_IsReportedEndsTheWorkDropsThePromptsWaitingAndTheNextPromptStartsAgain()
     {
-        prompter.OnCreate = session => session.Fail("boom").Reply("fine");
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one" ? Failing(release.Task) : [new PromptMessageEvent { Text = "fine" }]);
 
         await service.Prompt(workspace.Id, "one", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "waiting", CancellationToken.None);
+        release.SetResult();
         await Until(() => !service.IsBusy(workspace.Id));
+        await Task.Delay(200);
+        Assert.Single(Session.Prompts);
 
         Assert.Equal(["boom"], Events(RemoteEventKind.Failed).Select(remoteEvent => remoteEvent.Error).ToList());
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
@@ -747,6 +865,12 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Empty(history.Messages);
         Assert.Equal(legacy, Session.AttachedTo);
         Assert.Equal(Session.Id, workspace.AiSessionId);
+    }
+
+    private IEnumerable<PromptEvent> Failing(Task gate)
+    {
+        gate.GetAwaiter().GetResult();
+        return [new PromptFailureEvent { Message = "boom" }];
     }
 
     private IEnumerable<PromptEvent> Slow(Task gate, string text)

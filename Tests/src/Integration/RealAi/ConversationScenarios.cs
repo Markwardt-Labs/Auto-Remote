@@ -97,7 +97,7 @@ public sealed class ConversationScenarios
     [RealAiTheory]
     [InlineData(AiService.ClaudeCode)]
     [InlineData(AiService.Codex)]
-    public async Task Prompt_SentWhileTheAiWorksIsTakenIntoThatWorkInOneWorkingSpan(AiService service)
+    public async Task Prompt_SentWhileTheAiWorksIsWorkedIntoItsWorkInOneWorkingSpan(AiService service)
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("steer", service);
@@ -111,6 +111,26 @@ public sealed class ConversationScenarios
         Assert.Equal("BLUE", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "note.txt"))).Trim());
         Assert.Equal([true, false], server.Events().Skip(mark).Where(item => item.Kind == RemoteEventKind.WorkingChanged).Select(item => item.Working == true).ToList());
         Assert.Equal(2, server.Events().Skip(mark).Count(item => item.Kind == RemoteEventKind.MessageAdded && item.Message!.Role == MessageRole.User));
+        Assert.Empty(server.Failures(workspace));
+    }
+
+    [RealAiTheory]
+    [InlineData(AiService.ClaudeCode)]
+    public async Task Prompt_SentAtAnyMomentWhileTheAiWorksIsAlwaysWorkedOnBeforeTheWorkspaceIsReadyAgain(AiService service)
+    {
+        await using RealServer server = await RealServer.Start();
+        WorkspaceInfo workspace = await server.Workspace("late", service);
+        int mark = server.Mark();
+
+        await server.Connection.Prompt(workspace.Id, "Run the shell command `sleep 6`, then reply with the word DONE.", CancellationToken.None);
+        await Task.Delay(2000);
+        await server.Connection.Prompt(workspace.Id, "Also create a file named first.txt containing the word ONE.", CancellationToken.None);
+        await Task.Delay(3000);
+        await server.Connection.Prompt(workspace.Id, "Also create a file named second.txt containing the word TWO.", CancellationToken.None);
+        await server.Idle(workspace, mark);
+
+        Assert.Equal("ONE", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "first.txt"))).Trim());
+        Assert.Equal("TWO", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "second.txt"))).Trim());
         Assert.Empty(server.Failures(workspace));
     }
 }

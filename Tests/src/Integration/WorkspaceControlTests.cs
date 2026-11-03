@@ -13,6 +13,8 @@ public sealed class WorkspaceControlTests : IDisposable
 
     private readonly WorkspaceControl control;
 
+    private readonly WorkspaceLoops loops;
+
     private WorkspaceInfo workspace;
 
     private readonly string work;
@@ -42,7 +44,8 @@ public sealed class WorkspaceControlTests : IDisposable
         FakePromptProvider prompter = new() { OnCreate = session => session.Hang().Hang(), Models = [new PromptModel { Id = "sonnet", CallsTools = true }] };
         prompts = new PromptService(workspaces.Object, store.Object, (_, _) => prompter, hub, activity, snapshots);
         prompts.Configure(new ServerConfig { Port = 0, Key = "k" }, CancellationToken.None);
-        control = new WorkspaceControl(activity, prompts, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots);
+        loops = new WorkspaceLoops(workspaces.Object, prompts, activity, Mock.Of<IUsageService>(), hub, TimeSpan.FromMilliseconds(20));
+        control = new WorkspaceControl(activity, prompts, loops, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots);
     }
 
     public void Dispose() => temp.Dispose();
@@ -125,5 +128,44 @@ public sealed class WorkspaceControlTests : IDisposable
         Assert.Equal("orig", Read("a.txt"));
         Assert.False(File.Exists(Path.Combine(work, "created.txt")));
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    private async Task StartLoopedWork()
+    {
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "again", Condition = LoopCondition.Forever }, CancellationToken.None);
+        for (int attempt = 0; attempt < 100 && !prompts.IsBusy(workspace.Id); attempt++)
+        {
+            await Task.Delay(30);
+        }
+
+        Assert.NotNull(loops.Get(workspace.Id));
+        Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Stop_DuringALoopStopsTheRunAndCancelsTheLoopSoNoRunFollows()
+    {
+        await StartLoopedWork();
+
+        await control.Stop(workspace.Id);
+        await Task.Delay(500);
+
+        Assert.Null(loops.Get(workspace.Id));
+        Assert.False(prompts.IsBusy(workspace.Id));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Cancel_DuringALoopRevertsTheRunAndCancelsTheLoop()
+    {
+        await StartLoopedWork();
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+
+        await control.Cancel(workspace.Id);
+        await Task.Delay(500);
+
+        Assert.Null(loops.Get(workspace.Id));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+        Assert.Equal("orig", Read("a.txt"));
     }
 }

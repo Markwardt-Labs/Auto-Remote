@@ -552,6 +552,14 @@ public sealed partial class HomeView : UserControl
         }
     }
 
+    private void CloseLoop(object? sender, Avalonia.Input.PointerPressedEventArgs args)
+    {
+        if (DataContext is HomeViewModel { Active: { } active })
+        {
+            active.Loop.IsOpen = false;
+        }
+    }
+
     private void CloseUsage(object? sender, Avalonia.Input.PointerPressedEventArgs args)
     {
         if (DataContext is HomeViewModel model)

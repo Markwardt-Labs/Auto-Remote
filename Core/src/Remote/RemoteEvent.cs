@@ -41,7 +41,12 @@ public sealed record RemoteEvent
     public ScriptRun? Script { get; init; }
 
     /// <summary>
-    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run.
+    /// Gets the loop that runs in the workspace, for <see cref="RemoteEventKind.LoopChanged" />, or <see langword="null" /> when the loop ended.
+    /// </summary>
+    public LoopInfo? Loop { get; init; }
+
+    /// <summary>
+    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself.
     /// </summary>
     public string? Text { get; init; }
 
@@ -105,5 +110,10 @@ public enum RemoteEventKind
     /// <summary>
     /// The workspaces or the groups changed on the server: one was created, deleted, renamed, moved, reordered or configured. The event carries no details, so a client lists the workspaces again.
     /// </summary>
-    WorkspacesChanged
+    WorkspacesChanged,
+
+    /// <summary>
+    /// A loop of the AI started, made a run, or ended; <see cref="RemoteEvent.Loop" /> is the loop, or empty once it ended, and then <see cref="RemoteEvent.Text" /> says why when it ended by itself.
+    /// </summary>
+    LoopChanged
 }

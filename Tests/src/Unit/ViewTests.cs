@@ -417,6 +417,61 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsALoopButtonNextToReviewOpensThePanelAndShowsTheLoopInTheHeaderWithAButtonToCancelIt()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "Session", PercentUsed = 10, WindowMinutes = 300 }] });
+
+        (bool[] idle, bool panelOpen, string[] conditions, bool[] fields, bool[] looping, bool tipHasRuns) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            TouchButton? Find(string tip) => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString()?.StartsWith(tip, StringComparison.Ordinal) == true);
+            bool Indicator() => window.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Any(path => path.Name == "LoopIndicator" && path.IsEffectivelyVisible);
+            bool[] idle = [Find("Review the workspace") is not null, Find("Loop: send") is not null, Find("Cancel the loop") is not null, Indicator()];
+
+            model.Active!.OpenLoopCommand.Execute(null);
+            for (int attempt = 0; attempt < 100 && !model.Active.Loop.IsOpen; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string[] conditions = [.. model.Active.Loop.Conditions.Select(choice => choice.Name)];
+            bool Shown<T>() where T : Avalonia.Visual => window.GetVisualDescendants().OfType<T>().Any(item => item.IsEffectivelyVisible);
+            bool radios = Shown<RadioButton>();
+            model.Active.Loop.SelectedCondition = model.Active.Loop.Conditions.Single(choice => choice.Condition == LoopCondition.UntilTime);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool timePicker = Shown<TimePicker>();
+            model.Active.Loop.SelectedCondition = model.Active.Loop.Conditions.Single(choice => choice.Condition == LoopCondition.UntilWindow);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool windowPicker = window.GetVisualDescendants().OfType<ComboBox>().Count(box => box.IsEffectivelyVisible && box.ItemsSource is IReadOnlyList<string>) > 0;
+            bool[] fields = [radios, timePicker, windowPicker];
+            model.Active.Loop.CancelCommand.Execute(null);
+
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x", IntervalSeconds = 600, Condition = LoopCondition.Runs, Runs = 4 }, StartedAt = DateTimeOffset.UtcNow, Runs = 2 } });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool[] looping = [Find("Loop: send") is not null, Find("Cancel the loop") is not null, Indicator(), Find("Review the workspace") is not null];
+            bool tipHasRuns = model.Active.LoopTip.Contains("2 runs so far", StringComparison.Ordinal);
+            window.Close();
+            return (idle, model.Active.Loop.IsOpen, conditions, fields, looping, tipHasRuns);
+        });
+
+        Assert.Equal([true, true, false, false], idle);
+        Assert.False(panelOpen);
+        Assert.Equal(5, conditions.Length);
+        Assert.Equal([true, true, true], fields);
+        Assert.Equal([false, true, true, true], looping);
+        Assert.True(tipHasRuns);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsAnEqualHistoryTabOnlyWhenTheWorkspaceIsAGitRepository()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

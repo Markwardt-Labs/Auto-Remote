@@ -49,6 +49,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
 | `service` | string | `ConfigureWorkspace`, `GetUsage`, `ListModels` | `ClaudeCode`, `Codex` or `OpenCode` (the models of servers on the server's machine, such as Ollama, and those of OpenCode's own configuration). |
 | `model` | string | `ConfigureWorkspace` | The identifier of one of the models `ListModels` returns for the service, for the workspace's AI session. Refused when the service does not offer it. |
+| `loop` | loop settings | `StartLoop` | What the loop sends, how often and when it ends. |
 | `modelSettings` | object | `ConfigureWorkspace` | The values of the model's settings, text by setting identifier; refused for a setting the model does not have or a value it does not take, and a setting left out uses the model's default. |
 | `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
 | `data` | string | `UploadAttachment`, `Transcribe` | The file content or the WAV recording, base64 encoded. |
@@ -85,6 +86,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `history` | history | `GetHistory` |
 | `usage` | usage | `GetUsage` |
 | `ai` | workspace ai | `GetWorkspaceAi` |
+| `loop` | loop, optional | `GetLoop` |
 | `models` | array of model | `ListModels` |
 | `files` | files | `ListFiles` |
 | `searchResults` | array of search result | `SearchFiles` |
@@ -120,9 +122,12 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
 | `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first, read from the AI service's stored conversation: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
+| `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
+| `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes; does nothing when no loop runs. |
+| `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
 | `GetWorkspaceAi` | `workspaceId` | `ai` | The model and the values of its settings the workspace's AI session runs with, which the session stores (the server keeps none of its own); `ai.model` is omitted when the model the session was stored with is no longer offered. Makes the session when the workspace has none yet. |
 | `ListModels` | `service` | `models` | The models the service can run with tools, with the settings each offers (a reasoning effort, a context size and so on); empty when the service is not installed or signed in, or has none. Claude Code's and Codex's lists come from the tools themselves and OpenCode's from the local model server (Ollama by default) and its own configuration; the server asks again after about a minute. |
-| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the text is handed to the AI, also while it is working, when it is taken into the work in progress. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
+| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
@@ -211,6 +216,27 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `messages` | array of message | The chunk, oldest first. |
 | `older` | string, optional | The cursor to send as `before` to read the messages before this chunk; omitted when there are none. |
 | `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
+
+**loop settings** (`loop` of `StartLoop`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `prompt` | string | The prompt every run sends. |
+| `intervalSeconds` | number | Seconds from the start of one run to the start of the next; 0 runs again as soon as the last run is done. At most 86400. |
+| `condition` | string | `Forever`, `UntilTime`, `ForDuration`, `Runs` or `UntilWindow`. |
+| `until` | string, optional | ISO 8601 time the loop ends, within 24 days, for `UntilTime`. |
+| `durationSeconds` | number, optional | Seconds the loop may run, at most 24 days, for `ForDuration`. |
+| `runs` | number, optional | How many runs, at least 1, for `Runs`. |
+| `window` | string, optional | The name of the usage window to watch, one `GetUsage` returns, for `UntilWindow`. |
+| `percent` | number, optional | The share of the window's limit, 1 to 100, at which the loop ends, for `UntilWindow`. |
+
+**loop** (`GetLoop`, and `loop` of `LoopChanged`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `settings` | loop settings | What the loop was started with. |
+| `startedAt` | string | When the loop was started, ISO 8601 UTC. |
+| `runs` | number | How many runs the loop has started. |
 
 **workspace ai** (`GetWorkspaceAi`)
 
@@ -406,14 +432,15 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged` or `WorkspacesChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged` or `LoopChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
 | `path` | string | `FilesChanged`: the changed folder relative to the workspace folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Running`, `Managing`, `Stopping` or `Canceling`. |
-| `text` | string | `ScriptOutput`: what the run wrote since the last event. |
+| `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
+| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 
 `ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.

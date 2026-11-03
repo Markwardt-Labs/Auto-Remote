@@ -102,6 +102,21 @@ public enum RemoteCommand
     GetUsage,
 
     /// <summary>
+    /// Starts a loop of the AI in <see cref="RemoteRequest.WorkspaceId" /> with <see cref="RemoteRequest.Loop" />: the prompt is sent over and over on the interval until the loop's condition ends it or it is cancelled. The first run starts at once, or when the AI and the workspace are free. Refused unless the workspace is Ready or Working, and while a loop already runs there. The runs and the loop's state arrive as <see cref="RemoteEvent" /> pushes (<see cref="RemoteEventKind.LoopChanged" />).
+    /// </summary>
+    StartLoop,
+
+    /// <summary>
+    /// Cancels the loop of <see cref="RemoteRequest.WorkspaceId" /> without stopping the run in progress, which finishes; does nothing when no loop runs.
+    /// </summary>
+    CancelLoop,
+
+    /// <summary>
+    /// Reads the loop that runs in <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.Loop" />, empty when none runs.
+    /// </summary>
+    GetLoop,
+
+    /// <summary>
     /// Reads the model and the values of its settings that the AI session of <see cref="RemoteRequest.WorkspaceId" /> runs with, which the session stores; answered in <see cref="RemoteResponse.Ai" />. The session is made when the workspace has none yet.
     /// </summary>
     GetWorkspaceAi,

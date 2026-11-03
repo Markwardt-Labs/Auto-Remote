@@ -23,6 +23,10 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
+        Loop = new LoopViewModel(connection, workspace, Chat.ReviewPrompt);
+        Loop.Started += () => Chat.Notice = null;
+        OpenLoopCommand = new AsyncCommand(_ => Loop.Open());
+        CancelLoopCommand = new AsyncCommand(_ => CancelLoop());
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.HasContent))
@@ -31,6 +35,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowCancelButton));
                 Raise(nameof(ShowSendButton));
                 Raise(nameof(ShowReviewButton));
+                Raise(nameof(ShowLoopButton));
             }
         };
         Chat.PromptStarted += () => NotifyWhenReady = true;
@@ -135,6 +140,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private bool subscribed;
 
+    private LoopInfo? activeLoop;
+
     private WorkspaceTab tab;
 
     private WorkspaceTab beforeSettings;
@@ -210,6 +217,59 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether the message box offers the work buttons instead of sending: a script or git runs or work is being ended, or the AI works and nothing is typed, so more input could not be sent.
     /// </summary>
     public bool ShowHaltButtons => State is WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
+
+    /// <summary>
+    /// Gets the panel in which a loop of the AI is set up.
+    /// </summary>
+    public LoopViewModel Loop { get; }
+
+    /// <summary>
+    /// Gets the command that opens the loop panel.
+    /// </summary>
+    public AsyncCommand OpenLoopCommand { get; }
+
+    /// <summary>
+    /// Gets the command that cancels the loop without stopping the run in progress.
+    /// </summary>
+    public AsyncCommand CancelLoopCommand { get; }
+
+    /// <summary>
+    /// Gets the loop that runs in the workspace, or <see langword="null" /> when none does.
+    /// </summary>
+    public LoopInfo? ActiveLoop
+    {
+        get => activeLoop;
+        private set
+        {
+            if (Set(ref activeLoop, value))
+            {
+                Raise(nameof(IsLooping));
+                Raise(nameof(LoopTip));
+                Raise(nameof(ShowLoopButton));
+                Raise(nameof(ShowCancelLoopButton));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether a loop runs in the workspace, which shows the loop icon in the header and the button that cancels it.
+    /// </summary>
+    public bool IsLooping => activeLoop is not null;
+
+    /// <summary>
+    /// Gets a description of the loop that runs, for the tooltip of its icon: what it sends, how often, when it ends and how many runs it made.
+    /// </summary>
+    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {(activeLoop.Settings.Prompt == Chat.ReviewPrompt ? "review" : "custom prompt")}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far";
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the loop button next to the review button: there is no loop yet and the review button shows.
+    /// </summary>
+    public bool ShowLoopButton => ShowReviewButton && activeLoop is null;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the button that cancels the loop, whatever else it shows.
+    /// </summary>
+    public bool ShowCancelLoopButton => activeLoop is not null;
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the send button: something is typed or attached and the work buttons do not show.
@@ -380,6 +440,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         }
 
         _ = ReadState();
+        _ = ReadLoop();
         _ = Git.Start();
         _ = Scripts.Start();
         await Chat.Start();
@@ -449,6 +510,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowCancelButton));
         Raise(nameof(ShowSendButton));
         Raise(nameof(ShowReviewButton));
+        Raise(nameof(ShowLoopButton));
         Raise(nameof(IsWorking));
         Raise(nameof(CanCancel));
     }
@@ -456,6 +518,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     private void Resync()
     {
         _ = ReadState();
+        _ = ReadLoop();
         _ = Chat.Resync();
         _ = Scripts.Start();
         _ = Git.Refresh();
@@ -468,9 +531,19 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private void Receive(RemoteEvent remoteEvent)
     {
-        if (remoteEvent.WorkspaceId == Workspace.Id && remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
+        if (remoteEvent.WorkspaceId != Workspace.Id)
+        {
+            return;
+        }
+
+        if (remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
         {
             Follow(state);
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.LoopChanged)
+        {
+            ActiveLoop = remoteEvent.Loop;
+            Chat.Notice = remoteEvent.Loop is null ? remoteEvent.Text : null;
         }
     }
 
@@ -490,6 +563,34 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
         }
     }
+
+    private async Task ReadLoop()
+    {
+        try
+        {
+            ActiveLoop = await connection.GetLoop(Workspace.Id, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
+        {
+        }
+    }
+
+    private async Task CancelLoop()
+    {
+        if (!await Attempt(() => connection.CancelLoop(Workspace.Id, CancellationToken.None)) && Error is { } message)
+        {
+            Chat.Show(message);
+        }
+    }
+
+    private string Describe(LoopSettings settings) => settings.Condition switch
+    {
+        LoopCondition.UntilTime => $"until {settings.Until?.ToLocalTime():t}",
+        LoopCondition.ForDuration => $"for {(int)TimeSpan.FromSeconds(settings.DurationSeconds ?? 0).TotalHours}:{TimeSpan.FromSeconds(settings.DurationSeconds ?? 0).Minutes:00} h",
+        LoopCondition.Runs => $"{settings.Runs} runs in all",
+        LoopCondition.UntilWindow => $"until {settings.Window} reaches {settings.Percent:0.#}%",
+        _ => "until cancelled"
+    };
 
     private async Task Halt(Func<Guid, CancellationToken, Task> action)
     {

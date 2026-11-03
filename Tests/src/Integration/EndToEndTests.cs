@@ -28,8 +28,10 @@ public sealed class EndToEndTests : IAsyncLifetime
         FakePromptProvider prompter = new() { OnCreate = session => session.ReplyWith(Answer), Models = [Model("sonnet"), Model("haiku")] };
         PromptService prompts = new(workspaces, store, (_, _) => prompter, hub, activity, snapshots);
         WorkspaceVersioning versioning = new(git, prompts, hub, activity);
+        Mock<IUsageService> usage = new();
+        WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, Mock.Of<IUsageService>(), hub, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), new ModelService((_, _) => prompter));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage.Object, hub, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), new ModelService((_, _) => prompter), loops);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -215,7 +217,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Prompt_SentWhileTheAiWorksIsTakenIntoThatWork()
+    public async Task Prompt_SentWhileTheAiWorksWaitsAndIsAnsweredRightAfterInTheSameWorkingSpan()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "slow", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
@@ -224,9 +226,10 @@ public sealed class EndToEndTests : IAsyncLifetime
         await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
         Assert.True((await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Working);
         await connection.Prompt(workspace.Id, "short", CancellationToken.None);
-        List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 3 && events.Last().Working == false);
+        List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Working == false);
 
-        Assert.Equal(["long", "short", "reply to long"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
+        Assert.Equal(["long", "short", "reply to long", "reply to short"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
+        Assert.Equal([true, false], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working == true));
     }
 
     [Fact]

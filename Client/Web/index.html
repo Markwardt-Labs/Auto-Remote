@@ -135,6 +135,8 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .script-input { display: flex; gap: 8px; padding: 6px 10px; background: var(--elevated); border-top: 1px solid var(--border); }
 .script-input input { flex: 1; }
 .row.running .name { font-weight: 700; }
+.topbar .title .loop-indicator { display: inline-flex; vertical-align: middle; margin-left: 8px; }
+.row-check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .topbar .title { user-select: none; -webkit-touch-callout: none; }
 .topbar.offline .title::after { content: " (reconnecting…)"; font-size: 12px; opacity: 0.8; }
 .menu-list button:disabled { opacity: 0.45; cursor: default; }
@@ -366,6 +368,7 @@ const resetText = period => {
   return days >= 1 ? `Resets in ${days}d ${hours % 24}h` : hours >= 1 ? `Resets in ${hours}h ${minutes % 60}m` : `Resets in ${Math.max(1, minutes)}m`;
 };
 const log = message => console.log(`${new Date().toLocaleTimeString("en-GB")} ${message}`);
+const reviewPrompt = "review workspace and changes, fix any problems or inconsistencies";
 const services = {
   ClaudeCode: { label: "Claude Code", defaultModel: "sonnet" },
   Codex: { label: "OpenAI Codex", defaultModel: "gpt-5.6-terra" },
@@ -1279,6 +1282,9 @@ class Connection {
   renameWorkspace(workspaceId, name) { return this.request("RenameWorkspace", { workspaceId, name }).then(r => r.workspace); }
   getUsage(service) { return this.request("GetUsage", { service }).then(r => r.usage); }
   configureWorkspace(workspaceId, service, model, modelSettings) { return this.request("ConfigureWorkspace", { workspaceId, service, model, modelSettings }).then(r => r.workspace); }
+  startLoop(workspaceId, loop) { return this.request("StartLoop", { workspaceId, loop }); }
+  cancelLoop(workspaceId) { return this.request("CancelLoop", { workspaceId }); }
+  getLoop(workspaceId) { return this.request("GetLoop", { workspaceId }).then(r => r.loop ?? null); }
   getWorkspaceAi(workspaceId) { return this.request("GetWorkspaceAi", { workspaceId }).then(r => r.ai); }
   listModels(service) { return this.request("ListModels", { service }).then(r => r.models ?? []); }
   moveWorkspace(workspaceId, groupId) { return this.request("MoveWorkspace", { workspaceId, groupId: groupId ?? undefined }).then(r => r.workspace); }
@@ -1432,6 +1438,8 @@ const icons = {
   eye: ["M1,7 C3,3 11,3 13,7 C11,11 3,11 1,7 Z M5,7 A2,2 0 1,1 9,7 A2,2 0 1,1 5,7 Z", "1 3 12 8", 13],
   changes: ["M2,3 L8,3 M2,7 L12,7 M2,11 L6,11", "2 3 10 8", 13],
   refresh: ["M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5", "1 1 12 12", 13],
+  loop: ["M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8", "1 1 12 12", 14],
+  loopcancel: ["M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8 M1.5,12.5 L12.5,1.5", "1 1 12 12", 14],
   review: ["M6,1.5 A4.5,4.5 0 1 1 6,10.5 A4.5,4.5 0 1 1 6,1.5 Z M9.3,9.3 L12.5,12.5 M4,6 L5.4,7.4 L8,4.6", "1 1 12 12", 14],
   mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 1 10 13", 14],
   foldAll: ["M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12", "1 2 12 11", 13],
@@ -1653,6 +1661,7 @@ class WorkspaceView {
     this.forced = null;
     this.notifyWhenReady = false;
     this.lastState = "Ready";
+    this.loop = null;
     this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
     this.scriptError = new ErrorLine();
     this.syncTimer = null;
@@ -1663,6 +1672,7 @@ class WorkspaceView {
     this.refreshGit();
     this.loadScripts();
     this.loadState();
+    this.loadLoop();
   }
 
   build() {
@@ -1672,6 +1682,8 @@ class WorkspaceView {
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary", title: "Send", hidden: true, onclick: () => this.send() }, "↑");
     this.reviewButton = h("button", { class: "flat icon", title: "Review the workspace and its changes and fix any problems", onclick: () => this.review() }, icon("review"));
+    this.loopButton = h("button", { class: "flat icon", title: "Loop: send a prompt over and over", onclick: () => this.openLoop() }, icon("loop"));
+    this.cancelLoopButton = h("button", { class: "flat icon", hidden: true, title: "Cancel the loop (the work in progress keeps going)", onclick: () => this.cancelLoop() }, icon("loopcancel"));
     this.stopButton = h("button", { class: "primary", hidden: true, title: "Stop the work and keep what it did", onclick: () => this.home.confirmHalt(this, false) }, icon("stop"));
     this.cancelButton = h("button", { hidden: true, title: "Cancel the work and revert what it did", onclick: () => this.home.confirmHalt(this, true) }, icon("undo"));
     this.attachments = [];
@@ -1689,9 +1701,10 @@ class WorkspaceView {
     this.chatAutoButton = h("button", { class: "flat icon autoscroll on", title: "Auto scroll the chat to new messages", onclick: () => this.toggleChatAuto() }, icon("scroll"));
     this.chatBody = h("div", { class: "pane-body chat" },
       h("div", { class: "messages-wrap" }, this.scroller, this.chatAutoButton),
+      this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.reviewButton, this.sendButton, this.stopButton, this.cancelButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.reviewButton, this.loopButton, this.sendButton, this.cancelLoopButton, this.stopButton, this.cancelButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2046,6 +2059,7 @@ class WorkspaceView {
     this.refreshGit(true);
     this.loadScripts();
     this.loadState();
+    this.loadLoop();
     this.loadRoot(this.files?.path ?? "", false);
   }
 
@@ -2102,6 +2116,145 @@ class WorkspaceView {
   followState(state) {
     this.forced = state === "Stopping" || state === "Canceling" ? state : null;
     this.applyState();
+  }
+
+  async loadLoop() {
+    try {
+      this.setLoop(await this.connection.getLoop(this.info.id), null);
+    } catch (exception) {
+    }
+  }
+
+  setLoop(loop, notice) {
+    this.loop = loop;
+    this.chatNotice.textContent = notice ?? "";
+    this.chatNotice.hidden = !notice;
+    this.updateSend();
+    this.home.updateLoop(this);
+  }
+
+  loopTip() {
+    const loop = this.loop;
+
+    if (!loop) {
+      return "";
+    }
+
+    const settings = loop.settings;
+    const ends = {
+      UntilTime: () => `until ${new Date(settings.until).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`,
+      ForDuration: () => `for ${Math.floor(settings.durationSeconds / 3600)}:${String(Math.floor(settings.durationSeconds % 3600 / 60)).padStart(2, "0")} h`,
+      Runs: () => `${settings.runs} runs in all`,
+      UntilWindow: () => `until ${settings.window} reaches ${settings.percent}%`
+    }[settings.condition];
+    const runs = loop.runs ?? 0;
+    return `Loop: ${settings.prompt === reviewPrompt ? "review" : "custom prompt"}, ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far`;
+  }
+
+  async cancelLoop() {
+    await attempt(() => this.connection.cancelLoop(this.info.id), this.chatError);
+  }
+
+  async openLoop() {
+    let windows = [];
+
+    try {
+      windows = ((await this.connection.getUsage(this.info.service))?.windows ?? []).map(window => window.name);
+    } catch (exception) {
+    }
+
+    const field = (label, ...controls) => h("div", { class: "stack tight", style: "margin-top:6px" }, h("div", { class: "muted" }, label), ...controls);
+    const reviewRadio = h("input", { type: "radio", name: "loop-prompt", checked: true });
+    const customRadio = h("input", { type: "radio", name: "loop-prompt" });
+    const custom = h("textarea", { rows: 3, placeholder: "Enter the prompt...", hidden: true });
+    const choosePrompt = () => { custom.hidden = !customRadio.checked; };
+    reviewRadio.onchange = choosePrompt;
+    customRadio.onchange = choosePrompt;
+    const interval = h("input", { type: "number", min: "0", max: "1440", step: "1", value: "10" });
+    const conditions = [["Forever", "Until I cancel it"], ["UntilTime", "Until a time of day"], ["ForDuration", "For a length of time"], ["Runs", "For a number of runs"], ...(windows.length > 0 ? [["UntilWindow", "Until a usage limit reaches a share"]] : [])];
+    const time = h("input", { type: "time", value: "23:00" });
+    const hours = h("input", { type: "number", min: "0", max: "576", step: "1", value: "2" });
+    const minutes = h("input", { type: "number", min: "0", max: "59", step: "5", value: "0" });
+    const runs = h("input", { type: "number", min: "1", max: "100000", step: "1", value: "5" });
+    const windowSelect = h("select", {}, windows.map(name => h("option", { value: name }, name)));
+    const percent = h("input", { type: "number", min: "1", max: "100", step: "5", value: "90" });
+    const boxes = {
+      UntilTime: field("Time of day (the next time it is)", time),
+      ForDuration: field("Hours and minutes", h("div", { style: "display:flex;gap:8px" }, hours, minutes)),
+      Runs: field("Runs", runs),
+      UntilWindow: field("Usage window and share of its limit (%)", windowSelect, percent)
+    };
+    const kind = h("select", { onchange: () => show() }, conditions.map(([value, label]) => h("option", { value }, label)));
+    const show = () => { for (const [name, box] of Object.entries(boxes)) { box.hidden = name !== kind.value; } };
+    kind.value = "ForDuration";
+    show();
+    const start = async () => {
+      const text = reviewRadio.checked ? reviewPrompt : custom.value.trim();
+      const minutesBetween = Number(interval.value);
+      const condition = kind.value;
+      const fail = message => this.home.dialogError.set(message);
+
+      if (!text) {
+        return fail("Write the prompt the loop sends.");
+      }
+
+      if (interval.value === "" || !(minutesBetween >= 0 && minutesBetween <= 1440)) {
+        return fail("The minutes between runs must be between 0 and 1440.");
+      }
+
+      const settings = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition };
+
+      if (condition === "UntilTime") {
+        const [hour, minute] = (time.value || "").split(":").map(Number);
+
+        if (Number.isNaN(hour) || Number.isNaN(minute)) {
+          return fail("Choose the time the loop ends.");
+        }
+
+        const end = new Date();
+        end.setHours(hour, minute, 0, 0);
+
+        if (end.getTime() <= Date.now()) {
+          end.setDate(end.getDate() + 1);
+        }
+
+        settings.until = end.toISOString();
+      } else if (condition === "ForDuration") {
+        const seconds = Math.round(Number(hours.value || 0) * 3600 + Number(minutes.value || 0) * 60);
+
+        if (!(seconds > 0 && seconds <= 24 * 86400)) {
+          return fail("The loop must run for a time between a minute and 24 days.");
+        }
+
+        settings.durationSeconds = seconds;
+      } else if (condition === "Runs") {
+        if (!(Number(runs.value) >= 1)) {
+          return fail("The loop needs at least one run.");
+        }
+
+        settings.runs = Math.trunc(Number(runs.value));
+      } else if (condition === "UntilWindow") {
+        if (!windowSelect.value || !(Number(percent.value) >= 1 && Number(percent.value) <= 100)) {
+          return fail("Choose a usage window and a share between 1 and 100.");
+        }
+
+        settings.window = windowSelect.value;
+        settings.percent = Number(percent.value);
+      }
+
+      this.home.dialogError.set(null);
+      const result = await attempt(() => this.connection.startLoop(this.info.id, settings), this.home.dialogError);
+
+      if (result.ok) {
+        this.home.closeDialog();
+      }
+    };
+    this.home.dialog("Loop", "Sends a prompt to the AI over and over. Cancel it from the loop button in the message box; stopping the work cancels it too.",
+      field("Prompt", h("label", { class: "row-check" }, reviewRadio, " Review the workspace and its changes"), h("label", { class: "row-check" }, customRadio, " My own prompt"), custom),
+      field("Minutes between runs", interval, h("div", { class: "muted small" }, "From the start of one run to the start of the next. 0 runs again as soon as a run is done.")),
+      field("Ends", kind),
+      ...Object.values(boxes),
+      h("button", { class: "primary block", onclick: start }, "Start loop"));
   }
 
   async loadState() {
@@ -2510,6 +2663,11 @@ class WorkspaceView {
       return;
     }
 
+    if (event.kind === "LoopChanged") {
+      this.setLoop(event.loop ?? null, event.loop ? null : event.text ?? null);
+      return;
+    }
+
     if (event.kind === "ScriptChanged" || event.kind === "ScriptOutput" || event.kind === "ScriptRemoved") {
       this.receiveScript(event);
       return;
@@ -2686,6 +2844,9 @@ class WorkspaceView {
     this.sendButton.hidden = halt || empty;
     this.reviewButton.disabled = !this.takesAiInput();
     this.reviewButton.hidden = halt || !empty;
+    this.loopButton.disabled = !this.takesAiInput();
+    this.loopButton.hidden = halt || !empty || this.loop !== null;
+    this.cancelLoopButton.hidden = this.loop === null;
     this.stopButton.hidden = !halt;
     this.stopButton.disabled = state === "Canceling";
     this.cancelButton.hidden = !(halt && ai);
@@ -2795,10 +2956,11 @@ class WorkspaceView {
       return;
     }
 
-    await this.deliver("review workspace and changes, fix any problems or inconsistencies", []);
+    await this.deliver(reviewPrompt, []);
   }
 
   async deliver(text, sending) {
+    this.chatNotice.hidden = true;
     this.notifyWhenReady = true;
 
     try {
@@ -3949,7 +4111,9 @@ class Home {
 
   build() {
     this.menuButton = h("button", { class: "flat menu", title: "Workspaces", onclick: () => this.setDrawer(!this.drawerOpen) }, "☰");
-    this.title = h("div", { class: "title serif" }, "Auto Remote");
+    this.titleText = h("span", {}, "Auto Remote");
+    this.loopIndicator = h("span", { class: "loop-indicator", hidden: true }, icon("loop"));
+    this.title = h("div", { class: "title serif" }, this.titleText, this.loopIndicator);
     this.gearButton = h("button", { class: "flat gear", title: "Workspace settings", onclick: () => this.active?.toggleSettings() }, "\u2699\uFE0E");
     this.usageButton = h("button", { class: "flat usage", title: "AI usage limits", onclick: () => this.toggleUsage() });
     this.usageButton.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18"><path d="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>';
@@ -4146,6 +4310,13 @@ class Home {
       ...(windows.length ? [] : [h("div", { class: "muted" }, "The service reports no usage limits.")]));
   }
 
+  updateLoop(view) {
+    if (view === this.active) {
+      this.loopIndicator.hidden = view.loop === null;
+      this.loopIndicator.title = view.loopTip();
+    }
+  }
+
   updateWorking(view) {
     if (view === this.active) {
       this.topbar.classList.toggle("working", view.state() !== "Ready");
@@ -4204,7 +4375,8 @@ class Home {
     this.tools.hidden = workspace === null;
     this.toggleUsage(false);
     this.showUsage(workspace?.service ?? null);
-    this.title.textContent = workspace ? folderName(workspace.folder) : "Auto Remote";
+    this.titleText.textContent = workspace ? folderName(workspace.folder) : "Auto Remote";
+    this.loopIndicator.hidden = true;
     this.topbar.classList.remove("working");
 
     if (workspace) {
@@ -4220,6 +4392,7 @@ class Home {
       view.element.hidden = false;
       view.focus();
       this.updateWorking(view);
+      this.updateLoop(view);
     }
 
     this.renderDrawer();

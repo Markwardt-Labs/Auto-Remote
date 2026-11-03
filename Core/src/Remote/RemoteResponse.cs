@@ -66,6 +66,11 @@ public sealed record RemoteResponse
     public UsageStatus? Usage { get; init; }
 
     /// <summary>
+    /// Gets the loop answering <see cref="RemoteCommand.GetLoop" />, or <see langword="null" /> when none runs.
+    /// </summary>
+    public LoopInfo? Loop { get; init; }
+
+    /// <summary>
     /// Gets the model and settings answering <see cref="RemoteCommand.GetWorkspaceAi" />.
     /// </summary>
     public WorkspaceAi? Ai { get; init; }

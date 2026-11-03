@@ -33,6 +33,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly IServerConnection connection;
 
+    private string? notice;
+
     private readonly IVoiceRecorder? recorder;
 
     private readonly TimeSpan longestRecording = TimeSpan.FromSeconds(60);
@@ -247,6 +249,26 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <returns>A task that completes once the conversation is up to date.</returns>
     public Task Resync() => loaded ? Reload() : Task.CompletedTask;
+
+    /// <summary>
+    /// Gets or sets a note under the conversation that is not a failure, such as why a loop ended by itself; it goes away when the next prompt is sent.
+    /// </summary>
+    public string? Notice
+    {
+        get => notice;
+        set
+        {
+            if (Set(ref notice, value))
+            {
+                Raise(nameof(HasNotice));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="Notice" /> is set.
+    /// </summary>
+    public bool HasNotice => notice is not null;
 
     /// <summary>
     /// Shows a failure that happened outside the conversation, such as a refused stop, where the conversation shows its own.
@@ -617,6 +639,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private async Task<bool> Deliver(string text, List<ChatAttachment> sending)
     {
+        Notice = null;
         PromptStarted?.Invoke();
 
         bool sent = await Attempt(async () =>

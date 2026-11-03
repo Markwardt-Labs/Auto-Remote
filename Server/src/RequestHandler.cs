@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IModelService models) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IModelService models, IWorkspaceLoops loops) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -77,14 +77,31 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 Guid configuring = RequireWorkspace(request);
                 await models.Validate(configured, chosen, chosenSettings, cancellation);
 
-                if ((await workspaces.Get(configuring, cancellation)).Service != configured && prompts.IsBusy(configuring))
+                if ((await workspaces.Get(configuring, cancellation)).Service != configured)
                 {
-                    throw new RequestException("Stop the AI's work before switching its service.");
+                    if (prompts.IsBusy(configuring))
+                    {
+                        throw new RequestException("Stop the AI's work before switching its service.");
+                    }
+
+                    if (loops.Get(configuring) is not null)
+                    {
+                        throw new RequestException("Cancel the loop before switching the service.");
+                    }
                 }
 
                 WorkspaceInfo reconfigured = await workspaces.Configure(configuring, configured, cancellation);
                 await prompts.SetAi(configuring, chosen, chosenSettings, cancellation);
                 return new RemoteResponse { Id = 0, Workspace = reconfigured };
+            case RemoteCommand.StartLoop:
+                RequireAiInput(request);
+                await loops.Start(RequireWorkspace(request), request.Loop ?? throw new RequestException("The request needs a loop."), cancellation);
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.CancelLoop:
+                await loops.Cancel(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GetLoop:
+                return new RemoteResponse { Id = 0, Loop = loops.Get(RequireWorkspace(request)) };
             case RemoteCommand.GetWorkspaceAi:
                 return new RemoteResponse { Id = 0, Ai = await prompts.GetAi(RequireWorkspace(request), cancellation) };
             case RemoteCommand.GetUsage:
@@ -269,6 +286,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         if (request.WorkspaceId is { } id)
         {
             RequireReady(request);
+            await loops.Cancel(id);
             await prompts.Release(id);
         }
     }
