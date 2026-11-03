@@ -152,14 +152,14 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
-    public async Task Delete_WithFolderRemovesFolderWorkspaceAndHistory()
+    public async Task Delete_WithFolderRemovesFolderWorkspaceAndAttachments()
     {
         WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
 
         await manager.Delete(workspace.Id, true, CancellationToken.None);
 
         folders.Verify(x => x.Delete("/work/app", It.IsAny<CancellationToken>()), Times.Once);
-        store.Verify(x => x.DeleteHistory(workspace.Id), Times.Once);
+        store.Verify(x => x.DeleteAttachments(workspace.Id), Times.Once);
         Assert.Empty((await manager.List(CancellationToken.None)).Workspaces);
     }
 
@@ -185,49 +185,27 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
-    public async Task Configure_StoresModelAndEffort()
+    public async Task Configure_SwitchingServiceStoresItAndDetachesTheAiSessionButKeepingTheServiceKeepsIt()
     {
         WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        await manager.AttachAiSession(workspace.Id, Guid.NewGuid().ToString("N"), CancellationToken.None);
 
-        WorkspaceInfo updated = await manager.Configure(workspace.Id, AiService.ClaudeCode, AiModel.Opus, AiEffort.Low, CancellationToken.None);
-
-        Assert.Equal(AiModel.Opus, updated.Model);
-        Assert.Equal(AiEffort.Low, (await manager.Get(workspace.Id, CancellationToken.None)).Effort);
-    }
-
-    [Fact]
-    public async Task Configure_SwitchingServiceStoresItAndDetachesTheAiSession()
-    {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
-        await manager.AttachAiSession(workspace.Id, Guid.NewGuid(), CancellationToken.None);
-
-        WorkspaceInfo kept = await manager.Configure(workspace.Id, AiService.ClaudeCode, AiModel.Opus, AiEffort.Low, CancellationToken.None);
-        WorkspaceInfo switched = await manager.Configure(workspace.Id, AiService.Codex, AiModel.Sol, AiEffort.Medium, CancellationToken.None);
+        WorkspaceInfo kept = await manager.Configure(workspace.Id, AiService.ClaudeCode, CancellationToken.None);
+        WorkspaceInfo switched = await manager.Configure(workspace.Id, AiService.Codex, CancellationToken.None);
 
         Assert.NotNull(kept.AiSessionId);
-        Assert.Equal((AiService.Codex, AiModel.Sol, AiEffort.Medium), (switched.Service, switched.Model, switched.Effort));
+        Assert.Equal(AiService.Codex, switched.Service);
         Assert.Null(switched.AiSessionId);
-    }
-
-    [Theory]
-    [InlineData(AiService.Codex, AiModel.Opus)]
-    [InlineData(AiService.ClaudeCode, AiModel.Terra)]
-    public async Task Configure_RefusesAModelTheServiceDoesNotOffer(AiService service, AiModel model)
-    {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
-
-        await Assert.ThrowsAsync<RequestException>(() => manager.Configure(workspace.Id, service, model, AiEffort.High, CancellationToken.None));
-        Assert.Equal(AiModel.Sonnet, (await manager.Get(workspace.Id, CancellationToken.None)).Model);
+        Assert.Equal(AiService.Codex, (await manager.Get(workspace.Id, CancellationToken.None)).Service);
     }
 
     [Fact]
-    public async Task NewWorkspace_DefaultsToSonnetOnHigh()
+    public async Task NewWorkspace_StartsOnClaudeCode()
     {
         WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
 
         Assert.Equal(AiService.ClaudeCode, workspace.Service);
-        Assert.Equal(AiModel.Sonnet, workspace.Model);
-        Assert.Equal(AiEffort.High, workspace.Effort);
+        Assert.Equal(AiService.ClaudeCode, workspace.Service);
         Assert.Null(workspace.AiSessionId);
     }
 
@@ -235,7 +213,7 @@ public sealed class WorkspaceManagerTests
     public async Task AttachAiSession_StoresIt()
     {
         WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
-        Guid attached = Guid.NewGuid();
+        string attached = Guid.NewGuid().ToString("N");
 
         await manager.AttachAiSession(workspace.Id, attached, CancellationToken.None);
 
@@ -364,7 +342,7 @@ public sealed class WorkspaceManagerTests
         await manager.Move(workspace.Id, group.Id, CancellationToken.None);
         await manager.RenameGroup(group.Id, "Play", CancellationToken.None);
         await manager.ShiftWorkspace(workspace.Id, 1, CancellationToken.None);
-        await manager.Configure(workspace.Id, AiService.ClaudeCode, AiModel.Haiku, AiEffort.Low, CancellationToken.None);
+        await manager.Configure(workspace.Id, AiService.Codex, CancellationToken.None);
         VerifyAnnounced(6);
 
         await manager.DeleteGroup(group.Id, CancellationToken.None);
@@ -377,7 +355,7 @@ public sealed class WorkspaceManagerTests
     {
         WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
 
-        await manager.AttachAiSession(workspace.Id, Guid.NewGuid(), CancellationToken.None);
+        await manager.AttachAiSession(workspace.Id, Guid.NewGuid().ToString("N"), CancellationToken.None);
         await Assert.ThrowsAsync<RequestException>(() => manager.CreateGroup("  ", null, CancellationToken.None));
 
         VerifyAnnounced(1);

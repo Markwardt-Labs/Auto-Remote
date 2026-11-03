@@ -144,6 +144,14 @@
         "resolved": "1.4.0",
         "contentHash": "lLhaiI/mNDTNzgLqnmknhf4LjgTqOAyjx5+GNz0X3AxYMxUhmFppF2WVMdER+SDqwhE5wUF1pzs/cuLwFxs7xA=="
       },
+      "Markwardt.LiveAi": {
+        "type": "Transitive",
+        "resolved": "1.1.0",
+        "contentHash": "fvtwKJabTTHwchwxCY7Yxv7hXR34xBC8QMsTY3Qey8S4ZoMd6GjeK1GpapDxju9rRMaoYTajmeBw9m5OPqoR6g==",
+        "dependencies": {
+          "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
+        }
+      },
       "MicroCom.Runtime": {
         "type": "Transitive",
         "resolved": "0.11.6",
@@ -158,6 +166,19 @@
         "type": "Transitive",
         "resolved": "10.9.0",
         "contentHash": "//nASHMCJVxnYfE/WSzfaLOao6/q816kPpgB9rxU0gfSmAny1u3rfQT0D4xAmcIo4yQqJs7rAeBB+M/dIMdZYA=="
+      },
+      "Microsoft.Extensions.DependencyInjection.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "L3AdmZ1WOK4XXT5YFPEwyt0ep6l8lGIPs7F5OOBZc77Zqeo01Of7XXICy47628sdVl0v/owxYJTe86DTgFwKCA=="
+      },
+      "Microsoft.Extensions.Logging.Abstractions": {
+        "type": "Transitive",
+        "resolved": "10.0.0",
+        "contentHash": "FU/IfjDfwaMuKr414SSQNTIti/69bHEMb+QKrskRb26oVqpx3lNFXMjs/RC9ZUuhBhcwDM2BwOgoMw+PZ+beqQ==",
+        "dependencies": {
+          "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
+        }
       },
       "Microsoft.TestPlatform.ObjectModel": {
         "type": "Transitive",
@@ -190,19 +211,6 @@
         "dependencies": {
           "Microsoft.Extensions.AI.Abstractions": "10.9.0"
         }
-      },
-      "Whisper.net.Runtime": {
-        "type": "Transitive",
-        "resolved": "1.9.2-preview1",
-        "contentHash": "8VLBcApuOPyTLVDlp5iyEXAG/in7IURXPUy6UK3uaBRNOk761+c1R2b2lMVI4qhgnMWApzT5VkdkEI4pXaAa4w==",
-        "dependencies": {
-          "Whisper.net.Runtime.Metal": "1.9.2-preview1"
-        }
-      },
-      "Whisper.net.Runtime.Metal": {
-        "type": "Transitive",
-        "resolved": "1.9.2-preview1",
-        "contentHash": "/AfMAf7bpaasgbByuQMkiHD+oDQj3Br3LdYPKpDOtKOkn7FYEyqrQ47LyBptaOmEnCXgvUsqaXY7YeGqoPd9Eg=="
       },
       "Whisper.net.Runtime.Vulkan": {
         "type": "Transitive",
@@ -265,8 +273,8 @@
         "type": "Project",
         "dependencies": {
           "Markwardt.AutoRemote": "[1.0.0, )",
+          "Markwardt.LiveAi": "[1.1.0, )",
           "Whisper.net": "[1.9.2-preview1, )",
-          "Whisper.net.Runtime": "[1.9.2-preview1, )",
           "Whisper.net.Runtime.Vulkan": "[1.9.2-preview1, )"
         }
       }

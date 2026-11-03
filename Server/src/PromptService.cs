@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// Keeps a live AI conversation per workspace and records what is said in it.
+/// Keeps a live AI session per workspace, gives it the prompts and publishes what is said in it. The conversation itself is stored by the AI service and read back through Live AI.
 /// </summary>
 internal interface IPromptService
 {
@@ -9,7 +9,7 @@ internal interface IPromptService
     /// Supplies the settings used to run the AI services.
     /// </summary>
     /// <param name="config">The server settings.</param>
-    /// <param name="stopping">Ends every conversation when cancelled.</param>
+    /// <param name="stopping">Ends every session when cancelled.</param>
     void Configure(ServerConfig config, CancellationToken stopping);
 
     /// <summary>
@@ -20,18 +20,37 @@ internal interface IPromptService
     bool IsBusy(Guid id);
 
     /// <summary>
-    /// Reads a chunk of a workspace's conversation.
+    /// Reads a chunk of a workspace's conversation from the AI service's stored session.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="before">The position before which to read, or <see langword="null" /> for the newest messages.</param>
+    /// <param name="before">The cursor of <see cref="ChatHistory.Older" /> to read before, or <see langword="null" /> for the newest messages.</param>
     /// <param name="limit">The most messages to read, or <see langword="null" /> for the default.</param>
     /// <param name="cancellation">Cancels the read.</param>
     /// <returns>The chunk in order and whether the AI is working.</returns>
-    /// <exception cref="RequestException">No such workspace exists.</exception>
-    Task<ChatHistory> History(Guid id, int? before, int? limit, CancellationToken cancellation);
+    /// <exception cref="RequestException">No such workspace exists, or the cursor is not valid.</exception>
+    Task<ChatHistory> History(Guid id, string? before, int? limit, CancellationToken cancellation);
 
     /// <summary>
-    /// Sends a prompt to the AI in a workspace and records it. A prompt sent while the AI is working joins that work. The reply and the state of the work are published as events.
+    /// Reads the model and the values of its settings that a workspace's AI session runs with, making the session when the workspace has none yet.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The model, or none when the session's stored model is no longer offered, and its settings.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or the AI could not be asked.</exception>
+    Task<WorkspaceAi> GetAi(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Chooses the model and the values of its settings for a workspace's AI session, which applies them from its next prompt and stores them once that prompt starts; until then the server keeps the choice even when it closes an idle session.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="model">The identifier of the model.</param>
+    /// <param name="settings">The values of the model's settings; a setting left out gets the model's default.</param>
+    /// <param name="cancellation">Cancels the change.</param>
+    /// <exception cref="RequestException">No such workspace exists, or the service does not offer the model.</exception>
+    Task SetAi(Guid id, string model, IReadOnlyDictionary<string, string> settings, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sends a prompt to the AI in a workspace. A prompt sent while the AI is working is given to it at once and taken into that work. The prompt and the replies, and the state of the work, are published as events.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The prompt.</param>
@@ -51,56 +70,42 @@ internal interface IPromptService
     Task<string> Attach(Guid id, string name, string data, CancellationToken cancellation);
 
     /// <summary>
-    /// Ends a workspace's conversation process if the AI is idle, so the next prompt starts a fresh one with the workspace's current settings; does nothing while the AI works.
+    /// Closes a workspace's session if the AI is idle, so the next prompt opens one with the workspace's current settings; does nothing while the AI works.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <returns>A task that completes once the process has ended.</returns>
+    /// <returns>A task that completes once the session is closed.</returns>
     Task Release(Guid id);
 
     /// <summary>
-    /// Reads the prompts a workspace's AI has not answered yet.
+    /// Stops a workspace's AI at once, whatever it is doing; the conversation stays, so the next prompt carries on from what the AI had done. Does nothing when the AI is not working.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <returns>The prompts in the order they were given, empty if there are none.</returns>
-    Task<IReadOnlyList<string>> Unanswered(Guid id);
-
-    /// <summary>
-    /// Takes up the work that was paused when the server stopped: nothing runs yet, and <see cref="Resume" /> starts the AI again where it left off.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="unanswered">The prompts the AI had not answered.</param>
-    void Restore(Guid id, IReadOnlyList<string> unanswered);
-
-    /// <summary>
-    /// Pauses a workspace's AI: its process and what it started are suspended, so it keeps its place; the prompts it has are kept.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <returns>A task that completes once the AI is paused.</returns>
-    /// <exception cref="RequestException">The AI is not working, or could not be paused.</exception>
-    Task Pause(Guid id);
-
-    /// <summary>
-    /// Lets a paused AI carry on. When its process is gone, because the server was restarted while it was paused, the AI is started again in the same session and told to carry on.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <returns>A task that completes once the AI runs again.</returns>
-    /// <exception cref="RequestException">The AI is not paused, or could not be continued.</exception>
-    Task Resume(Guid id);
-
-    /// <summary>
-    /// Ends a workspace's AI process at once, whatever it is doing, and forgets the prompts it had not answered; the conversation stays and the next prompt starts a new process that resumes it. Does nothing when no process runs.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <returns>A task that completes once the process has ended and the AI no longer counts as working.</returns>
+    /// <returns>A task that completes once the AI no longer counts as working.</returns>
     Task Interrupt(Guid id);
+
+    /// <summary>
+    /// Ends every workspace's AI work and closes every session, including the commands the AI started, as the server stopping needs. Waits a few seconds for the work to end first.
+    /// </summary>
+    /// <returns>A task that completes once the sessions are closed.</returns>
+    Task Close();
+
+    /// <summary>
+    /// Closes a workspace's session and forgets it, as a deleted workspace needs.
+    /// </summary>
+    /// <param name="workspace">The workspace being deleted.</param>
+    /// <param name="conversation">Whether the AI service's stored conversation is deleted too.</param>
+    /// <returns>A task that completes once the session is gone.</returns>
+    Task Forget(WorkspaceInfo workspace, bool conversation);
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IAiRunner runner, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, Func<ServerConfig, AiService, IPromptProvider> createProvider, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
 
-    private readonly string restartInstruction = "The server was restarted while your work was paused, so what you were running was interrupted. Check where things stand, carry on with the work you were doing and finish it.";
+    private readonly ConcurrentDictionary<AiService, IPromptProvider> providers = new();
+
+    private readonly string workInstruction = "Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished. While you work, write a short status update as a normal message, saying what you have done and what comes next, at least once every five minutes so the user can follow along; split the work so that no single step runs much longer than five minutes.";
 
     private readonly int defaultChunk = 50;
 
@@ -108,9 +113,19 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly int maxAttachment = 2 * 1024 * 1024;
 
-    private readonly string[] lostSessionMarkers = ["No conversation found", "no rollout found"];
-
     private readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(5);
+
+    private readonly TimeSpan stopWait = TimeSpan.FromSeconds(15);
+
+    private readonly TimeSpan shutdownWait = TimeSpan.FromSeconds(10);
+
+    private readonly string[] images = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+
+    private readonly string interruptedMarker = "[Request interrupted by user";
+
+    private readonly string reminderMarker = "<system-reminder>";
+
+    private readonly string attachedPrefix = "Attached file: ";
 
     private ServerConfig config = new() { Port = 0, Key = string.Empty };
 
@@ -121,19 +136,62 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     {
         this.config = config;
         this.stopping = stopping;
+        providers.Clear();
+    }
+
+    /// <inheritdoc />
+    public async Task Close()
+    {
+        List<Tally> tallies = [];
+
+        foreach (Live live in lives.Values)
+        {
+            tallies.Add(live.Tally);
+            Detach(live)?.Dispose();
+        }
+
+        DateTime deadline = DateTime.UtcNow + shutdownWait;
+
+        while (tallies.Any(tally => Volatile.Read(ref tally.Count) > 0) && DateTime.UtcNow < deadline)
+        {
+            await Task.Delay(100);
+        }
     }
 
     /// <inheritdoc />
     public bool IsBusy(Guid id) => lives.TryGetValue(id, out Live? live) && live.Working;
 
     /// <inheritdoc />
-    public async Task<ChatHistory> History(Guid id, int? before, int? limit, CancellationToken cancellation)
+    public async Task<ChatHistory> History(Guid id, string? before, int? limit, CancellationToken cancellation)
     {
-        await workspaces.Get(id, cancellation);
-        IReadOnlyList<ChatMessage> all = await store.ReadHistory(id, cancellation);
-        int end = Math.Clamp(before ?? all.Count, 0, all.Count);
-        int start = Math.Max(0, end - Math.Clamp(limit ?? defaultChunk, 1, maxChunk));
-        return new ChatHistory { Messages = [.. all.Skip(start).Take(end - start)], Start = start, Working = IsBusy(id) };
+        WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
+        PromptHistoryPoint? cursor = Decode(before);
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        await live.Gate.WaitAsync(cancellation);
+
+        try
+        {
+            if (live.Session is null && workspace.AiSessionId is null)
+            {
+                return new ChatHistory { Messages = [], Working = live.Working };
+            }
+
+            await Session(id, workspace, live, cancellation);
+
+            if (!live.Working)
+            {
+                lock (live.Sync)
+                {
+                    Expire(id, live);
+                }
+            }
+
+            return await Read(live.Session!, cursor, Math.Clamp(limit ?? defaultChunk, 1, maxChunk), live.Working, cancellation);
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
     }
 
     /// <inheritdoc />
@@ -162,35 +220,49 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 await snapshots.Capture(workspace, cancellation);
             }
 
-            if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling or WorkspaceState.Paused)
+            if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling)
             {
                 throw new RequestException(activity.Describe(id));
             }
 
-            live.Idle?.Cancel();
-
-            if (live.Conversation is null)
+            lock (live.Sync)
             {
-                Begin(id, live, workspace.AiSessionId ?? Guid.NewGuid(), workspace.AiSessionId is not null, workspace);
+                StopIdle(live);
             }
 
-            await Record(id, new ChatMessage { Role = MessageRole.User, Text = text }, cancellation);
-            live.Unanswered.Add(text);
-            SetWorking(id, live, true);
+            IPromptSession session = await Session(id, workspace, live, cancellation);
+
+            if (session.Configuration.Model is null)
+            {
+                throw new RequestException($"{workspace.Service.Label()} has no model for this workspace. Choose one in the workspace settings.");
+            }
+
+            PromptOptions options = await Options(text, cancellation);
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.User, Text = text } });
+
+            lock (live.Sync)
+            {
+                live.Expecting = session.State == PromptSessionState.Waiting;
+                SetWorking(id, live, true);
+            }
 
             try
             {
-                await live.Conversation!.Send(text, cancellation);
+                await session.Send(text, options, cancellation);
             }
-            catch (RequestException) when (live.Resumed && !live.Confirmed)
+            catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or IOException)
             {
-                // A resumed process whose session is gone can exit before taking the prompt; Pump then sees its failure and restarts with the unanswered prompts.
-            }
-            catch (RequestException)
-            {
-                live.Unanswered.Clear();
-                await End(id, live, live.Conversation!);
-                throw;
+                lock (live.Sync)
+                {
+                    live.Expecting = false;
+
+                    if (session.State == PromptSessionState.Waiting)
+                    {
+                        SetWorking(id, live, false);
+                    }
+                }
+
+                throw new RequestException(exception.Message);
             }
         }
         catch (Exception) when (!live.Working)
@@ -202,6 +274,64 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             activity.Leave(id, WorkspaceState.Working);
             throw;
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkspaceAi> GetAi(Guid id, CancellationToken cancellation)
+    {
+        WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        await live.Gate.WaitAsync(cancellation);
+
+        try
+        {
+            IPromptSession session = await Session(id, workspace, live, cancellation);
+
+            if (!live.Working)
+            {
+                lock (live.Sync)
+                {
+                    Expire(id, live);
+                }
+            }
+
+            return new WorkspaceAi { Model = session.Configuration.Model?.Id, ModelSettings = session.Configuration.ModelSettings.ToDictionary(pair => pair.Key, pair => pair.Value) };
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SetAi(Guid id, string model, IReadOnlyDictionary<string, string> settings, CancellationToken cancellation)
+    {
+        WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        await live.Gate.WaitAsync(cancellation);
+
+        try
+        {
+            IPromptSession session = await Session(id, workspace, live, cancellation);
+
+            try
+            {
+                await Choose(Provider(workspace.Service), session, model, settings, cancellation);
+            }
+            catch (PromptSessionException exception)
+            {
+                throw new RequestException(exception.Message);
+            }
+
+            lock (live.Sync)
+            {
+                live.Carried = null;
+            }
         }
         finally
         {
@@ -240,89 +370,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
-            if (!live.Working && live.Conversation is not null)
+            if (!live.Working && Detach(live) is { } session)
             {
-                await End(id, live, live.Conversation);
-            }
-        }
-        finally
-        {
-            live.Gate.Release();
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task Pause(Guid id)
-    {
-        Live live = lives.TryGetValue(id, out Live? found) ? found : throw new RequestException("The AI is not working in this workspace.");
-        await live.Gate.WaitAsync(stopping);
-
-        try
-        {
-            await (live.Working && live.Conversation is { } conversation ? conversation.Pause() : throw new RequestException("The AI is not working in this workspace."));
-        }
-        finally
-        {
-            live.Gate.Release();
-        }
-    }
-
-    /// <inheritdoc />
-    public async Task<IReadOnlyList<string>> Unanswered(Guid id)
-    {
-        if (!lives.TryGetValue(id, out Live? live))
-        {
-            return [];
-        }
-
-        await live.Gate.WaitAsync(stopping);
-
-        try
-        {
-            return [.. live.Unanswered];
-        }
-        finally
-        {
-            live.Gate.Release();
-        }
-    }
-
-    /// <inheritdoc />
-    public void Restore(Guid id, IReadOnlyList<string> unanswered)
-    {
-        Live live = lives.GetOrAdd(id, _ => new Live());
-        live.Unanswered.Clear();
-        live.Unanswered.AddRange(unanswered);
-    }
-
-    /// <inheritdoc />
-    public async Task Resume(Guid id)
-    {
-        Live live = lives.GetOrAdd(id, _ => new Live());
-        await live.Gate.WaitAsync(stopping);
-
-        try
-        {
-            if (live.Working && live.Conversation is { } conversation)
-            {
-                await conversation.Continue();
-                return;
-            }
-
-            WorkspaceInfo workspace = await workspaces.Get(id, stopping);
-            Begin(id, live, workspace.AiSessionId ?? Guid.NewGuid(), workspace.AiSessionId is not null, workspace);
-            SetWorking(id, live, true);
-            string text = workspace.AiSessionId is null && live.Unanswered.Count > 0 ? string.Join("\n\n", live.Unanswered) : restartInstruction;
-
-            try
-            {
-                await live.Conversation!.Send(text, stopping);
-            }
-            catch (RequestException)
-            {
-                live.Unanswered.Clear();
-                await End(id, live, live.Conversation!);
-                throw;
+                await session.DisposeAsync();
             }
         }
         finally
@@ -339,178 +389,409 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             return;
         }
 
-        live.Interrupted = true;
-        live.Conversation?.Kill();
+        IPromptSession? session;
         await live.Gate.WaitAsync(CancellationToken.None);
 
         try
         {
-            live.Idle?.Cancel();
-            live.Unanswered.Clear();
-
-            if (live.Conversation is { } conversation)
+            lock (live.Sync)
             {
-                live.Conversation = null;
-                conversation.Kill();
-                await conversation.DisposeAsync();
+                StopIdle(live);
+                session = live.Session;
             }
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
 
+        if (session is not null && live.Working)
+        {
+            if (Volatile.Read(ref live.Tally.Count) > 0)
+            {
+                Detach(live)?.Dispose();
+            }
+            else
+            {
+                await Settle(live, session);
+            }
+        }
+
+        lock (live.Sync)
+        {
             SetWorking(id, live, false);
         }
-        finally
+    }
+
+    /// <inheritdoc />
+    public async Task Forget(WorkspaceInfo workspace, bool conversation)
+    {
+        await Interrupt(workspace.Id);
+
+        if (lives.TryRemove(workspace.Id, out Live? live) && Detach(live) is { } session)
         {
-            live.Interrupted = false;
-            live.Gate.Release();
+            await session.DisposeAsync();
+        }
+
+        if (conversation && workspace.AiSessionId is { } sessionId && IsLive(sessionId))
+        {
+            try
+            {
+                await Provider(workspace.Service).Delete(sessionId, CancellationToken.None);
+            }
+            catch (Exception exception) when (exception is PromptSessionException or IOException or UnauthorizedAccessException or ArgumentException)
+            {
+            }
         }
     }
 
-    private void Begin(Guid id, Live live, Guid aiSession, bool resume, WorkspaceInfo workspace)
+    private async Task Settle(Live live, IPromptSession session)
     {
-        IAiConversation conversation = runner.Start(config, workspace.Service, workspace.Folder, workspace.Model, workspace.Effort, aiSession, resume);
-        live.Conversation = conversation;
-        live.AiSession = aiSession;
-        live.Resumed = resume;
-        live.Confirmed = false;
-        live.Workspace = workspace;
-        _ = Pump(id, live, conversation);
+        DateTime deadline = DateTime.UtcNow + stopWait;
+
+        while (session.State != PromptSessionState.Waiting && DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                await session.Interrupt(CancellationToken.None);
+            }
+            catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException)
+            {
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250));
+        }
+
+        for (int attempt = 0; attempt < 3 && session.State == PromptSessionState.Waiting && Volatile.Read(ref live.Tally.Count) > 0; attempt++)
+        {
+            await Task.Delay(100);
+        }
+
+        if (session.State != PromptSessionState.Waiting || Volatile.Read(ref live.Tally.Count) > 0)
+        {
+            Detach(live)?.Dispose();
+        }
     }
 
-    private async Task Pump(Guid id, Live live, IAiConversation conversation)
+    private IPromptSession? Detach(Live live)
     {
-        try
+        lock (live.Sync)
         {
-            await foreach (AiOutput output in conversation.Read(stopping))
-            {
-                await live.Gate.WaitAsync(CancellationToken.None);
+            IPromptSession? session = live.Session;
 
+            if (session?.Configuration.Model is { } model)
+            {
+                live.Carried = new Carry(model.Id, session.Configuration.ModelSettings.ToDictionary(pair => pair.Key, pair => pair.Value));
+            }
+
+            live.Session = null;
+            live.Watch?.Dispose();
+            live.Watch = null;
+            return session;
+        }
+    }
+
+    private bool IsLive(string sessionId) => sessionId.Length == 32 && !sessionId.Contains('-', StringComparison.Ordinal);
+
+    private IPromptProvider Provider(AiService service) => providers.GetOrAdd(service, _ => createProvider(config, service));
+
+    private async Task<PromptOptions> Options(string text, CancellationToken cancellation)
+    {
+        List<PromptAttachment> attachments = [];
+
+        foreach (string line in text.Split('\n').Reverse().TakeWhile(line => line.StartsWith(attachedPrefix, StringComparison.Ordinal)))
+        {
+            string path = line[attachedPrefix.Length..].Trim();
+
+            if (images.Contains(Path.GetExtension(path), StringComparer.OrdinalIgnoreCase) && File.Exists(path))
+            {
                 try
                 {
-                    if (live.Conversation != conversation || live.Interrupted)
-                    {
-                        return;
-                    }
-
-                    await Handle(id, live, conversation, output);
-
-                    if (live.Conversation != conversation)
-                    {
-                        return;
-                    }
+                    attachments.Add(await PromptAttachment.FromFile(path, cancellation));
                 }
-                finally
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
                 {
-                    live.Gate.Release();
                 }
             }
         }
-        catch (OperationCanceledException)
+
+        return new PromptOptions { Attachments = attachments };
+    }
+
+    private async Task<IPromptSession> Session(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
+    {
+        if (live.Session is not null && live.Service != workspace.Service && !live.Working)
         {
+            IPromptSession? old = Detach(live);
+
+            lock (live.Sync)
+            {
+                live.Carried = null;
+            }
+
+            if (old is not null)
+            {
+                await old.DisposeAsync();
+            }
         }
 
-        await live.Gate.WaitAsync(CancellationToken.None);
+        return live.Session ??= await Open(id, workspace, live, cancellation);
+    }
+
+    private async Task<IPromptSession> Open(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
+    {
+        IPromptProvider provider = Provider(workspace.Service);
+        IPromptSession session;
+        bool fresh;
 
         try
         {
-            if (live.Conversation == conversation && !live.Interrupted)
-            {
-                if (live.Working)
-                {
-                    events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = "The AI stopped." });
-                }
+            (session, fresh) = workspace.AiSessionId is { } stored && IsLive(stored) ? await Load(provider, stored, workspace, cancellation) : (await Create(provider, workspace, cancellation), true);
 
-                live.Unanswered.Clear();
-                await End(id, live, conversation);
+            try
+            {
+                if (live.Carried is { } carried)
+                {
+                    await Restore(provider, session, carried, cancellation);
+                }
+                else if (fresh && session.Configuration.Model is { } initial)
+                {
+                    await Choose(provider, session, initial.Id, workspace.Service.DefaultSettings(), cancellation);
+                }
+            }
+            catch
+            {
+                await session.DisposeAsync();
+                throw;
             }
         }
-        finally
+        catch (Exception exception) when (exception is PromptSessionException or DirectoryNotFoundException)
         {
-            live.Gate.Release();
+            throw new RequestException(exception.Message);
+        }
+
+        Tally tally = new();
+        IPromptSessionConfiguration settings = session.Configuration;
+        settings.IsPersistent = true;
+        settings.EnableShell = true;
+        settings.Instructions = workInstruction;
+        settings.BeforeToolCall = (call, _) =>
+        {
+            if (call.Name == "shell")
+            {
+                Interlocked.Increment(ref tally.Count);
+            }
+
+            return Task.FromResult(PromptToolDecision.Allow);
+        };
+        settings.AfterToolCall = (call, _, _, _) =>
+        {
+            if (call.Name == "shell")
+            {
+                Interlocked.Decrement(ref tally.Count);
+            }
+
+            return Task.CompletedTask;
+        };
+
+        lock (live.Sync)
+        {
+            live.Tally = tally;
+            live.Service = workspace.Service;
+            live.Carried = null;
+            live.Watch = session.Output.Subscribe(new Watcher(output => Handle(id, live, session, workspace.Service, output)));
+        }
+
+        return session;
+    }
+
+    private async Task Choose(IPromptProvider provider, IPromptSession session, string modelId, IReadOnlyDictionary<string, string> chosen, CancellationToken cancellation)
+    {
+        PromptModel model = await provider.GetModel(modelId, null, cancellation);
+        session.Configuration.Model = model;
+
+        foreach (PromptModelSetting setting in model.Settings ?? [])
+        {
+            session.Configuration.ModelSettings[setting.Id] = chosen.TryGetValue(setting.Id, out string? value) && setting.Accepts(value) ? value : setting.Default;
         }
     }
 
-    private async Task Handle(Guid id, Live live, IAiConversation conversation, AiOutput output)
+    private async Task Restore(IPromptProvider provider, IPromptSession session, Carry carried, CancellationToken cancellation)
     {
-        switch (output.Kind)
+        try
         {
-            case AiOutputKind.Reply:
-                await Confirm(id, live);
-                SetWorking(id, live, true);
-                await Record(id, new ChatMessage { Role = MessageRole.Assistant, Text = output.Text }, CancellationToken.None);
-                break;
-            case AiOutputKind.Session:
-                if (Guid.TryParse(output.Text, out Guid reported))
+            await Choose(provider, session, carried.Model, carried.Settings, cancellation);
+        }
+        catch (PromptSessionModelException)
+        {
+        }
+    }
+
+    private async Task<PromptModel> Initial(IPromptProvider provider, AiService service, CancellationToken cancellation)
+    {
+        IReadOnlyList<PromptModel> listed = [.. (await provider.GetModels(null, cancellation)).Where(model => model.CallsTools != false)];
+        return listed.FirstOrDefault(candidate => candidate.Id == service.DefaultModel()) ?? listed.FirstOrDefault() ?? throw new PromptSessionModelException($"{service.Label()} offers no models. Is it installed and signed in?");
+    }
+
+    private async Task<(IPromptSession Session, bool Fresh)> Load(IPromptProvider provider, string stored, WorkspaceInfo workspace, CancellationToken cancellation)
+    {
+        try
+        {
+            return (await provider.Load(stored, null, cancellation), false);
+        }
+        catch (Exception exception) when (exception is PromptSessionNotFoundException or DirectoryNotFoundException)
+        {
+            return (await Create(provider, workspace with { AiSessionId = null }, cancellation), true);
+        }
+    }
+
+    private async Task<IPromptSession> Create(IPromptProvider provider, WorkspaceInfo workspace, CancellationToken cancellation)
+    {
+        PromptSessionOptions where = new() { WorkspacePath = workspace.Folder, Sandbox = false };
+        IPromptSession session = await provider.Create(where with { Model = await Initial(provider, workspace.Service, cancellation) }, cancellation);
+
+        try
+        {
+            if (workspace.AiSessionId is { } legacy)
+            {
+                try
                 {
-                    live.AiSession = reported;
+                    await session.AttachTo(legacy, where, cancellation);
+                }
+                catch (PromptSessionNotFoundException)
+                {
+                }
+            }
+
+            await workspaces.AttachAiSession(workspace.Id, session.Id, CancellationToken.None);
+            return session;
+        }
+        catch
+        {
+            await session.DisposeAsync();
+            throw;
+        }
+    }
+
+    private string Encode(PromptHistoryPoint point) => $"{point.Position.ToString(CultureInfo.InvariantCulture)}:{point.Index.ToString(CultureInfo.InvariantCulture)}";
+
+    private PromptHistoryPoint? Decode(string? cursor)
+    {
+        if (cursor is null)
+        {
+            return null;
+        }
+
+        string[] parts = cursor.Split(':');
+
+        if (parts.Length != 2 || !long.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out long position) || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int index))
+        {
+            throw new RequestException("The history cursor is not valid.");
+        }
+
+        return new PromptHistoryPoint(position, index);
+    }
+
+    private async Task<ChatHistory> Read(IPromptSession session, PromptHistoryPoint? before, int want, bool working, CancellationToken cancellation)
+    {
+        List<ChatMessage> newestFirst = [];
+        PromptHistoryPoint? last = null;
+        bool more = false;
+
+        try
+        {
+            IAsyncEnumerable<PromptHistoryEntry> entries = session.GetHistory(cancellation);
+
+            if (before is { } point)
+            {
+                entries = entries.OlderThan(point);
+            }
+
+            await foreach (PromptHistoryEntry entry in entries.WithCancellation(cancellation))
+            {
+                if (Message(entry) is not { } message)
+                {
+                    if (newestFirst.Count < want)
+                    {
+                        last = entry.Point;
+                    }
+
+                    continue;
                 }
 
-                break;
-            case AiOutputKind.Finished:
-                await Confirm(id, live);
-                live.Unanswered.Clear();
-                SetWorking(id, live, false);
-                Expire(id, live);
-                break;
-            case AiOutputKind.Failed:
-                if (live.Resumed && !live.Confirmed && lostSessionMarkers.Any(marker => output.Text.Contains(marker, StringComparison.OrdinalIgnoreCase)))
+                if (newestFirst.Count == want)
                 {
-                    await Restart(id, live, conversation);
+                    more = true;
                     break;
                 }
 
-                live.Unanswered.Clear();
-                events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = output.Text });
-                SetWorking(id, live, false);
-                await End(id, live, conversation);
+                newestFirst.Add(message);
+                last = entry.Point;
+            }
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException)
+        {
+            throw new RequestException($"The conversation could not be read: {exception.Message}");
+        }
+
+        newestFirst.Reverse();
+        return new ChatHistory { Messages = newestFirst, Older = more && last is { } cursor ? Encode(cursor) : null, Working = working };
+    }
+
+    private ChatMessage? Message(PromptHistoryEntry entry)
+    {
+        MessageRole? role = entry.Event switch
+        {
+            PromptInputEvent => MessageRole.User,
+            PromptMessageEvent => MessageRole.Assistant,
+            _ => null
+        };
+
+        if (role is not { } found || string.IsNullOrWhiteSpace(entry.Text) || entry.Text.StartsWith(interruptedMarker, StringComparison.Ordinal) || entry.Text.StartsWith(reminderMarker, StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        return new ChatMessage { Role = found, Text = entry.Text };
+    }
+
+    private void Handle(Guid id, Live live, IPromptSession session, AiService service, PromptEvent output)
+    {
+        switch (output)
+        {
+            case PromptMessageEvent { Text: { Length: > 0 } reply }:
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = reply } });
+                break;
+            case PromptFailureEvent failure:
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = failure.Exception is PromptToolStartException ? $"{service.Label()} could not be started: {failure.Message}" : failure.Message });
+                break;
+            case PromptStateEvent changed:
+                lock (live.Sync)
+                {
+                    Sync(id, live, session, changed.State);
+                }
+
                 break;
         }
     }
 
-    private async Task Restart(Guid id, Live live, IAiConversation lost)
+    private void Sync(Guid id, Live live, IPromptSession session, PromptSessionState state)
     {
-        List<string> again = [.. live.Unanswered];
-        WorkspaceInfo workspace = live.Workspace!;
-        live.Conversation = null;
-        await lost.DisposeAsync();
-
-        try
+        if (!ReferenceEquals(live.Session, session))
         {
-            Begin(id, live, Guid.NewGuid(), false, workspace);
-
-            foreach (string text in again)
-            {
-                await live.Conversation!.Send(text, stopping);
-            }
+            return;
         }
-        catch (RequestException exception)
+
+        if (state != PromptSessionState.Waiting)
         {
-            live.Unanswered.Clear();
-            events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = exception.Message });
+            live.Expecting = false;
+            SetWorking(id, live, true);
+        }
+        else if (!live.Expecting)
+        {
             SetWorking(id, live, false);
-
-            if (live.Conversation is { } started)
-            {
-                await End(id, live, started);
-            }
+            Expire(id, live);
         }
-    }
-
-    private async Task Confirm(Guid id, Live live)
-    {
-        if (!live.Confirmed)
-        {
-            live.Confirmed = true;
-
-            if (!live.Resumed)
-            {
-                await workspaces.AttachAiSession(id, live.AiSession, CancellationToken.None);
-            }
-        }
-    }
-
-    private async Task Record(Guid id, ChatMessage message, CancellationToken cancellation)
-    {
-        int index = await store.AppendHistory(id, message, cancellation);
-        events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Index = index, Message = message });
     }
 
     private void SetWorking(Guid id, Live live, bool working)
@@ -526,57 +807,82 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (!working)
             {
-                if (activity.Get(id) is WorkspaceState.Working or WorkspaceState.Paused)
+                if (activity.Get(id) == WorkspaceState.Working)
                 {
                     snapshots.Discard(id);
                 }
 
                 activity.Leave(id, WorkspaceState.Working);
-                activity.Leave(id, WorkspaceState.Paused);
             }
 
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = id, Working = working });
         }
     }
 
-    private async Task End(Guid id, Live live, IAiConversation conversation)
+    private void StopIdle(Live live)
     {
-        if (live.Conversation == conversation)
-        {
-            live.Conversation = null;
-        }
-
-        SetWorking(id, live, false);
-        await conversation.DisposeAsync();
+        live.Idle?.Cancel();
+        live.Idle?.Dispose();
+        live.Idle = null;
     }
 
     private void Expire(Guid id, Live live)
     {
-        live.Idle?.Cancel();
+        StopIdle(live);
         CancellationTokenSource idle = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         live.Idle = idle;
         _ = Task.Delay(idleTimeout, idle.Token).ContinueWith(task => task.IsCompletedSuccessfully ? Release(id) : Task.CompletedTask, TaskScheduler.Default);
     }
 
+    private sealed class Watcher(Action<PromptEvent> next) : IObserver<PromptEvent>
+    {
+        public void OnNext(PromptEvent value)
+        {
+            try
+            {
+                next(value);
+            }
+            catch (Exception)
+            {
+                // Live AI drops a watcher that throws, which would leave the workspace working for good.
+            }
+        }
+
+        public void OnError(Exception error)
+        {
+        }
+
+        public void OnCompleted()
+        {
+        }
+    }
+
+    private sealed record Carry(string Model, Dictionary<string, string> Settings);
+
+    private sealed class Tally
+    {
+        public int Count;
+    }
+
     private sealed class Live
     {
+        public Lock Sync { get; } = new();
+
         public SemaphoreSlim Gate { get; } = new(1, 1);
 
-        public IAiConversation? Conversation { get; set; }
+        public IPromptSession? Session { get; set; }
 
-        public WorkspaceInfo? Workspace { get; set; }
+        public IDisposable? Watch { get; set; }
 
-        public Guid AiSession { get; set; }
+        public AiService Service { get; set; }
 
-        public bool Resumed { get; set; }
+        public Carry? Carried { get; set; }
 
-        public bool Confirmed { get; set; }
+        public Tally Tally { get; set; } = new();
 
         public bool Working { get; set; }
 
-        public volatile bool Interrupted;
-
-        public List<string> Unanswered { get; } = [];
+        public bool Expecting { get; set; }
 
         public CancellationTokenSource? Idle { get; set; }
     }

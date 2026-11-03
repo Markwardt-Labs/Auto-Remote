@@ -16,11 +16,6 @@ public sealed record RemoteEvent
     public required Guid WorkspaceId { get; init; }
 
     /// <summary>
-    /// Gets the position of <see cref="Message" /> in the workspace's conversation, for <see cref="RemoteEventKind.MessageAdded" />.
-    /// </summary>
-    public int? Index { get; init; }
-
-    /// <summary>
     /// Gets the added message, for <see cref="RemoteEventKind.MessageAdded" />.
     /// </summary>
     public ChatMessage? Message { get; init; }

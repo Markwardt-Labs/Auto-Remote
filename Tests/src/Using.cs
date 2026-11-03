@@ -18,3 +18,7 @@ global using System.Security.Cryptography;
 global using System.Security.Cryptography.X509Certificates;
 global using Avalonia.Controls.Documents;
 global using System.Diagnostics;
+global using Markwardt.LiveAi;
+global using Markwardt.LiveAi.Testing;
+global using System.Globalization;
+global using System.IO.Compression;

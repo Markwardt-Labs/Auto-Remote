@@ -46,14 +46,19 @@ internal sealed record ServerConfig
     public string? CertificatePassword { get; init; }
 
     /// <summary>
-    /// Gets the extra arguments passed to every Claude Code run, after the always present <c>--dangerously-skip-permissions</c>.
-    /// </summary>
-    public IReadOnlyList<string> ClaudeArguments { get; init; } = [];
-
-    /// <summary>
     /// Gets the Codex executable to run for prompts.
     /// </summary>
     public string CodexCommand { get; init; } = "codex";
+
+    /// <summary>
+    /// Gets the OpenCode executable that runs the prompts of workspaces that use a local model.
+    /// </summary>
+    public string OpenCodeCommand { get; init; } = "opencode";
+
+    /// <summary>
+    /// Gets the address of the OpenAI compatible API, with its version path, of the server that runs the local models (Ollama by default; LM Studio, llama.cpp and vLLM work too).
+    /// </summary>
+    public string LocalModelUrl { get; init; } = "http://localhost:11434/v1";
 
     /// <summary>
     /// Gets the Whisper model that turns speech into text inside the server for voice input: a model name such as <c>small.en</c>, downloaded into the <c>models</c> folder of the data folder the first time, or the path of an existing <c>ggml</c> model file. Empty turns the built-in voice input off, unless <see cref="SpeechCommand" /> is set.
@@ -69,9 +74,4 @@ internal sealed record ServerConfig
     /// Gets the arguments of the speech command, in which <c>{file}</c> stands for the path of the recorded WAV file; the command prints the text to its standard output.
     /// </summary>
     public IReadOnlyList<string> SpeechArguments { get; init; } = [];
-
-    /// <summary>
-    /// Gets the extra arguments passed to every Codex run, after the always present <c>--dangerously-bypass-approvals-and-sandbox</c>.
-    /// </summary>
-    public IReadOnlyList<string> CodexArguments { get; init; } = [];
 }

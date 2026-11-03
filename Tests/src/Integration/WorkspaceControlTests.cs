@@ -13,7 +13,7 @@ public sealed class WorkspaceControlTests : IDisposable
 
     private readonly WorkspaceControl control;
 
-    private readonly WorkspaceInfo workspace;
+    private WorkspaceInfo workspace;
 
     private readonly string work;
 
@@ -31,26 +31,18 @@ public sealed class WorkspaceControlTests : IDisposable
         G("commit", "-m", "base");
         File.WriteAllText(Path.Combine(work, "mine.txt"), "untracked\n");
 
-        string fake = temp.Combine("fake-claude.sh");
-        File.WriteAllText(fake, "#!/bin/sh\nwhile IFS= read -r line; do\n  echo changed > \"$PWD/a.txt\"; echo new > \"$PWD/created.txt\"\n  printf '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"working\"}]}}\\n'\n  sleep 60\ndone\n");
-
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-
         workspace = new WorkspaceInfo { Id = Guid.NewGuid(), Folder = work };
         Mock<IWorkspaceManager> workspaces = new();
-        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
+        workspaces.Setup(x => x.AttachAiSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { AiSessionId = session }).Returns(Task.CompletedTask);
         Mock<IWorkspaceStore> store = new();
-        int index = 0;
-        store.Setup(x => x.AppendHistory(workspace.Id, It.IsAny<ChatMessage>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => index++);
         GitService git = new();
         activity = new WorkspaceActivity(hub);
         WorkspaceSnapshots snapshots = new(git);
-        prompts = new PromptService(workspaces.Object, store.Object, new AiRunner(new ProcessFreezer()), hub, activity, snapshots);
-        prompts.Configure(new ServerConfig { Port = 0, Key = "k", ClaudeCommand = fake, ClaudeArguments = [] }, CancellationToken.None);
-        control = new WorkspaceControl(activity, prompts, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots, store.Object, workspaces.Object, hub);
+        FakePromptProvider prompter = new() { OnCreate = session => session.Hang().Hang(), Models = [new PromptModel { Id = "sonnet", CallsTools = true }] };
+        prompts = new PromptService(workspaces.Object, store.Object, (_, _) => prompter, hub, activity, snapshots);
+        prompts.Configure(new ServerConfig { Port = 0, Key = "k" }, CancellationToken.None);
+        control = new WorkspaceControl(activity, prompts, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots);
     }
 
     public void Dispose() => temp.Dispose();
@@ -87,7 +79,8 @@ public sealed class WorkspaceControlTests : IDisposable
     private async Task StartWork()
     {
         await prompts.Prompt(workspace.Id, "go", CancellationToken.None);
-        await Until(() => File.Exists(Path.Combine(work, "created.txt")));
+        await File.WriteAllTextAsync(Path.Combine(work, "a.txt"), "changed\n");
+        await File.WriteAllTextAsync(Path.Combine(work, "created.txt"), "new\n");
         Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
     }
 

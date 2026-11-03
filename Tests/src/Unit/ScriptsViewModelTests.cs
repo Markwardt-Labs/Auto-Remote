@@ -164,7 +164,7 @@ public sealed class ScriptsViewModelTests
     public async Task Workspace_BlocksThePromptAndShowsWorkingWhileGitWorks()
     {
         GitStatus status = new() { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" };
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => status);
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -198,7 +198,7 @@ public sealed class ScriptsViewModelTests
     public async Task Workspace_WhileTheAiWorksTakesMoreAiInputButNoGitActionsOrScripts()
     {
         GitStatus status = new() { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" };
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => status);
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -226,7 +226,7 @@ public sealed class ScriptsViewModelTests
     [Fact]
     public async Task Workspace_BlocksThePromptWhileAScriptRunsAndMarksItsFile()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }, new FileEntry { Name = "b.txt", Path = "b.txt", IsFolder = false }] });
         WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
@@ -255,7 +255,7 @@ public sealed class ScriptsViewModelTests
     [Fact]
     public async Task Workspace_RunsADoubleTappedScriptAndRefusesWhileTheAiWorks()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0, Working = true });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = true });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }] });
         WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
@@ -279,7 +279,7 @@ public sealed class ScriptsViewModelTests
     [Fact]
     public async Task Workspace_WithTabsRunsScriptsAndShowsThemInTheirOwnTab()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }, new FileEntry { Name = "b.task", Path = "b.task", IsFolder = false }, new FileEntry { Name = "c.txt", Path = "c.txt", IsFolder = false }] });
         WorkspaceViewModel model = new(connection.Object, workspace);
@@ -307,7 +307,7 @@ public sealed class ScriptsViewModelTests
 
     private async Task<WorkspaceViewModel> StartedWorkspace(bool repo)
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = repo, Branch = "main", Commit = "abc1234", Message = "second" });
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -354,7 +354,7 @@ public sealed class ScriptsViewModelTests
     public async Task Workspace_ReadsAStateThatWasAlreadyStoppingWhenItOpened()
     {
         connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Canceling);
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
 
@@ -405,7 +405,7 @@ public sealed class ScriptsViewModelTests
     {
         WorkspaceViewModel model = await StartedWorkspace(true);
         connection.Invocations.Clear();
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.Assistant, Text = "posted meanwhile" }], Start = 0, Working = true });
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.Assistant, Text = "posted meanwhile" }], Working = true });
 
         connection.Raise(x => x.Reconnected += null);
         await Task.Delay(100);
@@ -418,33 +418,21 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_OffersPauseStopAndCancelForAiWorkResumeStopAndCancelWhenPausedAndOnlyStopOtherwise()
+    public async Task Workspace_OffersStopAndCancelForAiWorkAndOnlyStopOtherwise()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);
         Assert.False(model.ShowHaltButtons);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
-        Assert.Equal((true, true, true, true, false), (model.ShowHaltButtons, model.ShowPauseButton, model.ShowCancelButton, model.CanCancel, model.ShowResumeButton));
-
-        Server(WorkspaceState.Paused);
-        Assert.Equal(WorkspaceState.Paused, model.State);
-        Assert.Equal((true, false, true, true, true, true), (model.ShowHaltButtons, model.ShowPauseButton, model.ShowCancelButton, model.CanCancel, model.ShowResumeButton, model.CanHalt));
-        Assert.False(model.Chat.SendCommand.CanExecute(null));
-        Assert.Equal("Paused, resume or stop the work to carry on", model.Chat.Placeholder);
-        Assert.False(model.Git.CommitCommand.CanExecute(null));
-        Assert.True(model.IsWorking);
-
-        Server(WorkspaceState.Working);
-        Assert.Equal(WorkspaceState.Working, model.State);
+        Assert.Equal((true, true, true, true), (model.ShowHaltButtons, model.ShowCancelButton, model.CanCancel, model.CanHalt));
 
         Server(WorkspaceState.Canceling);
-        Assert.Equal((true, false, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowCancelButton, model.ShowPauseButton));
+        Assert.Equal((true, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowCancelButton));
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
         Server(WorkspaceState.Ready);
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-        Assert.Equal((true, true, false, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowPauseButton, model.ShowCancelButton, model.ShowResumeButton));
-        Assert.False(model.CanCancel);
+        Assert.Equal((true, true, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowCancelButton, model.CanCancel));
     }
 
     [Fact]
@@ -457,39 +445,6 @@ public sealed class ScriptsViewModelTests
         await model.Git.Refresh();
 
         Assert.Equal(WorkspaceState.Managing, model.State);
-        Assert.Equal((true, true, false, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowPauseButton, model.ShowCancelButton, model.CanCancel));
-    }
-
-    [Fact]
-    public async Task Workspace_PauseAndResumeAskTheServerAndRefusalsShowInTheChat()
-    {
-        WorkspaceViewModel model = await StartedWorkspace(true);
-        connection.Setup(x => x.ResumeWorkspace(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The AI is not paused in this workspace."));
-
-        await model.Pause();
-        await model.Resume();
-
-        connection.Verify(x => x.PauseWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
-        connection.Verify(x => x.ResumeWorkspace(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Equal("The AI is not paused in this workspace.", model.Chat.Error);
-    }
-
-    [Fact]
-    public async Task Workspace_ReadsAPauseThatSurvivedAServerRestartWhenItOpens()
-    {
-        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Paused);
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
-        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
-        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" });
-        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        WorkspaceViewModel model = new(connection.Object, workspace, ClientLayout.Panels);
-
-        await model.Start();
-        await model.Git.Refresh();
-        await Task.Delay(50);
-
-        Assert.Equal(WorkspaceState.Paused, model.State);
-        Assert.True(model.ShowResumeButton);
-        Assert.True(model.CanCancel);
+        Assert.Equal((true, true, false, false), (model.ShowHaltButtons, model.CanHalt, model.ShowCancelButton, model.CanCancel));
     }
 }

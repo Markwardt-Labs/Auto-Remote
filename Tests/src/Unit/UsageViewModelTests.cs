@@ -7,25 +7,51 @@ public sealed class UsageViewModelTests
     private UsageStatus Status(double session, int sessionMinutesLeft, double week) => new()
     {
         Service = AiService.ClaudeCode,
-        Session = new UsagePeriod { PercentUsed = session, WindowMinutes = 300, ResetsAt = DateTimeOffset.UtcNow.AddMinutes(sessionMinutesLeft) },
-        Week = new UsagePeriod { PercentUsed = week, WindowMinutes = 10080, ResetsAt = DateTimeOffset.UtcNow.AddDays(3) }
+        Windows =
+        [
+            new UsagePeriod { Name = "Session", PercentUsed = session, WindowMinutes = 300, ResetsAt = DateTimeOffset.UtcNow.AddMinutes(sessionMinutesLeft) },
+            new UsagePeriod { Name = "Week", PercentUsed = week, WindowMinutes = 10080, ResetsAt = DateTimeOffset.UtcNow.AddDays(3) }
+        ]
     };
 
     [Fact]
-    public async Task Show_ReadsTheLimitsOfTheServiceAndColorsTheSessionByPace()
+    public async Task Show_ListsEveryWindowTheServiceReportsAndColorsEachByPace()
     {
-        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(Status(80, 150, 10));
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(Status(80, 150, 10) with { Windows = [.. Status(80, 150, 10).Windows, new UsagePeriod { Name = "Week (Opus)", PercentUsed = 0, WindowMinutes = 10080 }] });
         using UsageViewModel model = new(connection.Object);
 
         await model.Show(AiService.ClaudeCode);
 
         Assert.True(model.HasLimits);
         Assert.Equal("Claude Code", model.ServiceName);
-        Assert.Equal("80% used", model.SessionText);
-        Assert.Equal("VeryHigh", model.SessionPace);
-        Assert.Equal("VeryLow", model.WeekPace);
-        Assert.StartsWith("Resets in 2h", model.SessionReset);
-        Assert.StartsWith("Resets in 2d", model.WeekReset);
+        Assert.Equal(["Session", "Week", "Week (Opus)"], model.Windows.Select(line => line.Name).ToList());
+        Assert.Equal(["80% used", "10% used", "0% used"], model.Windows.Select(line => line.Text).ToList());
+        Assert.Equal(["VeryHigh", "VeryLow", "Even"], model.Windows.Select(line => line.Pace).ToList());
+        Assert.StartsWith("Resets in 2h", model.Windows[0].Reset);
+        Assert.StartsWith("Resets in 2d", model.Windows[1].Reset);
+        Assert.Equal(string.Empty, model.Windows[2].Reset);
+    }
+
+    [Fact]
+    public async Task Show_ColorsTheIconByTheShortestWindow()
+    {
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus
+        {
+            Service = AiService.ClaudeCode,
+            Windows =
+            [
+                new UsagePeriod { Name = "Week", PercentUsed = 100, WindowMinutes = 10080, ResetsAt = DateTimeOffset.UtcNow.AddDays(3) },
+                new UsagePeriod { Name = "Session", PercentUsed = 80, WindowMinutes = 300, ResetsAt = DateTimeOffset.UtcNow.AddMinutes(150) }
+            ]
+        });
+        using UsageViewModel model = new(connection.Object);
+
+        await model.Show(AiService.ClaudeCode);
+
+        Assert.Equal("VeryHigh", model.IconPace);
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(Status(50, 150, 100));
+        await model.Show(AiService.ClaudeCode);
+        Assert.Equal("Even", model.IconPace);
     }
 
     [Fact]
@@ -40,8 +66,8 @@ public sealed class UsageViewModelTests
 
         Assert.Equal("OpenAI Codex", model.ServiceName);
         Assert.False(model.HasLimits);
-        Assert.Equal("Even", model.SessionPace);
-        Assert.Equal(string.Empty, model.SessionText);
+        Assert.Equal("Even", model.IconPace);
+        Assert.Empty(model.Windows);
     }
 
     [Fact]
@@ -53,7 +79,7 @@ public sealed class UsageViewModelTests
 
         await model.Show(AiService.ClaudeCode);
 
-        Assert.Equal("50% used", model.SessionText);
+        Assert.Equal("50% used", model.Windows[0].Text);
     }
 
     [Fact]

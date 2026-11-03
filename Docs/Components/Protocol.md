@@ -43,13 +43,13 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `workspaceId` | GUID | per command | The workspace targeted. |
 | `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
-| `before` | number | no | `GetHistory` only: read the messages before this position in the conversation; omitted means the newest. |
+| `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
 | `offset` | number | `ShiftWorkspace`, `ShiftGroup` | How many places to move: negative is up, positive is down. |
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
-| `service` | string | `ConfigureWorkspace`, `GetUsage` | `ClaudeCode` or `Codex`. |
-| `model` | string | `ConfigureWorkspace` | For `ClaudeCode`: `Sonnet`, `Opus` or `Haiku`. For `Codex`: `Terra`, `Sol` or `Luna`. Refused when the service does not offer it. |
-| `effort` | string | `ConfigureWorkspace` | `Low`, `Medium`, `High`, `XHigh` or `Max`. |
+| `service` | string | `ConfigureWorkspace`, `GetUsage`, `ListModels` | `ClaudeCode`, `Codex` or `OpenCode` (the models of servers on the server's machine, such as Ollama, and those of OpenCode's own configuration). |
+| `model` | string | `ConfigureWorkspace` | The identifier of one of the models `ListModels` returns for the service, for the workspace's AI session. Refused when the service does not offer it. |
+| `modelSettings` | object | `ConfigureWorkspace` | The values of the model's settings, text by setting identifier; refused for a setting the model does not have or a value it does not take, and a setting left out uses the model's default. |
 | `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
 | `data` | string | `UploadAttachment`, `Transcribe` | The file content or the WAV recording, base64 encoded. |
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
@@ -69,7 +69,7 @@ Properties a command does not use are omitted.
 ### Response
 
 ```json
-{"id": 7, "history": {"messages": [{"role": "Assistant", "text": "Done."}], "start": 12}}
+{"id": 7, "history": {"messages": [{"role": "Assistant", "text": "Done."}], "older": "48213:0"}}
 ```
 
 Exactly one payload property is set on success (none for `DeleteWorkspace`, `DeleteGroup`, `Prompt`, `WatchFiles` and the git actions: every `Git...` command except the `GetGit...` reads); on failure only `error` is set (see Errors). A response with `id` zero answers no request and carries `event` instead (see Events).
@@ -84,6 +84,8 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `listing` | listing | `ListFolders`, `CreateFolder` |
 | `history` | history | `GetHistory` |
 | `usage` | usage | `GetUsage` |
+| `ai` | workspace ai | `GetWorkspaceAi` |
+| `models` | array of model | `ListModels` |
 | `files` | files | `ListFiles` |
 | `searchResults` | array of search result | `SearchFiles` |
 | `content` | content | `ReadFile` |
@@ -105,7 +107,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `ListWorkspaces` | none | `catalog` | Workspaces and groups, each in its custom order. |
 | `CreateWorkspace` | `path` (existing folder on the server) | `workspace` | |
 | `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused unless the workspace is Ready. |
-| `ConfigureWorkspace` | `workspaceId`, `service`, `model`, `effort` | `workspace` | Applies from the next AI process: an idle one is ended now, a working one finishes first. Switching the service detaches the workspace's AI session, since sessions belong to one service. |
+| `ConfigureWorkspace` | `workspaceId`, `service`, `model`, optional `modelSettings` | `workspace` | The server checks the model and the settings against `ListModels` first and refuses what the service does not offer, and refuses to switch the service while the AI works. The service is stored with the workspace; the model and settings go to the AI session, which applies them from its next prompt and stores them when that prompt starts (until then the server keeps the choice, also when it closes an idle session). Switching the service detaches the workspace's AI session, since sessions belong to one service, and the new service gets a session of its own.
 | `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. It goes to the end of the group. |
 | `CreateGroup` | `name`, optional `parentId` | `group` | Names are trimmed, must be non-empty and unique ignoring case among the groups with the same parent. The parent must exist. |
 | `RenameGroup` | `groupId`, `name` | `group` | Same name rules as `CreateGroup`. |
@@ -116,9 +118,11 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused unless the workspace is Ready. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
-| `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first. |
+| `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first, read from the AI service's stored conversation: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
-| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the text is handed to the AI, also while it is working, when it joins the work in progress. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
+| `GetWorkspaceAi` | `workspaceId` | `ai` | The model and the values of its settings the workspace's AI session runs with, which the session stores (the server keeps none of its own); `ai.model` is omitted when the model the session was stored with is no longer offered. Makes the session when the workspace has none yet. |
+| `ListModels` | `service` | `models` | The models the service can run with tools, with the settings each offers (a reasoning effort, a context size and so on); empty when the service is not installed or signed in, or has none. Claude Code's and Codex's lists come from the tools themselves and OpenCode's from the local model server (Ollama by default) and its own configuration; the server asks again after about a minute. |
+| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the text is handed to the AI, also while it is working, when it is taken into the work in progress. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
@@ -147,10 +151,8 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GitSync` | `workspaceId` | none | `GitFetch`, then fast-forwards the checked out branch onto its remote counterpart, stashing changes that are not committed and restoring them (the AI resolves conflicts of the restore). Does nothing unless the workspace is Ready, without a remote, or when the branch has diverged. |
 | `GitSetIdentity` | `workspaceId`, `name`, `email` | none | Sets the git user name and email in the server user's global git configuration. |
 | `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone. While the workspace is Managing it is the same as `CancelWorkspace`. |
-| `PauseWorkspace` | `workspaceId` | none | Suspends the AI's work and answers once it is paused; the workspace is Paused until `ResumeWorkspace`, `StopWorkspace` or `CancelWorkspace`, also across a server restart. Refused unless the AI is working. |
-| `ResumeWorkspace` | `workspaceId` | none | Lets the paused AI carry on (after a server restart it is started again in its session and told to carry on). Refused unless the workspace is Paused. |
-| `StopWorkspace` | `workspaceId` | none | Ends the work of the AI (working or paused), the script or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
-| `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. Only for the AI, working or paused: refused for a script or a git action (stop those), when nothing runs, when it is already Stopping or Canceling, and in a workspace that is not a git repository. |
+| `StopWorkspace` | `workspaceId` | none | Ends the work of the AI, the script or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
+| `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. Only for the AI's work: refused for a script or a git action (stop those), when nothing runs, when it is already Stopping or Canceling, and in a workspace that is not a git repository. |
 | `GetWorkspaceState` | `workspaceId` | `state` | Reads the state, which a client does when it opens a workspace and then follows with `StateChanged` events. |
 | `GetScripts` | `workspaceId` | `scripts` | The runs the server holds for the workspace, with their output. |
 | `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Refused unless the workspace is Ready, for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. |
@@ -168,11 +170,9 @@ Nested objects are shown after the table of the object that contains them. Optio
 | --- | --- | --- |
 | `id` | GUID | The workspace's identifier. |
 | `folder` | string | Absolute path of the workspace's folder on the server. The display name is not sent; clients take the last segment of this. |
-| `aiSessionId` | GUID, optional | The AI session attached to the workspace; omitted until the first prompt. Informational: the server manages it. |
+| `aiSessionId` | string, optional | The live AI session attached to the workspace (32 hexadecimal digits; an older server stored the tool's own GUID); omitted until the first prompt. Informational: the server manages it. |
 | `groupId` | GUID, optional | The group the workspace is filed in; omitted when it is at the top level. |
 | `service` | string | The AI service the workspace's prompts run on; `ClaudeCode` by default. |
-| `model` | string | The AI model the prompts run on; `Sonnet` by default. |
-| `effort` | string | The AI effort the prompts run with; `High` by default. |
 
 **catalog** (`ListWorkspaces`)
 
@@ -209,26 +209,56 @@ Nested objects are shown after the table of the object that contains them. Optio
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `messages` | array of message | The chunk, oldest first. |
-| `start` | number | Position of the first message of the chunk in the whole conversation; above zero means older messages exist. |
+| `older` | string, optional | The cursor to send as `before` to read the messages before this chunk; omitted when there are none. |
 | `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
+
+**workspace ai** (`GetWorkspaceAi`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `model` | string, optional | The identifier of the model, one `ListModels` returns for the workspace's service; omitted when the session has none. |
+| `modelSettings` | object | The values of the model's settings, text by setting identifier. |
+
+**model** (items of `models`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | The name the service takes for the model; what `model` holds. |
+| `name` | string, optional | The name to show; the id when omitted. |
+| `description` | string, optional | What the service says about the model. |
+| `acceptsImages` | bool, optional | Whether the model takes images; omitted when the service does not say. |
+| `contextLimit` | number, optional | Tokens the context window holds as the service runs the model; omitted when not known. |
+| `settings` | array of model setting | The settings the model offers; empty when it has none. |
+
+**model setting** (items of `model.settings`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | The key of the setting in `modelSettings` (of the request and of `ai`). |
+| `name` | string | The name to show. |
+| `description` | string, optional | What the setting does. |
+| `kind` | string | `Choice` (one of `choices`, from the lowest to the highest), `Toggle` (`true` or `false`) or `Number` (a whole number from `minimum` to `maximum`). |
+| `choices` | array of string | The values of a `Choice` setting; empty for the other kinds. |
+| `minimum`, `maximum` | number, optional | The range of a `Number` setting. |
+| `default` | string | The value used until another is chosen. |
 
 **usage** (`GetUsage`)
 
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `service` | string | The AI service the limits belong to. |
-| `session` | period, optional | The short window (5 hours); omitted when the service reports none. |
-| `week` | period, optional | The weekly window; omitted when the service reports none. |
+| `windows` | array of period | Every window the service reports, in the order it reports them; empty when it reports none. |
 
-**period** (`usage.session`, `usage.week`)
+**period** (items of `usage.windows`)
 
 | Property | Type | Meaning |
 | --- | --- | --- |
+| `name` | string | The name the service gives the window, such as `Session`, `Week` or `Week (Opus)`. |
 | `percentUsed` | number | How much of the window's limit is used, 0 to 100. |
 | `windowMinutes` | number | Length of the window. |
 | `resetsAt` | string, optional | When the window resets, ISO 8601 UTC; omitted when unknown. |
 
-The client colors the usage icon by the pace of the session: percent used minus the percent of the window already passed. Within 5 points is even (normal color), 5 to 15 under is low (blue) and beyond that very low (green), 5 to 15 over is high (orange) and beyond that very high (red); a used up limit is always very high, and an unknown or passed reset time is even.
+The client lists every window and colors each one, and the usage icon by the shortest one, by its pace: percent used minus the percent of the window already passed. Within 5 points is even (normal color), 5 to 15 under is low (blue) and beyond that very low (green), 5 to 15 over is high (orange) and beyond that very high (red); a used up limit is always very high, and an unknown or passed reset time is even.
 
 **message** (items of `history.messages`, and carried by `MessageAdded` events)
 
@@ -378,12 +408,11 @@ The server pushes events to every authenticated connection, as responses with `i
 | --- | --- | --- |
 | `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged` or `WorkspacesChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
-| `index` | number | `MessageAdded`: the message's position in the conversation. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
 | `path` | string | `FilesChanged`: the changed folder relative to the workspace folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
-| `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Paused`, `Running`, `Managing`, `Stopping` or `Canceling`. |
+| `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Running`, `Managing`, `Stopping` or `Canceling`. |
 | `text` | string | `ScriptOutput`: what the run wrote since the last event. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 
@@ -393,7 +422,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 `GitChanged` says a git action started or finished in the workspace (the automatic fetch and pull only say it when they changed something), so a client reads the git state again; it does the same when a `FilesChanged` event arrives, when a `WorkingChanged` event says the AI stopped, and after its own git actions.
 
-A client that opens a workspace subscribes first and then reads the newest history chunk: an event whose `index` is below what it already has is a duplicate, one right after the end is appended, and one beyond a gap means it missed messages and reloads. `WorkingChanged` is not guaranteed to be balanced; the last one received is the truth.
+A client that opens a workspace subscribes first and then reads the newest history chunk, holding the events that arrive meanwhile: the leading `MessageAdded` events whose messages the chunk already ends with are duplicates and are dropped, the rest are appended, and later events are appended as they come. A client that may have missed events reads the newest chunk again the same way. `WorkingChanged` is not guaranteed to be balanced; the last one received is the truth.
 
 ## Requests are multiplexed
 

@@ -20,20 +20,6 @@ internal interface IWorkspaceSnapshots
     Task Capture(WorkspaceInfo workspace, CancellationToken cancellation);
 
     /// <summary>
-    /// Reads the snapshot kept for a workspace, so it can be stored.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <returns>The snapshot, or <see langword="null" /> when none is kept.</returns>
-    WorkspaceSnapshot? Export(Guid id);
-
-    /// <summary>
-    /// Keeps a snapshot read from storage, as if it had been taken now.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="snapshot">The snapshot.</param>
-    void Import(Guid id, WorkspaceSnapshot snapshot);
-
-    /// <summary>
     /// Puts the files, the head, the branch and the index of a workspace back as the snapshot saw them, then forgets the snapshot. Files git ignores, other branches and anything pushed are not touched.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -132,12 +118,6 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
 
         Check(await Run(folder, ["read-tree", snapshot.IndexTree], literal));
     }
-
-    /// <inheritdoc />
-    public WorkspaceSnapshot? Export(Guid id) => snapshots.GetValueOrDefault(id);
-
-    /// <inheritdoc />
-    public void Import(Guid id, WorkspaceSnapshot snapshot) => snapshots[id] = snapshot;
 
     /// <inheritdoc />
     public void Discard(Guid id) => snapshots.TryRemove(id, out _);

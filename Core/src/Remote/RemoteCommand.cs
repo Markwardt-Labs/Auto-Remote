@@ -22,7 +22,7 @@ public enum RemoteCommand
     RenameWorkspace,
 
     /// <summary>
-    /// Sets <see cref="RemoteRequest.Service" />, <see cref="RemoteRequest.Model" /> and <see cref="RemoteRequest.Effort" /> for <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.Workspace" />.
+    /// Sets <see cref="RemoteRequest.Service" /> and, on the AI session, <see cref="RemoteRequest.Model" /> and <see cref="RemoteRequest.ModelSettings" /> for <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.Workspace" />.
     /// </summary>
     ConfigureWorkspace,
 
@@ -62,22 +62,12 @@ public enum RemoteCommand
     ShiftGroup,
 
     /// <summary>
-    /// Pauses the AI's work in <see cref="RemoteRequest.WorkspaceId" />: its process is suspended and the workspace is paused until <see cref="ResumeWorkspace" />, <see cref="StopWorkspace" /> or <see cref="CancelWorkspace" />; refused unless the AI is working.
-    /// </summary>
-    PauseWorkspace,
-
-    /// <summary>
-    /// Lets the paused AI work in <see cref="RemoteRequest.WorkspaceId" /> carry on; refused unless the workspace is paused.
-    /// </summary>
-    ResumeWorkspace,
-
-    /// <summary>
-    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling; it works for the AI (also paused), a script and a git action, which it undoes.
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling; it works for the AI, a script and a git action, which it undoes.
     /// </summary>
     StopWorkspace,
 
     /// <summary>
-    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused unless the AI is working or paused, and when its work cannot be reverted because the workspace is not a git repository. Scripts and git actions are stopped, not cancelled.
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused unless the AI is working, and when its work cannot be reverted because the workspace is not a git repository. Scripts and git actions are stopped, not cancelled.
     /// </summary>
     CancelWorkspace,
 
@@ -102,7 +92,7 @@ public enum RemoteCommand
     CreateFolder,
 
     /// <summary>
-    /// Reads a chunk of the conversation of <see cref="RemoteRequest.WorkspaceId" />, the newest messages or the ones before <see cref="RemoteRequest.Before" />, at most <see cref="RemoteRequest.Limit" />, and whether the AI is working; answered in <see cref="RemoteResponse.History" />.
+    /// Reads a chunk of the conversation of <see cref="RemoteRequest.WorkspaceId" />, the newest messages or the ones before the cursor <see cref="RemoteRequest.Before" />, at most <see cref="RemoteRequest.Limit" />, and whether the AI is working; answered in <see cref="RemoteResponse.History" />. The conversation is read from the AI service's own stored session, so it holds the user's prompts and the AI's messages as the service kept them.
     /// </summary>
     GetHistory,
 
@@ -110,6 +100,16 @@ public enum RemoteCommand
     /// Reads the usage limits of <see cref="RemoteRequest.Service" />, as the server last read them (at most a minute old); answered in <see cref="RemoteResponse.Usage" />, with no windows when the service reports none.
     /// </summary>
     GetUsage,
+
+    /// <summary>
+    /// Reads the model and the values of its settings that the AI session of <see cref="RemoteRequest.WorkspaceId" /> runs with, which the session stores; answered in <see cref="RemoteResponse.Ai" />. The session is made when the workspace has none yet.
+    /// </summary>
+    GetWorkspaceAi,
+
+    /// <summary>
+    /// Lists the models <see cref="RemoteRequest.Service" /> can run with the settings each offers; answered in <see cref="RemoteResponse.Models" />, empty when the service is not installed or has none.
+    /// </summary>
+    ListModels,
 
     /// <summary>
     /// Sends <see cref="RemoteRequest.Text" /> to the AI in <see cref="RemoteRequest.WorkspaceId" /> and answers at once; if the AI is already working the text joins that work. The conversation and the work arrive as <see cref="RemoteEvent" /> pushes.

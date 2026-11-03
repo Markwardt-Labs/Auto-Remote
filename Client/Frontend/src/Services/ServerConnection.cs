@@ -58,12 +58,12 @@ internal interface IServerConnection : IAsyncDisposable
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="service">The AI service.</param>
-    /// <param name="model">The model.</param>
-    /// <param name="effort">The effort.</param>
+    /// <param name="model">The identifier of the model, one of those <see cref="ListModels" /> returns; it and its settings go to the workspace's AI session.</param>
+    /// <param name="modelSettings">The values of the model's settings by setting identifier.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The updated workspace.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<WorkspaceInfo> ConfigureWorkspace(Guid id, AiService service, AiModel model, AiEffort effort, CancellationToken cancellation);
+    Task<WorkspaceInfo> ConfigureWorkspace(Guid id, AiService service, string model, IReadOnlyDictionary<string, string> modelSettings, CancellationToken cancellation);
 
     /// <summary>
     /// Moves a workspace into a group, or out of any.
@@ -163,12 +163,12 @@ internal interface IServerConnection : IAsyncDisposable
     /// Reads a chunk of a workspace's conversation.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="before">The position in the conversation before which to read, or <see langword="null" /> for the newest messages.</param>
+    /// <param name="before">The cursor of <see cref="ChatHistory.Older" /> to read before, or <see langword="null" /> for the newest messages.</param>
     /// <param name="limit">The most messages to read, or <see langword="null" /> for the server's default.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The chunk in order and whether the AI is working.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<ChatHistory> GetHistory(Guid id, int? before, int? limit, CancellationToken cancellation);
+    Task<ChatHistory> GetHistory(Guid id, string? before, int? limit, CancellationToken cancellation);
 
     /// <summary>
     /// Sends a prompt to the AI in a workspace. It is accepted at once, also while the AI works, and the conversation arrives as events.
@@ -453,22 +453,6 @@ internal interface IServerConnection : IAsyncDisposable
     Task GitCancel(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Pauses the AI's work in a workspace.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="cancellation">Cancels the wait.</param>
-    /// <exception cref="RemoteException">The server refused: the AI is not working.</exception>
-    Task PauseWorkspace(Guid id, CancellationToken cancellation);
-
-    /// <summary>
-    /// Lets the paused AI work in a workspace carry on.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="cancellation">Cancels the wait.</param>
-    /// <exception cref="RemoteException">The server refused: the workspace is not paused.</exception>
-    Task ResumeWorkspace(Guid id, CancellationToken cancellation);
-
-    /// <summary>
     /// Stops the work running in a workspace at once, keeping what it did.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -501,6 +485,24 @@ internal interface IServerConnection : IAsyncDisposable
     /// <returns>The limits; with no windows when the service reports none.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
     Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads the model and the values of its settings that a workspace's AI session runs with.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The model and settings.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<WorkspaceAi> GetWorkspaceAi(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Lists the models an AI service can run, each with the settings it offers.
+    /// </summary>
+    /// <param name="service">The AI service.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The models; empty when the service is not installed or has none.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<IReadOnlyList<ModelInfo>> ListModels(AiService service, CancellationToken cancellation);
 
     /// <summary>
     /// Lists the script and task runs the server holds for a workspace.
@@ -728,7 +730,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<WorkspaceInfo> RenameWorkspace(Guid id, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenameWorkspace, WorkspaceId = id, Name = name }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> ConfigureWorkspace(Guid id, AiService service, AiModel model, AiEffort effort, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = id, Service = service, Model = model, Effort = effort }, cancellation)).Workspace ?? throw Malformed();
+    public async Task<WorkspaceInfo> ConfigureWorkspace(Guid id, AiService service, string model, IReadOnlyDictionary<string, string> modelSettings, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = id, Service = service, Model = model, ModelSettings = modelSettings }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> MoveWorkspace(Guid id, Guid? groupId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.MoveWorkspace, WorkspaceId = id, GroupId = groupId }, cancellation)).Workspace ?? throw Malformed();
@@ -761,7 +763,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<FolderListing> CreateFolder(string parent, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateFolder, Path = parent, Name = name }, cancellation)).Listing ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<ChatHistory> GetHistory(Guid id, int? before, int? limit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetHistory, WorkspaceId = id, Before = before, Limit = limit }, cancellation)).History ?? throw Malformed();
+    public async Task<ChatHistory> GetHistory(Guid id, string? before, int? limit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetHistory, WorkspaceId = id, Before = before, Limit = limit }, cancellation)).History ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task Prompt(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text }, cancellation);
@@ -856,12 +858,6 @@ internal sealed class ServerConnection : IServerConnection
     public async Task GitCancel(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.GitCancel, WorkspaceId = id }, cancellation);
 
     /// <inheritdoc />
-    public async Task PauseWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.PauseWorkspace, WorkspaceId = id }, cancellation);
-
-    /// <inheritdoc />
-    public async Task ResumeWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ResumeWorkspace, WorkspaceId = id }, cancellation);
-
-    /// <inheritdoc />
     public async Task StopWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StopWorkspace, WorkspaceId = id }, cancellation);
 
     /// <inheritdoc />
@@ -872,6 +868,12 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetUsage, Service = service }, cancellation)).Usage ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<WorkspaceAi> GetWorkspaceAi(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetWorkspaceAi, WorkspaceId = id }, cancellation)).Ai ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ModelInfo>> ListModels(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListModels, Service = service }, cancellation)).Models ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<ScriptRuns> GetScripts(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetScripts, WorkspaceId = id }, cancellation)).Scripts ?? throw Malformed();

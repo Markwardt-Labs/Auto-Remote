@@ -62,12 +62,12 @@ public sealed class MessageChannelTests
     public async Task Events_TravelAsResponsesWithIdZero()
     {
         using DuplexStream stream = new([]);
-        RemoteEvent remoteEvent = new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = Guid.Empty, Index = 4, Message = new ChatMessage { Role = MessageRole.Assistant, Text = "hi" } };
+        RemoteEvent remoteEvent = new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = Guid.Empty, Message = new ChatMessage { Role = MessageRole.Assistant, Text = "hi" } };
 
         await factory.Create(stream).Send(new RemoteResponse { Id = 0, Event = remoteEvent }, CancellationToken.None);
         string line = Encoding.UTF8.GetString(stream.Written.ToArray());
 
-        Assert.Equal("{\"id\":0,\"event\":{\"kind\":\"MessageAdded\",\"workspaceId\":\"00000000-0000-0000-0000-000000000000\",\"index\":4,\"message\":{\"role\":\"Assistant\",\"text\":\"hi\"}}}\n", line);
+        Assert.Equal("{\"id\":0,\"event\":{\"kind\":\"MessageAdded\",\"workspaceId\":\"00000000-0000-0000-0000-000000000000\",\"message\":{\"role\":\"Assistant\",\"text\":\"hi\"}}}\n", line);
         using DuplexStream incoming = new(Encoding.UTF8.GetBytes(line));
         Assert.Equal(remoteEvent, (await factory.Create(incoming).Receive<RemoteResponse>(CancellationToken.None))?.Event);
     }

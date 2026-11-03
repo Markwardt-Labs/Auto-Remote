@@ -6,6 +6,11 @@ namespace Markwardt.AutoRemote;
 public sealed record UsagePeriod
 {
     /// <summary>
+    /// Gets the name the service gives the window, such as <c>Session</c> or <c>Week (Opus)</c>.
+    /// </summary>
+    public required string Name { get; init; }
+
+    /// <summary>
     /// Gets how much of the window's limit is used, from 0 to 100.
     /// </summary>
     public required double PercentUsed { get; init; }

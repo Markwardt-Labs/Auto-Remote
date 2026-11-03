@@ -13,7 +13,7 @@ public sealed class HomeViewModelTests
     public HomeViewModelTests()
     {
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([], first, second));
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         model = new HomeViewModel(connection.Object);
     }
 
@@ -181,50 +181,6 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
-    public async Task PauseAndResume_AreOnlyAvailableInTheirStatesAndGoStraightToTheServer()
-    {
-        await model.Start();
-        Assert.False(model.PauseCommand.CanExecute(null));
-        Working(first, true);
-        Assert.True(model.PauseCommand.CanExecute(null));
-        Assert.False(model.ResumeCommand.CanExecute(null));
-
-        model.PauseCommand.Execute(null);
-        await Task.Delay(50);
-        connection.Verify(x => x.PauseWorkspace(first.Id, It.IsAny<CancellationToken>()), Times.Once);
-        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = first.Id, State = WorkspaceState.Paused });
-
-        Assert.False(model.PauseCommand.CanExecute(null));
-        Assert.True(model.ResumeCommand.CanExecute(null));
-        Assert.True(model.BeginStopCommand.CanExecute(null));
-        model.ResumeCommand.Execute(null);
-        await Task.Delay(50);
-        connection.Verify(x => x.ResumeWorkspace(first.Id, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task IsPaused_IsOnlyTrueWhileTheFocusedWorkspaceIsPausedAndTellsTheHeaderSo()
-    {
-        await model.Start();
-        List<string?> changed = [];
-        model.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
-        Working(first, true);
-        Assert.True(model.IsWorking);
-        Assert.False(model.IsPaused);
-
-        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = first.Id, State = WorkspaceState.Paused });
-
-        Assert.True(model.IsPaused);
-        Assert.True(model.IsWorking);
-        Assert.Contains(nameof(HomeViewModel.IsPaused), changed);
-
-        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = first.Id, State = WorkspaceState.Working });
-
-        Assert.False(model.IsPaused);
-        Assert.True(model.IsWorking);
-    }
-
-    [Fact]
     public async Task StopQuestion_ClosesWhenTheWorkEndsWhileItIsShowing()
     {
         await model.Start();
@@ -316,10 +272,10 @@ public sealed class HomeViewModelTests
         Assert.Equal("/work/renamed", model.Active?.Workspace.Folder);
 
         WorkspaceViewModel? renamed = model.Active;
-        await Changed(Catalog([], first with { Folder = "/work/renamed", Model = AiModel.Opus, Effort = AiEffort.Low }, second));
+        await Changed(Catalog([], first with { Folder = "/work/renamed", Service = AiService.Codex }, second));
 
         Assert.NotSame(renamed, model.Active);
-        Assert.Equal(AiModel.Opus, model.Active?.Workspace.Model);
+        Assert.Equal(AiService.Codex, model.Active?.Workspace.Service);
     }
 
     [Fact]

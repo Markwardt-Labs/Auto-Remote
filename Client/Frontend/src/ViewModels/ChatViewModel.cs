@@ -65,7 +65,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private readonly int chunk = 30;
 
 
-    private int first;
+    private string? older;
+
+    private bool loading;
 
     private string input = string.Empty;
 
@@ -150,7 +152,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether older messages exist on the server than the ones loaded so far.
     /// </summary>
-    public bool HasMore => first > 0;
+    public bool HasMore => older is not null;
 
     /// <summary>
     /// Gets or sets the prompt being typed, which is kept on the device and comes back when the workspace is opened again.
@@ -223,7 +225,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// Reads the newest messages again after the connection was lost and reopened, since messages and whether the AI works may have changed while no events arrived.
     /// </summary>
     /// <returns>A task that completes once the conversation is up to date.</returns>
-    public Task Resync() => loaded ? Load() : Task.CompletedTask;
+    public Task Resync() => loaded ? Reload() : Task.CompletedTask;
 
     /// <summary>
     /// Shows a failure that happened outside the conversation, such as a refused stop, where the conversation shows its own.
@@ -243,16 +245,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             connection.EventReceived += Receive;
         }
 
+        loading = true;
         await Restore();
         await Load();
         loaded = true;
-
-        foreach (RemoteEvent remoteEvent in early)
-        {
-            Apply(remoteEvent);
-        }
-
-        early.Clear();
+        Flush();
         Loaded?.Invoke();
     }
 
@@ -291,8 +288,15 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         try
         {
-            if (!await Attempt(async () => history = await connection.GetHistory(workspaceId, first, chunk, CancellationToken.None)) || history!.Messages.Count == 0)
+            if (!await Attempt(async () => history = await connection.GetHistory(workspaceId, older, chunk, CancellationToken.None)))
             {
+                return false;
+            }
+
+            if (history!.Messages.Count == 0)
+            {
+                older = history.Older;
+                Raise(nameof(HasMore));
                 return false;
             }
 
@@ -301,7 +305,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 Messages.Insert(index, history.Messages[index]);
             }
 
-            first = history.Start;
+            older = history.Older;
             Raise(nameof(HasMore));
             return true;
         }
@@ -310,6 +314,50 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             loadingOlder = false;
         }
     }
+
+    private async Task Reload()
+    {
+        loading = true;
+
+        try
+        {
+            await Load();
+        }
+        finally
+        {
+            Flush();
+        }
+    }
+
+    private void Flush()
+    {
+        List<RemoteEvent> pending = [.. early];
+        early.Clear();
+        List<ChatMessage> added = [.. pending.Where(item => item.Kind == RemoteEventKind.MessageAdded && item.Message is not null).Select(item => item.Message!)];
+        int overlap = Math.Min(added.Count, Messages.Count);
+
+        while (overlap > 0 && !Enumerable.Range(0, overlap).All(index => Same(Messages[Messages.Count - overlap + index], added[index])))
+        {
+            overlap--;
+        }
+
+        int skipped = 0;
+        loading = false;
+
+        foreach (RemoteEvent remoteEvent in pending)
+        {
+            if (remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message is not null && skipped < overlap)
+            {
+                skipped++;
+            }
+            else
+            {
+                Apply(remoteEvent);
+            }
+        }
+    }
+
+    private bool Same(ChatMessage first, ChatMessage second) => first.Role == second.Role && first.Text.Trim() == second.Text.Trim();
 
     private async Task Load()
     {
@@ -324,7 +372,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 Messages.Add(message);
             }
 
-            first = history.Start;
+            older = history.Older;
             Raise(nameof(HasMore));
             IsAiWorking = history.Working;
         }
@@ -337,13 +385,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             return;
         }
 
-        if (loaded)
+        if (loading)
         {
-            Apply(remoteEvent);
+            early.Add(remoteEvent);
         }
         else
         {
-            early.Add(remoteEvent);
+            Apply(remoteEvent);
         }
     }
 
@@ -351,16 +399,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     {
         switch (remoteEvent.Kind)
         {
-            case RemoteEventKind.MessageAdded when remoteEvent.Message is { } message && remoteEvent.Index is { } index:
-                if (index == first + Messages.Count)
-                {
-                    Messages.Add(message);
-                }
-                else if (index > first + Messages.Count)
-                {
-                    _ = Load();
-                }
-
+            case RemoteEventKind.MessageAdded when remoteEvent.Message is { } message:
+                Messages.Add(message);
                 break;
             case RemoteEventKind.WorkingChanged:
                 IsAiWorking = remoteEvent.Working == true;

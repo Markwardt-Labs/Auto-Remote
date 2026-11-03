@@ -9,7 +9,7 @@ public sealed class WorkspaceStoreTests
         WorkspaceStore store = new();
         store.Open(temp.Combine("data/workspaces.json"));
         WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
-        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", GroupId = group.Id, Model = AiModel.Opus, Effort = AiEffort.XHigh, AiSessionId = Guid.NewGuid() };
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", GroupId = group.Id, Service = AiService.Codex, AiSessionId = Guid.NewGuid().ToString("N") };
 
         await store.Save(new WorkspaceCatalog { Groups = [group], Workspaces = [workspace] }, CancellationToken.None);
 
@@ -46,21 +46,33 @@ public sealed class WorkspaceStoreTests
     }
 
     [Fact]
-    public async Task History_AppendsReadsAndDeletes()
+    public async Task Load_IgnoresTheModelAndEffortAnOlderServerStoredWhichTheAiSessionKeepsNow()
     {
         using TempFolder temp = new();
         WorkspaceStore store = new();
         store.Open(temp.Combine("workspaces.json"));
         Guid id = Guid.NewGuid();
-        ChatMessage user = new() { Role = MessageRole.User, Text = "line one\nline two" };
-        ChatMessage reply = new() { Role = MessageRole.Assistant, Text = "ok" };
+        string session = Guid.NewGuid().ToString();
+        await File.WriteAllTextAsync(temp.Combine("workspaces.json"), $$"""{ "groups": [], "workspaces": [ { "id": "{{id}}", "folder": "/work/app", "aiSessionId": "{{session}}", "service": "Codex", "model": "Terra", "effort": "XHigh" } ] }""");
 
-        Assert.Empty(await store.ReadHistory(id, CancellationToken.None));
-        Assert.Equal(0, await store.AppendHistory(id, user, CancellationToken.None));
-        Assert.Equal(1, await store.AppendHistory(id, reply, CancellationToken.None));
+        WorkspaceInfo loaded = (await store.Load(CancellationToken.None)).Workspaces.Single();
 
-        Assert.Equal([user, reply], await store.ReadHistory(id, CancellationToken.None));
-        store.DeleteHistory(id);
-        Assert.Empty(await store.ReadHistory(id, CancellationToken.None));
+        Assert.Equal((AiService.Codex, session), (loaded.Service, loaded.AiSessionId));
+    }
+
+    [Fact]
+    public async Task SaveAttachmentThenDeleteAttachments_KeepsTheFileUntilTheWorkspaceIsDeleted()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new();
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+
+        string path = await store.SaveAttachment(id, "../pic.png", new byte[] { 1, 2 }, CancellationToken.None);
+
+        Assert.True(File.Exists(path));
+        Assert.EndsWith("-pic.png", path);
+        store.DeleteAttachments(id);
+        Assert.False(File.Exists(path));
     }
 }

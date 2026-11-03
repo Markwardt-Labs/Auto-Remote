@@ -1,6 +1,8 @@
 Third-party notices for redistributed binaries
 
-The published Server executable is self-contained: it bundles the .NET runtime and, for voice input,
+The published Server executable is self-contained: it bundles the .NET runtime, the Live AI library
+that drives the AI tools (with Microsoft.Extensions.DependencyInjection.Abstractions and
+Microsoft.Extensions.Logging.Abstractions) and, for voice input,
 the Whisper.net library with the whisper.cpp and ggml native libraries (with Vulkan support) and
 Microsoft.Extensions.AI.Abstractions. The speech model is not bundled; the server downloads it on first
 use. All of these are licensed under the MIT License:
@@ -9,6 +11,7 @@ MIT License
 
 Copyright (c) .NET Foundation and Contributors
 Copyright (c) Microsoft Corporation (Microsoft.Extensions.AI.Abstractions)
+Copyright (c) 2026 Christopher Markwardt (Live AI)
 Copyright (c) 2024 sandrohanea (Whisper.net)
 Copyright (c) 2023-2024 The ggml authors (whisper.cpp and ggml)
 

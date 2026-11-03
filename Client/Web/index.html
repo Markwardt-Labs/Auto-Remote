@@ -20,7 +20,6 @@
   --accent-hover: #1F8AD2;
   --working: #007ACC;
   --on-working: #FFFFFF;
-  --paused: #A85F00;
   --danger: #C74E39;
   --scrim: #00000099;
   --pace-very-low: #6FBF73;
@@ -99,7 +98,6 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .usage-card .value { font-size: 18px; }
 .topbar button:hover:not(:disabled) { background: #ffffff40; }
 .topbar.working { background: var(--working); color: var(--on-working); border-bottom-color: var(--working); }
-.topbar.paused { background: var(--paused); border-bottom-color: var(--paused); }
 .topbar.working button { color: var(--on-working); }
 .topbar.working button:hover:not(:disabled) { background: #ffffff40; }
 .content { flex: 1; min-height: 0; position: relative; }
@@ -368,11 +366,15 @@ const resetText = period => {
   return days >= 1 ? `Resets in ${days}d ${hours % 24}h` : hours >= 1 ? `Resets in ${hours}h ${minutes % 60}m` : `Resets in ${Math.max(1, minutes)}m`;
 };
 const log = message => console.log(`${new Date().toLocaleTimeString("en-GB")} ${message}`);
-const efforts = ["Low", "Medium", "High", "XHigh", "Max"];
 const services = {
-  ClaudeCode: { label: "Claude Code", models: ["Sonnet", "Opus", "Haiku"], efforts, defaultEffort: "High" },
-  Codex: { label: "OpenAI Codex", models: ["Terra", "Sol", "Luna"], efforts, defaultEffort: "Medium" }
+  ClaudeCode: { label: "Claude Code", defaultModel: "sonnet" },
+  Codex: { label: "OpenAI Codex", defaultModel: "gpt-5.6-terra" },
+  OpenCode: { label: "OpenCode", defaultModel: null }
 };
+const settingAccepts = (setting, value) => setting.kind === "Choice" ? setting.choices.includes(value)
+  : setting.kind === "Toggle" ? value === "true" || value === "false"
+  : /^-?\d+$/.test(value) && Number(value) >= (setting.minimum ?? -Infinity) && Number(value) <= (setting.maximum ?? Infinity);
+
 
 function h(tag, props = {}, ...children) {
   const element = document.createElement(tag);
@@ -1265,8 +1267,6 @@ class Connection {
   }
 
   listWorkspaces() { return this.request("ListWorkspaces").then(r => r.catalog); }
-  pauseWorkspace(workspaceId) { return this.request("PauseWorkspace", { workspaceId }); }
-  resumeWorkspace(workspaceId) { return this.request("ResumeWorkspace", { workspaceId }); }
   stopWorkspace(workspaceId) { return this.request("StopWorkspace", { workspaceId }); }
   cancelWorkspace(workspaceId) { return this.request("CancelWorkspace", { workspaceId }); }
   getWorkspaceState(workspaceId) { return this.request("GetWorkspaceState", { workspaceId }).then(r => r.state); }
@@ -1278,7 +1278,9 @@ class Connection {
   createWorkspace(path) { return this.request("CreateWorkspace", { path }).then(r => r.workspace); }
   renameWorkspace(workspaceId, name) { return this.request("RenameWorkspace", { workspaceId, name }).then(r => r.workspace); }
   getUsage(service) { return this.request("GetUsage", { service }).then(r => r.usage); }
-  configureWorkspace(workspaceId, service, model, effort) { return this.request("ConfigureWorkspace", { workspaceId, service, model, effort }).then(r => r.workspace); }
+  configureWorkspace(workspaceId, service, model, modelSettings) { return this.request("ConfigureWorkspace", { workspaceId, service, model, modelSettings }).then(r => r.workspace); }
+  getWorkspaceAi(workspaceId) { return this.request("GetWorkspaceAi", { workspaceId }).then(r => r.ai); }
+  listModels(service) { return this.request("ListModels", { service }).then(r => r.models ?? []); }
   moveWorkspace(workspaceId, groupId) { return this.request("MoveWorkspace", { workspaceId, groupId: groupId ?? undefined }).then(r => r.workspace); }
   deleteWorkspace(workspaceId, deleteFolder) { return this.request("DeleteWorkspace", { workspaceId, deleteFolder }); }
   createGroup(name, parentId) { return this.request("CreateGroup", { name, parentId: parentId ?? undefined }).then(r => r.group); }
@@ -1416,7 +1418,6 @@ const icons = {
   file: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4", "4 1 9 14", 11],
   script: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6.5,7.5 L6.5,11.5 L10,9.5 Z", "4 1 9 14", 11],
   task: ["M4,1 L10,1 L13,4 L13,15 L4,15 Z M10,1 L10,4 L13,4 M6,6 L6,8.5 L8.5,7.25 Z M6,9.5 L6,12 L8.5,10.75 Z", "4 1 9 14", 11],
-  pause: ["M3,1 L5,1 L5,13 L3,13 Z M9,1 L11,1 L11,13 L9,13 Z", "3 1 8 12", 14],
   play: ["M2,1 L12,7 L2,13 Z", "2 1 10 12", 14],
   stop: ["M2,2 L12,2 L12,12 L2,12 Z", "2 2 10 10", 12],
   undo: ["M4,2 L1,5 L4,8 M1,5 L8,5 A4,4 0 0 1 8,13 L4,13", "1 2 9 11", 14],
@@ -1619,8 +1620,8 @@ class WorkspaceView {
     this.settingsOpen = false;
     this.working = false;
     this.messages = [];
-    this.first = 0;
-    this.loaded = false;
+    this.older = null;
+    this.loading = true;
     this.loadingOlder = false;
     this.early = [];
     this.chatAuto = true;
@@ -1669,8 +1670,6 @@ class WorkspaceView {
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary", disabled: true, title: "Send", onclick: () => this.send() }, "↑");
-    this.pauseButton = h("button", { hidden: true, title: "Pause the work", onclick: () => this.halt(() => this.connection.pauseWorkspace(this.info.id)) }, icon("pause"));
-    this.resumeButton = h("button", { class: "primary", hidden: true, title: "Resume the work", onclick: () => this.halt(() => this.connection.resumeWorkspace(this.info.id)) }, icon("play"));
     this.stopButton = h("button", { class: "primary", hidden: true, title: "Stop the work and keep what it did", onclick: () => this.home.confirmHalt(this, false) }, icon("stop"));
     this.cancelButton = h("button", { hidden: true, title: "Cancel the work and revert what it did", onclick: () => this.home.confirmHalt(this, true) }, icon("undo"));
     this.attachments = [];
@@ -1690,7 +1689,7 @@ class WorkspaceView {
       h("div", { class: "messages-wrap" }, this.scroller, this.chatAutoButton),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.sendButton, this.pauseButton, this.resumeButton, this.stopButton, this.cancelButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.sendButton, this.stopButton, this.cancelButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -1802,14 +1801,20 @@ class WorkspaceView {
       this.chatPane);
 
     this.serviceSelect = h("select", { onchange: () => this.changeService() }, Object.entries(services).map(([key, service]) => h("option", { value: key }, service.label)));
-    this.modelSelect = h("select", { onchange: () => this.configure() });
-    this.effortSelect = h("select", { onchange: () => this.configure() });
+    this.modelSelect = h("select", { onchange: () => this.changeModel() });
+    this.modelDescription = h("div", { class: "muted small", hidden: true });
+    this.modelSettingsBox = h("div", { class: "stack tight" });
+    this.refreshButton = h("button", { class: "block", style: "margin-top:8px", onclick: () => this.syncSettings() }, "Refresh models");
+    this.offered = [];
+    this.modelId = null;
+    this.values = {};
     this.syncSettings();
     this.settingsPane = h("div", { class: "pane settings" },
       h("div", { class: "inner stack tight" },
         h("div", { class: "muted" }, "AI service"), this.serviceSelect,
-        h("div", { class: "muted", style: "margin-top:8px" }, "Model"), this.modelSelect,
-        h("div", { class: "muted", style: "margin-top:8px" }, "Effort"), this.effortSelect,
+        h("div", { class: "muted", style: "margin-top:8px" }, "Model"), this.modelSelect, this.modelDescription,
+        this.modelSettingsBox,
+        this.refreshButton,
         this.settingsError.element,
         h("button", { class: "block", style: "margin-top:16px", onclick: () => this.home.beginRename() }, "Rename workspace"),
         h("button", { class: "block danger", onclick: () => this.home.beginDelete() }, "Delete workspace")));
@@ -1857,27 +1862,133 @@ class WorkspaceView {
     return bar;
   }
 
-  syncSettings() {
+  async syncSettings() {
     this.serviceSelect.value = this.info.service;
-    this.fillChoices(this.info.service, this.info.model, this.info.effort);
+    const models = await this.loadModels(this.info.service);
+
+    if (models === null) {
+      return;
+    }
+
+    const ai = await attempt(() => this.connection.getWorkspaceAi(this.info.id), this.settingsError);
+
+    if (ai.ok && this.serviceSelect.value === this.info.service) {
+      this.modelId = ai.value.model ?? null;
+      this.values = { ...(ai.value.modelSettings ?? {}) };
+      this.renderModels();
+    }
   }
 
-  fillChoices(service, model, effort) {
-    const offered = services[service];
-    this.modelSelect.replaceChildren(...offered.models.map(m => h("option", { value: m }, m)));
-    this.effortSelect.replaceChildren(...offered.efforts.map(e => h("option", { value: e }, e)));
-    this.modelSelect.value = model;
-    this.effortSelect.value = effort;
+  async loadModels(service) {
+    const result = await attempt(() => this.connection.listModels(service), this.settingsError);
+
+    if (!result.ok) {
+      return null;
+    }
+
+    if (service === this.serviceSelect.value) {
+      this.offered = result.value;
+      this.renderModels();
+    }
+
+    return result.value;
   }
 
-  changeService() {
-    const offered = services[this.serviceSelect.value];
-    this.fillChoices(this.serviceSelect.value, offered.models[0], offered.defaultEffort);
+  selectedModel() {
+    return this.offered.find(model => model.id === this.modelId) ?? null;
+  }
+
+  renderModels() {
+    const choices = this.offered.map(model => [model.id, model.name ?? model.id]);
+
+    if (this.modelId && !choices.some(([id]) => id === this.modelId)) {
+      choices.unshift([this.modelId, this.modelId]);
+    }
+
+    this.modelSelect.replaceChildren(...choices.map(([id, name]) => h("option", { value: id }, name)));
+    this.modelSelect.value = this.modelId ?? "";
+    this.renderModelSettings();
+  }
+
+  renderModelSettings() {
+    const model = this.selectedModel();
+    this.modelDescription.textContent = model?.description ?? "";
+    this.modelDescription.hidden = !model?.description;
+    this.modelSettingsBox.replaceChildren(...(model?.settings ?? []).map(setting => this.settingControl(setting)));
+  }
+
+  settingControl(setting) {
+    const value = this.values[setting.id] ?? setting.default;
+    const change = next => {
+      this.values[setting.id] = next;
+      this.configure();
+    };
+    let control;
+
+    if (setting.kind === "Choice") {
+      control = h("select", { onchange: () => change(control.value) }, setting.choices.map(choice => h("option", { value: choice }, choice)));
+      control.value = value;
+    } else if (setting.kind === "Toggle") {
+      control = h("input", { type: "checkbox", onchange: () => change(control.checked ? "true" : "false") });
+      control.checked = value === "true";
+    } else {
+      const step = (setting.maximum ?? 0) - (setting.minimum ?? 0) > 4096 ? 1024 : 1;
+      control = h("input", { type: "number", min: String(setting.minimum ?? ""), max: String(setting.maximum ?? ""), step: String(step), onchange: () => {
+        const next = String(Math.trunc(Number(control.value)));
+
+        if (control.value !== "" && settingAccepts(setting, next)) {
+          change(next);
+        } else {
+          control.value = this.values[setting.id] ?? setting.default;
+        }
+      } });
+      control.value = value;
+    }
+
+    return h("div", { class: "stack tight", style: "margin-top:8px" },
+      h("div", { class: "muted" }, setting.name),
+      control,
+      ...(setting.description ? [h("div", { class: "muted small" }, setting.description)] : []));
+  }
+
+  carry(model) {
+    return Object.fromEntries((model?.settings ?? []).map(setting => [setting.id, setting.id in this.values && settingAccepts(setting, this.values[setting.id]) ? this.values[setting.id] : setting.default]));
+  }
+
+  changeModel() {
+    this.modelId = this.modelSelect.value;
+    this.values = this.carry(this.selectedModel());
+    this.renderModelSettings();
     return this.configure();
+  }
+
+  async changeService() {
+    const key = this.serviceSelect.value;
+    const models = await this.loadModels(key);
+
+    if (models === null || models.length === 0) {
+      const message = models === null ? this.settingsError.element.textContent : `${services[key].label} offers no models. Is it installed and signed in on the server's machine?`;
+      this.serviceSelect.value = this.info.service;
+      await this.syncSettings();
+      this.settingsError.set(message);
+      return;
+    }
+
+    this.offered = models;
+    this.modelId = (models.find(model => model.id === services[key].defaultModel) ?? models[0]).id;
+    this.values = {};
+    this.values = this.carry(this.selectedModel());
+    this.renderModels();
+    await this.configure();
   }
 
   toggleSettings() {
     this.settingsOpen = !this.settingsOpen;
+
+    if (this.settingsOpen) {
+      this.syncSettings();
+    }
+
     this.settingsPane.hidden = !this.settingsOpen;
     this.panels.hidden = this.settingsOpen;
 
@@ -1987,7 +2098,7 @@ class WorkspaceView {
   }
 
   followState(state) {
-    this.forced = state === "Paused" || state === "Stopping" || state === "Canceling" ? state : null;
+    this.forced = state === "Stopping" || state === "Canceling" ? state : null;
     this.applyState();
   }
 
@@ -2214,7 +2325,7 @@ class WorkspaceView {
     const state = this.state();
 
     if (state !== "Ready") {
-      this.scriptError.set({ Running: "A script is already running.", Managing: "Wait for git to finish before running a script.", Paused: "Resume or stop the paused AI before running a script.", Stopping: "Wait for the work to finish stopping before running a script.", Canceling: "Wait for the work to finish being cancelled before running a script." }[state] ?? "Wait for the AI to finish before running a script.");
+      this.scriptError.set({ Running: "A script is already running.", Managing: "Wait for git to finish before running a script.", Stopping: "Wait for the work to finish stopping before running a script.", Canceling: "Wait for the work to finish being cancelled before running a script." }[state] ?? "Wait for the AI to finish before running a script.");
       return;
     }
 
@@ -2296,7 +2407,7 @@ class WorkspaceView {
     }
 
     this.gitBar.hidden = state !== "Managing";
-    this.input.placeholder = { Running: "A script is running, wait for it to finish", Managing: "Git is working, wait for it to finish", Paused: "Paused, resume or stop the work to carry on", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
+    this.input.placeholder = { Running: "A script is running, wait for it to finish", Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
     this.updateSend();
     this.home.updateWorking(this);
   }
@@ -2326,39 +2437,59 @@ class WorkspaceView {
   }
 
   async loadChat() {
+    this.loading = true;
     const result = await attempt(() => this.connection.getHistory(this.info.id, null, historyChunk), this.chatError);
 
     if (result.ok) {
       this.messages = [...result.value.messages];
-      this.first = result.value.start;
+      this.older = result.value.older ?? null;
       this.setWorking(result.value.working === true);
       this.renderMessages();
     }
 
-    this.loaded = true;
+    this.flushEarly();
+  }
 
-    for (const event of this.early) {
-      this.apply(event);
+  flushEarly() {
+    const pending = this.early;
+    this.early = [];
+    const added = pending.filter(event => event.kind === "MessageAdded" && event.message).map(event => event.message);
+    const same = (first, second) => first.role === second.role && first.text.trim() === second.text.trim();
+    let overlap = Math.min(added.length, this.messages.length);
+
+    while (overlap > 0 && !added.slice(0, overlap).every((message, index) => same(this.messages[this.messages.length - overlap + index], message))) {
+      overlap--;
     }
 
-    this.early = [];
+    this.loading = false;
+    let skipped = 0;
+
+    for (const event of pending) {
+      if (event.kind === "MessageAdded" && event.message && skipped < overlap) {
+        skipped++;
+      } else {
+        this.apply(event);
+      }
+    }
   }
 
   async loadOlder() {
-    if (this.first <= 0 || this.loadingOlder) {
+    if (this.older === null || this.loadingOlder) {
       return;
     }
 
     this.loadingOlder = true;
 
     try {
-      const result = await attempt(() => this.connection.getHistory(this.info.id, this.first, historyChunk), this.chatError);
+      const result = await attempt(() => this.connection.getHistory(this.info.id, this.older, historyChunk), this.chatError);
 
-      if (result.ok && result.value.messages.length > 0) {
+      if (result.ok && result.value.messages.length === 0) {
+        this.older = result.value.older ?? null;
+      } else if (result.ok) {
         const height = this.scroller.scrollHeight;
         const top = this.scroller.scrollTop;
         this.messages.unshift(...result.value.messages);
-        this.first = result.value.start;
+        this.older = result.value.older ?? null;
         this.list.prepend(...result.value.messages.map(message => this.messageElement(message)));
         this.scroller.scrollTop = top + (this.scroller.scrollHeight - height);
       }
@@ -2392,23 +2523,17 @@ class WorkspaceView {
       this.refreshGit(event.kind === "GitChanged");
     }
 
-    if (this.loaded) {
-      this.apply(event);
-    } else {
+    if (this.loading) {
       this.early.push(event);
+    } else {
+      this.apply(event);
     }
   }
 
   apply(event) {
-    if (event.kind === "MessageAdded" && event.message && typeof event.index === "number") {
-      const end = this.first + this.messages.length;
-
-      if (event.index === end) {
-        this.messages.push(event.message);
-        this.appendMessage(event.message);
-      } else if (event.index > end) {
-        this.loadChat();
-      }
+    if (event.kind === "MessageAdded" && event.message) {
+      this.messages.push(event.message);
+      this.appendMessage(event.message);
     } else if (event.kind === "WorkingChanged") {
       this.setWorking(event.working === true);
     } else if (event.kind === "Failed") {
@@ -2553,12 +2678,10 @@ class WorkspaceView {
   updateSend() {
     const state = this.state();
     const empty = this.input.value.trim().length === 0 && this.attachments.length === 0;
-    const halt = (state === "Working" && empty) || state === "Paused" || state === "Running" || state === "Managing" || state === "Canceling";
-    const ai = state === "Working" || state === "Paused";
+    const halt = (state === "Working" && empty) || state === "Running" || state === "Managing" || state === "Canceling";
+    const ai = state === "Working";
     this.sendButton.disabled = !this.takesAiInput() || empty;
     this.sendButton.hidden = halt;
-    this.pauseButton.hidden = !(halt && state === "Working");
-    this.resumeButton.hidden = !(halt && state === "Paused");
     this.stopButton.hidden = !halt;
     this.stopButton.disabled = state === "Canceling";
     this.cancelButton.hidden = !(halt && ai);
@@ -3769,15 +3892,18 @@ class WorkspaceView {
 
   async configure() {
     const service = this.serviceSelect.value;
-    const model = this.modelSelect.value;
-    const effort = this.effortSelect.value;
-    const result = await attempt(() => this.connection.configureWorkspace(this.info.id, service, model, effort), this.settingsError);
+    const result = await attempt(() => this.connection.configureWorkspace(this.info.id, service, this.modelId, this.values), this.settingsError);
 
     if (result.ok) {
       this.info = result.value;
       this.home.replace(result.value);
     } else {
-      this.syncSettings();
+      const message = this.settingsError.element.textContent;
+      await this.syncSettings();
+
+      if (!this.settingsError.element.textContent) {
+        this.settingsError.set(message);
+      }
     }
   }
 }
@@ -3896,7 +4022,7 @@ class Home {
     for (const [id, view] of [...this.opened]) {
       const now = this.workspaces.find(workspace => workspace.id === id);
 
-      if (!now || now.folder !== view.info.folder || now.service !== view.info.service || now.model !== view.info.model || now.effort !== view.info.effort) {
+      if (!now || now.folder !== view.info.folder || now.service !== view.info.service) {
         view.dispose();
         view.element.remove();
         this.opened.delete(id);
@@ -3988,30 +4114,24 @@ class Home {
   }
 
   renderUsage() {
-    const usage = this.usage;
-    const session = usage?.session;
-    const week = usage?.week;
-    this.usageButton.dataset.pace = session ? paceOf(session) : "Even";
-    const section = (label, period) => {
-      if (!period) {
-        return [];
-      }
-
+    const windows = this.usage?.windows ?? [];
+    const shortest = windows.reduce((best, period) => !best || period.windowMinutes < best.windowMinutes ? period : best, null);
+    this.usageButton.dataset.pace = shortest ? paceOf(shortest) : "Even";
+    const section = period => {
       const value = h("div", { class: "value" }, `${Math.round(period.percentUsed)}% used`);
       value.dataset.pace = paceOf(period);
-      return [h("div", { class: "stack tight" }, h("div", { class: "muted" }, label), value, h("div", { class: "muted small" }, resetText(period)))];
+      const reset = resetText(period);
+      return h("div", { class: "stack tight" }, h("div", { class: "muted" }, period.name), value, ...(reset ? [h("div", { class: "muted small" }, reset)] : []));
     };
     this.usageCard.replaceChildren(
       h("h3", { class: "serif" }, `${services[this.usageService ?? "ClaudeCode"].label} usage limits`),
-      ...section("Session", session),
-      ...section("Week", week),
-      ...(session || week ? [] : [h("div", { class: "muted" }, "The service reports no usage limits.")]));
+      ...windows.map(section),
+      ...(windows.length ? [] : [h("div", { class: "muted" }, "The service reports no usage limits.")]));
   }
 
   updateWorking(view) {
     if (view === this.active) {
       this.topbar.classList.toggle("working", view.state() !== "Ready");
-      this.topbar.classList.toggle("paused", view.state() === "Paused");
     }
   }
 
@@ -4068,7 +4188,7 @@ class Home {
     this.toggleUsage(false);
     this.showUsage(workspace?.service ?? null);
     this.title.textContent = workspace ? folderName(workspace.folder) : "Auto Remote";
-    this.topbar.classList.remove("working", "paused");
+    this.topbar.classList.remove("working");
 
     if (workspace) {
       let view = this.opened.get(workspace.id);
@@ -4220,7 +4340,7 @@ class Home {
   }
 
   closeHaltDialogUnlessRunning(state) {
-    if (this.haltDialog && this.dialogHost.firstChild === this.haltDialog && state !== "Working" && state !== "Paused" && state !== "Running" && state !== "Managing") {
+    if (this.haltDialog && this.dialogHost.firstChild === this.haltDialog && state !== "Working" && state !== "Running" && state !== "Managing") {
       this.closeDialog();
     }
   }

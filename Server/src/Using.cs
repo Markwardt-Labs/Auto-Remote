@@ -17,5 +17,6 @@ global using System.Net.NetworkInformation;
 global using System.Net.Security;
 global using System.Security.Authentication;
 global using System.Security.Cryptography.X509Certificates;
+global using Markwardt.LiveAi;
 global using Whisper.net;
 global using System.Reflection;

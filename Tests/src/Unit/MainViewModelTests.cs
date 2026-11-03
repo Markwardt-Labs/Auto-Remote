@@ -81,7 +81,7 @@ public sealed class MainViewModelTests
         WorkspaceInfo wanted = new() { Id = Guid.NewGuid(), Folder = "/work/wanted" };
         WorkspaceInfo other = new() { Id = Guid.NewGuid(), Folder = "/work/other" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [other, wanted] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
         factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
 
@@ -97,7 +97,7 @@ public sealed class MainViewModelTests
         WorkspaceInfo first = new() { Id = Guid.NewGuid(), Folder = "/work/first" };
         WorkspaceInfo second = new() { Id = Guid.NewGuid(), Folder = "/work/second" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [first, second] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
         factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
         await model.Start();

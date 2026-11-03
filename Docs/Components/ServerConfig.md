@@ -9,9 +9,9 @@ The server reads one JSON file at startup (the path passed as the first argument
 | `dataFolder` | `AutoRemote` folder in the server user's application data | Folder holding all data the server stores; created when missing. |
 | `defaultFolder` | the server user's home folder | Existing folder where browsing for a new workspace's folder starts. |
 | `claudeCommand` | `claude` | Claude Code executable run for prompts; must resolve on the server's machine. |
-| `claudeArguments` | `[]` | Extra arguments added to every Claude Code run. |
 | `codexCommand` | `codex` | Codex executable run for prompts; must resolve on the server's machine. |
-| `codexArguments` | `[]` | Extra arguments added to every Codex run. |
+| `openCodeCommand` | `opencode` | OpenCode executable that runs the prompts of workspaces that use OpenCode (local models); must resolve on the server's machine. |
+| `localModelUrl` | `http://localhost:11434/v1` | Address, with its version path, of the OpenAI compatible API of the local model server whose models OpenCode offers: Ollama by default; LM Studio, llama.cpp and vLLM work too; must be an http or https address, otherwise the server refuses to start. |
 | `speechModel` | `small.en` | Whisper model that turns speech into text inside the server for voice input: a model name (`tiny.en`, `base.en`, `small.en`, `medium.en`, `small`, `large-v3-turbo` and so on, as named at `huggingface.co/ggerganov/whisper.cpp`) or the path of an existing `ggml` model file; empty turns the built-in voice input off. See Voice input below. |
 | `speechCommand` | none | Executable that turns a recording into text instead of the built-in model; when set, `speechModel` is not used. |
 | `speechArguments` | `[]` | Arguments of the speech command, in which `{file}` is replaced by the path of the recorded WAV file. |
@@ -27,8 +27,8 @@ The clients record speech and the server turns it into text, so it works the sam
 
 ## Data location
 
-The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (workspaces, groups and settings), the per-workspace conversations in a `history` folder, `paused.json` (AI work that is paused, only while some is), the Whisper `models` and the extracted `native` libraries of voice input, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
+The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (workspaces, groups and settings), the `liveai` folder where Live AI links each workspace's session to the AI tool's own, the attached files in an `attachments` folder, the Whisper `models` and the extracted `native` libraries of voice input, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
 
 ## Fixed behavior
 
-Prompts always run with `--dangerously-skip-permissions` (Claude Code) or `--dangerously-bypass-approvals-and-sandbox` (Codex), since they run unattended and cannot ask, and always do their work in the foreground (see Workspaces); `claudeArguments` and `codexArguments` come after them. Which service a workspace uses is a workspace setting, not a server setting; the executables are only needed for the services in use.
+Prompts run through Live AI with the AI's own file tools and a shell instead of the tool's (see Workspaces), never ask for permission, and always do their work in the foreground. `claudeCommand`, `codexCommand` and `openCodeCommand` name the executables Live AI starts and the usage reading uses. Which service a workspace uses is a workspace setting, not a server setting; the executables are only needed for the services in use.

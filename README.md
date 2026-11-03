@@ -4,7 +4,7 @@
 [![Build](https://github.com/Markwardt-Labs/Auto-Remote/actions/workflows/build.yml/badge.svg)](https://github.com/Markwardt-Labs/Auto-Remote/actions/workflows/build.yml)
 ![Coverage](.github/badges/badge_linecoverage.svg)
 
-Auto Remote is a command line server that hosts Claude Code or OpenAI Codex workspaces on your computer and an Avalonia Android client, an Avalonia desktop client and a single-file browser client (`Client/Web/index.html`) for using them remotely. The server needs the `claude` (Claude Code) and/or `codex` (OpenAI Codex) command installed, for the services you use, and `git` for the git features (status, changes, history, diffs, commit and clone), which run on the server. Built on .NET 10 and [Avalonia](https://avaloniaui.net/); see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) for redistributed dependency licenses.
+Auto Remote is a command line server that hosts Claude Code, OpenAI Codex or local model workspaces on your computer and an Avalonia Android client, an Avalonia desktop client and a single-file browser client (`Client/Web/index.html`) for using them remotely. The server needs the `claude` (Claude Code) and/or `codex` (OpenAI Codex) command installed, for the services you use, and `git` for the git features (status, changes, history, diffs, commit and clone), which run on the server. Built on .NET 10 and [Avalonia](https://avaloniaui.net/); see [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) for redistributed dependency licenses.
 
 ## Requirements
 

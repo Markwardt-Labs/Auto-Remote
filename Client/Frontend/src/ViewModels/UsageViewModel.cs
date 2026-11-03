@@ -23,37 +23,17 @@ internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBa
     /// <summary>
     /// Gets a value indicating whether the service reported any limit.
     /// </summary>
-    public bool HasLimits => status is { Session: not null } or { Week: not null };
+    public bool HasLimits => Windows.Count > 0;
 
     /// <summary>
-    /// Gets the session usage as text, or an empty text when the service reports none.
+    /// Gets every window the service reports, in the order it reports them.
     /// </summary>
-    public string SessionText => Describe(status?.Session);
+    public IReadOnlyList<UsageLine> Windows => [.. (status?.Windows ?? []).Select(Line)];
 
     /// <summary>
-    /// Gets when the session resets as text.
+    /// Gets the pace that colors the usage icon: the pace of the shortest window.
     /// </summary>
-    public string SessionReset => Reset(status?.Session);
-
-    /// <summary>
-    /// Gets the pace of the session usage, which colors the icon: <c>VeryLow</c> green, <c>Low</c> blue, <c>Even</c> normal, <c>High</c> orange and <c>VeryHigh</c> red.
-    /// </summary>
-    public string SessionPace => (status?.Session?.Pace(DateTimeOffset.UtcNow) ?? UsagePace.Even).ToString();
-
-    /// <summary>
-    /// Gets the weekly usage as text, or an empty text when the service reports none.
-    /// </summary>
-    public string WeekText => Describe(status?.Week);
-
-    /// <summary>
-    /// Gets when the week resets as text.
-    /// </summary>
-    public string WeekReset => Reset(status?.Week);
-
-    /// <summary>
-    /// Gets the pace of the weekly usage.
-    /// </summary>
-    public string WeekPace => (status?.Week?.Pace(DateTimeOffset.UtcNow) ?? UsagePace.Even).ToString();
+    public string IconPace => (status?.Windows.MinBy(window => window.WindowMinutes)?.Pace(DateTimeOffset.UtcNow) ?? UsagePace.Even).ToString();
 
     /// <summary>
     /// Shows the limits of an AI service and keeps them up to date, or stops showing any.
@@ -140,11 +120,11 @@ internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBa
         }
     }
 
-    private string Describe(UsagePeriod? period) => period is null ? string.Empty : $"{Math.Round(period.PercentUsed):0}% used";
+    private UsageLine Line(UsagePeriod period) => new() { Name = period.Name, Text = $"{Math.Round(period.PercentUsed):0}% used", Reset = Reset(period), Pace = period.Pace(DateTimeOffset.UtcNow).ToString() };
 
-    private string Reset(UsagePeriod? period)
+    private string Reset(UsagePeriod period)
     {
-        if (period?.ResetsAt is not { } resets)
+        if (period.ResetsAt is not { } resets)
         {
             return string.Empty;
         }
@@ -163,11 +143,7 @@ internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBa
     {
         Raise(nameof(ServiceName));
         Raise(nameof(HasLimits));
-        Raise(nameof(SessionText));
-        Raise(nameof(SessionReset));
-        Raise(nameof(SessionPace));
-        Raise(nameof(WeekText));
-        Raise(nameof(WeekReset));
-        Raise(nameof(WeekPace));
+        Raise(nameof(Windows));
+        Raise(nameof(IconPace));
     }
 }

@@ -4,7 +4,7 @@ public sealed class UsagePeriodTests
 {
     private readonly DateTimeOffset now = new(2026, 10, 11, 12, 0, 0, TimeSpan.Zero);
 
-    private UsagePeriod Session(double used, TimeSpan? resetsIn = null) => new() { PercentUsed = used, WindowMinutes = 300, ResetsAt = resetsIn is { } left ? now + left : null };
+    private UsagePeriod Session(double used, TimeSpan? resetsIn = null) => new() { Name = "Session", PercentUsed = used, WindowMinutes = 300, ResetsAt = resetsIn is { } left ? now + left : null };
 
     [Theory]
     [InlineData(34, UsagePace.VeryLow)]

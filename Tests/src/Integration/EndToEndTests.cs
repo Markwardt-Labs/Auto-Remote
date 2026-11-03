@@ -17,14 +17,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        string fake = temp.Combine("fake-claude.sh");
-        File.WriteAllText(fake, "#!/bin/sh\nmode=new\nwhile [ $# -gt 0 ]; do case \"$1\" in --resume) mode=continued; sid=$2; shift;; --session-id) sid=$2; shift;; esac; shift; done\nif [ $mode = continued ] && [ ! -f \"$PWD/.ai-$sid\" ]; then printf '{\"type\":\"result\",\"subtype\":\"error_during_execution\",\"is_error\":true,\"errors\":[\"No conversation found with session ID: %s\"]}\\n' \"$sid\"; exit 1; fi\ntouch \"$PWD/.ai-$sid\"\nwhile IFS= read -r line; do\n  text=$(printf '%s' \"$line\" | sed 's/.*\"content\":\"\\([^\"]*\\)\".*/\\1/')\n  case \"$text\" in long*) sleep 1;; esac\n  printf '{\"type\":\"assistant\",\"message\":{\"content\":[{\"type\":\"text\",\"text\":\"%s:%s:%s\"}]}}\\n' \"$mode\" \"$(basename \"$PWD\")\" \"$text\"\n  printf '{\"type\":\"result\",\"is_error\":false,\"result\":\"done\"}\\n'\ndone\n");
-        if (!OperatingSystem.IsWindows())
-        {
-            File.SetUnixFileMode(fake, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-
-        ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), ClaudeCommand = fake, ClaudeArguments = [], SpeechCommand = "sh", SpeechArguments = ["-c", "echo said $(wc -c < \"$1\")", "speech", "{file}"] };
+        ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), SpeechCommand = "sh", SpeechArguments = ["-c", "echo said $(wc -c < \"$1\")", "speech", "{file}"] };
         FolderBrowser folders = new();
         WorkspaceStore store = new();
         EventHub hub = new();
@@ -32,10 +25,11 @@ public sealed class EndToEndTests : IAsyncLifetime
         GitService git = new();
         WorkspaceActivity activity = new(hub);
         WorkspaceSnapshots snapshots = new(git);
-        PromptService prompts = new(workspaces, store, new AiRunner(new ProcessFreezer()), hub, activity, snapshots);
+        FakePromptProvider prompter = new() { OnCreate = session => session.ReplyWith(Answer), Models = [Model("sonnet"), Model("haiku")] };
+        PromptService prompts = new(workspaces, store, (_, _) => prompter, hub, activity, snapshots);
         WorkspaceVersioning versioning = new(git, prompts, hub, activity);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, Mock.Of<IUsageService>(), hub, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots, store, workspaces, hub), new SpeechService(Mock.Of<IWhisperEngine>()));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, Mock.Of<IUsageService>(), hub, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), new ModelService((_, _) => prompter));
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -52,6 +46,18 @@ public sealed class EndToEndTests : IAsyncLifetime
                 received.Add(remoteEvent);
             }
         };
+    }
+
+    private PromptModel Model(string id) => new() { Id = id, Name = id, CallsTools = true, Settings = [PromptModelSetting.Choose("effort", "Effort", ["low", "medium", "high"])] };
+
+    private IEnumerable<PromptEvent> Answer(FakePrompt prompt)
+    {
+        if (prompt.Text == "long")
+        {
+            Thread.Sleep(600);
+        }
+
+        return [new PromptMessageEvent { Text = "reply to " + prompt.Text }];
     }
 
     private async Task<List<RemoteEvent>> Received(Func<List<RemoteEvent>, bool> done)
@@ -191,26 +197,25 @@ public sealed class EndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Prompt_StreamsTheConversationAsEventsAndResumesItsAiSessionInANewProcess()
+    public async Task Prompt_StreamsTheConversationAsEventsAndResumesItsAiSessionAfterTheSessionWasClosed()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "work", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
 
         await connection.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && events.Last().Kind == RemoteEventKind.WorkingChanged);
-        await connection.ConfigureWorkspace(workspace.Id, AiService.ClaudeCode, AiModel.Sonnet, AiEffort.Low, CancellationToken.None);
+        await connection.ConfigureWorkspace(workspace.Id, AiService.ClaudeCode, "sonnet", new Dictionary<string, string> { ["effort"] = "low" }, CancellationToken.None);
         await connection.Prompt(workspace.Id, "again", CancellationToken.None);
         List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Kind == RemoteEventKind.WorkingChanged);
 
-        Assert.Equal(["hello", "new:work:hello", "again", "continued:work:again"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
-        Assert.Equal([0, 1, 2, 3], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Index));
+        Assert.Equal(["hello", "reply to hello", "again", "reply to again"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
         ChatHistory history = await connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
-        Assert.Equal(["hello", "new:work:hello", "again", "continued:work:again"], history.Messages.Select(message => message.Text));
+        Assert.Equal(["hello", "reply to hello", "again", "reply to again"], history.Messages.Select(message => message.Text));
         Assert.False(history.Working);
     }
 
     [Fact]
-    public async Task Prompt_SentWhileTheAiWorksJoinsTheSameLiveSession()
+    public async Task Prompt_SentWhileTheAiWorksIsTakenIntoThatWork()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "slow", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
@@ -219,9 +224,9 @@ public sealed class EndToEndTests : IAsyncLifetime
         await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
         Assert.True((await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Working);
         await connection.Prompt(workspace.Id, "short", CancellationToken.None);
-        List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Working == false);
+        List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 3 && events.Last().Working == false);
 
-        Assert.Equal(["long", "short", "new:slow:long", "new:slow:short"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
+        Assert.Equal(["long", "short", "reply to long"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
     }
 
     [Fact]
@@ -237,12 +242,12 @@ public sealed class EndToEndTests : IAsyncLifetime
         }
 
         ChatHistory newest = await connection.GetHistory(workspace.Id, null, 4, CancellationToken.None);
-        ChatHistory older = await connection.GetHistory(workspace.Id, newest.Start, 4, CancellationToken.None);
+        ChatHistory older = await connection.GetHistory(workspace.Id, newest.Older, 4, CancellationToken.None);
 
-        Assert.Equal(2, newest.Start);
-        Assert.Equal(["q1", "new:chunks:q1", "q2", "new:chunks:q2"], newest.Messages.Select(message => message.Text));
-        Assert.Equal(0, older.Start);
-        Assert.Equal(["q0", "new:chunks:q0"], older.Messages.Select(message => message.Text));
+        Assert.NotNull(newest.Older);
+        Assert.Equal(["q1", "reply to q1", "q2", "reply to q2"], newest.Messages.Select(message => message.Text));
+        Assert.Null(older.Older);
+        Assert.Equal(["q0", "reply to q0"], older.Messages.Select(message => message.Text));
     }
 
     [Fact]
@@ -269,13 +274,14 @@ public sealed class EndToEndTests : IAsyncLifetime
         WorkspaceGroup group = await connection.CreateGroup("Clients", null, CancellationToken.None);
 
         await connection.MoveWorkspace(workspace.Id, group.Id, CancellationToken.None);
-        await connection.ConfigureWorkspace(workspace.Id, AiService.ClaudeCode, AiModel.Haiku, AiEffort.Low, CancellationToken.None);
+        await connection.ConfigureWorkspace(workspace.Id, AiService.ClaudeCode, "haiku", new Dictionary<string, string> { ["effort"] = "low" }, CancellationToken.None);
         WorkspaceCatalog catalog = await connection.ListWorkspaces(CancellationToken.None);
 
         Assert.Equal("Clients", Assert.Single(catalog.Groups).Name);
         WorkspaceInfo listed = Assert.Single(catalog.Workspaces);
         Assert.Equal(group.Id, listed.GroupId);
-        Assert.Equal((AiModel.Haiku, AiEffort.Low), (listed.Model, listed.Effort));
+        WorkspaceAi ai = await connection.GetWorkspaceAi(workspace.Id, CancellationToken.None);
+        Assert.Equal(("haiku", "low"), (ai.Model, ai.ModelSettings["effort"]));
 
         WorkspaceGroup nested = await connection.CreateGroup("Acme", group.Id, CancellationToken.None);
         WorkspaceGroup other = await connection.CreateGroup("Archive", null, CancellationToken.None);

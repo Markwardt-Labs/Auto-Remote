@@ -19,6 +19,12 @@ internal static class Program
             cancellation.Cancel();
         };
 
+        using PosixSignalRegistration terminated = PosixSignalRegistration.Create(PosixSignal.SIGTERM, context =>
+        {
+            context.Cancel = true;
+            cancellation.Cancel();
+        });
+
         IAppInfo info = new IAppInfo.Factory().Create(typeof(Program).Assembly);
         IFolderBrowser folders = new FolderBrowser();
         IWorkspaceStore store = new WorkspaceStore();
@@ -27,11 +33,21 @@ internal static class Program
         IGitService git = new GitService();
         IWorkspaceActivity activity = new WorkspaceActivity(events);
         IWorkspaceSnapshots snapshots = new WorkspaceSnapshots(git);
-        IPromptService prompts = new PromptService(workspaces, store, new AiRunner(new ProcessFreezer()), events, activity, snapshots);
+        IAiProviders providers = new AiProviders();
+        IPromptService prompts = new PromptService(workspaces, store, providers.Create, events, activity, snapshots);
         IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity);
         IScriptRunner scripts = new ScriptRunner(events, activity);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, new UsageService(), events, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots, store, workspaces, events), new SpeechService(new WhisperEngine()));
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, new UsageService(providers.Create), events, activity, new WorkspaceControl(activity, prompts, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), new ModelService(providers.Create));
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, new ConsoleLog()), Console.Out);
-        return await application.Run(args, cancellation.Token);
+        try
+        {
+            return await application.Run(args, cancellation.Token);
+        }
+        finally
+        {
+            Console.WriteLine("Closing the AI sessions");
+            await prompts.Close();
+            Console.WriteLine("Closed the AI sessions");
+        }
     }
 }

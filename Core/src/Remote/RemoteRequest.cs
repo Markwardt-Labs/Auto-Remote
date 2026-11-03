@@ -31,19 +31,19 @@ public sealed record RemoteRequest
     public Guid? ParentId { get; init; }
 
     /// <summary>
-    /// Gets the AI service for <see cref="RemoteCommand.ConfigureWorkspace" /> or <see cref="RemoteCommand.GetUsage" />.
+    /// Gets the AI service for <see cref="RemoteCommand.ConfigureWorkspace" />, <see cref="RemoteCommand.GetUsage" /> or <see cref="RemoteCommand.ListModels" />.
     /// </summary>
     public AiService? Service { get; init; }
 
     /// <summary>
-    /// Gets the model for <see cref="RemoteCommand.ConfigureWorkspace" />.
+    /// Gets the identifier of the model for <see cref="RemoteCommand.ConfigureWorkspace" />.
     /// </summary>
-    public AiModel? Model { get; init; }
+    public string? Model { get; init; }
 
     /// <summary>
-    /// Gets the effort for <see cref="RemoteCommand.ConfigureWorkspace" />.
+    /// Gets the values of the model's settings for <see cref="RemoteCommand.ConfigureWorkspace" />, by setting identifier; a setting left out uses the model's default.
     /// </summary>
-    public AiEffort? Effort { get; init; }
+    public IReadOnlyDictionary<string, string>? ModelSettings { get; init; }
 
     /// <summary>
     /// Gets the folder or group name the command needs, if any.
@@ -61,9 +61,9 @@ public sealed record RemoteRequest
     public IReadOnlyList<string>? Paths { get; init; }
 
     /// <summary>
-    /// Gets the position in the conversation before which <see cref="RemoteCommand.GetHistory" /> reads, or <see langword="null" /> to read the newest messages.
+    /// Gets the cursor, taken from <see cref="ChatHistory.Older" />, before which <see cref="RemoteCommand.GetHistory" /> reads, or <see langword="null" /> to read the newest messages.
     /// </summary>
-    public int? Before { get; init; }
+    public string? Before { get; init; }
 
     /// <summary>
     /// Gets how many messages <see cref="RemoteCommand.GetHistory" /> reads at most, or <see langword="null" /> for the server's default.

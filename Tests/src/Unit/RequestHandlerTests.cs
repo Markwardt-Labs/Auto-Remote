@@ -26,6 +26,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<ISpeechService> speech = new();
 
+    private readonly Mock<IModelService> models = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -36,7 +38,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object, speech.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object, speech.Object, models.Object);
     }
 
     [Fact]
@@ -108,11 +110,29 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_DeleteWorkspace_PassesFolderChoice()
+    public async Task Handle_DeleteWorkspace_PassesFolderChoiceAndForgetsTheAiSession()
     {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+
         await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id, DeleteFolder = false }, owner, CancellationToken.None);
+        await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id, DeleteFolder = true }, owner, CancellationToken.None);
 
         workspaces.Verify(x => x.Delete(workspace.Id, false, It.IsAny<CancellationToken>()), Times.Once);
+        workspaces.Verify(x => x.Delete(workspace.Id, true, It.IsAny<CancellationToken>()), Times.Once);
+        prompts.Verify(x => x.Forget(workspace, false), Times.Once);
+        prompts.Verify(x => x.Forget(workspace, true), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_DeleteWorkspace_KeepsTheAiSessionWhenTheDeleteIsRefused()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Delete(workspace.Id, true, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("in use"));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id, DeleteFolder = true }, owner, CancellationToken.None);
+
+        Assert.Equal("in use", response.Error);
+        prompts.Verify(x => x.Forget(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>()), Times.Never);
     }
 
     [Fact]
@@ -171,10 +191,10 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_GetHistory_PassesTheChunkBounds()
     {
-        ChatHistory chunk = new() { Messages = [], Start = 4, Working = true };
-        prompts.Setup(x => x.History(workspace.Id, 9, 5, It.IsAny<CancellationToken>())).ReturnsAsync(chunk);
+        ChatHistory chunk = new() { Messages = [], Older = "4:0", Working = true };
+        prompts.Setup(x => x.History(workspace.Id, "9:2", 5, It.IsAny<CancellationToken>())).ReturnsAsync(chunk);
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetHistory, WorkspaceId = workspace.Id, Before = 9, Limit = 5 }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetHistory, WorkspaceId = workspace.Id, Before = "9:2", Limit = 5 }, owner, CancellationToken.None);
 
         Assert.Equal(chunk, response.History);
     }
@@ -202,7 +222,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_GetUsage_AnswersWithTheUsageOfTheService()
     {
-        UsageStatus status = new() { Service = AiService.Codex, Session = new UsagePeriod { PercentUsed = 12, WindowMinutes = 300 } };
+        UsageStatus status = new() { Service = AiService.Codex, Windows = [new UsagePeriod { Name = "Session", PercentUsed = 12, WindowMinutes = 300 }] };
         usage.Setup(x => x.Get(AiService.Codex, It.IsAny<CancellationToken>())).ReturnsAsync(status);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.GetUsage, Service = AiService.Codex }, owner, CancellationToken.None);
@@ -220,15 +240,71 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ConfigureWorkspace_PassesModelAndEffort()
+    public async Task Handle_ConfigureWorkspace_ChecksTheModelAndItsSettingsThenStoresTheServiceAndGivesTheModelToTheAiSession()
     {
-        workspaces.Setup(x => x.Configure(workspace.Id, AiService.ClaudeCode, AiModel.Opus, AiEffort.Max, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Model = AiModel.Opus, Effort = AiEffort.Max });
+        Dictionary<string, string> settings = new() { ["effort"] = "max" };
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Configure(workspace.Id, AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.ClaudeCode, Model = AiModel.Opus, Effort = AiEffort.Max }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.ClaudeCode, Model = "opus", ModelSettings = settings }, owner, CancellationToken.None);
 
-        Assert.Equal(AiModel.Opus, response.Workspace?.Model);
-        prompts.Verify(x => x.Release(workspace.Id), Times.AtLeastOnce);
-        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        Assert.Null(response.Error);
+        Assert.Equal(workspace, response.Workspace);
+        models.Verify(x => x.Validate(AiService.ClaudeCode, "opus", settings, It.IsAny<CancellationToken>()), Times.Once);
+        prompts.Verify(x => x.SetAi(workspace.Id, "opus", settings, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_ConfigureWorkspace_RefusesWhatTheServiceDoesNotOfferWithoutChangingAnything()
+    {
+        models.Setup(x => x.Validate(AiService.Codex, "nope", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("OpenAI Codex does not offer the model nope."));
+
+        RemoteResponse refused = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex, Model = "nope" }, owner, CancellationToken.None);
+        RemoteResponse incomplete = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex }, owner, CancellationToken.None);
+
+        Assert.Contains("does not offer the model nope", refused.Error);
+        Assert.Contains("needs", incomplete.Error);
+        workspaces.Verify(x => x.Configure(It.IsAny<Guid>(), It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.Never);
+        prompts.Verify(x => x.SetAi(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_ConfigureWorkspace_RefusesSwitchingTheServiceWhileTheAiWorksButAllowsChangingTheModel()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Configure(workspace.Id, It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
+
+        RemoteResponse switching = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex, Model = "gpt-5.6-terra" }, owner, CancellationToken.None);
+        RemoteResponse same = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.ClaudeCode, Model = "opus" }, owner, CancellationToken.None);
+
+        Assert.Contains("Stop the AI's work", switching.Error);
+        Assert.Null(same.Error);
+        prompts.Verify(x => x.SetAi(workspace.Id, "opus", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_GetWorkspaceAi_AnswersWithTheModelAndSettingsOfTheAiSession()
+    {
+        WorkspaceAi ai = new() { Model = "sonnet", ModelSettings = new Dictionary<string, string> { ["effort"] = "high" } };
+        prompts.Setup(x => x.GetAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(ai);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 6, Command = RemoteCommand.GetWorkspaceAi, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal(ai, response.Ai);
+    }
+
+    [Fact]
+    public async Task Handle_ListModels_AnswersWithTheModelsOfTheService()
+    {
+        ModelInfo[] offered = [new ModelInfo { Id = "ollama/gemma4:26b", Settings = [new ModelSettingInfo { Id = "context", Name = "Context window", Kind = ModelSettingKind.Number, Minimum = 1024, Maximum = 262144, Default = "4096" }] }, new ModelInfo { Id = "ollama/qwen3:8b" }];
+        models.Setup(x => x.List(AiService.OpenCode, It.IsAny<CancellationToken>())).ReturnsAsync(offered);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 4, Command = RemoteCommand.ListModels, Service = AiService.OpenCode }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 5, Command = RemoteCommand.ListModels }, owner, CancellationToken.None);
+
+        Assert.Equal(offered, response.Models);
+        Assert.Contains("needs a service", missing.Error);
     }
 
     [Fact]
@@ -463,22 +539,6 @@ public sealed class RequestHandlerTests
         control.Verify(x => x.Stop(workspace.Id), Times.Once);
         control.Verify(x => x.Cancel(workspace.Id), Times.Once);
         Assert.Equal(WorkspaceState.Running, state.State);
-    }
-
-    [Fact]
-    public async Task Handle_PauseAndResumeWorkspace_GoToTheControlAndPromptsAreRefusedWhilePaused()
-    {
-        Assert.Null((await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.PauseWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
-        Assert.Null((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ResumeWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
-        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.PauseWorkspace }, owner, CancellationToken.None)).Error);
-        control.Verify(x => x.Pause(workspace.Id), Times.Once);
-        control.Verify(x => x.Resume(workspace.Id), Times.Once);
-
-        activity.TryEnter(workspace.Id, WorkspaceState.Working);
-        activity.Pause(workspace.Id);
-        RemoteResponse prompt = await handler.Handle(new RemoteRequest { Id = 4, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
-
-        Assert.Equal("The AI is paused in this workspace right now.", prompt.Error);
     }
 
     [Fact]

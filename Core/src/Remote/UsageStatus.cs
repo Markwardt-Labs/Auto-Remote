@@ -11,12 +11,7 @@ public sealed record UsageStatus
     public required AiService Service { get; init; }
 
     /// <summary>
-    /// Gets the short window, or <see langword="null" /> when the service reports none.
+    /// Gets every window the service reports, in the order it reports them; empty when it reports none.
     /// </summary>
-    public UsagePeriod? Session { get; init; }
-
-    /// <summary>
-    /// Gets the weekly window, or <see langword="null" /> when the service reports none.
-    /// </summary>
-    public UsagePeriod? Week { get; init; }
+    public IReadOnlyList<UsagePeriod> Windows { get; init; } = [];
 }

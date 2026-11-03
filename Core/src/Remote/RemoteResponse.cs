@@ -66,6 +66,16 @@ public sealed record RemoteResponse
     public UsageStatus? Usage { get; init; }
 
     /// <summary>
+    /// Gets the model and settings answering <see cref="RemoteCommand.GetWorkspaceAi" />.
+    /// </summary>
+    public WorkspaceAi? Ai { get; init; }
+
+    /// <summary>
+    /// Gets the models answering <see cref="RemoteCommand.ListModels" />.
+    /// </summary>
+    public IReadOnlyList<ModelInfo>? Models { get; init; }
+
+    /// <summary>
     /// Gets the git state answering <see cref="RemoteCommand.GetGitStatus" />.
     /// </summary>
     public GitStatus? Git { get; init; }

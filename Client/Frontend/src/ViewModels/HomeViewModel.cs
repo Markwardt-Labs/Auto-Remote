@@ -65,8 +65,6 @@ internal sealed class HomeViewModel : ViewModelBase
             ChangeServerRequested?.Invoke();
             return Task.CompletedTask;
         });
-        PauseCommand = new AsyncCommand(_ => active?.Pause() ?? Task.CompletedTask, () => active?.CanPause ?? false);
-        ResumeCommand = new AsyncCommand(_ => active?.Resume() ?? Task.CompletedTask, () => active?.CanResume ?? false);
         BeginStopCommand = new AsyncCommand(_ => Begin(EditMode.StopWork, string.Empty), () => active?.CanHalt ?? false);
         BeginCancelCommand = new AsyncCommand(_ => Begin(EditMode.CancelWork, string.Empty), () => active?.CanCancel ?? false);
         ConfirmHaltCommand = new AsyncCommand(_ => Halt());
@@ -273,8 +271,6 @@ internal sealed class HomeViewModel : ViewModelBase
             Active = value is null ? null : Open(value);
             BeginStopCommand.Refresh();
             BeginCancelCommand.Refresh();
-            PauseCommand.Refresh();
-            ResumeCommand.Refresh();
             _ = Active?.Focus();
             _ = Usage.Show(value?.Service);
 
@@ -305,7 +301,6 @@ internal sealed class HomeViewModel : ViewModelBase
 
                 Raise(nameof(IsAiWorking));
                 Raise(nameof(IsWorking));
-                Raise(nameof(IsPaused));
             }
         }
     }
@@ -316,14 +311,9 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool IsAiWorking => active?.IsAiWorking ?? false;
 
     /// <summary>
-    /// Gets a value indicating whether the AI is working or a script is running in the focused workspace, which turns the header blue, or orange while it is paused.
+    /// Gets a value indicating whether the AI is working or a script is running in the focused workspace, which turns the header blue.
     /// </summary>
     public bool IsWorking => active?.IsWorking ?? false;
-
-    /// <summary>
-    /// Gets a value indicating whether the focused workspace's work is paused, which turns the header orange instead of blue.
-    /// </summary>
-    public bool IsPaused => active?.State == WorkspaceState.Paused;
 
     /// <summary>
     /// Gets a value indicating whether the client is the desktop one, which has its own window controls and offers the workspace folder on the machine.
@@ -540,16 +530,6 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand ChangeServerCommand { get; }
 
     /// <summary>
-    /// Gets the command that pauses the AI's work in the focused workspace.
-    /// </summary>
-    public AsyncCommand PauseCommand { get; }
-
-    /// <summary>
-    /// Gets the command that lets the paused AI work in the focused workspace carry on.
-    /// </summary>
-    public AsyncCommand ResumeCommand { get; }
-
-    /// <summary>
     /// Gets the command that asks whether to stop the work in the focused workspace at once, keeping what it did.
     /// </summary>
     public AsyncCommand BeginStopCommand { get; }
@@ -747,7 +727,7 @@ internal sealed class HomeViewModel : ViewModelBase
         {
             WorkspaceInfo? now = workspaces.FirstOrDefault(workspace => workspace.Id == id);
 
-            if (now is null || now.Folder != view.Workspace.Folder || now.Service != view.Workspace.Service || now.Model != view.Workspace.Model || now.Effort != view.Workspace.Effort)
+            if (now is null || now.Folder != view.Workspace.Folder || now.Service != view.Workspace.Service)
             {
                 view.Dispose();
                 opened.Remove(id);
@@ -844,11 +824,8 @@ internal sealed class HomeViewModel : ViewModelBase
 
             if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.CanCancel))
             {
-                Raise(nameof(IsPaused));
                 BeginStopCommand.Refresh();
                 BeginCancelCommand.Refresh();
-                PauseCommand.Refresh();
-                ResumeCommand.Refresh();
 
                 if (editMode is EditMode.StopWork or EditMode.CancelWork && !created.CanHalt)
                 {

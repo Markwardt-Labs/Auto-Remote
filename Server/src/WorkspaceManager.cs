@@ -49,25 +49,23 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> Rename(Guid id, string name, CancellationToken cancellation);
 
     /// <summary>
-    /// Changes the AI service, model and effort a workspace's prompts run with.
+    /// Changes the AI service a workspace's prompts run on.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="service">The AI service; changing it detaches the workspace's AI session, since sessions belong to one service.</param>
-    /// <param name="model">The model.</param>
-    /// <param name="effort">The effort.</param>
     /// <param name="cancellation">Cancels the call.</param>
     /// <returns>The updated workspace.</returns>
-    /// <exception cref="RequestException">The workspace is unknown, or the service does not offer the model or effort.</exception>
-    Task<WorkspaceInfo> Configure(Guid id, AiService service, AiModel model, AiEffort effort, CancellationToken cancellation);
+    /// <exception cref="RequestException">The workspace is unknown.</exception>
+    Task<WorkspaceInfo> Configure(Guid id, AiService service, CancellationToken cancellation);
 
     /// <summary>
-    /// Attaches an AI session to a workspace, replacing any earlier one.
+    /// Attaches a live AI session to a workspace, replacing any earlier one.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="aiSessionId">The AI session identifier.</param>
+    /// <param name="aiSessionId">The live AI session identifier.</param>
     /// <param name="cancellation">Cancels the call.</param>
     /// <exception cref="RequestException">The workspace is unknown.</exception>
-    Task AttachAiSession(Guid id, Guid aiSessionId, CancellationToken cancellation);
+    Task AttachAiSession(Guid id, string aiSessionId, CancellationToken cancellation);
 
     /// <summary>
     /// Moves a workspace into a group, or out of any group; it goes to the end of that group.
@@ -233,22 +231,17 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     }
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> Configure(Guid id, AiService service, AiModel model, AiEffort effort, CancellationToken cancellation)
+    public async Task<WorkspaceInfo> Configure(Guid id, AiService service, CancellationToken cancellation)
     {
-        if (!service.Models().Contains(model) || !service.Efforts().Contains(effort))
-        {
-            throw new RequestException($"{service.Label()} does not offer {model} at {effort} effort.");
-        }
-
         using (await Lock(cancellation))
         {
             WorkspaceInfo workspace = Find(id);
-            return await Replace(workspace with { Service = service, Model = model, Effort = effort, AiSessionId = service == workspace.Service ? workspace.AiSessionId : null }, cancellation);
+            return await Replace(workspace with { Service = service, AiSessionId = service == workspace.Service ? workspace.AiSessionId : null }, cancellation);
         }
     }
 
     /// <inheritdoc />
-    public async Task AttachAiSession(Guid id, Guid aiSessionId, CancellationToken cancellation)
+    public async Task AttachAiSession(Guid id, string aiSessionId, CancellationToken cancellation)
     {
         using (await Lock(cancellation))
         {
@@ -414,7 +407,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             workspaces.Remove(workspace);
             await Save(cancellation);
-            store.DeleteHistory(id);
+            store.DeleteAttachments(id);
         }
     }
 

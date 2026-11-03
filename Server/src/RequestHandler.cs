@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IModelService models) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -41,9 +41,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         scripts.Configure(config, cancellation);
         usage.Configure(config);
         speech.Configure(config);
+        models.Configure(config);
         folders.Configure(config.DefaultFolder);
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
-        await control.Restore(cancellation);
     }
 
     /// <inheritdoc />
@@ -71,10 +71,26 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await RequireIdle(request);
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation) };
             case RemoteCommand.ConfigureWorkspace:
-                await prompts.Release(RequireWorkspace(request));
-                return new RemoteResponse { Id = 0, Workspace = await workspaces.Configure(RequireWorkspace(request), request.Service ?? throw new RequestException("The request needs a service."), request.Model ?? throw new RequestException("The request needs a model."), request.Effort ?? throw new RequestException("The request needs an effort."), cancellation) };
+                AiService configured = request.Service ?? throw new RequestException("The request needs a service.");
+                string chosen = Require(request.Model, "model");
+                IReadOnlyDictionary<string, string> chosenSettings = request.ModelSettings ?? new Dictionary<string, string>();
+                Guid configuring = RequireWorkspace(request);
+                await models.Validate(configured, chosen, chosenSettings, cancellation);
+
+                if ((await workspaces.Get(configuring, cancellation)).Service != configured && prompts.IsBusy(configuring))
+                {
+                    throw new RequestException("Stop the AI's work before switching its service.");
+                }
+
+                WorkspaceInfo reconfigured = await workspaces.Configure(configuring, configured, cancellation);
+                await prompts.SetAi(configuring, chosen, chosenSettings, cancellation);
+                return new RemoteResponse { Id = 0, Workspace = reconfigured };
+            case RemoteCommand.GetWorkspaceAi:
+                return new RemoteResponse { Id = 0, Ai = await prompts.GetAi(RequireWorkspace(request), cancellation) };
             case RemoteCommand.GetUsage:
                 return new RemoteResponse { Id = 0, Usage = await usage.Get(request.Service ?? throw new RequestException("The request needs a service."), cancellation) };
+            case RemoteCommand.ListModels:
+                return new RemoteResponse { Id = 0, Models = await models.List(request.Service ?? throw new RequestException("The request needs a service."), cancellation) };
             case RemoteCommand.MoveWorkspace:
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Move(RequireWorkspace(request), request.GroupId, cancellation) };
             case RemoteCommand.CreateGroup:
@@ -94,7 +110,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.DeleteWorkspace:
                 await RequireIdle(request);
-                await workspaces.Delete(RequireWorkspace(request), request.DeleteFolder, cancellation);
+                WorkspaceInfo deleting = await workspaces.Get(RequireWorkspace(request), cancellation);
+                await workspaces.Delete(deleting.Id, request.DeleteFolder, cancellation);
+                await prompts.Forget(deleting, request.DeleteFolder);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.ListFolders:
                 return new RemoteResponse { Id = 0, Listing = await folders.List(request.Path, cancellation) };
@@ -190,12 +208,6 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GitCancel:
                 await (activity.Get(RequireWorkspace(request)) == WorkspaceState.Managing ? control.Stop(RequireWorkspace(request)) : versioning.Cancel(RequireWorkspace(request)));
-                return new RemoteResponse { Id = 0 };
-            case RemoteCommand.PauseWorkspace:
-                await control.Pause(RequireWorkspace(request));
-                return new RemoteResponse { Id = 0 };
-            case RemoteCommand.ResumeWorkspace:
-                await control.Resume(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.StopWorkspace:
                 await control.Stop(RequireWorkspace(request));

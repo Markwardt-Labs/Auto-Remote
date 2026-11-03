@@ -31,6 +31,7 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.ILLink.Tasks" Version="10.0.13" PrivateAssets="all" />
+    <PackageReference Include="Markwardt.LiveAi" Version="1.1.0" />
     <PackageReference Include="Whisper.net" Version="1.9.2-preview1" />
     <PackageReference Include="Whisper.net.Runtime.Vulkan" Version="1.9.2-preview1" GeneratePathProperty="true" ExcludeAssets="build" />
   </ItemGroup>

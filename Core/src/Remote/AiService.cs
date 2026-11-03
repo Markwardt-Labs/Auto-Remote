@@ -14,7 +14,12 @@ public enum AiService
     /// <summary>
     /// OpenAI's Codex.
     /// </summary>
-    Codex
+    Codex,
+
+    /// <summary>
+    /// OpenCode, which runs the models of servers on the server's machine (Ollama or another OpenAI compatible server) and those of its own configuration.
+    /// </summary>
+    OpenCode
 }
 
 /// <summary>
@@ -31,29 +36,25 @@ public static class AiServiceExtensions
         public string Label() => service switch
         {
             AiService.Codex => "OpenAI Codex",
+            AiService.OpenCode => "OpenCode",
             _ => "Claude Code"
         };
 
         /// <summary>
-        /// Gets the models the service offers.
+        /// Gets the model a workspace starts with on the service when the service offers it.
         /// </summary>
-        /// <returns>The models, the default first.</returns>
-        public IReadOnlyList<AiModel> Models() => service switch
+        /// <returns>The identifier of the model, or <see langword="null" /> when the first model the service lists is used.</returns>
+        public string? DefaultModel() => service switch
         {
-            AiService.Codex => [AiModel.Terra, AiModel.Sol, AiModel.Luna],
-            _ => [AiModel.Sonnet, AiModel.Opus, AiModel.Haiku]
+            AiService.ClaudeCode => "sonnet",
+            AiService.Codex => "gpt-5.6-terra",
+            _ => null
         };
 
         /// <summary>
-        /// Gets the efforts the service offers.
+        /// Gets the values of model settings a new session on the service starts with in place of the model's own defaults, used for the settings the model has and takes.
         /// </summary>
-        /// <returns>The efforts from least to most.</returns>
-        public IReadOnlyList<AiEffort> Efforts() => [AiEffort.Low, AiEffort.Medium, AiEffort.High, AiEffort.XHigh, AiEffort.Max];
-
-        /// <summary>
-        /// Gets the effort the service uses unless told otherwise.
-        /// </summary>
-        /// <returns>The default effort.</returns>
-        public AiEffort DefaultEffort() => service == AiService.Codex ? AiEffort.Medium : AiEffort.High;
+        /// <returns>The values by setting identifier.</returns>
+        public IReadOnlyDictionary<string, string> DefaultSettings() => service == AiService.ClaudeCode ? new Dictionary<string, string> { ["effort"] = "high" } : new Dictionary<string, string>();
     }
 }

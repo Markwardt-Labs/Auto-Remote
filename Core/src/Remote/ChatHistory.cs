@@ -11,9 +11,9 @@ public sealed record ChatHistory
     public required IReadOnlyList<ChatMessage> Messages { get; init; }
 
     /// <summary>
-    /// Gets the position in the whole conversation of the first message of the chunk; anything above zero means older messages exist.
+    /// Gets the cursor to give as <see cref="RemoteRequest.Before" /> to read the messages before this chunk, or <see langword="null" /> when there are none.
     /// </summary>
-    public required int Start { get; init; }
+    public string? Older { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the AI is working in the workspace.

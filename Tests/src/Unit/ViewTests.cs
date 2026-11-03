@@ -258,7 +258,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", GroupId = group.Id };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [group], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }, new ChatMessage { Role = MessageRole.Assistant, Text = "hello" }], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }, new ChatMessage { Role = MessageRole.Assistant, Text = "hello" }] });
         connection.Setup(x => x.ListFiles(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false, Size = 1 }] });
 
         Assert.True(await fixture.Run(() => Shows<HomeView>(new HomeView(), new HomeViewModel(connection.Object))));
@@ -295,7 +295,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0, Working = working });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = working });
 
         (string[] labels, double[] widths, bool accented, bool paintedAccent, bool statusText, bool gearAtTopRight) = await fixture.Run(() =>
         {
@@ -326,11 +326,61 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_SettingsShowTheModelsOfTheServiceAndOneControlForEachSettingOfTheSelectedModel()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.ListModels(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(
+        [
+            new ModelInfo { Id = "sonnet", Name = "Sonnet 5.5", Description = "Most efficient", Settings = [new ModelSettingInfo { Id = "effort", Name = "Effort", Kind = ModelSettingKind.Choice, Choices = ["low", "medium", "high"], Default = "medium" }] },
+            new ModelInfo { Id = "tuned", Name = "Tuned", Settings = [new ModelSettingInfo { Id = "thinking", Name = "Thinking", Kind = ModelSettingKind.Toggle, Default = "false" }, new ModelSettingInfo { Id = "context", Name = "Context window", Kind = ModelSettingKind.Number, Minimum = 1024, Maximum = 262144, Default = "4096" }] }
+        ]);
+
+        connection.Setup(x => x.ConfigureWorkspace(workspace.Id, It.IsAny<AiService>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, AiService service, string chosen, IReadOnlyDictionary<string, string> values, CancellationToken _) => workspace with { Service = service });
+        connection.Setup(x => x.GetWorkspaceAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceAi { Model = "sonnet", ModelSettings = new Dictionary<string, string> { ["effort"] = "medium" } });
+
+        (string[] models, int choiceBoxes, int toggles, int numbers, string[] names) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            model.Active!.ToggleSettingsCommand.Execute(null);
+
+            for (int attempt = 0; attempt < 100 && model.Active.Settings.Models.Count == 0; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(20);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            ComboBox[] Visible() => [.. window.GetVisualDescendants().OfType<ComboBox>().Where(box => box.IsEffectivelyVisible)];
+            string[] models = [.. model.Active.Settings.Models.Select(choice => choice.Name)];
+            int choiceBoxes = Visible().Length;
+
+            model.Active.Settings.SelectedModel = model.Active.Settings.Models.Single(choice => choice.Id == "tuned");
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            int toggles = window.GetVisualDescendants().OfType<ToggleSwitch>().Count(item => item.IsEffectivelyVisible);
+            int numbers = window.GetVisualDescendants().OfType<NumericUpDown>().Count(item => item.IsEffectivelyVisible);
+            string[] names = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible).Select(block => block.Text ?? string.Empty).Where(text => text is "Thinking" or "Context window" or "Effort")];
+            window.Close();
+            return (models, choiceBoxes, toggles, numbers, names);
+        });
+
+        Assert.Equal(["Sonnet 5.5", "Tuned"], models);
+        Assert.Equal(3, choiceBoxes);
+        Assert.Equal((1, 1), (toggles, numbers));
+        Assert.Equal(["Thinking", "Context window"], names);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsAnEqualHistoryTabOnlyWhenTheWorkspaceIsAGitRepository()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "first", HasChanges = true });
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([new GitChange { Path = "a.txt", Status = GitChangeStatus.Modified }]);
         connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false }] });
@@ -364,7 +414,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [new ScriptRun { Path = "a.cs", Name = "a", State = ScriptState.Succeeded, Output = "hello" }] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "merge" });
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -595,7 +645,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -649,7 +699,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "base", HasIdentity = true, HasChanges = true });
         connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -697,7 +747,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
         connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
@@ -709,7 +759,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             HomeView view = new() { DataContext = model };
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
-            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.PauseCommand ? "pause" : button.Command == model.ResumeCommand ? "resume" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
+            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
             string[] ready = Shown();
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
             string[] working = Shown();
@@ -726,7 +776,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal(["send"], ready);
-        Assert.Equal(["pause", "stop", "cancel"], working);
+        Assert.Equal(["stop", "cancel"], working);
         Assert.Equal([true, false], enabled);
         Assert.True(typing);
         Assert.True(asking);
@@ -740,7 +790,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
-        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
         connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
 

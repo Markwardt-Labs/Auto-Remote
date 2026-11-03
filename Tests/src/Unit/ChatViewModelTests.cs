@@ -26,7 +26,7 @@ public sealed class ChatViewModelTests
     [Fact]
     public async Task Start_RaisesLoadedOnceTheConversationIsShown()
     {
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }] });
         int shown = -1;
         chat.Loaded += () => shown = chat.Messages.Count;
 
@@ -40,7 +40,7 @@ public sealed class ChatViewModelTests
     {
         Mock<IDraftStore> drafts = new();
         drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("half written");
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object);
 
         await restoring.Start();
@@ -54,7 +54,7 @@ public sealed class ChatViewModelTests
     {
         Mock<IDraftStore> drafts = new();
         drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("old draft");
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Start = 0 });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object) { Input = "typed already" };
 
         await restoring.Start();
@@ -88,8 +88,8 @@ public sealed class ChatViewModelTests
         ChatMessage one = new() { Role = MessageRole.User, Text = "one" };
         ChatMessage two = new() { Role = MessageRole.Assistant, Text = "two" };
         connection.SetupSequence(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new ChatHistory { Messages = [one], Start = 0, Working = true })
-            .ReturnsAsync(new ChatHistory { Messages = [one, two], Start = 0, Working = false });
+            .ReturnsAsync(new ChatHistory { Messages = [one], Working = true })
+            .ReturnsAsync(new ChatHistory { Messages = [one, two], Working = false });
         await chat.Start();
         Assert.True(chat.IsAiWorking);
 

@@ -6,9 +6,9 @@ public sealed class WorkspaceViewModelTests
 
     private readonly WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
 
-    private ChatHistory History(int start, bool working, params string[] texts) => new() { Start = start, Working = working, Messages = [.. texts.Select(text => new ChatMessage { Role = MessageRole.User, Text = text })] };
+    private ChatHistory History(string? older, bool working, params string[] texts) => new() { Older = older, Working = working, Messages = [.. texts.Select(text => new ChatMessage { Role = MessageRole.Assistant, Text = text })] };
 
-    private RemoteEvent Added(int index, string text, MessageRole role = MessageRole.Assistant) => new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspace.Id, Index = index, Message = new ChatMessage { Role = role, Text = text } };
+    private RemoteEvent Added(string text, MessageRole role = MessageRole.Assistant) => new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspace.Id, Message = new ChatMessage { Role = role, Text = text } };
 
     private RemoteEvent Working(bool working) => new() { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = working };
 
@@ -20,20 +20,52 @@ public sealed class WorkspaceViewModelTests
         WorkspaceViewModel model = new(connection.Object, workspace);
 
         Task start = model.Start();
-        connection.Raise(x => x.EventReceived += null, Added(1, "new"));
-        connection.Raise(x => x.EventReceived += null, Added(0, "old"));
-        loading.SetResult(History(0, false, "old"));
+        connection.Raise(x => x.EventReceived += null, Added("old"));
+        connection.Raise(x => x.EventReceived += null, Added("new"));
+        loading.SetResult(History(null, false, "older", "old"));
         await start;
 
-        Assert.Equal(["old", "new"], model.Chat.Messages.Select(message => message.Text));
+        Assert.Equal(["older", "old", "new"], model.Chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task Chat_KeepsARepeatedMessageThatTheHistoryDoesNotAlreadyHold()
+    {
+        TaskCompletionSource<ChatHistory> loading = new();
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).Returns(loading.Task);
+        WorkspaceViewModel model = new(connection.Object, workspace);
+
+        Task start = model.Start();
+        connection.Raise(x => x.EventReceived += null, Added("ok"));
+        connection.Raise(x => x.EventReceived += null, Added("ok"));
+        loading.SetResult(History(null, false, "ok"));
+        await start;
+
+        Assert.Equal(["ok", "ok"], model.Chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task Chat_ReadsTheNewestMessagesAgainAfterTheConnectionCameBackWithoutDuplicatingAnything()
+    {
+        connection.SetupSequence(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(History(null, false, "one"))
+            .ReturnsAsync(History(null, true, "one", "two"));
+        WorkspaceViewModel model = new(connection.Object, workspace);
+        await model.Start();
+
+        await model.Chat.Resync();
+        connection.Raise(x => x.EventReceived += null, Added("three"));
+
+        Assert.Equal(["one", "two", "three"], model.Chat.Messages.Select(message => message.Text));
+        Assert.True(model.Chat.IsAiWorking);
     }
 
     [Fact]
     public async Task Chat_LoadsOlderChunksOnDemandUntilTheBeginning()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(4, false, "e", "f"));
-        connection.Setup(x => x.GetHistory(workspace.Id, 4, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(1, false, "b", "c", "d"));
-        connection.Setup(x => x.GetHistory(workspace.Id, 1, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(0, false, "a"));
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History("before-e", false, "e", "f"));
+        connection.Setup(x => x.GetHistory(workspace.Id, "before-e", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History("before-b", false, "b", "c", "d"));
+        connection.Setup(x => x.GetHistory(workspace.Id, "before-b", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(null, false, "a"));
         WorkspaceViewModel model = new(connection.Object, workspace);
         await model.Start();
 
@@ -46,14 +78,14 @@ public sealed class WorkspaceViewModelTests
         Assert.False(model.Chat.HasMore);
         Assert.False(await model.Chat.LoadOlder());
 
-        connection.Raise(x => x.EventReceived += null, Added(6, "g"));
+        connection.Raise(x => x.EventReceived += null, Added("g"));
         Assert.Equal("g", model.Chat.Messages[^1].Text);
     }
 
     [Fact]
     public async Task Chat_ShowsFailuresTheAiReports()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(0, false));
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(null, false));
         WorkspaceViewModel model = new(connection.Object, workspace);
         await model.Start();
 
@@ -65,7 +97,7 @@ public sealed class WorkspaceViewModelTests
     [Fact]
     public async Task IsAiWorking_FollowsTheServersWorkingEvents()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(0, false));
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(null, false));
         WorkspaceViewModel model = new(connection.Object, workspace);
         List<string?> changed = [];
         model.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
@@ -83,7 +115,7 @@ public sealed class WorkspaceViewModelTests
     [Fact]
     public async Task Dispose_StopsFollowingEvents()
     {
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(0, false));
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(null, false));
         WorkspaceViewModel model = new(connection.Object, workspace);
         await model.Start();
 
@@ -123,12 +155,20 @@ public sealed class WorkspaceViewModelTests
     }
 
     [Fact]
-    public void Settings_DefaultToSonnetOnHigh()
+    public async Task Settings_ShowTheModelAndSettingsOfTheAiSession()
     {
-        WorkspaceViewModel model = new(connection.Object, workspace);
+        connection.Setup(x => x.ListModels(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync([new ModelInfo { Id = "sonnet", Name = "Sonnet 5.5", Settings = [new ModelSettingInfo { Id = "effort", Name = "Effort", Kind = ModelSettingKind.Choice, Choices = ["low", "medium", "high"], Default = "medium" }] }]);
 
-        Assert.Equal(AiModel.Sonnet, model.Settings.Model);
-        Assert.Equal(AiEffort.High, model.Settings.Effort);
+        connection.Setup(x => x.GetWorkspaceAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceAi { Model = "sonnet", ModelSettings = new Dictionary<string, string> { ["effort"] = "high" } });
+
+        WorkspaceViewModel model = new(connection.Object, workspace);
+        for (int attempt = 0; attempt < 100 && model.Settings.Settings.Count == 0; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal("sonnet", model.Settings.SelectedModel?.Id);
+        Assert.Equal("high", model.Settings.Settings.Single().ChoiceValue);
     }
 
     [Fact]
