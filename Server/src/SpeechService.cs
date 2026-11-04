@@ -83,8 +83,9 @@ internal sealed class SpeechService(IWhisperEngine engine) : ISpeechService
         {
             await engine.Prepare(CancellationToken.None);
         }
-        catch (RequestException)
+        catch (Exception exception) when (exception is not OutOfMemoryException)
         {
+            // Voice input is optional: whatever goes wrong while fetching the model must leave the server running, and the next transcription reports it.
         }
     }
 

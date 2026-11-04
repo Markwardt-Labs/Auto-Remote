@@ -77,6 +77,52 @@ public sealed class SpeechServiceTests
         service.Configure(new ServerConfig { Port = 1, Key = "k" });
     }
 
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(HttpRequestException))]
+    [InlineData(typeof(InvalidOperationException))]
+    public async Task Configure_SwallowsAnyFailureOfTheDownloadSoTheServerKeepsRunningWithoutVoiceInput(Type failure)
+    {
+        List<Exception> unobserved = [];
+        void Watch(object? sender, UnobservedTaskExceptionEventArgs args)
+        {
+            lock (unobserved)
+            {
+                unobserved.AddRange(args.Exception.InnerExceptions.Where(item => item.Message == "speech-probe"));
+            }
+        }
+
+        TaskScheduler.UnobservedTaskException += Watch;
+
+        try
+        {
+            TaskCompletionSource prepared = new();
+            engine.Setup(x => x.Prepare(It.IsAny<CancellationToken>())).Returns(() =>
+            {
+                prepared.SetResult();
+                return Task.FromException((Exception)Activator.CreateInstance(failure, "speech-probe")!);
+            });
+            engine.Setup(x => x.Transcribe(It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The speech model could not be downloaded."));
+
+            service.Configure(new ServerConfig { Port = 1, Key = "k" });
+            await prepared.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await Task.Delay(100);
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+
+            RequestException refused = await Assert.ThrowsAsync<RequestException>(() => service.Transcribe(Audio(), CancellationToken.None));
+
+            Assert.Empty(unobserved);
+            Assert.Contains("could not be downloaded", refused.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            TaskScheduler.UnobservedTaskException -= Watch;
+        }
+    }
+
     [Fact]
     public async Task Transcribe_ReportsWhyTheCommandFailed()
     {
