@@ -461,14 +461,6 @@ internal interface IServerConnection : IAsyncDisposable
     Task StopWorkspace(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Stops the AI's work in a workspace and reverts what it did.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="cancellation">Cancels the wait.</param>
-    /// <exception cref="RemoteException">The server refused: nothing runs, the workspace is already stopping or canceling, or its work cannot be reverted.</exception>
-    Task CancelWorkspace(Guid id, CancellationToken cancellation);
-
-    /// <summary>
     /// Reads the state a workspace is in.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -545,6 +537,7 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="id">The workspace identifier.</param>
     /// <param name="path">The file, relative to the workspace folder.</param>
     /// <param name="cancellation">Cancels the wait.</param>
+    /// <remarks>The display of this machine (X11 or Wayland) is sent along so that a graphical script can open its window here; the server uses it only when this machine is its own.</remarks>
     /// <exception cref="RemoteException">The server refused, for example while the AI or another script is running.</exception>
     Task RunScript(Guid id, string path, CancellationToken cancellation);
 
@@ -593,7 +586,7 @@ internal interface IServerConnection : IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public sealed class Factory(IMessageChannel.IFactory channels, ILog log) : IFactory
+    public sealed class Factory(IMessageChannel.IFactory channels, ILog log, Func<string, string?>? environment = null) : IFactory
     {
         private readonly TimeSpan timeout = TimeSpan.FromSeconds(10);
 
@@ -601,7 +594,7 @@ internal interface IServerConnection : IAsyncDisposable
         public async Task<IServerConnection> Connect(ConnectionSettings settings, CancellationToken cancellation)
         {
             (ClientWebSocket socket, IMessageChannel channel) = await Open(settings, cancellation);
-            return new ServerConnection(socket, channel, token => Open(settings, token), log, $"{settings.Host}:{settings.Port}");
+            return new ServerConnection(socket, channel, token => Open(settings, token), log, $"{settings.Host}:{settings.Port}", environment);
         }
 
         private async Task<(ClientWebSocket socket, IMessageChannel channel)> Open(ConnectionSettings settings, CancellationToken cancellation)
@@ -686,8 +679,10 @@ internal sealed class ServerConnection : IServerConnection
     /// <param name="reopen">Opens a new authenticated connection to the same server, used when the connection is lost.</param>
     /// <param name="log">Receives a line when the connection is lost.</param>
     /// <param name="server">The host and port, for the log.</param>
-    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel)>> reopen, ILog log, string server)
+    /// <param name="environment">Reads an environment variable of this machine, or <see langword="null" /> to read the process's own.</param>
+    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel)>> reopen, ILog log, string server, Func<string, string?>? environment = null)
     {
+        this.environment = environment ?? Environment.GetEnvironmentVariable;
         this.log = log;
         this.server = server;
         this.socket = socket;
@@ -697,6 +692,8 @@ internal sealed class ServerConnection : IServerConnection
     }
 
     private readonly ILog log;
+
+    private readonly Func<string, string?> environment;
 
     private readonly string server;
 
@@ -887,9 +884,6 @@ internal sealed class ServerConnection : IServerConnection
     public async Task StopWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StopWorkspace, WorkspaceId = id }, cancellation);
 
     /// <inheritdoc />
-    public async Task CancelWorkspace(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelWorkspace, WorkspaceId = id }, cancellation);
-
-    /// <inheritdoc />
     public async Task<WorkspaceState> GetWorkspaceState(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetWorkspaceState, WorkspaceId = id }, cancellation)).State ?? throw Malformed();
 
     /// <inheritdoc />
@@ -914,7 +908,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<ScriptRuns> GetScripts(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetScripts, WorkspaceId = id }, cancellation)).Scripts ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task RunScript(Guid id, string path, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.RunScript, WorkspaceId = id, Path = path }, cancellation);
+    public async Task RunScript(Guid id, string path, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.RunScript, WorkspaceId = id, Path = path, Environment = Display() }, cancellation);
 
     /// <inheritdoc />
     public async Task StopScript(Guid id, string path, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StopScript, WorkspaceId = id, Path = path }, cancellation);
@@ -931,6 +925,21 @@ internal sealed class ServerConnection : IServerConnection
         await stopping.CancelAsync();
         socket.Dispose();
         await reading;
+    }
+
+    private Dictionary<string, string>? Display()
+    {
+        Dictionary<string, string> display = [];
+
+        foreach (string name in (string[])["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_SESSION_TYPE"])
+        {
+            if (environment(name) is { Length: > 0 } value)
+            {
+                display[name] = value;
+            }
+        }
+
+        return display.Count == 0 ? null : display;
     }
 
     private InvalidDataException Malformed() => new("The server sent an incomplete response.");

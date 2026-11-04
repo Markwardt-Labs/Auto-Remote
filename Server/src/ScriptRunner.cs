@@ -31,9 +31,10 @@ internal interface IScriptRunner
     /// </summary>
     /// <param name="workspace">The workspace, whose folder is the working folder of the run.</param>
     /// <param name="path">The <c>.cs</c> or <c>.task</c> file, relative to the workspace folder.</param>
+    /// <param name="environment">Environment variables added to the environment of every script the run starts.</param>
     /// <param name="cancellation">Cancels reading the task file.</param>
     /// <exception cref="RequestException">A run is in progress, or the path leaves the workspace folder, is missing, or is not a script or task, or a script the task lists is not usable.</exception>
-    Task Run(WorkspaceInfo workspace, string path, CancellationToken cancellation);
+    Task Run(WorkspaceInfo workspace, string path, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation);
 
     /// <summary>
     /// Stops a run, all the scripts of a task.
@@ -106,7 +107,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
     }
 
     /// <inheritdoc />
-    public async Task Run(WorkspaceInfo workspace, string path, CancellationToken cancellation)
+    public async Task Run(WorkspaceInfo workspace, string path, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation)
     {
         string root = Path.TrimEndingDirectorySeparator(workspace.Folder);
         string relative = Normalize(path);
@@ -153,7 +154,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
             state.Active = true;
         }
 
-        _ = Task.Run(() => Execute(workspace, root, state, main, batches), CancellationToken.None);
+        _ = Task.Run(() => Execute(workspace, root, state, main, batches, environment), CancellationToken.None);
     }
 
     /// <inheritdoc />
@@ -374,7 +375,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
         }
     }
 
-    private async Task Execute(WorkspaceInfo workspace, string root, Workspace state, Entry main, List<List<string>> batches)
+    private async Task Execute(WorkspaceInfo workspace, string root, Workspace state, Entry main, List<List<string>> batches, IReadOnlyDictionary<string, string> environment)
     {
         using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(stopping);
         main.Bind(linked);
@@ -382,7 +383,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
 
         try
         {
-            result = main.IsTask ? await RunTask(workspace.Id, root, state, main, batches, linked) : await RunScript(workspace.Id, root, state, main, linked.Token);
+            result = main.IsTask ? await RunTask(workspace.Id, root, state, main, batches, environment, linked) : await RunScript(workspace.Id, root, state, main, environment, linked.Token);
         }
         finally
         {
@@ -396,7 +397,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
         }
     }
 
-    private async Task<ScriptState> RunTask(Guid id, string root, Workspace state, Entry main, List<List<string>> batches, CancellationTokenSource linked)
+    private async Task<ScriptState> RunTask(Guid id, string root, Workspace state, Entry main, List<List<string>> batches, IReadOnlyDictionary<string, string> environment, CancellationTokenSource linked)
     {
         ScriptState result = ScriptState.Succeeded;
 
@@ -426,7 +427,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
                 ScriptState[] results = await Task.WhenAll(children.Select(async child =>
                 {
                     child.Bind(linked);
-                    ScriptState childResult = await RunScript(id, root, state, child, linked.Token);
+                    ScriptState childResult = await RunScript(id, root, state, child, environment, linked.Token);
                     Finish(id, state, child, childResult);
                     return childResult;
                 }));
@@ -453,7 +454,7 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
         return result;
     }
 
-    private async Task<ScriptState> RunScript(Guid id, string root, Workspace state, Entry entry, CancellationToken cancellation)
+    private async Task<ScriptState> RunScript(Guid id, string root, Workspace state, Entry entry, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation)
     {
         ProcessStartInfo start = new(config.DotnetCommand)
         {
@@ -468,6 +469,11 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
         foreach (string argument in (string[])["run", "--file", Path.Combine(root, entry.Path)])
         {
             start.ArgumentList.Add(argument);
+        }
+
+        foreach ((string name, string value) in environment)
+        {
+            start.Environment[name] = value;
         }
 
         using Process process = new() { StartInfo = start };

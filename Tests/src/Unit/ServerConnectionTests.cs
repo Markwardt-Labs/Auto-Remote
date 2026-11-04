@@ -17,6 +17,22 @@ public sealed class ServerConnectionTests
     }
 
     [Fact]
+    public async Task RunScript_SendsTheDisplayOfThisMachineWhenThereIsOne()
+    {
+        List<RemoteRequest> sent = [];
+        Mock<IMessageChannel> channel = Channel(sent, out _);
+        Dictionary<string, string> variables = new() { ["DISPLAY"] = ":1", ["XAUTHORITY"] = "/auth", ["PATH"] = "/bin" };
+        await using ServerConnection graphical = new(new ClientWebSocket(), channel.Object, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", name => variables.GetValueOrDefault(name));
+        await using ServerConnection plain = new(new ClientWebSocket(), channel.Object, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
+
+        await graphical.RunScript(Guid.NewGuid(), "a.cs", CancellationToken.None);
+        await plain.RunScript(Guid.NewGuid(), "a.cs", CancellationToken.None);
+
+        Assert.Equal(new Dictionary<string, string> { ["DISPLAY"] = ":1", ["XAUTHORITY"] = "/auth" }, sent[0].Environment);
+        Assert.Null(sent[1].Environment);
+    }
+
+    [Fact]
     public async Task Request_ReopensALostConnectionAndReplaysTheFileWatch()
     {
         List<RemoteRequest> sentFirst = [];

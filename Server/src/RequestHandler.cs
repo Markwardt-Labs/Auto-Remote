@@ -34,6 +34,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
+    private readonly HashSet<string> displayVariables = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_SESSION_TYPE"];
+
     /// <inheritdoc />
     public async Task Open(ServerConfig config, CancellationToken cancellation)
     {
@@ -240,7 +242,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0, Scripts = scripts.List(RequireWorkspace(request)) };
             case RemoteCommand.RunScript:
                 RequireReady(request);
-                await scripts.Run(await WorkspaceOf(request, cancellation), Require(request.Path, "path"), cancellation);
+                await scripts.Run(await WorkspaceOf(request, cancellation), Require(request.Path, "path"), DisplayOf(request, owner), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.StopScript:
                 scripts.Stop(RequireWorkspace(request), Require(request.Path, "path"));
@@ -264,6 +266,28 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             Stop(watching);
         }
     }
+
+    private Dictionary<string, string> DisplayOf(RemoteRequest request, object owner)
+    {
+        Dictionary<string, string> display = [];
+
+        if (request.Environment is null || !IsLocal(owner))
+        {
+            return display;
+        }
+
+        foreach ((string name, string value) in request.Environment)
+        {
+            if (displayVariables.Contains(name) && value.Length is > 0 and <= 4096 && !value.Contains('\0', StringComparison.Ordinal))
+            {
+                display[name] = value;
+            }
+        }
+
+        return display;
+    }
+
+    private bool IsLocal(object owner) => owner is TcpClient { Client: { RemoteEndPoint: IPEndPoint remote, LocalEndPoint: IPEndPoint local } } && (IPAddress.IsLoopback(remote.Address) || remote.Address.Equals(local.Address));
 
     private void RequireReady(RemoteRequest request)
     {

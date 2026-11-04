@@ -66,7 +66,6 @@ internal sealed class HomeViewModel : ViewModelBase
             return Task.CompletedTask;
         });
         BeginStopCommand = new AsyncCommand(_ => Begin(EditMode.StopWork, string.Empty), () => active?.CanHalt ?? false);
-        BeginCancelCommand = new AsyncCommand(_ => Begin(EditMode.CancelWork, string.Empty), () => active?.CanCancel ?? false);
         ConfirmHaltCommand = new AsyncCommand(_ => Halt());
         BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => CanEditSelected);
         ConfirmRenameCommand = new AsyncCommand(_ => Rename());
@@ -270,7 +269,6 @@ internal sealed class HomeViewModel : ViewModelBase
             EditMode = EditMode.None;
             Active = value is null ? null : Open(value);
             BeginStopCommand.Refresh();
-            BeginCancelCommand.Refresh();
             _ = Active?.Focus();
             _ = Usage.Show(value?.Service);
 
@@ -385,7 +383,6 @@ internal sealed class HomeViewModel : ViewModelBase
                 Raise(nameof(IsEditing));
                 Raise(nameof(IsHalting));
                 Raise(nameof(IsStoppingWork));
-                Raise(nameof(IsCancelingWork));
                 Raise(nameof(CancelEditText));
                 Raise(nameof(NeedsName));
             }
@@ -433,19 +430,14 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool IsMoving => editMode is EditMode.MoveWorkspace or EditMode.MoveGroup;
 
     /// <summary>
-    /// Gets a value indicating whether the question whether to stop or cancel the work is showing.
+    /// Gets a value indicating whether the question whether to stop the work is showing.
     /// </summary>
-    public bool IsHalting => editMode is EditMode.StopWork or EditMode.CancelWork;
+    public bool IsHalting => editMode == EditMode.StopWork;
 
     /// <summary>
     /// Gets a value indicating whether the question whether to stop the work, keeping what it did, is showing.
     /// </summary>
     public bool IsStoppingWork => editMode == EditMode.StopWork;
-
-    /// <summary>
-    /// Gets a value indicating whether the question whether to stop the work and revert what it did is showing.
-    /// </summary>
-    public bool IsCancelingWork => editMode == EditMode.CancelWork;
 
     /// <summary>
     /// Gets the label of the button that closes the showing dialog without doing anything.
@@ -533,11 +525,6 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the command that asks whether to stop the work in the focused workspace at once, keeping what it did.
     /// </summary>
     public AsyncCommand BeginStopCommand { get; }
-
-    /// <summary>
-    /// Gets the command that asks whether to stop the work in the focused workspace and revert what it did.
-    /// </summary>
-    public AsyncCommand BeginCancelCommand { get; }
 
     /// <summary>
     /// Gets the command that does what the showing stop or cancel question asks.
@@ -822,12 +809,11 @@ internal sealed class HomeViewModel : ViewModelBase
                 BeginDeleteCommand.Refresh();
             }
 
-            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.CanCancel))
+            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State))
             {
                 BeginStopCommand.Refresh();
-                BeginCancelCommand.Refresh();
 
-                if (editMode is EditMode.StopWork or EditMode.CancelWork && !created.CanHalt)
+                if (editMode == EditMode.StopWork && !created.CanHalt)
                 {
                     EditMode = EditMode.None;
                 }
@@ -1114,12 +1100,11 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private async Task Halt()
     {
-        EditMode mode = editMode;
         EditMode = EditMode.None;
 
         if (active is { } workspace)
         {
-            await (mode == EditMode.CancelWork ? workspace.Cancel() : workspace.Stop());
+            await workspace.Stop();
         }
     }
 

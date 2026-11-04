@@ -376,7 +376,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_ShowsAReviewIconWhereTheSendButtonIsWhileNothingIsTypedAndSendsTheReviewPrompt()
+    public async Task HomeView_ShowsABlueReviewActionButtonWhereTheSendButtonIsWhileNothingIsTypedAndSendsTheReviewPrompt()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
@@ -384,7 +384,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         string? prompted = null;
         connection.Setup(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => prompted = text).Returns(Task.CompletedTask);
 
-        (bool emptyReview, bool emptySend, bool typedReview, bool typedSend, bool reviewIsIcon, string? sent) = await fixture.Run(() =>
+        (bool emptyReview, bool emptySend, bool typedReview, bool typedSend, bool reviewIsAction, string? sent) = await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
             model.Start().GetAwaiter().GetResult();
@@ -395,7 +395,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             TouchButton? Send() => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && button.Content?.ToString() == "\u2191");
             bool emptyReview = Review() is not null;
             bool emptySend = Send() is not null;
-            bool reviewIsIcon = Review() is { } review && review.Classes.Contains("icon") && review.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Any();
+            bool reviewIsAction = Review() is { } review && review.Classes.Contains("primary") && !review.Classes.Contains("icon") && review.Width == 34 && review.Height == 34 && ToolTip.GetPlacement(review) == PlacementMode.Top && review.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Any();
 
             model.Active!.Chat.ReviewCommand.Execute(null);
             for (int attempt = 0; attempt < 100 && prompted is null; attempt++)
@@ -409,10 +409,10 @@ public sealed class ViewTests(HeadlessFixture fixture)
             bool typedReview = Review() is not null;
             bool typedSend = Send() is not null;
             window.Close();
-            return (emptyReview, emptySend, typedReview, typedSend, reviewIsIcon, prompted);
+            return (emptyReview, emptySend, typedReview, typedSend, reviewIsAction, prompted);
         });
 
-        Assert.Equal((true, false, false, true, true), (emptyReview, emptySend, typedReview, typedSend, reviewIsIcon));
+        Assert.Equal((true, false, false, true, true), (emptyReview, emptySend, typedReview, typedSend, reviewIsAction));
         Assert.Equal("review workspace and changes, fix any problems or inconsistencies", sent);
     }
 
@@ -433,7 +433,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             window.Show();
             TouchButton? Find(string tip) => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString()?.StartsWith(tip, StringComparison.Ordinal) == true);
             bool Indicator() => window.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Any(path => path.Name == "LoopIndicator" && path.IsEffectivelyVisible);
-            bool[] idle = [Find("Review the workspace") is not null, Find("Loop: send") is not null, Find("Cancel the loop") is not null, Indicator()];
+            bool[] idle = [Find("Review the workspace") is not null, Find("Loop: send") is { } plain && plain.Classes.Contains("action") && !plain.Classes.Contains("primary") && plain.Width == 34 && plain.Height == 34, Find("Cancel the loop") is not null, Indicator()];
 
             model.Active!.OpenLoopCommand.Execute(null);
             for (int attempt = 0; attempt < 100 && !model.Active.Loop.IsOpen; attempt++)
@@ -855,11 +855,11 @@ public sealed class ViewTests(HeadlessFixture fixture)
             HomeView view = new() { DataContext = model };
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
-            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.Active?.Chat.ReviewCommand ? "review" : button.Command == model.BeginStopCommand ? "stop" : button.Command == model.BeginCancelCommand ? "cancel" : string.Empty).Where(name => name.Length > 0)];
+            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.Active?.Chat.ReviewCommand ? "review" : button.Command == model.BeginStopCommand ? "stop" : string.Empty).Where(name => name.Length > 0)];
             string[] ready = Shown();
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
             string[] working = Shown();
-            bool[] enabled = [model.BeginStopCommand.CanExecute(null), model.BeginCancelCommand.CanExecute(null)];
+            bool[] enabled = [model.BeginStopCommand.CanExecute(null)];
             model.Active!.Chat.Input = "one more thing";
             bool typing = Shown().Contains("send");
             model.Active.Chat.Input = string.Empty;
@@ -872,8 +872,8 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal(["review"], ready);
-        Assert.Equal(["stop", "cancel"], working);
-        Assert.Equal([true, false], enabled);
+        Assert.Equal(["stop"], working);
+        Assert.Equal([true], enabled);
         Assert.True(typing);
         Assert.True(asking);
         Assert.Equal("Keep working", dismiss);

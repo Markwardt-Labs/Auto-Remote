@@ -32,7 +32,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             if (args.PropertyName == nameof(ChatViewModel.HasContent))
             {
                 Raise(nameof(ShowHaltButtons));
-                Raise(nameof(ShowCancelButton));
                 Raise(nameof(ShowSendButton));
                 Raise(nameof(ShowReviewButton));
                 Raise(nameof(ShowLoopButton));
@@ -81,8 +80,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
             if (args.PropertyName == nameof(GitViewModel.IsRepo))
             {
-                Raise(nameof(CanCancel));
-
                 if (!Git.IsRepo && tab == WorkspaceTab.History)
                 {
                     Tab = WorkspaceTab.Chat;
@@ -209,11 +206,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing;
 
     /// <summary>
-    /// Gets a value indicating whether the AI's work can be cancelled and reverted: the AI works, and the workspace is a git repository whose files can be put back.
-    /// </summary>
-    public bool CanCancel => State == WorkspaceState.Working && Git.IsRepo;
-
-    /// <summary>
     /// Gets a value indicating whether the message box offers the work buttons instead of sending: a script or git runs or work is being ended, or the AI works and nothing is typed, so more input could not be sent.
     /// </summary>
     public bool ShowHaltButtons => State is WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
@@ -280,11 +272,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and the work buttons do not show.
     /// </summary>
     public bool ShowReviewButton => !ShowHaltButtons && !Chat.HasContent;
-
-    /// <summary>
-    /// Gets a value indicating whether the cancel button shows, which only AI work has: it is working and the work buttons show.
-    /// </summary>
-    public bool ShowCancelButton => ShowHaltButtons && State == WorkspaceState.Working;
 
     /// <summary>
     /// Gets a value indicating whether the workspace is in any state but <see cref="WorkspaceState.Ready" />, which turns the header blue.
@@ -453,12 +440,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public Task Stop() => Halt(connection.StopWorkspace);
 
     /// <summary>
-    /// Stops the work in the workspace and reverts what it did; a refusal is shown in the conversation.
-    /// </summary>
-    /// <returns>A task that completes once the workspace is ready again.</returns>
-    public Task Cancel() => Halt(connection.CancelWorkspace);
-
-    /// <summary>
     /// Called when the workspace gets the focus again, so the file browser, if showing, catches up and watches the right workspace.
     /// </summary>
     /// <returns>A task that completes once the files are up to date.</returns>
@@ -507,12 +488,10 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(State));
         Raise(nameof(CanHalt));
         Raise(nameof(ShowHaltButtons));
-        Raise(nameof(ShowCancelButton));
         Raise(nameof(ShowSendButton));
         Raise(nameof(ShowReviewButton));
         Raise(nameof(ShowLoopButton));
         Raise(nameof(IsWorking));
-        Raise(nameof(CanCancel));
     }
 
     private void Resync()

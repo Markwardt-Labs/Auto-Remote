@@ -17,7 +17,14 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     public async Task InitializeAsync()
     {
-        ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = temp.Combine("data"), SpeechCommand = "sh", SpeechArguments = ["-c", "echo said $(wc -c < \"$1\")", "speech", "{file}"] };
+        string fakeDotnet = temp.Combine("fake-dotnet");
+        await File.WriteAllTextAsync(fakeDotnet, "#!/bin/sh\necho \"display=$DISPLAY wayland=$WAYLAND_DISPLAY other=$AUTO_REMOTE_PROBE\"\n");
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(fakeDotnet, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        ServerConfig config = new() { Port = 0, Key = "secret", DotnetCommand = fakeDotnet, DataFolder = temp.Combine("data"), SpeechCommand = "sh", SpeechArguments = ["-c", "echo said $(wc -c < \"$1\")", "speech", "{file}"] };
         FolderBrowser folders = new();
         WorkspaceStore store = new();
         EventHub hub = new();
@@ -230,6 +237,21 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         Assert.Equal(["long", "short", "reply to long", "reply to short"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
         Assert.Equal([true, false], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working == true));
+    }
+
+    [Fact]
+    public async Task RunScript_GivesAScriptTheDisplayOfAClientOnTheSameMachineAndNothingElseOfItsEnvironment()
+    {
+        FolderListing folder = await connection.CreateFolder(temp.Path, "scripted", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "a.cs"), "// not run by the fake");
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
+        Dictionary<string, string> client = new() { ["DISPLAY"] = ":7", ["WAYLAND_DISPLAY"] = "wayland-9", ["AUTO_REMOTE_PROBE"] = "leaked" };
+        await using IServerConnection graphical = await new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>(), name => client.GetValueOrDefault(name)).Connect(settings, CancellationToken.None);
+
+        await graphical.RunScript(workspace.Id, "a.cs", CancellationToken.None);
+        List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptOutput && remoteEvent.Text!.Contains("display=", StringComparison.Ordinal)));
+
+        Assert.Equal("display=:7 wayland=wayland-9 other=", string.Concat(events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptOutput).Select(remoteEvent => remoteEvent.Text)).Trim());
     }
 
     [Fact]

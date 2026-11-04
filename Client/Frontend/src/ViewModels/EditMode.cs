@@ -48,10 +48,5 @@ internal enum EditMode
     /// <summary>
     /// Confirming that the work in the focused workspace is stopped, keeping what it did.
     /// </summary>
-    StopWork,
-
-    /// <summary>
-    /// Confirming that the work in the focused workspace is stopped and what it did reverted.
-    /// </summary>
-    CancelWork
+    StopWork
 }

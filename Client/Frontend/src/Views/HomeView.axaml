@@ -271,33 +271,31 @@
               </StackPanel>
               <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
               <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" Margin="6,0,0,0" VerticalAlignment="Center">
-                <local:TouchButton Classes="icon" Command="{Binding ReviewCommand}" ToolTip.Tip="Review the workspace and its changes and fix any problems"
+                <local:TouchButton Classes="primary" Command="{Binding ReviewCommand}" ToolTip.Tip="Review the workspace and its changes and fix any problems" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowReviewButton, FallbackValue=False}"
-                        VerticalAlignment="Center">
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource ReviewIconGeometry}" Width="14" Height="14" />
                 </local:TouchButton>
-                <local:TouchButton Classes="icon" Command="{Binding $parent[local:HomeView].DataContext.Active.OpenLoopCommand}" ToolTip.Tip="Loop: send a prompt over and over"
+                <local:TouchButton Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.OpenLoopCommand}" ToolTip.Tip="Loop: send a prompt over and over" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowLoopButton, FallbackValue=False}"
-                        VerticalAlignment="Center">
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" Width="14" Height="14" />
                 </local:TouchButton>
                 <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowSendButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
-                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did"
+                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Stop the work and keep what it did" ToolTip.Placement="Top"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowHaltButtons, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Data="M1,1 L11,1 L11,11 L1,11 Z" Fill="White" Width="12" Height="12" />
                 </local:TouchButton>
-                <local:TouchButton Classes="icon" Command="{Binding $parent[local:HomeView].DataContext.Active.CancelLoopCommand}" ToolTip.Tip="Cancel the loop (the work in progress keeps going)"
+                <local:TouchButton Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.CancelLoopCommand}" ToolTip.Tip="Cancel the loop (the work in progress keeps going)" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowCancelLoopButton, FallbackValue=False}"
-                        VerticalAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource LoopCancelIconGeometry}" Width="14" Height="14" />
-                </local:TouchButton>
-                <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginCancelCommand}" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="Cancel the work and revert what it did"
-                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowCancelButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="M4,2 L1,5 L4,8 M1,5 L8,5 A4,4 0 0 1 8,13 L4,13" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource LoopCancelIconGeometry}" Width="14" Height="14" />
                 </local:TouchButton>
               </StackPanel>
             </Grid>
@@ -761,11 +759,6 @@
             <TextBlock Text="Stop the work?" Classes="serif" FontSize="20" />
             <TextBlock Text="It stops at once and keeps what it did so far." Classes="muted" TextWrapping="Wrap" />
             <local:TouchButton Content="Stop" Command="{Binding ConfirmHaltCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          </StackPanel>
-          <StackPanel IsVisible="{Binding IsCancelingWork}" Spacing="12">
-            <TextBlock Text="Cancel the work?" Classes="serif" FontSize="20" />
-            <TextBlock Text="It stops and what it did is reverted, which cannot be undone." Classes="muted" TextWrapping="Wrap" />
-            <local:TouchButton Content="Cancel and revert" Command="{Binding ConfirmHaltCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsDeleting}" Spacing="12">
             <TextBlock Text="Delete workspace?" Classes="serif" FontSize="20" />

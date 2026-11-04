@@ -181,6 +181,18 @@
     <Style Selector="Button.icon:disabled /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="Transparent" />
     </Style>
+    <Style Selector="Button.primary Path.lineIcon">
+      <Setter Property="Stroke" Value="White" />
+    </Style>
+    <Style Selector="Button.primary:disabled Path.lineIcon">
+      <Setter Property="Stroke" Value="{DynamicResource Muted}" />
+    </Style>
+    <Style Selector="Button.action Path.lineIcon">
+      <Setter Property="Stroke" Value="{DynamicResource Text}" />
+    </Style>
+    <Style Selector="Button.action:disabled Path.lineIcon">
+      <Setter Property="Opacity" Value="0.4" />
+    </Style>
     <Style Selector="Button.icon:disabled Path.lineIcon">
       <Setter Property="Opacity" Value="0.4" />
     </Style>

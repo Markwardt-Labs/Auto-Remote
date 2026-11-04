@@ -615,7 +615,28 @@ public sealed class RequestHandlerTests
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
 
         Assert.Null(response.Error);
-        scripts.Verify(x => x.Run(workspace, "a.cs", It.IsAny<CancellationToken>()), Times.Once);
+        scripts.Verify(x => x.Run(workspace, "a.cs", It.Is<IReadOnlyDictionary<string, string>>(environment => environment.Count == 0), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_RunScript_PassesOnlyTheDisplayVariablesAndOnlyFromAClientOnTheServersMachine()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        TcpListener listener = new(IPAddress.Loopback, 0);
+        listener.Start();
+        using TcpClient local = new();
+        Task<TcpClient> accepted = listener.AcceptTcpClientAsync();
+        await local.ConnectAsync(IPAddress.Loopback, ((IPEndPoint)listener.LocalEndpoint).Port);
+        using TcpClient serverSide = await accepted;
+        listener.Stop();
+        Dictionary<string, string> sent = new() { ["DISPLAY"] = ":1", ["XAUTHORITY"] = "/run/user/1000/gdm/Xauthority", ["PATH"] = "/evil", ["LD_PRELOAD"] = "/evil.so", ["WAYLAND_DISPLAY"] = string.Empty };
+        RemoteRequest request = new() { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs", Environment = sent };
+
+        await handler.Handle(request, serverSide, CancellationToken.None);
+        await handler.Handle(request with { Id = 2 }, owner, CancellationToken.None);
+
+        scripts.Verify(x => x.Run(workspace, "a.cs", It.Is<IReadOnlyDictionary<string, string>>(environment => environment.Count == 2 && environment["DISPLAY"] == ":1" && environment["XAUTHORITY"] == "/run/user/1000/gdm/Xauthority"), It.IsAny<CancellationToken>()), Times.Once);
+        scripts.Verify(x => x.Run(workspace, "a.cs", It.Is<IReadOnlyDictionary<string, string>>(environment => environment.Count == 0), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -632,7 +653,7 @@ public sealed class RequestHandlerTests
 
         Assert.Equal("The AI is working in this workspace right now.", working.Error);
         Assert.Equal("A git action is running in this workspace right now.", acting.Error);
-        scripts.Verify(x => x.Run(It.IsAny<WorkspaceInfo>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        scripts.Verify(x => x.Run(It.IsAny<WorkspaceInfo>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

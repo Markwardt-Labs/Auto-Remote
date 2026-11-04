@@ -30,31 +30,6 @@ public sealed class ControlScenarios
     }
 
     [RealAiTheory]
-    [InlineData(AiService.ClaudeCode, 251)]
-    [InlineData(AiService.Codex, 252)]
-    public async Task Cancel_RevertsEveryFileTheAiChangedAndTheWorkspaceIsUsableAfterwards(AiService service, int marker)
-    {
-        await using RealServer server = await RealServer.Start();
-        WorkspaceInfo workspace = await server.Workspace("cancel", service);
-        await File.WriteAllTextAsync(Path.Combine(workspace.Folder, "mine.txt"), "untracked\n");
-        string readme = await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "README.md"));
-        await server.Connection.Prompt(workspace.Id, $"Append the line CHANGED to README.md, create a file new.txt containing the word new, then run the shell command `sleep {marker}` and wait for it.", CancellationToken.None);
-        await server.Until(() => File.Exists(Path.Combine(workspace.Folder, "new.txt")) && RealServer.Processes($"sleep {marker}") > 0, 120, "the AI to change files and start the long command");
-        Assert.Contains("CHANGED", await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "README.md")), StringComparison.Ordinal);
-
-        await server.Connection.CancelWorkspace(workspace.Id, CancellationToken.None);
-
-        Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
-        Assert.Equal(readme, await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "README.md")));
-        Assert.False(File.Exists(Path.Combine(workspace.Folder, "new.txt")));
-        Assert.Equal("untracked", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "mine.txt"))).Trim());
-        await server.Until(() => RealServer.Processes($"sleep {marker}") == 0, 20, "the long command to end");
-
-        Assert.Contains("OK", await server.Ask(workspace, "Reply with exactly the word OK."), StringComparison.Ordinal);
-        Assert.Empty(server.Failures(workspace));
-    }
-
-    [RealAiTheory]
     [InlineData(AiService.ClaudeCode, 261)]
     [InlineData(AiService.Codex, 262)]
     public async Task ShuttingTheServerDownDuringWorkEndsTheToolAndItsCommandsAndTheNextStartResumes(AiService service, int marker)

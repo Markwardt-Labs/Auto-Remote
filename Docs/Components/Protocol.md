@@ -54,6 +54,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
 | `data` | string | `UploadAttachment`, `Transcribe` | The file content or the WAV recording, base64 encoded. |
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
+| `environment` | object, optional | `RunScript` | The client's `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY` and `XDG_SESSION_TYPE`, when it has them. |
 | `url` | string | `CloneWorkspace`, `GitSetRemote` | A git repository URL. |
 | `commit` | string | per command | A commit hash, 4 to 64 hexadecimal characters. |
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
@@ -157,10 +158,10 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GitSetIdentity` | `workspaceId`, `name`, `email` | none | Sets the git user name and email in the server user's global git configuration. |
 | `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone. While the workspace is Managing it is the same as `CancelWorkspace`. |
 | `StopWorkspace` | `workspaceId` | none | Ends the work of the AI, the script or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
-| `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. Only for the AI's work: refused for a script or a git action (stop those), when nothing runs, when it is already Stopping or Canceling, and in a workspace that is not a git repository. |
+| `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. None of the clients sends it. Only for the AI's work: refused for a script or a git action (stop those), when nothing runs, when it is already Stopping or Canceling, and in a workspace that is not a git repository. |
 | `GetWorkspaceState` | `workspaceId` | `state` | Reads the state, which a client does when it opens a workspace and then follows with `StateChanged` events. |
 | `GetScripts` | `workspaceId` | `scripts` | The runs the server holds for the workspace, with their output. |
-| `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Refused unless the workspace is Ready, for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. |
+| `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Refused unless the workspace is Ready, for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. The `environment` is added to the environment of the scripts only when the connection comes from the server's own machine (a loopback address, or the address the server is listening on), and only the four display variables are taken from it. |
 | `StopScript` | `workspaceId`, `path` | none | Kills the script, or every script of the task, and the task stops. Does nothing when the run is not in progress. |
 | `SendScriptInput` | `workspaceId`, `path`, `text` | none | Writes the line to the standard input of the running script and adds it, with a newline, to the output. Refused when the script is not running. |
 | `RemoveScript` | `workspaceId`, `path` | none | Forgets a finished run, and the runs of a task's scripts. Refused while it is in progress. |

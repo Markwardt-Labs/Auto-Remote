@@ -61,6 +61,11 @@ public sealed record RemoteRequest
     public string? Path { get; init; }
 
     /// <summary>
+    /// Gets the environment variables <see cref="RemoteCommand.RunScript" /> gives the script, which tell a graphical script which display of the client's machine to open on; the server uses them only for a client on its own machine.
+    /// </summary>
+    public IReadOnlyDictionary<string, string>? Environment { get; init; }
+
+    /// <summary>
     /// Gets the folder paths <see cref="RemoteCommand.WatchFiles" /> watches, relative to the workspace folder.
     /// </summary>
     public IReadOnlyList<string>? Paths { get; init; }
