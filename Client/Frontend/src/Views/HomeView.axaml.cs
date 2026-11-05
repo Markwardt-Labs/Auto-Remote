@@ -167,6 +167,18 @@ public sealed partial class HomeView : UserControl
 
     private void OnChatKeyDown(object? sender, Avalonia.Input.KeyEventArgs args)
     {
+        if (args.Key == Avalonia.Input.Key.Enter && args.KeyModifiers == Avalonia.Input.KeyModifiers.Shift)
+        {
+            args.Handled = true;
+
+            if (Chat is { } chat && chat.SendCommand.CanExecute(null))
+            {
+                chat.SendCommand.Execute(null);
+            }
+
+            return;
+        }
+
         if (TextBox.PasteGesture?.Matches(args) == true)
         {
             args.Handled = true;

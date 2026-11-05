@@ -376,6 +376,48 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_SendsOnShiftEnterAndStartsANewLineOnEnter()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        List<string> sent = [];
+        connection.Setup(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => sent.Add(text)).Returns(Task.CompletedTask);
+
+        (string afterEnter, int sentByEnter, int sentByShiftEnter, string afterShiftEnter) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            TextBox box = window.GetVisualDescendants().OfType<TextBox>().First(item => item.Name == "ChatInput");
+            box.Focus();
+            model.Active!.Chat.Input = "hello";
+            box.CaretIndex = 5;
+            window.KeyPress(Avalonia.Input.Key.Enter, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Enter, null);
+            string afterEnter = model.Active.Chat.Input;
+            int sentByEnter = sent.Count;
+            window.KeyPress(Avalonia.Input.Key.Enter, Avalonia.Input.RawInputModifiers.Shift, Avalonia.Input.PhysicalKey.Enter, null);
+
+            for (int attempt = 0; attempt < 100 && sent.Count == 0; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            string afterShiftEnter = model.Active.Chat.Input;
+            window.Close();
+            return (afterEnter, sentByEnter, sent.Count, afterShiftEnter);
+        });
+
+        Assert.Equal("hello\n", afterEnter.Replace("\r\n", "\n"));
+        Assert.Equal((0, 1), (sentByEnter, sentByShiftEnter));
+        Assert.Equal(string.Empty, afterShiftEnter);
+        Assert.StartsWith("hello", sent[0], StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsABlueReviewActionButtonWhereTheSendButtonIsWhileNothingIsTypedAndSendsTheReviewPrompt()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
