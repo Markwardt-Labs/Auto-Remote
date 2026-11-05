@@ -35,6 +35,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowSendButton));
                 Raise(nameof(ShowReviewButton));
                 Raise(nameof(ShowPromptButtons));
+                Raise(nameof(ShowPauseButton));
+                Raise(nameof(ShowResumeButton));
                 Raise(nameof(ShowLoopButton));
             }
         };
@@ -264,9 +266,19 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public string LoopNext => DescribeNext(DateTimeOffset.UtcNow);
 
     /// <summary>
-    /// Gets a value indicating whether the message box shows the buttons that send a fixed prompt (pause and resume): nothing is typed and the AI is ready or working.
+    /// Gets a value indicating whether nothing is typed and the AI is ready or working, which is when the message box offers the loop button.
     /// </summary>
     public bool ShowPromptButtons => ShowReviewButton || State == WorkspaceState.Working && !Chat.HasContent;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the pause button: nothing is typed and the AI is working.
+    /// </summary>
+    public bool ShowPauseButton => State == WorkspaceState.Working && !Chat.HasContent;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the resume button: nothing is typed and the workspace is ready.
+    /// </summary>
+    public bool ShowResumeButton => State == WorkspaceState.Ready && !Chat.HasContent;
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the loop button next to the review or stop button: there is no loop yet and nothing is typed, while the AI is ready or working (a loop started during work waits for it to finish).
@@ -507,6 +519,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowSendButton));
         Raise(nameof(ShowReviewButton));
         Raise(nameof(ShowPromptButtons));
+        Raise(nameof(ShowPauseButton));
+        Raise(nameof(ShowResumeButton));
         Raise(nameof(ShowLoopButton));
         Raise(nameof(LoopNext));
         Raise(nameof(IsWorking));

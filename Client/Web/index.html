@@ -1708,7 +1708,7 @@ class WorkspaceView {
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.reviewButton, this.pauseButton, this.resumeButton, this.loopButton, this.sendButton, this.cancelLoopButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loopButton, this.cancelLoopButton, this.reviewButton, this.pauseButton, this.resumeButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2874,11 +2874,10 @@ class WorkspaceView {
     this.sendButton.hidden = halt || empty;
     this.reviewButton.disabled = !this.takesAiInput();
     this.reviewButton.hidden = halt || !empty;
-    const quick = empty && !(halt && state !== "Working");
     this.pauseButton.disabled = !this.takesAiInput();
-    this.pauseButton.hidden = !quick;
+    this.pauseButton.hidden = !(empty && state === "Working");
     this.resumeButton.disabled = !this.takesAiInput();
-    this.resumeButton.hidden = !quick;
+    this.resumeButton.hidden = !(empty && state === "Ready");
     this.loopButton.disabled = !this.takesAiInput();
     this.loopButton.hidden = !empty || this.loop !== null || (halt && state !== "Working");
     this.cancelLoopButton.hidden = this.loop === null;

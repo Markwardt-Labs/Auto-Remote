@@ -434,7 +434,8 @@ public sealed class ViewTests(HeadlessFixture fixture)
             window.Show();
             TouchButton? Find(string tip) => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString()?.StartsWith(tip, StringComparison.Ordinal) == true);
             bool Indicator() => window.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Any(path => path.Name == "LoopIndicator" && path.IsEffectivelyVisible);
-            bool[] idle = [Find("Review the workspace") is not null && Find("Pause: ask") is not null && Find("Resume: ask") is not null, Find("Loop: send") is { } plain && plain.Classes.Contains("action") && !plain.Classes.Contains("primary") && plain.Width == 34 && plain.Height == 34, Find("Cancel the loop") is not null, Indicator()];
+            double Left(string tip) => Avalonia.VisualExtensions.TranslatePoint(Find(tip)!, new Avalonia.Point(), window)!.Value.X;
+            bool[] idle = [Find("Review the workspace") is not null && Find("Resume: ask") is not null && Find("Pause: ask") is null, Find("Loop: send") is { } plain && plain.Classes.Contains("action") && !plain.Classes.Contains("primary") && plain.Width == 34 && plain.Height == 34, Find("Cancel the loop") is not null, Indicator(), Left("Loop: send") < Left("Review the workspace") && Left("Review the workspace") < Left("Resume: ask")];
 
             model.Active!.OpenLoopCommand.Execute(null);
             for (int attempt = 0; attempt < 100 && !model.Active.Loop.IsOpen; attempt++)
@@ -463,18 +464,18 @@ public sealed class ViewTests(HeadlessFixture fixture)
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id });
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-            working = [Find("Loop: send") is not null, Find("Stop the work") is not null, Find("Review the workspace") is not null, Find("Pause: ask") is { } pause && pause.Classes.Contains("primary"), Find("Resume: ask") is not null];
+            working = [Find("Loop: send") is not null, Find("Stop the work") is not null, Find("Review the workspace") is not null, Find("Pause: ask") is { } pause && pause.Classes.Contains("primary"), Find("Resume: ask") is not null, Left("Loop: send") < Left("Pause: ask")];
             window.Close();
             return (idle, model.Active.Loop.IsOpen, conditions, fields, looping, tipHasRuns, working);
         });
 
-        Assert.Equal([true, true, false, false], idle);
+        Assert.Equal([true, true, false, false, true], idle);
         Assert.False(panelOpen);
         Assert.Equal(5, conditions.Length);
         Assert.Equal([true, true, true], fields);
         Assert.Equal([false, true, true, true], looping);
         Assert.True(tipHasRuns);
-        Assert.Equal([true, true, false, true, true], working);
+        Assert.Equal([true, true, false, true, false, true], working);
     }
 
     [Fact]

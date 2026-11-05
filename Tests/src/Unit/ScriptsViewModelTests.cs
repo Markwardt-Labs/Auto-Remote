@@ -442,21 +442,24 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_OffersPauseAndResumeWhileNothingIsTypedAndTheAiIsReadyOrWorking()
+    public async Task Workspace_OffersPauseOnlyWhileTheAiWorksAndResumeOnlyWhileReadyAndOnlyWhileNothingIsTyped()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);
-        Assert.True(model.ShowPromptButtons);
+        Assert.Equal((false, true), (model.ShowPauseButton, model.ShowResumeButton));
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
-        Assert.True(model.ShowPromptButtons);
+        Assert.Equal((true, false), (model.ShowPauseButton, model.ShowResumeButton));
 
         model.Chat.Input = "typed";
-        Assert.False(model.ShowPromptButtons);
+        Assert.Equal((false, false), (model.ShowPauseButton, model.ShowResumeButton));
 
         model.Chat.Input = string.Empty;
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-        Assert.False(model.ShowPromptButtons);
+        Assert.Equal((false, false), (model.ShowPauseButton, model.ShowResumeButton));
+
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Succeeded)));
+        Assert.Equal((false, true), (model.ShowPauseButton, model.ShowResumeButton));
     }
 
     [Fact]
