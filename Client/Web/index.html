@@ -370,6 +370,8 @@ const resetText = period => {
 };
 const log = message => console.log(`${new Date().toLocaleTimeString("en-GB")} ${message}`);
 const reviewPrompt = "review workspace and changes, fix any problems or inconsistencies";
+const pausePrompt = "pause current work";
+const resumePrompt = "resume unfinished work";
 const services = {
   ClaudeCode: { label: "Claude Code", defaultModel: "sonnet" },
   Codex: { label: "OpenAI Codex", defaultModel: "gpt-5.6-terra" },
@@ -1439,6 +1441,8 @@ const icons = {
   refresh: ["M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5", "1 1 12 12", 13],
   loop: ["M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8", "1 1 12 12", 14],
   loopcancel: ["M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8 M1.5,12.5 L12.5,1.5", "1 1 12 12", 14],
+  pause: ["M4.5,2 L4.5,12 M9.5,2 L9.5,12", "1 1 12 12", 14],
+  resume: ["M3.5,1.5 L11.5,7 L3.5,12.5 Z", "1 1 12 12", 14],
   review: ["M6,1.5 A4.5,4.5 0 1 1 6,10.5 A4.5,4.5 0 1 1 6,1.5 Z M9.3,9.3 L12.5,12.5 M4,6 L5.4,7.4 L8,4.6", "1 1 12 12", 14],
   mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 1 10 13", 14],
   foldAll: ["M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12", "1 2 12 11", 13],
@@ -1681,6 +1685,8 @@ class WorkspaceView {
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary act", title: "Send", hidden: true, onclick: () => this.send() }, "↑");
     this.reviewButton = h("button", { class: "primary act", title: "Review the workspace and its changes and fix any problems", onclick: () => this.review() }, icon("review"));
+    this.pauseButton = h("button", { class: "primary act", title: "Pause: ask the AI to pause its current work", onclick: () => this.quick(pausePrompt) }, icon("pause"));
+    this.resumeButton = h("button", { class: "primary act", title: "Resume: ask the AI to resume its unfinished work", onclick: () => this.quick(resumePrompt) }, icon("resume"));
     this.loopButton = h("button", { class: "act", title: "Loop: send a prompt over and over", onclick: () => this.openLoop() }, icon("loop"));
     this.cancelLoopButton = h("button", { class: "act", hidden: true, title: "Cancel the loop (the work in progress keeps going)", onclick: () => this.cancelLoop() }, icon("loopcancel"));
     this.stopButton = h("button", { class: "primary act", hidden: true, title: "Stop the work and keep what it did", onclick: () => this.home.confirmHalt(this) }, icon("stop"));
@@ -1702,7 +1708,7 @@ class WorkspaceView {
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.reviewButton, this.loopButton, this.sendButton, this.cancelLoopButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.reviewButton, this.pauseButton, this.resumeButton, this.loopButton, this.sendButton, this.cancelLoopButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2149,6 +2155,29 @@ class WorkspaceView {
     return `Loop: ${settings.prompt === reviewPrompt ? "review" : "custom prompt"}, ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far`;
   }
 
+  loopNext() {
+    const loop = this.loop;
+
+    if (!loop) {
+      return "";
+    }
+
+    const busy = this.state() !== "Ready";
+
+    if (!loop.nextRunAt) {
+      return busy ? "The first prompt is sent when the workspace is free." : "The first prompt is being sent.";
+    }
+
+    const wait = (new Date(loop.nextRunAt).getTime() - Date.now()) / 1000;
+
+    if (wait <= 0) {
+      return busy ? "The next prompt is sent as soon as the workspace is free." : "The next prompt is due now.";
+    }
+
+    const span = wait >= 3600 ? `${Math.floor(wait / 3600)} h ${Math.floor(wait % 3600 / 60)} min` : wait >= 60 ? `${Math.floor(wait / 60)} min ${Math.floor(wait % 60)} s` : `${Math.max(1, Math.floor(wait))} s`;
+    return busy ? `The next prompt is sent in ${span}, or when the workspace is free if that is later.` : `The next prompt is sent in ${span}.`;
+  }
+
   async cancelLoop() {
     await attempt(() => this.connection.cancelLoop(this.info.id), this.chatError);
   }
@@ -2528,6 +2557,10 @@ class WorkspaceView {
     if (state === "Ready" && this.lastState !== "Ready" && this.notifyWhenReady) {
       this.notifyWhenReady = false;
 
+      if (this.loop !== null) {
+        return;
+      }
+
       try {
         if ("Notification" in window && Notification.permission === "granted") {
           const note = new Notification(`${folderName(this.info.folder)} is ready`, { tag: `ready-${this.info.id}` });
@@ -2841,6 +2874,11 @@ class WorkspaceView {
     this.sendButton.hidden = halt || empty;
     this.reviewButton.disabled = !this.takesAiInput();
     this.reviewButton.hidden = halt || !empty;
+    const quick = empty && !(halt && state !== "Working");
+    this.pauseButton.disabled = !this.takesAiInput();
+    this.pauseButton.hidden = !quick;
+    this.resumeButton.disabled = !this.takesAiInput();
+    this.resumeButton.hidden = !quick;
     this.loopButton.disabled = !this.takesAiInput();
     this.loopButton.hidden = !empty || this.loop !== null || (halt && state !== "Working");
     this.cancelLoopButton.hidden = this.loop === null;
@@ -2947,11 +2985,15 @@ class WorkspaceView {
   }
 
   async review() {
+    await this.quick(reviewPrompt);
+  }
+
+  async quick(prompt) {
     if (this.input.value.trim() || this.attachments.length > 0 || !this.takesAiInput()) {
       return;
     }
 
-    await this.deliver(reviewPrompt, []);
+    await this.deliver(prompt, []);
   }
 
   async deliver(text, sending) {
@@ -4107,7 +4149,7 @@ class Home {
   build() {
     this.menuButton = h("button", { class: "flat menu", title: "Workspaces", onclick: () => this.setDrawer(!this.drawerOpen) }, "☰");
     this.titleText = h("span", {}, "Auto Remote");
-    this.loopIndicator = h("span", { class: "loop-indicator", hidden: true }, icon("loop"));
+    this.loopIndicator = h("button", { class: "flat icon loop-indicator", hidden: true, onclick: () => this.showLoopNext() }, icon("loop"));
     this.title = h("div", { class: "title serif" }, this.titleText, this.loopIndicator);
     this.gearButton = h("button", { class: "flat gear", title: "Workspace settings", onclick: () => this.active?.toggleSettings() }, "\u2699\uFE0E");
     this.usageButton = h("button", { class: "flat usage", title: "AI usage limits", onclick: () => this.toggleUsage() });
@@ -4303,6 +4345,36 @@ class Home {
       h("h3", { class: "serif" }, `${services[this.usageService ?? "ClaudeCode"].label} usage limits`),
       ...windows.map(section),
       ...(windows.length ? [] : [h("div", { class: "muted" }, "The service reports no usage limits.")]));
+  }
+
+  showLoopNext() {
+    const view = this.active;
+
+    if (!view || view.loop === null) {
+      return;
+    }
+
+    const text = h("div", { class: "muted" }, view.loopNext());
+    const timer = setInterval(() => {
+      if (!this.dialogHost.contains(text)) {
+        clearInterval(timer);
+        return;
+      }
+
+      if (view.loop === null) {
+        close();
+        return;
+      }
+
+      text.textContent = view.loopNext();
+    }, 1000);
+    const close = () => {
+      clearInterval(timer);
+      this.closeDialog();
+    };
+    this.dialogError.set(null);
+    this.dialogHost.replaceChildren(h("div", { class: "dialog" }, h("h3", { class: "serif" }, "Loop"), text, h("button", { class: "block", onclick: close }, "Close")));
+    this.dialogHost.hidden = false;
   }
 
   updateLoop(view) {

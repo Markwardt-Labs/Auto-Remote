@@ -442,6 +442,46 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_OffersPauseAndResumeWhileNothingIsTypedAndTheAiIsReadyOrWorking()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        Assert.True(model.ShowPromptButtons);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+        Assert.True(model.ShowPromptButtons);
+
+        model.Chat.Input = "typed";
+        Assert.False(model.ShowPromptButtons);
+
+        model.Chat.Input = string.Empty;
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+        Assert.False(model.ShowPromptButtons);
+    }
+
+    [Fact]
+    public async Task Workspace_SaysWhenTheLoopSendsItsNextPromptAndThatItWaitsForBusyWork()
+    {
+        DateTimeOffset now = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        Assert.Equal(string.Empty, model.DescribeNext(now));
+
+        LoopInfo first = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 600 }, StartedAt = now };
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = first });
+        Assert.Equal("The first prompt is being sent.", model.DescribeNext(now));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = first with { Runs = 1, NextRunAt = now.AddSeconds(3725) } });
+        Assert.Equal("The next prompt is sent in 1 h 2 min.", model.DescribeNext(now));
+        Assert.Equal("The next prompt is sent in 4 min 20 s.", model.DescribeNext(now.AddSeconds(3725 - 260)));
+        Assert.Equal("The next prompt is sent in 5 s.", model.DescribeNext(now.AddSeconds(3720)));
+        Assert.Equal("The next prompt is due now.", model.DescribeNext(now.AddSeconds(3800)));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+        Assert.Equal("The next prompt is sent in 5 s, or when the workspace is free if that is later.", model.DescribeNext(now.AddSeconds(3720)));
+        Assert.Equal("The next prompt is sent as soon as the workspace is free.", model.DescribeNext(now.AddSeconds(3800)));
+    }
+
+    [Fact]
     public async Task Workspace_KeepsTheLoopButtonWhileTheAiWorksAndNothingIsTypedButNotForOtherWork()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);

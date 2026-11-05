@@ -424,6 +424,22 @@ public sealed class WorkspaceLoopsTests : IDisposable
     }
 
     [Fact]
+    public async Task Get_ReportsWhenTheNextPromptIsDueOnceARunStarted()
+    {
+        WorkspaceLoops loops = Create();
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", IntervalSeconds = 60 }, CancellationToken.None);
+        await Until(() => loops.Get(workspace.Id)?.Runs == 1);
+        DateTimeOffset after = DateTimeOffset.UtcNow;
+
+        LoopInfo info = loops.Get(workspace.Id)!;
+        Assert.Null(Changes().First(change => change.Loop is not null).Loop!.NextRunAt);
+        Assert.InRange(info.NextRunAt!.Value, after.AddSeconds(59) - TimeSpan.FromSeconds(5), after.AddSeconds(61));
+        Assert.Equal(info.NextRunAt, Changes().Last(change => change.Loop is not null).Loop!.NextRunAt);
+        await loops.Cancel(workspace.Id);
+    }
+
+    [Fact]
     public async Task Start_HoldsTheSessionOpenWhileTheLoopRunsAndReleasesItAfterwards()
     {
         WorkspaceLoops loops = Create();

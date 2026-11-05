@@ -174,6 +174,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                     continue;
                 }
 
+                run.Schedule(started + TimeSpan.FromSeconds(run.Settings.IntervalSeconds));
                 Interlocked.Increment(ref run.Runs);
                 events.Publish(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = id, Loop = run.Info() });
                 reason = await Wait(run, () => !prompts.IsBusy(id) && activity.Get(id) == WorkspaceState.Ready);
@@ -276,6 +277,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
     private sealed class LoopRun(LoopSettings settings, AiService service, DateTimeOffset startedAt, DateTimeOffset? deadline)
     {
+        private DateTimeOffset? nextRunAt;
+
         public int Runs;
 
         public volatile bool Over;
@@ -290,6 +293,20 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
         public string? Failure { get; set; }
 
-        public LoopInfo Info() => new() { Settings = Settings, StartedAt = startedAt, Runs = Volatile.Read(ref Runs) };
+        public void Schedule(DateTimeOffset next)
+        {
+            lock (this)
+            {
+                nextRunAt = next;
+            }
+        }
+
+        public LoopInfo Info()
+        {
+            lock (this)
+            {
+                return new() { Settings = Settings, StartedAt = startedAt, Runs = Volatile.Read(ref Runs), NextRunAt = nextRunAt };
+            }
+        }
     }
 }

@@ -42,6 +42,29 @@ public sealed class ChatViewModelTests
         Assert.Contains(nameof(ChatViewModel.HasContent), changed);
     }
 
+    [Theory]
+    [InlineData(true, "pause current work")]
+    [InlineData(false, "resume unfinished work")]
+    public async Task PauseAndResume_SendTheirFixedPromptAsTheUsersMessageAndAreOfferedOnlyWhileNothingIsTyped(bool pause, string expected)
+    {
+        string? sent = null;
+        connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => sent = text).Returns(Task.CompletedTask);
+        AsyncCommand command = pause ? chat.PauseCommand : chat.ResumeCommand;
+
+        chat.Input = "typed";
+        bool whileTyped = command.CanExecute(null);
+        chat.Input = string.Empty;
+        bool whenEmpty = command.CanExecute(null);
+        command.Execute(null);
+        for (int attempt = 0; attempt < 100 && sent is null; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal((false, true, expected), (whileTyped, whenEmpty, sent));
+        Assert.Equal(("pause current work", "resume unfinished work"), (chat.PausePrompt, chat.ResumePrompt));
+    }
+
     [Fact]
     public async Task Review_SendsTheReviewPromptAsTheUsersMessageWithoutTouchingTheMessageBox()
     {

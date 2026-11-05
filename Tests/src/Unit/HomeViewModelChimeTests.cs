@@ -44,6 +44,27 @@ public sealed class HomeViewModelChimeTests
     }
 
     [Fact]
+    public async Task Chime_StaysSilentWhileALoopRunsBecauseEachRunEndsInReady()
+    {
+        connection.Setup(x => x.GetLoop(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new LoopInfo { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UnixEpoch });
+        await model.Start();
+        await Task.Delay(100);
+
+        Work(true);
+        time.Advance(TimeSpan.FromSeconds(5));
+        Work(false);
+
+        chime.Verify(x => x.Play(), Times.Never);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id });
+        Work(true);
+        time.Advance(TimeSpan.FromSeconds(5));
+        Work(false);
+
+        chime.Verify(x => x.Play(), Times.Once);
+    }
+
+    [Fact]
     public async Task Chime_StaysSilentForAMomentaryBusyState()
     {
         await model.Start();

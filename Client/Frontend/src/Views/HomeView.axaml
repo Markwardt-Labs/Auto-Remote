@@ -16,8 +16,15 @@
           <local:TouchButton Grid.Column="0" Content="☰" Classes="flat" FontSize="20" HorizontalAlignment="Left" Command="{Binding ToggleDrawerCommand}" />
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
             <TextBlock Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" Width="16" Height="16" VerticalAlignment="Center"
-                  ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}" IsVisible="{Binding Active.IsLooping, FallbackValue=False}" />
+            <local:TouchButton Name="LoopIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}"
+                  IsVisible="{Binding Active.IsLooping, FallbackValue=False}">
+              <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" Width="16" Height="16" />
+              <Button.Flyout>
+                <Flyout Placement="Bottom">
+                  <TextBlock Text="{Binding Active.LoopNext, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
+                </Flyout>
+              </Button.Flyout>
+            </local:TouchButton>
           </StackPanel>
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
@@ -276,6 +283,18 @@
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowReviewButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource ReviewIconGeometry}" Width="14" Height="14" />
+                </local:TouchButton>
+                <local:TouchButton Classes="primary" Command="{Binding PauseCommand}" ToolTip.Tip="Pause: ask the AI to pause its current work" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowPromptButtons, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Width="14" Height="14" />
+                </local:TouchButton>
+                <local:TouchButton Classes="primary" Command="{Binding ResumeCommand}" ToolTip.Tip="Resume: ask the AI to resume its unfinished work" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowPromptButtons, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource ResumeIconGeometry}" Width="14" Height="14" />
                 </local:TouchButton>
                 <local:TouchButton Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.OpenLoopCommand}" ToolTip.Tip="Loop: send a prompt over and over" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"

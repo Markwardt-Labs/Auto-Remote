@@ -237,6 +237,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | --- | --- | --- |
 | `settings` | loop settings | What the loop was started with. |
 | `startedAt` | string | When the loop was started, ISO 8601 UTC. |
+| `nextRunAt` | string, optional | The earliest time the next prompt is sent (the interval after the start of the last run), absent before the first run; it waits further while the workspace is busy. |
 | `runs` | number | How many runs the loop has started. |
 
 **workspace ai** (`GetWorkspaceAi`)

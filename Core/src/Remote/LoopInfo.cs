@@ -19,4 +19,9 @@ public sealed record LoopInfo
     /// Gets how many runs the loop has started.
     /// </summary>
     public int Runs { get; init; }
+
+    /// <summary>
+    /// Gets the earliest time the next prompt is sent, which is the interval after the start of the last run, or <see langword="null" /> before the first run. The prompt waits further when the AI or the workspace is still busy then.
+    /// </summary>
+    public DateTimeOffset? NextRunAt { get; init; }
 }

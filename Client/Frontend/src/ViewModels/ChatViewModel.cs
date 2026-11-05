@@ -19,7 +19,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         this.workspaceId = workspaceId;
         this.drafts = drafts;
         SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && HasContent);
-        ReviewCommand = new AsyncCommand(_ => Review(), () => blockReason is null && !HasContent);
+        ReviewCommand = new AsyncCommand(_ => Deliver(ReviewPrompt, []), () => blockReason is null && !HasContent);
+        PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, []), () => blockReason is null && !HasContent);
+        ResumeCommand = new AsyncCommand(_ => Deliver(ResumePrompt, []), () => blockReason is null && !HasContent);
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
         DictateCommand = new AsyncCommand(_ => recording ? StopDictation() : StartDictation(), () => !transcribing && (recording || blockReason is null));
         Attachments.CollectionChanged += (_, _) =>
@@ -27,7 +29,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             Raise(nameof(HasAttachments));
             Raise(nameof(HasContent));
             SendCommand.Refresh();
-            ReviewCommand.Refresh();
+            RefreshQuick();
         };
     }
 
@@ -119,7 +121,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(Placeholder));
                 SendCommand.Refresh();
-                ReviewCommand.Refresh();
+                RefreshQuick();
                 DictateCommand.Refresh();
             }
         }
@@ -172,7 +174,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(HasContent));
                 SendCommand.Refresh();
-                ReviewCommand.Refresh();
+                RefreshQuick();
                 SaveDraft();
             }
         }
@@ -196,6 +198,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// Gets the prompt the review command sends.
     /// </summary>
     public string ReviewPrompt { get; } = "review workspace and changes, fix any problems or inconsistencies";
+
+    /// <summary>
+    /// Gets the prompt the pause command sends.
+    /// </summary>
+    public string PausePrompt { get; } = "pause current work";
+
+    /// <summary>
+    /// Gets the prompt the resume command sends.
+    /// </summary>
+    public string ResumePrompt { get; } = "resume unfinished work";
 
     /// <summary>
     /// Gets a value indicating whether there is anything to send: text in the message box or a file waiting to go with it. Without it the message box offers the review button instead of the send button.
@@ -226,6 +238,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// Gets the command that asks the AI to review the workspace and its changes and fix any problems or inconsistencies by sending <see cref="ReviewPrompt" />; it is available while nothing is typed, in the same states as <see cref="SendCommand" />.
     /// </summary>
     public AsyncCommand ReviewCommand { get; }
+
+    /// <summary>
+    /// Gets the command that asks the AI to pause its current work by sending <see cref="PausePrompt" />; it is available in the same states as <see cref="ReviewCommand" />.
+    /// </summary>
+    public AsyncCommand PauseCommand { get; }
+
+    /// <summary>
+    /// Gets the command that asks the AI to pick up the work it left unfinished by sending <see cref="ResumePrompt" />; it is available in the same states as <see cref="ReviewCommand" />.
+    /// </summary>
+    public AsyncCommand ResumeCommand { get; }
 
     /// <summary>
     /// Adds a file to send with the next prompt, unless it is empty or larger than the server accepts.
@@ -635,7 +657,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task Review() => await Deliver(ReviewPrompt, []);
+    private void RefreshQuick()
+    {
+        ReviewCommand.Refresh();
+        PauseCommand.Refresh();
+        ResumeCommand.Refresh();
+    }
 
     private async Task<bool> Deliver(string text, List<ChatAttachment> sending)
     {

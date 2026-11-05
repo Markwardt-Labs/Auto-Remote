@@ -34,6 +34,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowHaltButtons));
                 Raise(nameof(ShowSendButton));
                 Raise(nameof(ShowReviewButton));
+                Raise(nameof(ShowPromptButtons));
                 Raise(nameof(ShowLoopButton));
             }
         };
@@ -139,6 +140,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private LoopInfo? activeLoop;
 
+    private CancellationTokenSource? loopClock;
+
     private WorkspaceTab tab;
 
     private WorkspaceTab beforeSettings;
@@ -237,6 +240,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(IsLooping));
                 Raise(nameof(LoopTip));
+                Raise(nameof(LoopNext));
+                FollowLoopClock();
                 Raise(nameof(ShowLoopButton));
                 Raise(nameof(ShowCancelLoopButton));
             }
@@ -254,9 +259,19 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {(activeLoop.Settings.Prompt == Chat.ReviewPrompt ? "review" : "custom prompt")}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far";
 
     /// <summary>
+    /// Gets when the next automatic prompt of the loop is sent, in words, which the loop icon in the header shows when clicked and which counts down while it is open.
+    /// </summary>
+    public string LoopNext => DescribeNext(DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the buttons that send a fixed prompt (pause and resume): nothing is typed and the AI is ready or working.
+    /// </summary>
+    public bool ShowPromptButtons => ShowReviewButton || State == WorkspaceState.Working && !Chat.HasContent;
+
+    /// <summary>
     /// Gets a value indicating whether the message box shows the loop button next to the review or stop button: there is no loop yet and nothing is typed, while the AI is ready or working (a loop started during work waits for it to finish).
     /// </summary>
-    public bool ShowLoopButton => (ShowReviewButton || State == WorkspaceState.Working && !Chat.HasContent) && activeLoop is null;
+    public bool ShowLoopButton => ShowPromptButtons && activeLoop is null;
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the button that cancels the loop, whatever else it shows.
@@ -467,6 +482,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             connection.Reconnected -= Resync;
         }
 
+        loopClock?.Cancel();
         Chat.Dispose();
         Scripts.Dispose();
         Files.Dispose();
@@ -490,7 +506,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowHaltButtons));
         Raise(nameof(ShowSendButton));
         Raise(nameof(ShowReviewButton));
+        Raise(nameof(ShowPromptButtons));
         Raise(nameof(ShowLoopButton));
+        Raise(nameof(LoopNext));
         Raise(nameof(IsWorking));
     }
 
@@ -543,6 +561,38 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void FollowLoopClock()
+    {
+        if (activeLoop is null)
+        {
+            loopClock?.Cancel();
+            loopClock = null;
+            return;
+        }
+
+        if (loopClock is null)
+        {
+            loopClock = new CancellationTokenSource();
+            _ = TickLoopClock(loopClock.Token);
+        }
+    }
+
+    private async Task TickLoopClock(CancellationToken cancellation)
+    {
+        using PeriodicTimer timer = new(TimeSpan.FromSeconds(1));
+
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellation))
+            {
+                Raise(nameof(LoopNext));
+            }
+        }
+        catch (OperationCanceledException)
+        {
+        }
+    }
+
     private async Task ReadLoop()
     {
         try
@@ -560,6 +610,35 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             Chat.Show(message);
         }
+    }
+
+    /// <summary>
+    /// Describes when the loop sends its next prompt: after the interval since the last run began, or once the workspace is free when that is later.
+    /// </summary>
+    /// <param name="now">The current time.</param>
+    /// <returns>The description, or an empty text when no loop runs.</returns>
+    public string DescribeNext(DateTimeOffset now)
+    {
+        if (activeLoop is null)
+        {
+            return string.Empty;
+        }
+
+        bool busy = State != WorkspaceState.Ready;
+
+        if (activeLoop.NextRunAt is not { } next)
+        {
+            return busy ? "The first prompt is sent when the workspace is free." : "The first prompt is being sent.";
+        }
+
+        if (next <= now)
+        {
+            return busy ? "The next prompt is sent as soon as the workspace is free." : "The next prompt is due now.";
+        }
+
+        TimeSpan wait = next - now;
+        string span = wait.TotalHours >= 1 ? $"{(int)wait.TotalHours} h {wait.Minutes} min" : wait.TotalMinutes >= 1 ? $"{(int)wait.TotalMinutes} min {wait.Seconds} s" : $"{Math.Max(1, wait.Seconds)} s";
+        return busy ? $"The next prompt is sent in {span}, or when the workspace is free if that is later." : $"The next prompt is sent in {span}.";
     }
 
     private string Describe(LoopSettings settings) => settings.Condition switch

@@ -137,6 +137,23 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task Notifier_StaysQuietWhileALoopRunsAndForgetsTheWorkItWasWaitingFor()
+    {
+        connection.Setup(x => x.GetLoop(first.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new LoopInfo { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UnixEpoch });
+        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
+        await Task.Delay(100);
+        notifying.Active!.Chat.Input = "do it";
+
+        notifying.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+        Working(first, true);
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        Assert.False(notifying.Active.NotifyWhenReady);
+    }
+
+    [Fact]
     public async Task Notifier_StaysQuietForWorkAnotherClientGave()
     {
         (_, Mock<IReadyNotifier> notifier) = await Notifying();

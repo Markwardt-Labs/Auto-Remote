@@ -785,10 +785,14 @@ internal sealed class HomeViewModel : ViewModelBase
                 {
                     created.NotifyWhenReady = false;
                     keeper?.Release(workspace.Id);
-                    notifier?.Notify(workspace.Id, workspace.Name);
+
+                    if (!created.IsLooping)
+                    {
+                        notifier?.Notify(workspace.Id, workspace.Name);
+                    }
                 }
 
-                if (time.GetUtcNow() - busySince >= minimumBusy)
+                if (!created.IsLooping && time.GetUtcNow() - busySince >= minimumBusy)
                 {
                     chime?.Play();
                 }
