@@ -2842,7 +2842,7 @@ class WorkspaceView {
     this.reviewButton.disabled = !this.takesAiInput();
     this.reviewButton.hidden = halt || !empty;
     this.loopButton.disabled = !this.takesAiInput();
-    this.loopButton.hidden = halt || !empty || this.loop !== null;
+    this.loopButton.hidden = !empty || this.loop !== null || (halt && state !== "Working");
     this.cancelLoopButton.hidden = this.loop === null;
     this.stopButton.hidden = !halt;
     this.stopButton.disabled = state === "Canceling";

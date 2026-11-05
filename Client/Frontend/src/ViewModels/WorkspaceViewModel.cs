@@ -254,9 +254,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {(activeLoop.Settings.Prompt == Chat.ReviewPrompt ? "review" : "custom prompt")}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far";
 
     /// <summary>
-    /// Gets a value indicating whether the message box shows the loop button next to the review button: there is no loop yet and the review button shows.
+    /// Gets a value indicating whether the message box shows the loop button next to the review or stop button: there is no loop yet and nothing is typed, while the AI is ready or working (a loop started during work waits for it to finish).
     /// </summary>
-    public bool ShowLoopButton => ShowReviewButton && activeLoop is null;
+    public bool ShowLoopButton => (ShowReviewButton || State == WorkspaceState.Working && !Chat.HasContent) && activeLoop is null;
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the button that cancels the loop, whatever else it shows.

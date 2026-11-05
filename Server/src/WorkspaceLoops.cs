@@ -185,7 +185,6 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
                 if (reason is not null)
                 {
-                    await prompts.Interrupt(id);
                     End(id, run, reason);
                     return;
                 }

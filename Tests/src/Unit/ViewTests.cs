@@ -424,8 +424,9 @@ public sealed class ViewTests(HeadlessFixture fixture)
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "Session", PercentUsed = 10, WindowMinutes = 300 }] });
 
-        (bool[] idle, bool panelOpen, string[] conditions, bool[] fields, bool[] looping, bool tipHasRuns) = await fixture.Run(() =>
+        (bool[] idle, bool panelOpen, string[] conditions, bool[] fields, bool[] looping, bool tipHasRuns, bool[] working) = await fixture.Run(() =>
         {
+            bool[] working;
             HomeViewModel model = new(connection.Object);
             model.Start().GetAwaiter().GetResult();
             HomeView view = new() { DataContext = model };
@@ -459,8 +460,12 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             bool[] looping = [Find("Loop: send") is not null, Find("Cancel the loop") is not null, Indicator(), Find("Review the workspace") is not null];
             bool tipHasRuns = model.Active.LoopTip.Contains("2 runs so far", StringComparison.Ordinal);
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id });
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            working = [Find("Loop: send") is not null, Find("Stop the work") is not null, Find("Review the workspace") is not null];
             window.Close();
-            return (idle, model.Active.Loop.IsOpen, conditions, fields, looping, tipHasRuns);
+            return (idle, model.Active.Loop.IsOpen, conditions, fields, looping, tipHasRuns, working);
         });
 
         Assert.Equal([true, true, false, false], idle);
@@ -469,6 +474,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal([true, true, true], fields);
         Assert.Equal([false, true, true, true], looping);
         Assert.True(tipHasRuns);
+        Assert.Equal([true, true, false], working);
     }
 
     [Fact]

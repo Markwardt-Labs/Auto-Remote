@@ -229,17 +229,25 @@ public sealed class WorkspaceLoopsTests : IDisposable
     }
 
     [Fact]
-    public async Task Start_StopsTheRunInProgressWhenTheTimeIsUp()
+    public async Task Start_NeverCutsOffTheRunInProgressWhenTheTimeIsUpAndOnlyStopsSendingMore()
     {
-        prompter.OnCreate = session => session.Hang();
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => Slow(release.Task, "done"));
         WorkspaceLoops loops = Create();
 
         await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.ForDuration, DurationSeconds = 1 }, CancellationToken.None);
         await Until(() => loops.Get(workspace.Id) is null);
-        await Until(() => !prompts.IsBusy(workspace.Id));
+        await Task.Delay(300);
 
         Assert.Equal("The loop ran for the time it was given.", Ended());
-        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+        Assert.True(prompts.IsBusy(workspace.Id));
+        Assert.Equal(WorkspaceState.Working, activity.Get(workspace.Id));
+
+        release.SetResult();
+        await Until(() => !prompts.IsBusy(workspace.Id));
+
+        Assert.Single(Session.Prompts);
+        Assert.Equal(["done"], Messages());
     }
 
     [Fact]
@@ -256,9 +264,10 @@ public sealed class WorkspaceLoopsTests : IDisposable
     }
 
     [Fact]
-    public async Task Start_StopsTheRunInProgressWhenTheWindowReachesItsShare()
+    public async Task Start_NeverCutsOffTheRunInProgressWhenTheWindowReachesItsShare()
     {
-        prompter.OnCreate = session => session.Hang();
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => Slow(release.Task, "done"));
         double used = 10;
         usage.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Status(used));
         WorkspaceLoops loops = Create();
@@ -267,9 +276,16 @@ public sealed class WorkspaceLoopsTests : IDisposable
 
         used = 60;
         await Until(() => loops.Get(workspace.Id) is null);
-        await Until(() => !prompts.IsBusy(workspace.Id));
+        await Task.Delay(300);
 
         Assert.StartsWith("5 hours reached 50%", Ended());
+        Assert.True(prompts.IsBusy(workspace.Id));
+
+        release.SetResult();
+        await Until(() => !prompts.IsBusy(workspace.Id));
+
+        Assert.Single(Session.Prompts);
+        Assert.Equal(["done"], Messages());
     }
 
     [Fact]
@@ -466,6 +482,14 @@ public sealed class WorkspaceLoopsTests : IDisposable
         Assert.Null(loops.Get(workspace.Id));
         Assert.False(prompts.IsBusy(workspace.Id));
         Assert.Single(Session.Prompts);
+    }
+
+    private List<string> Messages()
+    {
+        lock (events)
+        {
+            return [.. events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message!.Role == MessageRole.Assistant).Select(remoteEvent => remoteEvent.Message!.Text)];
+        }
     }
 
     private IEnumerable<PromptEvent> Slow(Task gate, string text)

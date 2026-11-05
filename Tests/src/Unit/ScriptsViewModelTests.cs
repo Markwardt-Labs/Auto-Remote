@@ -442,6 +442,23 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_KeepsTheLoopButtonWhileTheAiWorksAndNothingIsTypedButNotForOtherWork()
+    {
+        WorkspaceViewModel model = await StartedWorkspace(true);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+        Assert.Equal((true, true, false), (model.ShowHaltButtons, model.ShowLoopButton, model.ShowReviewButton));
+
+        model.Chat.Input = "one more thing";
+        Assert.Equal((false, false), (model.ShowHaltButtons, model.ShowLoopButton));
+
+        model.Chat.Input = string.Empty;
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
+        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+        Assert.Equal((true, false), (model.ShowHaltButtons, model.ShowLoopButton));
+    }
+
+    [Fact]
     public async Task Workspace_FollowsTheLoopOfTheServerAndOffersTheLoopButtonOnlyWhileNoneRuns()
     {
         LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 300, Condition = LoopCondition.Runs, Runs = 3 }, StartedAt = DateTimeOffset.UtcNow, Runs = 1 };

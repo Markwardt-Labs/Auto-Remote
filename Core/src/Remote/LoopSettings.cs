@@ -21,12 +21,12 @@ public sealed record LoopSettings
     public LoopCondition Condition { get; init; } = LoopCondition.Forever;
 
     /// <summary>
-    /// Gets the point in time the loop ends, for <see cref="LoopCondition.UntilTime" />; a run in progress then is cancelled.
+    /// Gets the point in time the loop ends, for <see cref="LoopCondition.UntilTime" />; a run in progress then finishes and no other starts.
     /// </summary>
     public DateTimeOffset? Until { get; init; }
 
     /// <summary>
-    /// Gets the seconds the loop may run, at most 24 days, for <see cref="LoopCondition.ForDuration" />; a run in progress when they are up is cancelled.
+    /// Gets the seconds the loop may run, at most 24 days, for <see cref="LoopCondition.ForDuration" />; a run in progress when they are up finishes and no other starts.
     /// </summary>
     public int? DurationSeconds { get; init; }
 
