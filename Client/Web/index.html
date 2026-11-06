@@ -1793,7 +1793,7 @@ class WorkspaceView {
     this.backButton = h("button", { class: "flat icon", title: "Back", disabled: true, onclick: () => this.navigate(-1) }, icon("back"));
     this.forwardButton = h("button", { class: "flat icon", title: "Forward", disabled: true, onclick: () => this.navigate(1) }, icon("forward"));
     this.previewPane = h("div", { class: "preview", hidden: true },
-      h("div", { class: "pbar" }, this.backButton, this.forwardButton, this.previewKind, this.previewTitle, this.previewNote, this.findToggle, this.foldButton, this.wrapButton, h("button", { class: "flat icon", title: "Close", onclick: () => this.closePreview() }, icon("close"))),
+      h("div", { class: "pbar" }, this.backButton, this.forwardButton, this.previewKind, this.previewTitle, this.previewNote, this.findToggle, this.foldButton, this.wrapButton, h("button", { class: "flat icon", title: "Close", onclick: () => this.closePreview(true) }, icon("close"))),
       this.findBar,
       this.previewCode,
       this.previewMarkdown,
@@ -3303,12 +3303,16 @@ class WorkspaceView {
     this.search(other, other);
   }
 
-  closePreview() {
+  closePreview(forget = false) {
     this.preview = null;
     this.diffState = null;
-    this.visited = [];
-    this.visitPosition = -1;
-    this.updateNavigation();
+
+    if (forget) {
+      this.visited = [];
+      this.visitPosition = -1;
+      this.updateNavigation();
+    }
+
     this.previewDiff.hidden = true;
     this.setFind(false);
     this.previewPane.hidden = true;
