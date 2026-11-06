@@ -26,6 +26,7 @@ internal static class Program
         });
 
         IAppInfo info = new IAppInfo.Factory().Create(typeof(Program).Assembly);
+        ILog log = new ConsoleLog();
         IFolderBrowser folders = new FolderBrowser();
         IWorkspaceStore store = new WorkspaceStore();
         IEventHub events = new EventHub();
@@ -39,8 +40,8 @@ internal static class Program
         IScriptRunner scripts = new ScriptRunner(events, activity);
         IUsageService usage = new UsageService(providers.Create);
         IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, events, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), new ModelService(providers.Create), loops);
-        IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, new ConsoleLog()), Console.Out);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), new ModelService(providers.Create), loops, new WorkspaceWatcher(events, log));
+        IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log), Console.Out);
         try
         {
             return await application.Run(args, cancellation.Token);

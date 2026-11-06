@@ -1306,7 +1306,7 @@ class Connection {
   listFiles(workspaceId, path, showHidden) { return this.request("ListFiles", { workspaceId, path, showHidden }).then(r => r.files); }
   searchFiles(workspaceId, text, content, showHidden) { return this.request("SearchFiles", { workspaceId, text, searchContent: content, showHidden }).then(r => r.searchResults); }
   readFile(workspaceId, path) { return this.request("ReadFile", { workspaceId, path }).then(r => r.content); }
-  watchFiles(workspaceId, paths) { return this.request("WatchFiles", { workspaceId, paths }); }
+  watchWorkspace(workspaceId) { return this.request("WatchWorkspace", { workspaceId }); }
   cloneWorkspace(url, path, name) { return this.request("CloneWorkspace", { url, path, name: name || undefined }).then(r => r.workspace); }
   getGitStatus(workspaceId) { return this.request("GetGitStatus", { workspaceId }).then(r => r.git); }
   getGitChanges(workspaceId) { return this.request("GetGitChanges", { workspaceId }).then(r => r.gitChanges.changes); }
@@ -1640,7 +1640,8 @@ class WorkspaceView {
     this.scriptAuto = true;
     this.files = null;
     this.nodes = [];
-    this.watched = [];
+    this.previewRead = 0;
+    this.previewWaiting = false;
     this.preview = null;
     this.tokens = [];
     this.find = { open: false, query: "", matchCase: false, wholeWord: false, starts: [], current: -1 };
@@ -2017,7 +2018,7 @@ class WorkspaceView {
   }
 
   focus() {
-    this.watched = [];
+    this.watch();
     this.loadRoot(this.files?.path ?? "", false);
     this.refreshGit();
     this.startSync();
@@ -2058,7 +2059,7 @@ class WorkspaceView {
     this.connection.listeners.delete(this.listener);
     this.connection = connection;
     connection.listeners.add(this.listener);
-    this.watched = [];
+    this.watch();
     this.loadChat();
     this.refreshGit(true);
     this.loadScripts();
@@ -2705,7 +2706,12 @@ class WorkspaceView {
     }
 
     if (event.kind === "FilesChanged") {
-      this.refreshFiles(event.path);
+      if (event.text === "all") {
+        this.reloadAll();
+      } else {
+        this.refreshFiles(event.path);
+      }
+
       this.refreshGit();
       return;
     }
@@ -3027,10 +3033,6 @@ class WorkspaceView {
     return entries.map(entry => old.find(node => node.entry.path === entry.path && node.entry.isFolder === entry.isFolder) ?? { entry, expanded: false, loaded: false, children: [] });
   }
 
-  expandedPaths(nodes) {
-    return nodes.filter(node => node.entry.isFolder && node.expanded && node.loaded).flatMap(node => [node.entry.path, ...this.expandedPaths(node.children)]);
-  }
-
   findNode(nodes, path) {
     for (const node of nodes.filter(item => item.entry.isFolder && item.expanded && item.loaded)) {
       const found = node.entry.path === path ? node : this.findNode(node.children, path);
@@ -3044,15 +3046,7 @@ class WorkspaceView {
   }
 
   async watch() {
-    const paths = [...new Set([this.files?.path ?? "", ...this.expandedPaths(this.nodes)])];
-
-    if (JSON.stringify(paths) !== JSON.stringify(this.watched)) {
-      const result = await attempt(() => this.connection.watchFiles(this.info.id, paths), this.filesError);
-
-      if (result.ok) {
-        this.watched = paths;
-      }
-    }
+    await attempt(() => this.connection.watchWorkspace(this.info.id), this.filesError);
   }
 
   async loadRoot(path, newRoot = true) {
@@ -3067,7 +3061,10 @@ class WorkspaceView {
       this.nodes = this.syncNodes(newRoot ? [] : this.nodes, this.files.entries);
       this.applyChangesMode();
       this.renderTree();
-      await this.watch();
+
+      if (newRoot) {
+        await this.watch();
+      }
       this.reveal(newRoot);
     }
   }
@@ -3082,8 +3079,6 @@ class WorkspaceView {
     if (expand && path !== null) {
       const parts = path.split("/");
       let level = this.nodes;
-      let changed = false;
-
       for (let i = 0; i < parts.length - 1; i++) {
         const folder = level.find(node => node.entry.isFolder && node.entry.path === parts.slice(0, i + 1).join("/"));
 
@@ -3095,13 +3090,8 @@ class WorkspaceView {
           await this.loadNode(folder);
         }
 
-        changed ||= !folder.expanded;
         folder.expanded = true;
         level = folder.children;
-      }
-
-      if (changed) {
-        await this.watch();
       }
     }
 
@@ -3175,7 +3165,6 @@ class WorkspaceView {
       }
 
       this.renderTree();
-      await this.watch();
       return;
     }
 
@@ -3205,8 +3194,6 @@ class WorkspaceView {
 
       this.renderChanges();
     }
-
-    await this.watch();
   }
 
   isMarkdown() {
@@ -3432,13 +3419,51 @@ class WorkspaceView {
     }
 
     if (this.preview && this.preview.path.slice(0, Math.max(this.preview.path.lastIndexOf("/"), 0)) === path) {
-      const result = await attempt(() => this.connection.readFile(this.info.id, this.preview.path), this.filesError);
+      await this.reloadPreview();
+    }
+  }
 
-      if (result.ok) {
-        this.showPreview(result.value);
-      } else {
-        this.closePreview();
+  async reloadAll() {
+    await this.loadRoot(this.files?.path ?? "", false);
+
+    for (const node of this.nodes.filter(item => item.entry.isFolder && item.expanded)) {
+      await this.loadNode(node);
+    }
+
+    this.renderTree();
+    await this.reloadPreview();
+  }
+
+  async reloadPreview() {
+    if (this.previewWaiting) {
+      return;
+    }
+
+    this.previewWaiting = true;
+
+    try {
+      const wait = this.previewRead + 3000 - Date.now();
+
+      if (wait > 0) {
+        await new Promise(resolve => setTimeout(resolve, wait));
       }
+
+      const open = this.preview;
+
+      if (!open) {
+        return;
+      }
+
+      const result = await attempt(() => this.connection.readFile(this.info.id, open.path), this.filesError);
+      this.previewRead = Date.now();
+
+      if (!result.ok) {
+        this.closePreview();
+      } else if (result.value.text !== open.text || result.value.truncated !== open.truncated || result.value.path !== open.path) {
+        this.showPreview(result.value);
+      }
+    } finally {
+      this.previewWaiting = false;
     }
   }
 
@@ -3629,7 +3654,6 @@ class WorkspaceView {
     }
 
     this.renderTree();
-    await this.watch();
   }
 
   setChangesMode(on) {

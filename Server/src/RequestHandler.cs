@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IEventHub events, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IModelService models, IWorkspaceLoops loops) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IModelService models, IWorkspaceLoops loops, IWorkspaceWatcher watcher) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -71,6 +71,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Create(Require(request.Path, "path"), cancellation) };
             case RemoteCommand.RenameWorkspace:
                 await RequireIdle(request);
+                watcher.Forget(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation) };
             case RemoteCommand.ConfigureWorkspace:
                 AiService configured = request.Service ?? throw new RequestException("The request needs a service.");
@@ -130,6 +131,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.DeleteWorkspace:
                 await RequireIdle(request);
                 WorkspaceInfo deleting = await workspaces.Get(RequireWorkspace(request), cancellation);
+                watcher.Forget(deleting.Id);
                 await workspaces.Delete(deleting.Id, request.DeleteFolder, cancellation);
                 await prompts.Forget(deleting, request.DeleteFolder);
                 return new RemoteResponse { Id = 0 };
@@ -154,8 +156,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0, SearchResults = await files.Search(await workspaces.Get(RequireWorkspace(request), cancellation), Require(request.Text, "text"), request.SearchContent == true, request.ShowHidden == true, cancellation) };
             case RemoteCommand.ReadFile:
                 return new RemoteResponse { Id = 0, Content = await files.Read(await workspaces.Get(RequireWorkspace(request), cancellation), Require(request.Path, "path"), cancellation) };
-            case RemoteCommand.WatchFiles:
-                Watch(owner, await workspaces.Get(RequireWorkspace(request), cancellation), request.Paths ?? []);
+            case RemoteCommand.WatchWorkspace:
+                Watch(owner, await workspaces.Get(RequireWorkspace(request), cancellation));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.CloneWorkspace:
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Create(await git.Clone(Require(request.Path, "path"), Require(request.Url, "URL"), request.Name, cancellation), cancellation) };
@@ -323,28 +325,14 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         }
     }
 
-    private void Watch(object owner, WorkspaceInfo workspace, IReadOnlyList<string> paths)
+    private void Watch(object owner, WorkspaceInfo workspace)
     {
-        List<IDisposable> created = [];
-
-        try
-        {
-            foreach (string path in paths.Distinct())
-            {
-                created.Add(files.Watch(workspace, path, changed => events.Publish(new RemoteEvent { Kind = RemoteEventKind.FilesChanged, WorkspaceId = workspace.Id, Path = changed })));
-            }
-        }
-        catch
-        {
-            Stop(created);
-            throw;
-        }
-
+        IReadOnlyList<IDisposable> leased = [watcher.Watch(workspace)];
         IReadOnlyList<IDisposable>? previous = null;
-        watches.AddOrUpdate(owner, created, (_, existing) =>
+        watches.AddOrUpdate(owner, leased, (_, existing) =>
         {
             previous = existing;
-            return created;
+            return leased;
         });
 
         if (previous is not null)

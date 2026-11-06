@@ -20,6 +20,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IEventHub> events = new();
 
+    private readonly Mock<IWorkspaceWatcher> watcher = new();
+
     private readonly WorkspaceActivity activity;
 
     private readonly Mock<IWorkspaceControl> control = new();
@@ -40,7 +42,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, events.Object, activity, control.Object, speech.Object, models.Object, loops.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, models.Object, loops.Object, watcher.Object);
     }
 
     [Fact]
@@ -202,23 +204,40 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_WatchFiles_ReplacesTheConnectionsWatchAndPublishesChanges()
+    public async Task Handle_WatchWorkspace_JoinsTheWatchOfTheOpenWorkspaceAndLeavesTheOneBeforeOnlyAfterwards()
     {
         Mock<IDisposable> first = new();
         Mock<IDisposable> second = new();
-        Action<string>? changed = null;
+        WorkspaceInfo other = workspace with { Id = Guid.NewGuid(), Folder = "/work/other" };
+        List<string> order = [];
+        first.Setup(x => x.Dispose()).Callback(() => order.Add("leave first"));
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        files.Setup(x => x.Watch(workspace, "src", It.IsAny<Action<string>>())).Callback<WorkspaceInfo, string, Action<string>>((_, _, callback) => changed = callback).Returns(first.Object);
+        workspaces.Setup(x => x.Get(other.Id, It.IsAny<CancellationToken>())).ReturnsAsync(other);
+        watcher.Setup(x => x.Watch(workspace)).Returns(first.Object);
+        watcher.Setup(x => x.Watch(other)).Returns(() =>
+        {
+            order.Add("join second");
+            return second.Object;
+        });
 
-        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.WatchFiles, WorkspaceId = workspace.Id, Paths = ["src"] }, owner, CancellationToken.None);
-        changed!("src");
-        files.Setup(x => x.Watch(workspace, "docs", It.IsAny<Action<string>>())).Returns(second.Object);
-        await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.WatchFiles, WorkspaceId = workspace.Id, Paths = ["docs"] }, owner, CancellationToken.None);
+        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.WatchWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.WatchWorkspace, WorkspaceId = other.Id }, owner, CancellationToken.None);
 
-        events.Verify(x => x.Publish(new RemoteEvent { Kind = RemoteEventKind.FilesChanged, WorkspaceId = workspace.Id, Path = "src" }), Times.Once);
-        first.Verify(x => x.Dispose(), Times.Once);
+        Assert.Equal(["join second", "leave first"], order);
         handler.Disconnect(owner);
         second.Verify(x => x.Dispose(), Times.Once);
+        first.Verify(x => x.Dispose(), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_WatchWorkspace_RefusesAnUnknownWorkspace()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("No such workspace."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.WatchWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal("No such workspace.", response.Error);
+        watcher.Verify(x => x.Watch(It.IsAny<WorkspaceInfo>()), Times.Never);
     }
 
     [Fact]

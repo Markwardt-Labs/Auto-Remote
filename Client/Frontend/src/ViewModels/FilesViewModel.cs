@@ -12,8 +12,10 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// <param name="workspaceId">The workspace whose folder is browsed.</param>
     /// <param name="git">The git state of the workspace, which colors the tree and supplies the diffs.</param>
     /// <param name="desktop">Whether this is the desktop layout: the tree always starts at the workspace folder, and keeps the open file selected with its folders open.</param>
-    public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false)
+    /// <param name="previewInterval">The shortest time between two readings of the open file after changes were reported, or <see langword="null" /> for three seconds.</param>
+    public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false, TimeSpan? previewInterval = null)
     {
+        this.previewInterval = previewInterval ?? TimeSpan.FromSeconds(3);
         this.connection = connection;
         this.workspaceId = workspaceId;
         this.desktop = desktop;
@@ -52,9 +54,13 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private readonly Guid workspaceId;
 
-    private readonly List<string> watched = [];
-
     private readonly bool desktop;
+
+    private readonly TimeSpan previewInterval;
+
+    private DateTimeOffset previewRead = DateTimeOffset.MinValue;
+
+    private bool previewWaiting;
 
     private IReadOnlySet<string> running = new HashSet<string>();
 
@@ -430,7 +436,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         string[] parts = path.Split('/');
         IList<FileNode> level = Nodes;
         string current = string.Empty;
-        bool changed = false;
 
         for (int i = 0; i < parts.Length - 1; i++)
         {
@@ -460,7 +465,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
             if (!folder.IsExpanded)
             {
-                changed = true;
                 folder.IsExpanded = true;
             }
 
@@ -472,10 +476,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             Selected = level.FirstOrDefault(node => node.IsFile && node.Path == path);
         }
 
-        if (changed)
-        {
-            await Watch();
-        }
     }
 
     /// <summary>
@@ -542,8 +542,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         {
             Collapse(node);
         }
-
-        await Watch();
     }
 
     private void Collapse(FileNode node)
@@ -560,7 +558,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     {
         if (remoteEvent.Kind == RemoteEventKind.FilesChanged && remoteEvent.WorkspaceId == workspaceId && remoteEvent.Path is { } path)
         {
-            _ = Refresh(path);
+            _ = remoteEvent.Text == "all" ? ReloadAll() : Refresh(path);
         }
     }
 
@@ -612,8 +610,55 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
         if (preview is { } open && open.Path[..Math.Max(open.Path.LastIndexOf('/'), 0)] == path)
         {
+            await ReloadPreview();
+        }
+    }
+
+    private async Task ReloadAll()
+    {
+        await Reload();
+        await ReloadPreview();
+    }
+
+    private async Task ReloadPreview()
+    {
+        if (previewWaiting)
+        {
+            return;
+        }
+
+        previewWaiting = true;
+
+        try
+        {
+            TimeSpan wait = previewRead + previewInterval - DateTimeOffset.UtcNow;
+
+            if (wait > TimeSpan.Zero)
+            {
+                await Task.Delay(wait);
+            }
+
+            if (preview is not { } open)
+            {
+                return;
+            }
+
             FileContent? content = null;
-            Preview = await Attempt(async () => content = await connection.ReadFile(workspaceId, open.Path, CancellationToken.None)) ? content : null;
+            bool read = await Attempt(async () => content = await connection.ReadFile(workspaceId, open.Path, CancellationToken.None));
+            previewRead = DateTimeOffset.UtcNow;
+
+            if (!read)
+            {
+                Preview = null;
+            }
+            else if (content is not null && (content.Text != open.Text || content.Truncated != open.Truncated || content.Path != open.Path))
+            {
+                Preview = content;
+            }
+        }
+        finally
+        {
+            previewWaiting = false;
         }
     }
 
@@ -652,8 +697,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         {
             await Load(node);
         }
-
-        await Watch();
     }
 
     private async Task Load(FileNode node)
@@ -676,16 +719,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task Watch()
-    {
-        List<string> paths = Expanded(Nodes).Prepend(files?.Path ?? string.Empty).Distinct().ToList();
-
-        if (!paths.SequenceEqual(watched) && await Attempt(() => connection.WatchFiles(workspaceId, paths, CancellationToken.None)))
-        {
-            watched.Clear();
-            watched.AddRange(paths);
-        }
-    }
+    private Task Watch() => Attempt(() => connection.WatchWorkspace(workspaceId, CancellationToken.None));
 
     private async Task Open(string? path, bool newRoot = true)
     {
@@ -701,7 +735,12 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             }
 
             Sync(Nodes, result!.Entries);
-            await Watch();
+
+            if (newRoot)
+            {
+                await Watch();
+            }
+
             _ = Reveal(newRoot);
         }
     }

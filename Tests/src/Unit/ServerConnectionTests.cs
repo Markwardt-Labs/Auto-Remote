@@ -33,7 +33,7 @@ public sealed class ServerConnectionTests
     }
 
     [Fact]
-    public async Task Request_ReopensALostConnectionAndReplaysTheFileWatch()
+    public async Task Request_ReopensALostConnectionAndReplaysTheWorkspaceWatch()
     {
         List<RemoteRequest> sentFirst = [];
         List<RemoteRequest> sentSecond = [];
@@ -47,14 +47,14 @@ public sealed class ServerConnectionTests
         }, Mock.Of<ILog>(), "box:1");
         Guid workspace = Guid.NewGuid();
 
-        await connection.WatchFiles(workspace, ["src"], CancellationToken.None);
+        await connection.WatchWorkspace(workspace, CancellationToken.None);
         firstReplies.Writer.Complete();
         await Task.Delay(100);
         await connection.Prompt(workspace, "hi", CancellationToken.None);
 
         Assert.Equal(1, opened);
-        Assert.Equal([RemoteCommand.WatchFiles, RemoteCommand.Prompt], sentSecond.Select(request => request.Command));
-        Assert.Equal(["src"], sentSecond[0].Paths);
+        Assert.Equal([RemoteCommand.WatchWorkspace, RemoteCommand.Prompt], sentSecond.Select(request => request.Command));
+        Assert.Equal(workspace, sentSecond[0].WorkspaceId);
     }
 
     [Fact]

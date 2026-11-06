@@ -60,7 +60,6 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
-| `paths` | array of string | `WatchFiles` | Folder paths. |
 | `text` | string | `Prompt`, `GitCommit`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the line written to a script, or the text to search for. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
 | `showHidden` | bool | no | `ListFiles` and `SearchFiles`; includes the entries a `.filehide` file hides. |
@@ -74,7 +73,7 @@ Properties a command does not use are omitted.
 {"id": 7, "history": {"messages": [{"role": "Assistant", "text": "Done."}], "older": "48213:0"}}
 ```
 
-Exactly one payload property is set on success (none for `DeleteWorkspace`, `DeleteGroup`, `Prompt`, `WatchFiles` and the git actions: every `Git...` command except the `GetGit...` reads); on failure only `error` is set (see Errors). A response with `id` zero answers no request and carries `event` instead (see Events).
+Exactly one payload property is set on success (none for `DeleteWorkspace`, `DeleteGroup`, `Prompt`, `WatchWorkspace` and the git actions: every `Git...` command except the `GetGit...` reads); on failure only `error` is set (see Errors). A response with `id` zero answers no request and carries `event` instead (see Events).
 
 | Property | Type | Set for |
 | --- | --- | --- |
@@ -134,7 +133,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
 | `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |
-| `WatchFiles` | `workspaceId`, `paths` (folders relative to the workspace folder; empty string for the folder itself) | none | Replaces the folders this connection watched before; an empty list stops watching. Changes arrive as `FilesChanged` events. |
+| `WatchWorkspace` | `workspaceId` | none | Says that this connection has the workspace open, in place of the one it had open before. The server watches the whole folder of every workspace some connection has open, however deep, and pushes what changes in it to every connection as `FilesChanged` and `GitChanged` events, also when the change was made outside Auto Remote. The watch ends with the connection, and a connection that reconnects sends it again. |
 | `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |
 | `GetGitStatus` | `workspaceId` | `git` | `isRepo` is false for a folder that is not the root of a repository, and when git is not installed on the server. |
 | `GetGitChanges` | `workspaceId` | `gitChanges` | Paths that differ from the head commit plus the ones git ignores; empty for a folder that is not a repository. |
@@ -438,7 +437,7 @@ The server pushes events to every authenticated connection, as responses with `i
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
-| `path` | string | `FilesChanged`: the changed folder relative to the workspace folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
+| `path` | string | `FilesChanged`: a folder relative to the workspace folder whose entries or their contents changed (empty for the workspace folder itself); one event per folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Running`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
@@ -449,7 +448,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 `WorkspacesChanged` says the workspaces or groups changed on the server (one was created, deleted, renamed, moved, reordered or configured, by any client); it carries no details, so a client lists the workspaces again with `ListWorkspaces`, which it also does after reconnecting. A new AI session being attached to a workspace is not announced. The client keeps what it has open: the focused workspace stays open untouched unless it was deleted (the view clears and the drawer opens) or its folder or AI settings changed (it is reopened).
 
-`GitChanged` says a git action started or finished in the workspace (the automatic fetch and pull only say it when they changed something), so a client reads the git state again; it does the same when a `FilesChanged` event arrives, when a `WorkingChanged` event says the AI stopped, and after its own git actions.
+`GitChanged` says a git action started or finished in the workspace (the automatic fetch and pull only say it when they changed something), so a client reads the git state again; the server also sends it when the head, the index or the refs of the repository change outside Auto Remote, and a client does the same when a `FilesChanged` event arrives, when a `WorkingChanged` event says the AI stopped, and after its own git actions.
 
 A client that opens a workspace subscribes first and then reads the newest history chunk, holding the events that arrive meanwhile: the leading `MessageAdded` events whose messages the chunk already ends with are duplicates and are dropped, the rest are appended, and later events are appended as they come. A client that may have missed events reads the newest chunk again the same way. `WorkingChanged` is not guaranteed to be balanced; the last one received is the truth.
 

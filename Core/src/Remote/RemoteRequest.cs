@@ -66,11 +66,6 @@ public sealed record RemoteRequest
     public IReadOnlyDictionary<string, string>? Environment { get; init; }
 
     /// <summary>
-    /// Gets the folder paths <see cref="RemoteCommand.WatchFiles" /> watches, relative to the workspace folder.
-    /// </summary>
-    public IReadOnlyList<string>? Paths { get; init; }
-
-    /// <summary>
     /// Gets the cursor, taken from <see cref="ChatHistory.Older" />, before which <see cref="RemoteCommand.GetHistory" /> reads, or <see langword="null" /> to read the newest messages.
     /// </summary>
     public string? Before { get; init; }

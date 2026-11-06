@@ -147,9 +147,9 @@ public enum RemoteCommand
     ReadFile,
 
     /// <summary>
-    /// Watches the folders <see cref="RemoteRequest.Paths" /> (relative to the workspace folder, empty for the folder itself) of <see cref="RemoteRequest.WorkspaceId" /> in place of any folders this connection watched before, none stopping the watch; changes arrive as <see cref="RemoteEventKind.FilesChanged" /> pushes.
+    /// Tells the server that this connection has <see cref="RemoteRequest.WorkspaceId" /> open, in place of the workspace it had open before: the server watches the whole folder of every workspace some connection has open, and pushes what changes in it to every connection as <see cref="RemoteEventKind.FilesChanged" /> and <see cref="RemoteEventKind.GitChanged" />, also when the change was made outside Auto Remote.
     /// </summary>
-    WatchFiles,
+    WatchWorkspace,
 
     /// <summary>
     /// Clones the repository at <see cref="RemoteRequest.Url" /> into a new folder inside the existing folder <see cref="RemoteRequest.Path" /> and creates a workspace in it; the folder is named <see cref="RemoteRequest.Name" />, or after the repository when that is omitted. Answered in <see cref="RemoteResponse.Workspace" />.

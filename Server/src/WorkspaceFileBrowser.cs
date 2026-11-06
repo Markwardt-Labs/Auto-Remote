@@ -36,16 +36,6 @@ internal interface IWorkspaceFileBrowser
     /// <returns>The file text, truncated when large.</returns>
     /// <exception cref="RequestException">The path leaves the workspace folder, is missing, or is not a text file.</exception>
     Task<FileContent> Read(WorkspaceInfo workspace, string path, CancellationToken cancellation);
-
-    /// <summary>
-    /// Watches a folder inside the workspace folder, not its sub-folders.
-    /// </summary>
-    /// <param name="workspace">The workspace.</param>
-    /// <param name="path">The folder, relative to the workspace folder; empty for the workspace folder.</param>
-    /// <param name="changed">Called with the folder's relative path shortly after its entries or their contents changed.</param>
-    /// <returns>Stops watching when disposed.</returns>
-    /// <exception cref="RequestException">The path leaves the workspace folder or is not a folder.</exception>
-    IDisposable Watch(WorkspaceInfo workspace, string path, Action<string> changed);
 }
 
 /// <inheritdoc />
@@ -60,8 +50,6 @@ internal sealed class WorkspaceFileBrowser : IWorkspaceFileBrowser
     private readonly int maxNameResults = 50;
 
     private readonly int maxContentResults = 200;
-
-    private readonly TimeSpan debounce = TimeSpan.FromMilliseconds(250);
 
     private readonly StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
@@ -196,20 +184,6 @@ internal sealed class WorkspaceFileBrowser : IWorkspaceFileBrowser
         }
     }
 
-    /// <inheritdoc />
-    public IDisposable Watch(WorkspaceInfo workspace, string path, Action<string> changed)
-    {
-        string root = Path.TrimEndingDirectorySeparator(workspace.Folder);
-        string full = Resolve(root, path);
-
-        if (!Directory.Exists(full))
-        {
-            throw new RequestException($"The folder '{path}' does not exist.");
-        }
-
-        return new Watcher(full, Relative(root, full), changed, debounce);
-    }
-
     private void Walk(string root, string folder, bool showHidden, List<string> files, CancellationToken cancellation)
     {
         cancellation.ThrowIfCancellationRequested();
@@ -296,51 +270,4 @@ internal sealed class WorkspaceFileBrowser : IWorkspaceFileBrowser
     }
 
     private string Relative(string root, string full) => Path.GetRelativePath(root, full) is var relative && relative == "." ? string.Empty : relative.Replace(Path.DirectorySeparatorChar, '/');
-
-    private sealed class Watcher : IDisposable
-    {
-        public Watcher(string full, string relative, Action<string> changed, TimeSpan debounce)
-        {
-            this.debounce = debounce;
-            timer = new Timer(_ => Notify(relative, changed));
-            watcher = new FileSystemWatcher(full) { NotifyFilter = NotifyFilters.FileName | NotifyFilters.DirectoryName | NotifyFilters.LastWrite | NotifyFilters.Size };
-            watcher.Created += (_, _) => Schedule();
-            watcher.Deleted += (_, _) => Schedule();
-            watcher.Changed += (_, _) => Schedule();
-            watcher.Renamed += (_, _) => Schedule();
-            watcher.Error += (_, _) => Schedule();
-            watcher.EnableRaisingEvents = true;
-        }
-
-        private readonly TimeSpan debounce;
-
-        private readonly Timer timer;
-
-        private readonly FileSystemWatcher watcher;
-
-        private volatile bool disposed;
-
-        public void Dispose()
-        {
-            disposed = true;
-            watcher.Dispose();
-            timer.Dispose();
-        }
-
-        private void Schedule()
-        {
-            if (!disposed)
-            {
-                timer.Change(debounce, Timeout.InfiniteTimeSpan);
-            }
-        }
-
-        private void Notify(string relative, Action<string> changed)
-        {
-            if (!disposed)
-            {
-                changed(relative);
-            }
-        }
-    }
 }

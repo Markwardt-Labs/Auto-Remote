@@ -31,7 +31,7 @@ public sealed record RemoteEvent
     public bool? Working { get; init; }
 
     /// <summary>
-    /// Gets the folder that changed relative to the workspace folder for <see cref="RemoteEventKind.FilesChanged" />, or the path of the run for <see cref="RemoteEventKind.ScriptOutput" /> and <see cref="RemoteEventKind.ScriptRemoved" />.
+    /// Gets the folder whose entries changed, relative to the workspace folder, for <see cref="RemoteEventKind.FilesChanged" />, or the path of the run for <see cref="RemoteEventKind.ScriptOutput" /> and <see cref="RemoteEventKind.ScriptRemoved" />.
     /// </summary>
     public string? Path { get; init; }
 
@@ -46,7 +46,7 @@ public sealed record RemoteEvent
     public LoopInfo? Loop { get; init; }
 
     /// <summary>
-    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself.
+    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
     /// </summary>
     public string? Text { get; init; }
 
@@ -73,7 +73,7 @@ public enum RemoteEventKind
     WorkingChanged,
 
     /// <summary>
-    /// The contents of a folder watched with <see cref="RemoteCommand.WatchFiles" /> changed.
+    /// The contents of a folder of a workspace that is open (see <see cref="RemoteCommand.WatchWorkspace" />) changed, whoever changed them.
     /// </summary>
     FilesChanged,
 

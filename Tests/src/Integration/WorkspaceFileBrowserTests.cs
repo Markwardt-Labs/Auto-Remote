@@ -91,15 +91,6 @@ public sealed class WorkspaceFileBrowserTests
         await Assert.ThrowsAsync<RequestException>(() => browser.Read(Workspace(temp), "missing.txt", CancellationToken.None));
     }
 
-    [Fact]
-    public void Watch_RefusesPathsOutsideOrMissing()
-    {
-        using TempFolder temp = new();
-
-        Assert.Throws<RequestException>(() => browser.Watch(Workspace(temp), "..", _ => { }));
-        Assert.Throws<RequestException>(() => browser.Watch(Workspace(temp), "missing", _ => { }));
-    }
-
     private static async Task Until(Func<bool> condition, object gate)
     {
         for (int attempt = 0; attempt < 100; attempt++)

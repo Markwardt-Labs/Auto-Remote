@@ -38,7 +38,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage.Object, hub, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), new ModelService((_, _) => prompter), loops);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), new ModelService((_, _) => prompter), loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)));
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -276,19 +276,75 @@ public sealed class EndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task WatchFiles_PushesAnEventWhenTheWatchedFolderChanges()
+    public async Task WatchWorkspace_PushesEventsForChangesAnywhereInTheFolderWhoeverMakesThem()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "watched", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
-        Directory.CreateDirectory(Path.Combine(folder.Path, "src"));
+        Directory.CreateDirectory(Path.Combine(folder.Path, "src", "deep"));
+        Directory.CreateDirectory(Path.Combine(folder.Path, ".git", "refs", "heads"));
+        await connection.WatchWorkspace(workspace.Id, CancellationToken.None);
 
-        await connection.WatchFiles(workspace.Id, ["src"], CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(folder.Path, "src", "new.txt"), "x");
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "src", "deep", "new.txt"), "x");
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "top.txt"), "x");
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, ".git", "refs", "heads", "main"), "abc");
 
-        List<RemoteEvent> events = await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged));
-        RemoteEvent changed = events.First(remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged);
-        Assert.Equal((workspace.Id, "src"), (changed.WorkspaceId, changed.Path));
-        await Assert.ThrowsAsync<RemoteException>(() => connection.WatchFiles(workspace.Id, [".."], CancellationToken.None));
+        List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged && remoteEvent.Path == "src/deep") && items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged && remoteEvent.Path == string.Empty) && items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.GitChanged));
+        Assert.All(events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged), remoteEvent => Assert.Equal(workspace.Id, remoteEvent.WorkspaceId));
+        Assert.DoesNotContain(events, remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged && remoteEvent.Path!.StartsWith(".git", StringComparison.Ordinal));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.WatchWorkspace(Guid.NewGuid(), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task WatchWorkspace_GoesQuietAgainWhenClientsReadTheGitStatusInResponseToEveryEvent()
+    {
+        FolderListing folder = await connection.CreateFolder(temp.Path, "quiet", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "a.txt"), "one");
+        Git(folder.Path, "init", "-b", "main");
+        Git(folder.Path, "add", "-A");
+        Git(folder.Path, "-c", "user.email=t@example.com", "-c", "user.name=T", "commit", "-m", "base");
+        await connection.WatchWorkspace(workspace.Id, CancellationToken.None);
+        connection.EventReceived += remoteEvent =>
+        {
+            if (remoteEvent.Kind is RemoteEventKind.FilesChanged or RemoteEventKind.GitChanged)
+            {
+                _ = connection.GetGitStatus(workspace.Id, CancellationToken.None);
+                _ = connection.GetGitChanges(workspace.Id, CancellationToken.None);
+            }
+        };
+
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "a.txt"), "two");
+        await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.FilesChanged));
+        await Task.Delay(1500);
+        int settled;
+
+        lock (received)
+        {
+            settled = received.Count(remoteEvent => remoteEvent.Kind is RemoteEventKind.FilesChanged or RemoteEventKind.GitChanged);
+        }
+
+        await Task.Delay(1500);
+
+        lock (received)
+        {
+            Assert.Equal(settled, received.Count(remoteEvent => remoteEvent.Kind is RemoteEventKind.FilesChanged or RemoteEventKind.GitChanged));
+        }
+    }
+
+    private void Git(string folder, params string[] arguments)
+    {
+        ProcessStartInfo start = new("git") { WorkingDirectory = folder, RedirectStandardOutput = true, RedirectStandardError = true };
+
+        foreach (string argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using Process process = Process.Start(start)!;
+        process.StandardOutput.ReadToEnd();
+        process.StandardError.ReadToEnd();
+        process.WaitForExit();
+        Assert.Equal(0, process.ExitCode);
     }
 
     [Fact]

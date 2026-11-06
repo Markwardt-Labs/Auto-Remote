@@ -200,13 +200,12 @@ internal interface IServerConnection : IAsyncDisposable
     Task<string> Transcribe(ReadOnlyMemory<byte> audio, CancellationToken cancellation);
 
     /// <summary>
-    /// Asks to be told when any of some folders inside a workspace's folder changes, in place of the folders watched before.
+    /// Tells the server that this connection has a workspace open, in place of the one it had open before: the server then reports every change in the workspace's folder, whoever makes it, as events to all connections.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="paths">The folders relative to the workspace folder; empty for the workspace folder itself. None stops watching.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task WatchFiles(Guid id, IReadOnlyList<string> paths, CancellationToken cancellation);
+    Task WatchWorkspace(Guid id, CancellationToken cancellation);
 
     /// <summary>
     /// Lists a folder inside a workspace's folder.
@@ -798,9 +797,9 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.UploadAttachment, WorkspaceId = id, Name = name, Data = Convert.ToBase64String(data.Span) }, cancellation)).AttachmentPath ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task WatchFiles(Guid id, IReadOnlyList<string> paths, CancellationToken cancellation)
+    public async Task WatchWorkspace(Guid id, CancellationToken cancellation)
     {
-        RemoteRequest request = new() { Id = 0, Command = RemoteCommand.WatchFiles, WorkspaceId = id, Paths = paths };
+        RemoteRequest request = new() { Id = 0, Command = RemoteCommand.WatchWorkspace, WorkspaceId = id };
         await Send(request, cancellation);
         watching = request;
     }
