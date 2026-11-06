@@ -41,11 +41,16 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         };
         git.DiffRequested += (path, commit) => _ = OpenDiff(path, commit);
         CollapseAllCommand = new AsyncCommand(_ => CollapseAll());
+        BackCommand = new AsyncCommand(_ => Go(-1), () => position > 0);
+        ForwardCommand = new AsyncCommand(_ => Go(1), () => position < history.Count - 1);
         ClosePreviewCommand = new AsyncCommand(_ =>
         {
             Preview = null;
             Diff = null;
             diffPath = null;
+            history.Clear();
+            position = -1;
+            RefreshHistory();
             return Task.CompletedTask;
         });
     }
@@ -56,7 +61,13 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private readonly bool desktop;
 
+    private readonly List<Target> history = [];
+
+    private int position = -1;
+
     private readonly TimeSpan previewInterval;
+
+    private readonly int maxHistory = 100;
 
     private DateTimeOffset previewRead = DateTimeOffset.MinValue;
 
@@ -119,6 +130,16 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// Gets the search of the previewed file's text.
     /// </summary>
     public FileFindViewModel Find { get; } = new();
+
+    /// <summary>
+    /// Gets the command that shows the file or diff opened before the one showing, as a browser's back button does; it is available while there is one.
+    /// </summary>
+    public AsyncCommand BackCommand { get; }
+
+    /// <summary>
+    /// Gets the command that shows the file or diff that was left with <see cref="BackCommand" />; it is available while there is one.
+    /// </summary>
+    public AsyncCommand ForwardCommand { get; }
 
     /// <summary>
     /// Gets the entries of the root folder.
@@ -373,19 +394,88 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         Git.Updated -= ApplyGit;
     }
 
-    private async Task OpenDiff(string path, string? commit)
+    private async Task<bool> OpenDiff(string path, string? commit, bool remember = true)
     {
         GitDiff? result = null;
 
-        if (await Attempt(async () => result = await connection.GetGitDiff(workspaceId, path, commit, CancellationToken.None)))
+        if (!await Attempt(async () => result = await connection.GetGitDiff(workspaceId, path, commit, CancellationToken.None)))
         {
-            Preview = null;
-            diffPath = path;
-            diffCommit = commit;
-            diffTitle = commit is null ? $"{path} (changes)" : $"{path} ({commit[..Math.Min(7, commit.Length)]})";
-            Diff = result;
-            Raise(nameof(PreviewTitle));
+            return false;
         }
+
+        Preview = null;
+        diffPath = path;
+        diffCommit = commit;
+        diffTitle = commit is null ? $"{path} (changes)" : $"{path} ({commit[..Math.Min(7, commit.Length)]})";
+        Diff = result;
+        Raise(nameof(PreviewTitle));
+
+        if (remember)
+        {
+            Remember(new Target(path, commit, true));
+        }
+
+        return true;
+    }
+
+    private async Task<bool> ShowFile(string path)
+    {
+        FileContent? content = null;
+
+        if (!await Attempt(async () => content = await connection.ReadFile(workspaceId, path, CancellationToken.None)))
+        {
+            return false;
+        }
+
+        Preview = content;
+        return true;
+    }
+
+    private void Remember(Target target)
+    {
+        if (position >= 0 && history[position] == target)
+        {
+            return;
+        }
+
+        if (position < history.Count - 1)
+        {
+            history.RemoveRange(position + 1, history.Count - position - 1);
+        }
+
+        history.Add(target);
+
+        if (history.Count > maxHistory)
+        {
+            history.RemoveAt(0);
+        }
+
+        position = history.Count - 1;
+        RefreshHistory();
+    }
+
+    private async Task Go(int offset)
+    {
+        int next = position + offset;
+
+        if (next < 0 || next >= history.Count)
+        {
+            return;
+        }
+
+        Target target = history[next];
+
+        if (target.IsDiff ? await OpenDiff(target.Path, target.Commit, false) : await ShowFile(target.Path))
+        {
+            position = next;
+            RefreshHistory();
+        }
+    }
+
+    private void RefreshHistory()
+    {
+        BackCommand.Refresh();
+        ForwardCommand.Refresh();
     }
 
     private void ApplyGit()
@@ -394,7 +484,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
         if (diffPath is not null && diffCommit is null && diff is not null)
         {
-            _ = OpenDiff(diffPath, null);
+            _ = OpenDiff(diffPath, null, false);
         }
     }
 
@@ -491,11 +581,9 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         }
         else if (node.IsFile)
         {
-            FileContent? content = null;
-
-            if (await Attempt(async () => content = await connection.ReadFile(workspaceId, node.Path, CancellationToken.None)))
+            if (await ShowFile(node.Path))
             {
-                Preview = content;
+                Remember(new Target(node.Path, null, false));
             }
         }
 
@@ -517,6 +605,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         if (await Attempt(async () => content = await connection.ReadFile(workspaceId, result.Path, CancellationToken.None)))
         {
             Preview = content;
+            Remember(new Target(result.Path, null, false));
 
             if (result.Line > 0)
             {
@@ -744,4 +833,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             _ = Reveal(newRoot);
         }
     }
+
+    private sealed record Target(string Path, string? Commit, bool IsDiff);
 }

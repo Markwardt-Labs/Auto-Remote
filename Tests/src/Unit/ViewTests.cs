@@ -923,6 +923,54 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsBackAndForwardButtonsLeftOfTheFileBarThatStepThroughTheFilesOpened()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+        connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.ListFiles(workspace.Id, string.Empty, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.cs", Path = "a.cs", IsFolder = false }, new FileEntry { Name = "b.cs", Path = "b.cs", IsFolder = false }] });
+        connection.Setup(x => x.ReadFile(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string path, CancellationToken _) => new FileContent { Path = path, Text = "x" });
+
+        (bool[] shownBefore, bool[] atTwo, string? afterBack, bool inOrder) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            model.Active!.Files.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1400, Height = 800, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            TouchButton? Find(string tip) => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => ToolTip.GetTip(button)?.ToString() == tip && button.IsEffectivelyVisible);
+            bool[] shownBefore = [Find("Back") is not null, Find("Forward") is not null];
+            model.Active.Files.Choose(model.Active.Files.Nodes.Single(node => node.Path == "a.cs")).GetAwaiter().GetResult();
+            model.Active.Files.Choose(model.Active.Files.Nodes.Single(node => node.Path == "b.cs")).GetAwaiter().GetResult();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool[] atTwo = [Find("Back")!.IsEffectivelyEnabled, Find("Forward")!.IsEffectivelyEnabled];
+            Find("Back")!.Command!.Execute(null);
+
+            for (int attempt = 0; attempt < 100 && model.Active.Files.Preview?.Path != "a.cs"; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            string? afterBack = model.Active.Files.Preview?.Path;
+            double X(TouchButton button) => Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(), window)!.Value.X;
+            bool inOrder = X(Find("Back")!) < X(Find("Forward")!) && X(Find("Forward")!) < X(Find("Close")!);
+            window.Close();
+            return (shownBefore, atTwo, afterBack, inOrder);
+        });
+
+        Assert.Equal([false, false], shownBefore);
+        Assert.Equal([true, false], atTwo);
+        Assert.Equal("a.cs", afterBack);
+        Assert.True(inOrder);
+    }
+
+    [Fact]
     public async Task HomeView_GitPromptFocusesItsBoxEscapeCancelsAndEnterSubmits()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

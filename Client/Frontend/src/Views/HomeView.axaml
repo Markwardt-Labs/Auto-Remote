@@ -527,6 +527,14 @@
               <Border Grid.Row="0" Background="{DynamicResource Elevated}" Padding="10,4">
                 <Grid ColumnDefinitions="*,Auto">
                   <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                    <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
+                      <local:TouchButton Classes="icon" ToolTip.Tip="Back" Command="{Binding BackCommand}">
+                        <Path Classes="lineIcon" Data="{StaticResource BackIconGeometry}" Width="12" Height="12" />
+                      </local:TouchButton>
+                      <local:TouchButton Classes="icon" ToolTip.Tip="Forward" Command="{Binding ForwardCommand}">
+                        <Path Classes="lineIcon" Data="{StaticResource ForwardIconGeometry}" Width="12" Height="12" />
+                      </local:TouchButton>
+                    </StackPanel>
                     <Border Background="{DynamicResource Background}" CornerRadius="3" Padding="5,1" VerticalAlignment="Center" IsVisible="{Binding PreviewKind, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
                       <TextBlock Text="{Binding PreviewKind}" FontSize="10" Classes="muted" VerticalAlignment="Center" />
                     </Border>

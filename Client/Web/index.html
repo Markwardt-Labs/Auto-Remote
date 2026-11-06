@@ -1453,6 +1453,8 @@ const icons = {
   up: ["M7,13 L7,2 M2,7 L7,2 L12,7", "2 2 10 11", 13],
   find: ["M1,5 A4,4 0 1,1 9,5 A4,4 0 1,1 1,5 Z M7.83,7.83 L13,13", "1 1 12 12", 13],
   close: ["M1,1 L13,13 M13,1 L1,13", "1 1 12 12", 10],
+  back: ["M8.5,1.5 L3,7 L8.5,12.5", "1 1 12 12", 12],
+  forward: ["M5.5,1.5 L11,7 L5.5,12.5", "1 1 12 12", 12],
   scroll: ["M2,1 L7,6 L12,1 M2,6 L7,11 L12,6 M2,14 L12,14", "2 1 10 14", 13],
   attach: ["M12,6.5 L6.8,11.7 A2.4,2.4 0 0 1 3.4,8.3 L8.9,2.8 A1.6,1.6 0 0 1 11.2,5.1 L5.8,10.5", "3 2 9 10", 14],
   wrap: ["M1,3 L13,3 M1,7 L10,7 A2,2 0 0,1 10,11 L6,11 M8,9 L6,11 L8,13 M1,11 L3,11", "1 2 12 12", 12],
@@ -1786,8 +1788,12 @@ class WorkspaceView {
       h("button", { class: "flat icon", title: "Previous match (Shift+Enter)", onclick: () => this.stepFind(-1) }, "▲"),
       h("button", { class: "flat icon", title: "Next match (Enter)", onclick: () => this.stepFind(1) }, "▼"),
       h("button", { class: "flat icon", title: "Close (Esc)", onclick: () => this.setFind(false) }, icon("close")));
+    this.visited = [];
+    this.visitPosition = -1;
+    this.backButton = h("button", { class: "flat icon", title: "Back", disabled: true, onclick: () => this.navigate(-1) }, icon("back"));
+    this.forwardButton = h("button", { class: "flat icon", title: "Forward", disabled: true, onclick: () => this.navigate(1) }, icon("forward"));
     this.previewPane = h("div", { class: "preview", hidden: true },
-      h("div", { class: "pbar" }, this.previewKind, this.previewTitle, this.previewNote, this.findToggle, this.foldButton, this.wrapButton, h("button", { class: "flat icon", title: "Close", onclick: () => this.closePreview() }, icon("close"))),
+      h("div", { class: "pbar" }, this.backButton, this.forwardButton, this.previewKind, this.previewTitle, this.previewNote, this.findToggle, this.foldButton, this.wrapButton, h("button", { class: "flat icon", title: "Close", onclick: () => this.closePreview() }, icon("close"))),
       this.findBar,
       this.previewCode,
       this.previewMarkdown,
@@ -3190,11 +3196,57 @@ class WorkspaceView {
       return;
     }
 
-    const result = await attempt(() => this.connection.readFile(this.info.id, node.entry.path), this.filesError);
+    if (await this.openFile(node.entry.path)) {
+      this.remember({ path: node.entry.path, commit: null, diff: false });
+    }
+  }
+
+  async openFile(path) {
+    const result = await attempt(() => this.connection.readFile(this.info.id, path), this.filesError);
 
     if (result.ok) {
       this.showPreview(result.value);
     }
+
+    return result.ok;
+  }
+
+  remember(target) {
+    const current = this.visited[this.visitPosition];
+
+    if (current && current.path === target.path && current.commit === target.commit && current.diff === target.diff) {
+      return;
+    }
+
+    this.visited.splice(this.visitPosition + 1);
+    this.visited.push(target);
+
+    if (this.visited.length > 100) {
+      this.visited.shift();
+    }
+
+    this.visitPosition = this.visited.length - 1;
+    this.updateNavigation();
+  }
+
+  async navigate(offset) {
+    const next = this.visitPosition + offset;
+
+    if (next < 0 || next >= this.visited.length) {
+      return;
+    }
+
+    const target = this.visited[next];
+
+    if (target.diff ? await this.openDiff(target.path, target.commit, false, false) : await this.openFile(target.path)) {
+      this.visitPosition = next;
+      this.updateNavigation();
+    }
+  }
+
+  updateNavigation() {
+    this.backButton.disabled = this.visitPosition <= 0;
+    this.forwardButton.disabled = this.visitPosition >= this.visited.length - 1;
   }
 
   async collapseAll() {
@@ -3254,6 +3306,9 @@ class WorkspaceView {
   closePreview() {
     this.preview = null;
     this.diffState = null;
+    this.visited = [];
+    this.visitPosition = -1;
+    this.updateNavigation();
     this.previewDiff.hidden = true;
     this.setFind(false);
     this.previewPane.hidden = true;
@@ -3652,6 +3707,7 @@ class WorkspaceView {
     }
 
     this.showPreview(result.value);
+    this.remember({ path: hit.path, commit: null, diff: false });
 
     if (hit.line) {
       this.find.query = text;
@@ -3746,12 +3802,18 @@ class WorkspaceView {
     this.changeList.scrollTop = scroll;
   }
 
-  async openDiff(path, commit, quiet = false) {
+  async openDiff(path, commit, quiet = false, remember = true) {
     const result = await attempt(() => this.connection.getGitDiff(this.info.id, path, commit), quiet ? new ErrorLine() : this.filesError);
 
     if (result.ok) {
       this.showDiff(result.value, path, commit);
+
+      if (remember && !quiet) {
+        this.remember({ path, commit: commit ?? null, diff: true });
+      }
     }
+
+    return result.ok;
   }
 
   showDiff(diff, path, commit) {
