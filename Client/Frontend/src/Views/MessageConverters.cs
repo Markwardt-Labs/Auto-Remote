@@ -24,4 +24,19 @@ public static class MessageConverters
     /// Gets the converter from a stored prompt to whether it has attached files.
     /// </summary>
     public static readonly IValueConverter HasFiles = new FuncValueConverter<string?, bool>(text => MessageParts.Parse(text ?? string.Empty).Files.Count > 0);
+
+    /// <summary>
+    /// Gets the converter from the time of a message to the short text shown under it, in the local time zone.
+    /// </summary>
+    public static readonly IValueConverter Time = new FuncValueConverter<DateTimeOffset?, string>(time => time?.ToStamp(DateTimeOffset.UtcNow) ?? string.Empty);
+
+    /// <summary>
+    /// Gets the converter from the time of a message to the whole local date and time, which its stamp shows as a tooltip.
+    /// </summary>
+    public static readonly IValueConverter FullTime = new FuncValueConverter<DateTimeOffset?, string>(time => time?.ToLocalTime().ToString("F", CultureInfo.CurrentCulture) ?? string.Empty);
+
+    /// <summary>
+    /// Gets the converter from the time of a message to whether the message has one.
+    /// </summary>
+    public static readonly IValueConverter HasTime = new FuncValueConverter<DateTimeOffset?, bool>(time => time is not null);
 }

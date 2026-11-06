@@ -222,10 +222,15 @@
                               </DataTemplate>
                             </ItemsControl.ItemTemplate>
                           </ItemsControl>
+                          <TextBlock Classes="muted" FontSize="11" HorizontalAlignment="Right" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}"
+                                     ToolTip.Tip="{Binding Time, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding Time, Converter={x:Static local:MessageConverters.HasTime}}" />
                         </StackPanel>
                       </Border>
-                      <local:MarkdownView IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}"
-                                          Source="{Binding Text}" />
+                      <StackPanel Spacing="2" IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}">
+                        <local:MarkdownView Source="{Binding Text}" />
+                        <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}"
+                                   ToolTip.Tip="{Binding Time, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding Time, Converter={x:Static local:MessageConverters.HasTime}}" />
+                      </StackPanel>
                     </Panel>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>

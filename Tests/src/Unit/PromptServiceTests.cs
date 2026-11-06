@@ -109,6 +109,7 @@ public sealed class PromptServiceTests : IDisposable
 
         Assert.Equal(["hello"], Messages(MessageRole.User));
         Assert.Equal(["hi there"], Messages(MessageRole.Assistant));
+        Assert.All(Events(RemoteEventKind.MessageAdded), remoteEvent => Assert.InRange(remoteEvent.Message!.Time!.Value, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddSeconds(1)));
         Assert.Equal([true, false], Events(RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working == true).ToList());
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
         Assert.Equal(["hello"], Session.Prompts.Select(prompt => prompt.Text).ToList());
@@ -821,6 +822,7 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal(["q1", "reply to q1"], earlier.Messages.Select(message => message.Text).ToList());
         Assert.Null(earlier.Older);
         Assert.Equal([MessageRole.User, MessageRole.Assistant], earlier.Messages.Select(message => message.Role).ToList());
+        Assert.All(newest.Messages.Concat(earlier.Messages), message => Assert.NotNull(message.Time));
     }
 
     [Fact]

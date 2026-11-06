@@ -14,6 +14,11 @@ public sealed record ChatMessage
     /// Gets the message text.
     /// </summary>
     public required string Text { get; init; }
+
+    /// <summary>
+    /// Gets when the message was written, or <see langword="null" /> when the conversation tool did not store it.
+    /// </summary>
+    public DateTimeOffset? Time { get; init; }
 }
 
 /// <summary>

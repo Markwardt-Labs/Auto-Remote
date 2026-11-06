@@ -267,7 +267,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             }
 
             PromptOptions options = await Options(text, cancellation);
-            events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.User, Text = text } });
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow } });
 
             bool queued = false;
             bool steering = false;
@@ -864,7 +864,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             return null;
         }
 
-        return new ChatMessage { Role = found, Text = entry.Text };
+        return new ChatMessage { Role = found, Text = entry.Text, Time = entry.Time };
     }
 
     private void Handle(Guid id, Live live, IPromptSession session, AiService service, PromptEvent output)
@@ -872,7 +872,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         switch (output)
         {
             case PromptMessageEvent { Text: { Length: > 0 } reply }:
-                events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = reply } });
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow } });
                 break;
             case PromptFailureEvent failure:
                 lock (live.Sync)

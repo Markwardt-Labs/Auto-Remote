@@ -376,6 +376,46 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsTheLocalTimeUnderEachMessageThatHasOne()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        DateTimeOffset written = DateTimeOffset.UtcNow.AddMinutes(-3);
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory
+        {
+            Messages =
+            [
+                new ChatMessage { Role = MessageRole.User, Text = "hello", Time = written },
+                new ChatMessage { Role = MessageRole.Assistant, Text = "hi there", Time = written },
+                new ChatMessage { Role = MessageRole.Assistant, Text = "no time" }
+            ]
+        });
+
+        string[] stamps = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 800, Content = view };
+            window.Show();
+
+            for (int attempt = 0; attempt < 100 && model.Active!.Chat.Messages.Count < 3; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string[] found = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible && block.FontSize == 11 && block.Classes.Contains("muted")).Select(block => block.Text ?? string.Empty)];
+            window.Close();
+            return found;
+        });
+
+        string expected = written.ToStamp(DateTimeOffset.UtcNow);
+        Assert.Equal([expected, expected], stamps);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheNewWindowButtonRightOfTheWorkspacesButtonOnlyWhenTheClientCanOpenWindows()
     {
         Mock<INewWindow> newWindow = new();
