@@ -79,8 +79,8 @@ public sealed class ChatViewModelTests
             await Task.Delay(10);
         }
 
-        Assert.Equal("review workspace and changes, fix any problems or inconsistencies", sent);
-        Assert.Equal(("review workspace and changes, fix any problems or inconsistencies", 1, string.Empty), (chat.ReviewPrompt, started, chat.Input));
+        Assert.Equal("review workspace, fix any problems or inconsistencies", sent);
+        Assert.Equal(("review workspace, fix any problems or inconsistencies", 1, string.Empty), (chat.ReviewPrompt, started, chat.Input));
         connection.Verify(x => x.UploadAttachment(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 

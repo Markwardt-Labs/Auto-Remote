@@ -369,7 +369,7 @@ const resetText = period => {
   return days >= 1 ? `Resets in ${days}d ${hours % 24}h` : hours >= 1 ? `Resets in ${hours}h ${minutes % 60}m` : `Resets in ${Math.max(1, minutes)}m`;
 };
 const log = message => console.log(`${new Date().toLocaleTimeString("en-GB")} ${message}`);
-const reviewPrompt = "review workspace and changes, fix any problems or inconsistencies";
+const reviewPrompt = "review workspace, fix any problems or inconsistencies";
 const pausePrompt = "pause current work";
 const resumePrompt = "resume unfinished work";
 const services = {

@@ -455,7 +455,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal((true, false, false, true, true), (emptyReview, emptySend, typedReview, typedSend, reviewIsAction));
-        Assert.Equal("review workspace and changes, fix any problems or inconsistencies", sent);
+        Assert.Equal("review workspace, fix any problems or inconsistencies", sent);
     }
 
     [Fact]

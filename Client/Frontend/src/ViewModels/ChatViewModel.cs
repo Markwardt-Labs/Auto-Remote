@@ -197,7 +197,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets the prompt the review command sends.
     /// </summary>
-    public string ReviewPrompt { get; } = "review workspace and changes, fix any problems or inconsistencies";
+    public string ReviewPrompt { get; } = "review workspace, fix any problems or inconsistencies";
 
     /// <summary>
     /// Gets the prompt the pause command sends.
