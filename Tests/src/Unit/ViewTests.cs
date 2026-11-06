@@ -376,6 +376,49 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsTheNewWindowButtonRightOfTheWorkspacesButtonOnlyWhenTheClientCanOpenWindows()
+    {
+        Mock<INewWindow> newWindow = new();
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
+
+        (bool without, bool with, bool rightOfMenu, bool opened) = await fixture.Run(() =>
+        {
+            bool Shown(HomeViewModel model, out double left, out double menu)
+            {
+                HomeView view = new() { DataContext = model };
+                Window window = new() { Width = 900, Height = 600, Content = view };
+                window.Show();
+                TouchButton? button = window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(item => item.IsEffectivelyVisible && ToolTip.GetTip(item)?.ToString() == "Open a new window");
+                TouchButton menuButton = window.GetVisualDescendants().OfType<TouchButton>().First(item => item.Content?.ToString() == "\u2630");
+                left = button is null ? 0 : Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(), window)!.Value.X;
+                menu = Avalonia.VisualExtensions.TranslatePoint(menuButton, new Avalonia.Point(), window)!.Value.X;
+                bool visible = button is not null;
+
+                if (button is not null)
+                {
+                    button.Command?.Execute(null);
+                }
+
+                window.Close();
+                return visible;
+            }
+
+            HomeViewModel plain = new(connection.Object, ClientLayout.Panels);
+            plain.Start().GetAwaiter().GetResult();
+            HomeViewModel capable = new(connection.Object, ClientLayout.Panels, null, null, null, null, null, null, newWindow.Object);
+            capable.Start().GetAwaiter().GetResult();
+            bool without = Shown(plain, out _, out _);
+            bool with = Shown(capable, out double left, out double menu);
+            return (without, with, left > menu, newWindow.Invocations.Count > 0);
+        });
+
+        Assert.False(without);
+        Assert.True(with);
+        Assert.True(rightOfMenu);
+        Assert.True(opened);
+    }
+
+    [Fact]
     public async Task HomeView_SendsOnShiftEnterAndStartsANewLineOnEnter()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

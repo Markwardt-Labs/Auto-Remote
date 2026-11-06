@@ -16,9 +16,11 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <param name="notifier">Tells the user outside the app that a workspace they gave work to is ready, or <see langword="null" /> for no notifications.</param>
     /// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
     /// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null)
+    /// <param name="newWindow">Opens another window of the app as a process of its own, or <see langword="null" /> when this client cannot, which hides the button.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null)
     {
         this.recorder = recorder;
+        this.newWindow = newWindow;
         this.notifier = notifier;
         this.keeper = keeper;
         this.chime = chime;
@@ -60,6 +62,7 @@ internal sealed class HomeViewModel : ViewModelBase
             CloneWorkspaceRequested?.Invoke();
             return Task.CompletedTask;
         });
+        NewWindowCommand = new AsyncCommand(_ => OpenNewWindow());
         ChangeServerCommand = new AsyncCommand(_ =>
         {
             ChangeServerRequested?.Invoke();
@@ -105,6 +108,8 @@ internal sealed class HomeViewModel : ViewModelBase
     private readonly IDraftStore? drafts;
 
     private readonly IVoiceRecorder? recorder;
+
+    private readonly INewWindow? newWindow;
 
     private readonly IChime? chime;
 
@@ -520,6 +525,16 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the command that asks to change server.
     /// </summary>
     public AsyncCommand ChangeServerCommand { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether this client can open another window of the app, which shows the button for it.
+    /// </summary>
+    public bool CanOpenNewWindow => newWindow is not null;
+
+    /// <summary>
+    /// Gets the command that opens another window of the app as a process of its own.
+    /// </summary>
+    public AsyncCommand NewWindowCommand { get; }
 
     /// <summary>
     /// Gets the command that asks whether to stop the work in the focused workspace at once, keeping what it did.
@@ -1018,6 +1033,20 @@ internal sealed class HomeViewModel : ViewModelBase
         {
             await Start(renamed.Id);
         }
+    }
+
+    private Task OpenNewWindow()
+    {
+        try
+        {
+            newWindow?.Open();
+        }
+        catch (InvalidOperationException exception)
+        {
+            Error = exception.Message;
+        }
+
+        return Task.CompletedTask;
     }
 
     private async Task Delete()

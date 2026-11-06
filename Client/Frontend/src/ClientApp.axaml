@@ -324,6 +324,7 @@
       <Geometry x:Key="LoopIconGeometry">M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8</Geometry>
       <Geometry x:Key="LoopCancelIconGeometry">M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8 M1.5,12.5 L12.5,1.5</Geometry>
       <Geometry x:Key="ReviewIconGeometry">M6,1.5 A4.5,4.5 0 1 1 6,10.5 A4.5,4.5 0 1 1 6,1.5 Z M9.3,9.3 L12.5,12.5 M4,6 L5.4,7.4 L8,4.6</Geometry>
+      <Geometry x:Key="NewWindowIconGeometry">M4.5,1.5 L12.5,1.5 L12.5,9.5 M1.5,4.5 L9.5,4.5 L9.5,12.5 L1.5,12.5 Z</Geometry>
       <Geometry x:Key="PauseIconGeometry">M4.5,2 L4.5,12 M9.5,2 L9.5,12</Geometry>
       <Geometry x:Key="ResumeIconGeometry">M3.5,1.5 L11.5,7 L3.5,12.5 Z</Geometry>
       <Geometry x:Key="MicIconGeometry">M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5</Geometry>

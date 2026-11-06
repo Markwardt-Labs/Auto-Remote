@@ -13,7 +13,7 @@ public sealed class App : ClientApp
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             DesktopReadyNotifier notifier = new();
-            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()), notifier, null, new DesktopVoiceRecorder());
+            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()), notifier, null, new DesktopVoiceRecorder(), new DesktopNewWindow());
             Window window = new()
             {
                 Title = "Auto Remote",
