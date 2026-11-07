@@ -49,6 +49,13 @@ internal interface IPromptService
     Task<WorkspaceSettings> SetSettings(Guid id, WorkspaceSettings settings, CancellationToken cancellation);
 
     /// <summary>
+    /// Gives every open AI session the built-in instructions for its current status interval, which a change of the environment's interval makes stale; sessions that are not open get them when they are opened.
+    /// </summary>
+    /// <param name="cancellation">Cancels the update.</param>
+    /// <returns>A task that completes once the open sessions have been updated.</returns>
+    Task RefreshInstructions(CancellationToken cancellation);
+
+    /// <summary>
     /// Keeps a workspace's AI session open, or lets the idle timer close it again. A loop holds it for as long as it runs, since the session closing between two runs would only cost the next run a start.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -195,7 +202,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 }
             }
 
-            return await Read(live.Session!, cursor, Math.Clamp(limit ?? defaultChunk, 1, maxChunk), live.Working, cancellation);
+            ChatHistory read = await Read(live.Session!, cursor, Math.Clamp(limit ?? defaultChunk, 1, maxChunk), live.Working, cancellation);
+            return read with { Status = live.Working ? live.Status : null };
         }
         finally
         {
@@ -379,6 +387,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             throw new RequestException("The capability or the effort is not one the AI knows.");
         }
 
+        if (settings.StatusMinutes is < 1 or > 1440)
+        {
+            throw new RequestException("The status interval must be from 1 to 1440 minutes.");
+        }
+
         WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
         Live live = lives.GetOrAdd(id, _ => new Live());
         await live.Gate.WaitAsync(cancellation);
@@ -407,7 +420,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 throw new RequestException(exception.Message);
             }
 
-            WorkspaceSettings described = Describe(await workspaces.SetPrompts(id, settings.ReviewPrompt, settings.ExpandPrompt, cancellation), session);
+            WorkspaceSettings described = Describe(await workspaces.SetOverrides(id, settings.ReviewPrompt, settings.ExpandPrompt, settings.StatusMinutes, cancellation), session);
 
             if (!live.Working)
             {
@@ -422,6 +435,36 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         finally
         {
             live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RefreshInstructions(CancellationToken cancellation)
+    {
+        foreach ((Guid id, Live live) in lives.ToList())
+        {
+            await live.Gate.WaitAsync(cancellation);
+
+            try
+            {
+                if (live.Session is { } session)
+                {
+                    WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
+                    string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes);
+
+                    if (session.Configuration.Instructions != wanted)
+                    {
+                        session.Configuration.Instructions = wanted;
+                    }
+                }
+            }
+            catch (Exception exception) when (exception is RequestException or PromptSessionException or ObjectDisposedException or ArgumentException)
+            {
+            }
+            finally
+            {
+                live.Gate.Release();
+            }
         }
     }
 
@@ -603,6 +646,38 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
+    private PromptTool StatusTool(Guid id, Live live)
+        => new()
+        {
+            Name = host.StatusTool,
+            Description = "Shows the user a short status of your work: what you have done so far and what you are doing or will do next. Call it regularly while you work, at the interval the instructions give, and use it for every status update instead of writing one as a normal message. Do not use it for the final summary.",
+            InputSchema = JsonDocument.Parse("""{"type":"object","properties":{"status":{"type":"string","description":"The status: one or two short sentences."}},"required":["status"]}""").RootElement.Clone(),
+            Handler = (arguments, _) => Task.FromResult(Report(id, live, arguments))
+        };
+
+    private string Report(Guid id, Live live, JsonElement arguments)
+    {
+        string status = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("status", out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString()!.Trim() : string.Empty;
+
+        if (status.Length == 0)
+        {
+            throw new ArgumentException("The status must be a text.");
+        }
+
+        lock (live.Sync)
+        {
+            if (!live.Working)
+            {
+                return "The user is not following the work right now, so the status was not shown.";
+            }
+
+            live.Status = status;
+        }
+
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = id, Text = status });
+        return "The status was shown to the user.";
+    }
+
     private void Apply(IPromptSessionConfiguration configuration, WorkspaceSettings settings)
     {
         configuration.Capability = Enum.Parse<PromptCapability>(settings.Capability.ToString());
@@ -611,7 +686,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         configuration.IsSystemAccessAllowed = settings.IsSystemAccessAllowed;
         configuration.IsWebAllowed = settings.IsWebAllowed;
         configuration.IsImageGenerationAllowed = settings.IsImageGenerationAllowed;
-        configuration.Instructions = host.ComposeInstructions(settings.Instructions);
+        configuration.Instructions = host.ComposeInstructions(settings.Instructions, settings.StatusMinutes);
     }
 
     private WorkspaceSettings Describe(WorkspaceInfo workspace, IPromptSession session)
@@ -627,6 +702,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             IsWebAllowed = session.Configuration.IsWebAllowed,
             IsImageGenerationAllowed = session.Configuration.IsImageGenerationAllowed,
             Instructions = host.UserInstructions(session.Configuration.Instructions),
+            StatusMinutes = workspace.StatusMinutes,
+            GlobalStatusMinutes = environment.StatusMinutes,
             ReviewPrompt = workspace.ReviewPrompt,
             ExpandPrompt = workspace.ExpandPrompt,
             GlobalReviewPrompt = environment.ReviewPrompt,
@@ -668,12 +745,19 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         try
         {
             session = await Obtain(workspace, cancellation);
-            string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions));
+            string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes);
 
             if (session.Configuration.Instructions != wanted)
             {
                 session.Configuration.Instructions = wanted;
             }
+
+            foreach (PromptTool existing in session.Transient.Tools.Where(tool => tool.Name == host.StatusTool).ToList())
+            {
+                session.Transient.Tools.Remove(existing);
+            }
+
+            session.Transient.Tools.Add(StatusTool(id, live));
         }
         catch (Exception exception) when (exception is PromptSessionException or DirectoryNotFoundException or ArgumentException)
         {
@@ -1028,6 +1112,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (!working)
             {
+                live.Status = null;
+
                 if (activity.Get(id) == WorkspaceState.Working)
                 {
                     snapshots.Discard(id);
@@ -1110,6 +1196,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public Tally Tally { get; set; } = new();
 
         public bool Working { get; set; }
+
+        public string? Status { get; set; }
 
         public bool Expecting { get; set; }
 

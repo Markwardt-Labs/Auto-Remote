@@ -17,6 +17,11 @@ internal interface IPrompterHost
     AiService DefaultService { get; }
 
     /// <summary>
+    /// Gets the name of the tool the AI reports its status with.
+    /// </summary>
+    string StatusTool { get; }
+
+    /// <summary>
     /// Takes over the AI settings an older release kept in the server config when there is no stored environment yet, makes the prompter over the sessions in the data folder (Live AI upgrades the ones an earlier version stored itself) and applies the environment the server kept, which also holds what every new session starts with.
     /// </summary>
     /// <param name="config">The server settings.</param>
@@ -42,8 +47,9 @@ internal interface IPrompterHost
     /// Puts the instructions every AI gets in front of the user's own, which is what a session is configured with.
     /// </summary>
     /// <param name="user">The user's own instructions, or <see langword="null" /> for none.</param>
+    /// <param name="statusMinutes">The status interval of the workspace, or <see langword="null" /> for the one of the environment.</param>
     /// <returns>The instructions for the session.</returns>
-    string ComposeInstructions(string? user);
+    string ComposeInstructions(string? user, int? statusMinutes);
 
     /// <summary>
     /// Takes the instructions every AI gets off what a session is configured with, leaving what the user wrote.
@@ -140,6 +146,9 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
     public AiService DefaultService => kept.DefaultService;
 
     /// <inheritdoc />
+    public string StatusTool => builtIn.StatusTool;
+
+    /// <inheritdoc />
     public async Task Configure(ServerConfig config, CancellationToken cancellation)
     {
         file = Path.Combine(config.DataFolder, "environment.json");
@@ -158,7 +167,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
     }
 
     /// <inheritdoc />
-    public string ComposeInstructions(string? user) => builtIn.Compose(user);
+    public string ComposeInstructions(string? user, int? statusMinutes) => builtIn.Compose(user, statusMinutes ?? kept.StatusMinutes);
 
     /// <inheritdoc />
     public string? UserInstructions(string? stored) => builtIn.Visible(stored);
@@ -252,7 +261,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
             configuration.IsWebAllowed = true;
             configuration.IsSystemAccessAllowed = true;
             configuration.IsImageGenerationAllowed = kept.ImageGeneration != ImageGenerationKind.None;
-            configuration.Instructions = builtIn.Compose(null);
+            configuration.Instructions = builtIn.Compose(null, kept.StatusMinutes);
         }
         catch (Exception exception) when (exception is PromptSessionException or ArgumentException or DirectoryNotFoundException or IOException)
         {
@@ -307,6 +316,11 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
 
     private void Check(AiEnvironment environment)
     {
+        if (environment.StatusMinutes is < 1 or > 1440)
+        {
+            throw new RequestException("The status interval must be from 1 to 1440 minutes.");
+        }
+
         if (!Enum.IsDefined(environment.NewWorkspaces.Capability) || !Enum.IsDefined(environment.NewWorkspaces.Effort))
         {
             throw new RequestException("The capability or the effort of new workspaces is not one the AI knows.");
@@ -384,7 +398,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
             IsSystemAccessAllowed = environment.NewWorkspaces.IsSystemAccessAllowed,
             IsWebAllowed = environment.NewWorkspaces.IsWebAllowed,
             IsImageGenerationAllowed = environment.NewWorkspaces.IsImageGenerationAllowed,
-            Instructions = builtIn.Compose(environment.NewWorkspaces.Instructions)
+            Instructions = builtIn.Compose(environment.NewWorkspaces.Instructions, environment.StatusMinutes)
         };
     }
 

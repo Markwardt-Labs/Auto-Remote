@@ -48,6 +48,10 @@
         <TextBlock Text="Instructions" Classes="muted" />
         <TextBox Text="{Binding NewInstructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
 
+        <TextBlock Text="Status" Classes="serif" FontSize="18" Margin="0,16,0,0" />
+        <TextBlock Text="Status interval (minutes)" Classes="muted" />
+        <NumericUpDown Value="{Binding StatusMinutes}" Minimum="1" Maximum="1440" Increment="1" FormatString="0" HorizontalAlignment="Stretch" />
+        <TextBlock Text="How often the AI is told to report its status while it works. A workspace can set its own in its settings. Empty restores the default of 5." Classes="muted" FontSize="12" TextWrapping="Wrap" />
         <TextBlock Text="Prompts" Classes="serif" FontSize="18" Margin="0,16,0,0" />
         <TextBlock Text="Review prompt" Classes="muted" />
         <TextBox Text="{Binding ReviewPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />

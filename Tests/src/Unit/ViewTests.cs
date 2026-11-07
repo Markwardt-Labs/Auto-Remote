@@ -363,7 +363,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         Assert.Equal(2, choiceBoxes);
         Assert.Equal(4, toggles);
-        Assert.Equal(0, numbers);
+        Assert.Equal(1, numbers);
         Assert.True(providerShown);
         Assert.True(instructionsShown);
         Assert.True(detailShown);
@@ -1597,5 +1597,47 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Single(widths.Distinct());
         Assert.All(gaps, gap => Assert.Equal(0, gap));
         Assert.InRange(right, 0, 16);
+    }
+
+    [Fact]
+    public async Task HomeView_ShowsTheStatusBarAboveTheMessageBoxOnlyWhileTheAiHasReportedAStatus()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
+
+        (bool hiddenAtFirst, bool shown, string text, bool aboveInput, bool hiddenAgain) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1280, Height = 900, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Border? Bar() => window.GetVisualDescendants().OfType<Border>().FirstOrDefault(border => border.Name == "StatusBar");
+            bool hiddenAtFirst = Bar() is { IsEffectivelyVisible: false };
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = workspace.Id, Text = "Running the tests" });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Border bar = Bar()!;
+            bool shown = bar.IsEffectivelyVisible;
+            string text = bar.GetVisualDescendants().OfType<TextBlock>().Single().Text ?? string.Empty;
+            TextBox input = window.GetVisualDescendants().OfType<TextBox>().First(box => box.Name == "ChatInput");
+            bool aboveInput = Avalonia.VisualExtensions.TranslatePoint(bar, new Avalonia.Point(0, bar.Bounds.Height), window)!.Value.Y <= Avalonia.VisualExtensions.TranslatePoint(input, new Avalonia.Point(0, 0), window)!.Value.Y;
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool hiddenAgain = !Bar()!.IsEffectivelyVisible;
+            window.Close();
+            return (hiddenAtFirst, shown, text, aboveInput, hiddenAgain);
+        });
+
+        Assert.True(hiddenAtFirst);
+        Assert.True(shown);
+        Assert.Equal("Running the tests", text);
+        Assert.True(aboveInput);
+        Assert.True(hiddenAgain);
     }
 }

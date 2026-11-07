@@ -51,7 +51,7 @@ public sealed class PromptServiceTests : IDisposable
     {
         workspace = info;
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
-        workspaces.Setup(x => x.SetPrompts(workspace.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? review, string? expand, CancellationToken _) => workspace = workspace with { ReviewPrompt = string.IsNullOrWhiteSpace(review) ? null : review.Trim(), ExpandPrompt = string.IsNullOrWhiteSpace(expand) ? null : expand.Trim() });
+        workspaces.Setup(x => x.SetOverrides(workspace.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? review, string? expand, int? minutes, CancellationToken _) => workspace = workspace with { ReviewPrompt = string.IsNullOrWhiteSpace(review) ? null : review.Trim(), ExpandPrompt = string.IsNullOrWhiteSpace(expand) ? null : expand.Trim(), StatusMinutes = minutes });
         workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { SessionId = session }).Returns(Task.CompletedTask);
     }
 
@@ -382,7 +382,7 @@ public sealed class PromptServiceTests : IDisposable
         IPromptSessionConfiguration configuration = Session.Configuration;
         Assert.Equal((PromptCapability.Max, PromptEffort.Low), (configuration.Capability, configuration.Effort));
         Assert.Equal((false, false, false, true), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
-        Assert.Equal(host.BuiltIn.Compose("be brief"), configuration.Instructions);
+        Assert.Equal(host.BuiltIn.Compose("be brief", 5), configuration.Instructions);
         Assert.Equal("be brief", saved.Instructions);
         Assert.Equal((AiService.ClaudeCode, AiCapability.Max, AiEffort.Low), (saved.Service, saved.Capability, saved.Effort));
     }
@@ -399,7 +399,107 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal((null, null, "global review", "global expand"), (none.ReviewPrompt, none.ExpandPrompt, none.GlobalReviewPrompt, none.GlobalExpandPrompt));
         Assert.Equal(("my review", "my expand", "global review", "global expand"), (own.ReviewPrompt, own.ExpandPrompt, own.GlobalReviewPrompt, own.GlobalExpandPrompt));
         Assert.Equal((null, null), (cleared.ReviewPrompt, cleared.ExpandPrompt));
-        workspaces.Verify(x => x.SetPrompts(workspace.Id, null, "   ", It.IsAny<CancellationToken>()), Times.Once);
+        workspaces.Verify(x => x.SetOverrides(workspace.Id, null, "   ", null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private async Task<string> CallStatus(string json)
+    {
+        PromptTool tool = Session.Transient.Tools.Single(candidate => candidate.Name == host.Object.StatusTool);
+        using JsonDocument arguments = JsonDocument.Parse(json);
+        return await tool.Handler(arguments.RootElement, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task OpeningASession_OffersTheStatusToolOnceAndGivesTheAiTheInstructionsForTheInterval()
+    {
+        await service.GetSettings(workspace.Id, CancellationToken.None);
+        await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        PromptTool tool = Assert.Single(Session.Transient.Tools);
+        Assert.Equal("report_status", tool.Name);
+        Assert.Contains("status", tool.Description);
+        Assert.True(tool.InputSchema.GetProperty("properties").TryGetProperty("status", out _));
+        Assert.Equal(host.BuiltIn.Compose(null, 5), Session.Configuration.Instructions);
+    }
+
+    [Fact]
+    public async Task TheStatusTool_ShowsTheLatestStatusWhileTheAiWorksAndItIsGoneWhenTheWorkEnds()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => Slow(release.Task, "done"));
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+
+        string answer = await CallStatus("""{"status":"  reading the files  "}""");
+        await CallStatus("""{"status":"writing the tests"}""");
+
+        Assert.Contains("shown", answer);
+        Assert.Equal(["reading the files", "writing the tests"], Events(RemoteEventKind.StatusChanged).Select(remoteEvent => remoteEvent.Text).ToList());
+        Assert.All(Events(RemoteEventKind.StatusChanged), remoteEvent => Assert.Equal(workspace.Id, remoteEvent.WorkspaceId));
+        Assert.Equal("writing the tests", (await service.History(workspace.Id, null, null, CancellationToken.None)).Status);
+
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Null((await service.History(workspace.Id, null, null, CancellationToken.None)).Status);
+    }
+
+    [Fact]
+    public async Task TheStatusTool_RefusesAnEmptyStatusAndIgnoresOneWhileNothingWorks()
+    {
+        await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        await Assert.ThrowsAsync<ArgumentException>(() => CallStatus("""{"status":"  "}"""));
+        await Assert.ThrowsAsync<ArgumentException>(() => CallStatus("""{"other":1}"""));
+        string idle = await CallStatus("""{"status":"hello"}""");
+
+        Assert.Contains("not shown", idle);
+        Assert.Empty(Events(RemoteEventKind.StatusChanged));
+    }
+
+    [Fact]
+    public async Task TheInstructionsFollowTheIntervalOfTheWorkspaceOrTheEnvironmentAndTheWorkspaceCanClearItsOwn()
+    {
+        host.Mock.Setup(x => x.Get()).Returns(new AiEnvironment { StatusMinutes = 12 });
+        WorkspaceSettings first = await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        WorkspaceSettings own = await service.SetSettings(workspace.Id, first with { StatusMinutes = 3 }, CancellationToken.None);
+        string withOwn = Session.Configuration.Instructions!;
+        WorkspaceSettings cleared = await service.SetSettings(workspace.Id, own with { StatusMinutes = null }, CancellationToken.None);
+
+        Assert.Equal((null, 12), (first.StatusMinutes, first.GlobalStatusMinutes));
+        Assert.Equal((3, 12), (own.StatusMinutes, own.GlobalStatusMinutes));
+        Assert.Equal(host.BuiltIn.Compose(null, 3), withOwn);
+        Assert.Null(cleared.StatusMinutes);
+        workspaces.Verify(x => x.SetOverrides(workspace.Id, It.IsAny<string?>(), It.IsAny<string?>(), 3, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1441)]
+    public async Task SetSettings_RefusesAStatusIntervalOutOfRange(int minutes)
+    {
+        WorkspaceSettings current = await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        await Assert.ThrowsAsync<RequestException>(() => service.SetSettings(workspace.Id, current with { StatusMinutes = minutes }, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task RefreshInstructions_GivesOpenSessionsTheNewGlobalIntervalUnlessTheWorkspaceHasItsOwn()
+    {
+        host.Mock.Setup(x => x.Get()).Returns(new AiEnvironment { StatusMinutes = 5 });
+        await service.GetSettings(workspace.Id, CancellationToken.None);
+        Assert.Equal(host.BuiltIn.Compose(null, 5), Session.Configuration.Instructions);
+        host.Mock.Setup(x => x.ComposeInstructions(It.IsAny<string?>(), It.IsAny<int?>())).Returns((string? user, int? minutes) => host.BuiltIn.Compose(user, minutes ?? 20));
+
+        await service.RefreshInstructions(CancellationToken.None);
+
+        Assert.Equal(host.BuiltIn.Compose(null, 20), Session.Configuration.Instructions);
+
+        Use(workspace with { StatusMinutes = 7 });
+        await service.RefreshInstructions(CancellationToken.None);
+
+        Assert.Equal(host.BuiltIn.Compose(null, 7), Session.Configuration.Instructions);
     }
 
     [Fact]
@@ -410,7 +510,7 @@ public sealed class PromptServiceTests : IDisposable
         WorkspaceSettings saved = await service.SetSettings(workspace.Id, current with { Instructions = "   " }, CancellationToken.None);
 
         Assert.Null(saved.Instructions);
-        Assert.Equal(host.BuiltIn.Text, Session.Configuration.Instructions);
+        Assert.Equal(host.BuiltIn.Compose(null, 5), Session.Configuration.Instructions);
     }
 
     [Fact]
@@ -424,21 +524,21 @@ public sealed class PromptServiceTests : IDisposable
         WorkspaceSettings first = await service.GetSettings(workspace.Id, CancellationToken.None);
 
         Assert.Equal("my own", first.Instructions);
-        Assert.Equal(host.BuiltIn.Compose("my own"), prompter.Sessions[^1].Configuration.Instructions);
+        Assert.Equal(host.BuiltIn.Compose("my own", 5), prompter.Sessions[^1].Configuration.Instructions);
     }
 
     [Fact]
     public async Task ASessionThatAlreadyHoldsOnlyTheBuiltInInstructionsShowsNoneAndIsLeftAsItIs()
     {
         IPromptSession existing = Existing();
-        existing.Configuration.Instructions = host.BuiltIn.Text;
+        existing.Configuration.Instructions = host.BuiltIn.Compose(null, 5);
         await existing.DisposeAsync();
         Use(workspace with { SessionId = existing.Id });
 
         WorkspaceSettings settings = await service.GetSettings(workspace.Id, CancellationToken.None);
 
         Assert.Null(settings.Instructions);
-        Assert.Equal(host.BuiltIn.Text, prompter.Sessions[^1].Configuration.Instructions);
+        Assert.Equal(host.BuiltIn.Compose(null, 5), prompter.Sessions[^1].Configuration.Instructions);
     }
 
     [Fact]

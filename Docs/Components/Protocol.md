@@ -187,6 +187,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `lastUpdated` | timestamp, optional | When the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first); refreshed whenever the workspaces are listed. |
 | `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts of the workspace's own that its review and expand buttons send; omitted when it uses the environment's. |
+| `statusMinutes` | number, optional | The status interval the workspace has of its own; omitted when it uses the environment's. |
 
 **catalog** (`ListWorkspaces`)
 
@@ -225,6 +226,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `messages` | array of message | The chunk, oldest first. |
 | `older` | string, optional | The cursor to send as `before` to read the messages before this chunk; omitted when there are none. |
 | `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
+| `status` | string, optional | The latest status the AI reported with its status tool while it works; omitted when it reported none or is not working. |
 
 **loop settings** (`loop` of `StartLoop`)
 
@@ -261,6 +263,8 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `isImageGenerationAllowed` | bool | Whether the AI may generate images; needs an image service in the environment. |
 | `instructions` | string, optional | Standing instructions for the AI. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts the workspace's review and expand buttons send instead of the ones of the environment; omitted (or blank when setting) means the environment's. They belong to the workspace, not to the session. |
+| `statusMinutes` | number, optional | The status interval of the workspace itself, 1 to 1440; omitted (or omitted when setting) means the environment's. It belongs to the workspace, not to the session. |
+| `globalStatusMinutes` | number | The environment's status interval, which applies while the workspace has none of its own; read only. |
 | `globalReviewPrompt`, `globalExpandPrompt` | string | The prompts of the environment, which the buttons send while the workspace has none of its own; read only. |
 | `descriptors` | object | What the session says about how it runs, text by name; read only. |
 
@@ -279,6 +283,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `imageGeneration` | string | `None`, `OpenAi` or `Local`. |
 | `localImageServer` | string | Address of the Stable Diffusion server. |
 | `localImageModels` | capability names | The checkpoint for each capability; all four when `imageGeneration` is `Local`. |
+| `statusMinutes` | number | How often, in minutes (1 to 1440, default 5), the AI is told to report its status in every workspace that has no interval of its own. |
 | `reviewPrompt`, `expandPrompt` | string | The prompts the review and expand buttons send in every workspace that has none of its own; trimmed, and a blank one is replaced by the default (`review workspace and fix any problems or inconsistencies`, `expand upon content in workspace in areas that make sense`). |
 | `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. A workspace keeps the values it was created with whatever this says later. |
 
@@ -447,7 +452,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged` or `LoopChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `StatusChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged` or `LoopChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
@@ -455,10 +460,12 @@ The server pushes events to every authenticated connection, as responses with `i
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Running`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
-| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. |
+| `text` | string | `ScriptOutput`: what the run wrote since the last event. `StatusChanged`: the latest status the AI reported with its status tool. `LoopChanged`: why a loop ended by itself. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 
 `ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.
+
+`StatusChanged` is pushed each time the AI calls its status tool; the clients show the text in a status bar above the message box and hide it when `WorkingChanged` says the work is over. A client that opens a workspace while the AI works reads the latest status from the `status` of the history chunk.
 
 `WorkspacesChanged` says the workspaces or groups changed on the server (one was created, deleted, renamed, moved, reordered or configured, by any client); it carries no details, so a client lists the workspaces again with `ListWorkspaces`, which it also does after reconnecting. A new AI session being attached to a workspace is not announced. The client keeps what it has open: the focused workspace stays open untouched unless it was deleted (the view clears and the drawer opens) or its folder or AI settings changed (it is reopened).
 

@@ -165,6 +165,43 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task StatusInterval_ShowsTheWorkspacesOwnNextToTheGlobalOneAndApplies()
+    {
+        Session(Current with { StatusMinutes = 3, GlobalStatusMinutes = 5 });
+        Accept();
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.Instructions.Length > 0);
+
+        Assert.Equal((3m, 5), (settings.StatusMinutes, settings.GlobalStatusMinutes));
+        Assert.False(settings.HasPending);
+
+        settings.StatusMinutes = 20;
+        Assert.True(settings.HasPending);
+        Assert.True(await settings.Apply());
+
+        Assert.Equal(20, saved.Single().StatusMinutes);
+    }
+
+    [Fact]
+    public async Task StatusInterval_IsClampedAndCanBeClearedToUseTheGlobalOne()
+    {
+        Session(Current with { StatusMinutes = 3, GlobalStatusMinutes = 5 });
+        Accept();
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.Instructions.Length > 0);
+
+        settings.StatusMinutes = 99999;
+        Assert.Equal(1440m, settings.StatusMinutes);
+        settings.StatusMinutes = 0;
+        Assert.Equal(1m, settings.StatusMinutes);
+
+        settings.ClearStatusMinutesCommand.Execute(null);
+        Assert.Null(settings.StatusMinutes);
+        Assert.True(await settings.Apply());
+        Assert.Null(saved.Single().StatusMinutes);
+    }
+
+    [Fact]
     public async Task Apply_WithoutEditsOrWithEditsThatWereUndoneSendsNothing()
     {
         Session(Current);

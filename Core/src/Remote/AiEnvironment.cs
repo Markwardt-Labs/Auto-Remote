@@ -101,6 +101,11 @@ public sealed record AiEnvironment
     public WorkspaceDefaults NewWorkspaces { get; init; } = new();
 
     /// <summary>
+    /// Gets how often, in minutes, the AI is told to report its status with its status tool while it works, in every workspace that has no interval of its own. From 1 to 1440.
+    /// </summary>
+    public int StatusMinutes { get; init; } = 5;
+
+    /// <summary>
     /// Gets the prompt the review button sends in every workspace that has no review prompt of its own. It is never empty: an empty one is replaced by the default.
     /// </summary>
     public string ReviewPrompt { get; init; } = "review workspace and fix any problems or inconsistencies";

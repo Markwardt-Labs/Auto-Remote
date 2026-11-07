@@ -447,6 +447,22 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task FocusingAWorkspaceInACollapsedGroup_OpensTheGroupsAroundItSoItShows()
+    {
+        WorkspaceGroup work = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceGroup inner = new() { Id = Guid.NewGuid(), Name = "Inner", ParentId = work.Id };
+        WorkspaceInfo deep = first with { GroupId = inner.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work, inner], deep, second));
+        await model.Start();
+        Assert.Equal([(object)work, second], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+
+        await model.Show(deep.Id);
+
+        Assert.Equal([(object)work, inner, deep, second], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.Equal(deep, model.SelectedEntry?.Workspace);
+    }
+
+    [Fact]
     public async Task Entries_OrderWorkspacesBySessionLastUpdateLatestFirstAndGroupsStayBeforeThem()
     {
         DateTimeOffset now = new(2026, 11, 7, 12, 0, 0, TimeSpan.Zero);

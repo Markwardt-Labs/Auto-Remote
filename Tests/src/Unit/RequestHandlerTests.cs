@@ -227,6 +227,17 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
+    public async Task Handle_SetAiEnvironment_GivesOpenSessionsTheirInstructionsAgain()
+    {
+        host.Setup(x => x.Set(It.IsAny<AiEnvironment>(), It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment { StatusMinutes = 9 });
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.SetAiEnvironment, AiEnvironment = new AiEnvironment { StatusMinutes = 9 } }, owner, CancellationToken.None);
+
+        Assert.Equal(9, response.AiEnvironment?.StatusMinutes);
+        prompts.Verify(x => x.RefreshInstructions(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Handle_Transcribe_AnswersTheTextOfTheSpeech()
     {
         speech.Setup(x => x.Transcribe("AQ==", It.IsAny<CancellationToken>())).ReturnsAsync("hello there");

@@ -113,6 +113,28 @@ public sealed class EnvironmentViewModelTests
     }
 
     [Fact]
+    public async Task StatusInterval_IsReadFromTheEnvironmentAndSentClampedWhenTheSettingsClose()
+    {
+        EnvironmentViewModel model = Open(Current with { StatusMinutes = 8 });
+        await model.Load();
+        Assert.Equal(8m, model.StatusMinutes);
+
+        model.StatusMinutes = 5000;
+        model.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 1);
+
+        Assert.Equal(1440, saved[0].StatusMinutes);
+
+        EnvironmentViewModel blank = Open(Current with { StatusMinutes = 8 });
+        await blank.Load();
+        blank.StatusMinutes = null;
+        blank.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 2);
+
+        Assert.Equal(5, saved[1].StatusMinutes);
+    }
+
+    [Fact]
     public async Task Prompts_AreReadFromTheEnvironmentAndSentTrimmedWhenTheSettingsClose()
     {
         EnvironmentViewModel model = Open();

@@ -201,7 +201,7 @@ internal sealed class HomeViewModel : ViewModelBase
     public event Action? ChangeServerRequested;
 
     /// <summary>
-    /// Gets the drawer rows: the group tree flattened in display order. Within the top level and within each group the groups come first, in their manual order, and then the workspaces, the one whose AI session was loaded last first. Groups start collapsed.
+    /// Gets the drawer rows: the group tree flattened in display order. Within the top level and within each group the groups come first, in their manual order, and then the workspaces, the one whose AI session was loaded last first. Groups start collapsed, and the groups holding a workspace that gets focused open so that it shows.
     /// </summary>
     public ObservableCollection<DrawerEntry> Entries { get; } = [];
 
@@ -304,6 +304,12 @@ internal sealed class HomeViewModel : ViewModelBase
 
             Raise(nameof(HasSelection));
             Raise(nameof(Title));
+
+            if (value is not null && ExpandAround(value))
+            {
+                BuildEntries();
+            }
+
             SyncSelectedEntry();
             BeginRenameCommand.Refresh();
             MoveWorkspaceToFolderCommand.Refresh();
@@ -889,6 +895,18 @@ internal sealed class HomeViewModel : ViewModelBase
         Raise(nameof(NewGroupHint));
         EditMode = mode;
         return Task.CompletedTask;
+    }
+
+    private bool ExpandAround(WorkspaceInfo workspace)
+    {
+        bool changed = false;
+
+        for (Guid? group = Parent(workspace.GroupId); group is { } id; group = Parent(groups.First(item => item.Id == id).ParentId))
+        {
+            changed |= expanded.Add(id);
+        }
+
+        return changed;
     }
 
     private Task BeginNewGroup()

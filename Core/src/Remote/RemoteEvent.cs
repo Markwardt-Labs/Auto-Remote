@@ -46,7 +46,7 @@ public sealed record RemoteEvent
     public LoopInfo? Loop { get; init; }
 
     /// <summary>
-    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
+    /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.StatusChanged" /> it is the latest status the AI reported. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
     /// </summary>
     public string? Text { get; init; }
 
@@ -71,6 +71,11 @@ public enum RemoteEventKind
     /// The AI started or stopped working in a workspace.
     /// </summary>
     WorkingChanged,
+
+    /// <summary>
+    /// The AI reported its status with its status tool; <see cref="RemoteEvent.Text" /> is the latest status.
+    /// </summary>
+    StatusChanged,
 
     /// <summary>
     /// The contents of a folder of a workspace that is open (see <see cref="RemoteCommand.WatchWorkspace" />) changed, whoever changed them.

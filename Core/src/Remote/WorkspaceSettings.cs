@@ -56,6 +56,16 @@ public sealed record WorkspaceSettings
     public string? ExpandPrompt { get; init; }
 
     /// <summary>
+    /// Gets how often, in minutes, the AI of this workspace is told to report its status instead of the interval of the server's environment, or <see langword="null" /> to use that one. From 1 to 1440. It belongs to the workspace, not to its AI session.
+    /// </summary>
+    public int? StatusMinutes { get; init; }
+
+    /// <summary>
+    /// Gets the status interval of the server's environment, which applies while <see cref="StatusMinutes" /> is not set. It is only read; setting it has no effect.
+    /// </summary>
+    public int GlobalStatusMinutes { get; init; }
+
+    /// <summary>
     /// Gets the review prompt of the server's environment, which the review button sends while <see cref="ReviewPrompt" /> is not set. It is only read; setting it has no effect.
     /// </summary>
     public string GlobalReviewPrompt { get; init; } = string.Empty;

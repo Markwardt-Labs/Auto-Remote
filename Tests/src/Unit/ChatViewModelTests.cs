@@ -155,6 +155,41 @@ public sealed class ChatViewModelTests
     }
 
     [Fact]
+    public async Task Status_ShowsTheLatestStatusOfTheAiWhileItWorksAndIsHiddenAgainWhenTheWorkEnds()
+    {
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        await chat.Start();
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        Assert.False(chat.HasStatus);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspaceId, Working = true });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = workspaceId, Text = "reading the files" });
+        Assert.Equal(("reading the files", true), (chat.Status, chat.HasStatus));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = workspaceId, Text = "writing the tests" });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = Guid.NewGuid(), Text = "another workspace" });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = workspaceId, Text = "  " });
+        Assert.Equal("writing the tests", chat.Status);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspaceId, Working = false });
+        Assert.Equal((null, false), (chat.Status, chat.HasStatus));
+        Assert.Contains(nameof(ChatViewModel.HasStatus), changed);
+    }
+
+    [Theory]
+    [InlineData(true, "halfway", "halfway")]
+    [InlineData(false, "stale", null)]
+    public async Task Start_ShowsTheStatusTheServerHasWhileTheAiWorksAndNoneOtherwise(bool working, string status, string? expected)
+    {
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = working, Status = status });
+
+        await chat.Start();
+
+        Assert.Equal(expected, chat.Status);
+    }
+
+    [Fact]
     public async Task Start_RestoresTheSavedDraft()
     {
         Mock<IDraftStore> drafts = new();

@@ -65,6 +65,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
 
     private string localImageServer = string.Empty;
 
+    private decimal? statusMinutes = 5;
+
     private string reviewPrompt = string.Empty;
 
     private string expandPrompt = string.Empty;
@@ -445,6 +447,15 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     public bool HasUpdate => Update is not null;
 
     /// <summary>
+    /// Gets or sets how often, in minutes, the AI is told to report its status in every workspace that has no interval of its own; empty restores the default of 5.
+    /// </summary>
+    public decimal? StatusMinutes
+    {
+        get => statusMinutes;
+        set => Set(ref statusMinutes, value);
+    }
+
+    /// <summary>
     /// Gets or sets the prompt the review button sends in every workspace that has none of its own; empty restores the default.
     /// </summary>
     public string ReviewPrompt
@@ -505,6 +516,7 @@ internal sealed class EnvironmentViewModel : ViewModelBase
             LocalImageServer = localImageServer.Trim(),
             LocalImageModels = Names(ImageRows),
             NewWorkspaces = defaults with { Instructions = defaults.Instructions.Trim() },
+            StatusMinutes = statusMinutes is { } minutes ? (int)Math.Clamp(Math.Round(minutes), 1, 1440) : 5,
             ReviewPrompt = reviewPrompt.Trim(),
             ExpandPrompt = expandPrompt.Trim()
         };
@@ -530,6 +542,7 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         hasOpenAiApiKey = environment.HasOpenAiApiKey;
         clearOpenAiApiKey = false;
         localImageServer = environment.LocalImageServer;
+        statusMinutes = environment.StatusMinutes;
         reviewPrompt = environment.ReviewPrompt;
         expandPrompt = environment.ExpandPrompt;
         defaults = environment.NewWorkspaces;

@@ -91,6 +91,26 @@ public sealed class PrompterHostTests : IDisposable
     }
 
     [Fact]
+    public async Task Set_KeepsTheStatusIntervalAndRefusesOneOutOfRangeAndTheInstructionsOfNewSessionsCarryIt()
+    {
+        PrompterHost host = await Configured();
+        Assert.Equal(5, host.Get().StatusMinutes);
+
+        AiEnvironment saved = await host.Set(host.Get() with { StatusMinutes = 12 }, CancellationToken.None);
+        PrompterHost next = await Configured();
+
+        Assert.Equal(12, saved.StatusMinutes);
+        Assert.Equal(12, next.Get().StatusMinutes);
+        await Assert.ThrowsAsync<RequestException>(() => host.Set(host.Get() with { StatusMinutes = 0 }, CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => host.Set(host.Get() with { StatusMinutes = 1441 }, CancellationToken.None));
+        Assert.Equal(12, host.Get().StatusMinutes);
+        Assert.Equal(builtIn.Compose(null, 12), prompter.Environment.Instructions);
+        Assert.Equal(builtIn.Compose("x", 4), host.ComposeInstructions("x", 4));
+        Assert.Equal(builtIn.Compose("x", 12), host.ComposeInstructions("x", null));
+        Assert.Equal("report_status", host.StatusTool);
+    }
+
+    [Fact]
     public async Task Set_KeepsTrimmedReviewAndExpandPromptsAndRestoresTheDefaultForBlankOnes()
     {
         PrompterHost host = await Configured();
@@ -336,7 +356,7 @@ public sealed class PrompterHostTests : IDisposable
 
         IPromptSessionConfiguration configuration = session.Configuration;
         Assert.Equal((true, true, true, true), (configuration.IsShellAllowed, configuration.IsWebAllowed, configuration.IsSystemAccessAllowed, configuration.IsImageGenerationAllowed));
-        Assert.Equal(builtIn.Text, configuration.Instructions);
+        Assert.Equal(builtIn.Compose(null, 5), configuration.Instructions);
         Assert.Contains("in the foreground", configuration.Instructions);
         Assert.Contains("status update", configuration.Instructions);
         Assert.True(session.IsDisposed);
@@ -375,7 +395,7 @@ public sealed class PrompterHostTests : IDisposable
 
         PromptEnvironment environment = prompter.Environment;
         Assert.Equal((PromptCapability.Balanced, PromptEffort.High, false, false, true, false), (environment.Capability, environment.Effort, environment.IsShellAllowed, environment.IsSystemAccessAllowed, environment.IsWebAllowed, environment.IsImageGenerationAllowed));
-        Assert.Equal(builtIn.Text, environment.Instructions);
+        Assert.Equal(builtIn.Compose(null, 5), environment.Instructions);
         Assert.Equal(string.Empty, host.Get().NewWorkspaces.Instructions);
     }
 
@@ -388,7 +408,7 @@ public sealed class PrompterHostTests : IDisposable
         AiEnvironment saved = await host.Set(host.Get() with { NewWorkspaces = defaults }, CancellationToken.None);
 
         PromptEnvironment environment = prompter.Environment;
-        Assert.Equal((PromptCapability.Max, PromptEffort.Low, false, false, false, false, builtIn.Compose("be brief")), (environment.Capability, environment.Effort, environment.IsShellAllowed, environment.IsSystemAccessAllowed, environment.IsWebAllowed, environment.IsImageGenerationAllowed, environment.Instructions));
+        Assert.Equal((PromptCapability.Max, PromptEffort.Low, false, false, false, false, builtIn.Compose("be brief", 5)), (environment.Capability, environment.Effort, environment.IsShellAllowed, environment.IsSystemAccessAllowed, environment.IsWebAllowed, environment.IsImageGenerationAllowed, environment.Instructions));
         Assert.Equal(defaults with { Instructions = "be brief" }, saved.NewWorkspaces);
         Assert.Equal(saved.NewWorkspaces, (await Configured()).Get().NewWorkspaces);
     }
@@ -401,7 +421,7 @@ public sealed class PrompterHostTests : IDisposable
         AiEnvironment saved = await host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { Instructions = "   " } }, CancellationToken.None);
 
         Assert.Equal(string.Empty, saved.NewWorkspaces.Instructions);
-        Assert.Equal(builtIn.Text, prompter.Environment.Instructions);
+        Assert.Equal(builtIn.Compose(null, 5), prompter.Environment.Instructions);
         await Assert.ThrowsAsync<RequestException>(() => host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { Capability = (AiCapability)99 } }, CancellationToken.None));
         await Assert.ThrowsAsync<RequestException>(() => host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { Effort = (AiEffort)99 } }, CancellationToken.None));
     }
@@ -478,7 +498,7 @@ public sealed class PrompterHostTests : IDisposable
         IPromptSessionConfiguration configuration = prompter.Sessions[0].Configuration;
         Assert.Equal((PromptCapability.Balanced, PromptEffort.High), (configuration.Capability, configuration.Effort));
         Assert.Equal((false, false, true, false), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
-        Assert.Equal(builtIn.Text, configuration.Instructions);
+        Assert.Equal(builtIn.Compose(null, 5), configuration.Instructions);
         Assert.Equal(prompter.Sessions[0].Id, id);
         Assert.True(prompter.Sessions[0].IsDisposed);
     }
@@ -505,7 +525,7 @@ public sealed class PrompterHostTests : IDisposable
         await host.CreateSession(temp.Path, AiService.ClaudeCode, null, CancellationToken.None);
 
         IPromptSessionConfiguration configuration = prompter.Sessions.Single().Configuration;
-        Assert.Equal((PromptCapability.Strong, PromptEffort.Medium, false, false, builtIn.Compose("be brief")), (configuration.Capability, configuration.Effort, configuration.IsShellAllowed, configuration.IsImageGenerationAllowed, configuration.Instructions));
+        Assert.Equal((PromptCapability.Strong, PromptEffort.Medium, false, false, builtIn.Compose("be brief", 5)), (configuration.Capability, configuration.Effort, configuration.IsShellAllowed, configuration.IsImageGenerationAllowed, configuration.Instructions));
     }
 
     [Fact]

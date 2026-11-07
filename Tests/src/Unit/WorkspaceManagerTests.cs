@@ -232,7 +232,7 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
-    public async Task SetPrompts_StoresTheTrimmedOverridesWithTheWorkspaceAndClearsBlankOnes()
+    public async Task SetOverrides_StoresTheTrimmedOverridesWithTheWorkspaceAndClearsBlankOnes()
     {
         string session = await Session("/work/a");
         Guid id = Guid.NewGuid();
@@ -242,8 +242,8 @@ public sealed class WorkspaceManagerTests
         await manager.Open("workspaces.json", CancellationToken.None);
         Assert.Equal(("old review", "old expand"), ((await manager.Get(id, CancellationToken.None)).ReviewPrompt, (await manager.Get(id, CancellationToken.None)).ExpandPrompt));
 
-        WorkspaceInfo changed = await manager.SetPrompts(id, "  new review ", "   ", CancellationToken.None);
-        WorkspaceInfo same = await manager.SetPrompts(id, "new review", null, CancellationToken.None);
+        WorkspaceInfo changed = await manager.SetOverrides(id, "  new review ", "   ", null, CancellationToken.None);
+        WorkspaceInfo same = await manager.SetOverrides(id, "new review", null, null, CancellationToken.None);
 
         Assert.Equal(("new review", null), (changed.ReviewPrompt, changed.ExpandPrompt));
         Assert.Equal(changed, same);
@@ -253,11 +253,29 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
-    public async Task SetPrompts_RefusesAnUnknownWorkspace()
+    public async Task SetOverrides_StoresTheStatusIntervalWithTheWorkspaceAndClearsIt()
+    {
+        string session = await Session("/work/a");
+        Guid id = Guid.NewGuid();
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [new StoredWorkspace { Id = id, SessionId = session, StatusMinutes = 15 }] });
+        List<StoredCatalog> saved = [];
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved.Add(catalog)).Returns(Task.CompletedTask);
+        await manager.Open("workspaces.json", CancellationToken.None);
+        Assert.Equal(15, (await manager.Get(id, CancellationToken.None)).StatusMinutes);
+
+        WorkspaceInfo changed = await manager.SetOverrides(id, null, null, 4, CancellationToken.None);
+        WorkspaceInfo cleared = await manager.SetOverrides(id, null, null, null, CancellationToken.None);
+
+        Assert.Equal((4, null), (changed.StatusMinutes, cleared.StatusMinutes));
+        Assert.Equal([4, null], saved.Select(catalog => Assert.Single(catalog.Workspaces).StatusMinutes));
+    }
+
+    [Fact]
+    public async Task SetOverrides_RefusesAnUnknownWorkspace()
     {
         await manager.Open("workspaces.json", CancellationToken.None);
 
-        await Assert.ThrowsAsync<RequestException>(() => manager.SetPrompts(Guid.NewGuid(), "a", "b", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => manager.SetOverrides(Guid.NewGuid(), "a", "b", null, CancellationToken.None));
     }
 
     [Fact]

@@ -95,7 +95,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.GetAiEnvironment:
                 return new RemoteResponse { Id = 0, AiEnvironment = host.Get() };
             case RemoteCommand.SetAiEnvironment:
-                return new RemoteResponse { Id = 0, AiEnvironment = await host.Set(request.AiEnvironment ?? throw new RequestException("The request needs an environment."), cancellation) };
+                AiEnvironment changed = await host.Set(request.AiEnvironment ?? throw new RequestException("The request needs an environment."), cancellation);
+                await prompts.RefreshInstructions(cancellation);
+                return new RemoteResponse { Id = 0, AiEnvironment = changed };
             case RemoteCommand.GetUsage:
                 return new RemoteResponse { Id = 0, Usage = await usage.Get(request.Service ?? throw new RequestException("The request needs a service."), cancellation) };
             case RemoteCommand.ListLocalModels:

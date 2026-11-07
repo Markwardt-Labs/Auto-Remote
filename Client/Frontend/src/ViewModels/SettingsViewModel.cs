@@ -25,6 +25,11 @@ internal sealed class SettingsViewModel : ViewModelBase
             ExpandPrompt = string.Empty;
             return Task.CompletedTask;
         });
+        ClearStatusMinutesCommand = new AsyncCommand(_ =>
+        {
+            StatusMinutes = null;
+            return Task.CompletedTask;
+        });
         _ = Load();
     }
 
@@ -172,6 +177,29 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets how often, in minutes, the AI of this workspace is told to report its status; empty uses the interval of the global settings.
+    /// </summary>
+    public decimal? StatusMinutes
+    {
+        get => pending.StatusMinutes;
+        set
+        {
+            Edit(pending with { StatusMinutes = value is { } minutes ? (int)Math.Clamp(Math.Round(minutes), 1, 1440) : null });
+            Raise(nameof(StatusMinutes));
+        }
+    }
+
+    /// <summary>
+    /// Gets the status interval of the global settings, which applies while this workspace has none of its own.
+    /// </summary>
+    public int GlobalStatusMinutes => pending.GlobalStatusMinutes;
+
+    /// <summary>
+    /// Gets the command that clears the status interval of this workspace, so that the global one is used again.
+    /// </summary>
+    public AsyncCommand ClearStatusMinutesCommand { get; }
+
+    /// <summary>
     /// Gets the review prompt of the global settings, which the review button sends while this workspace has none of its own.
     /// </summary>
     public string GlobalReviewPrompt => pending.GlobalReviewPrompt;
@@ -221,7 +249,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     private bool Differs(WorkspaceSettings first, WorkspaceSettings second)
-        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt)) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt));
+        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes);
 
     private string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
@@ -270,6 +298,8 @@ internal sealed class SettingsViewModel : ViewModelBase
         Raise(nameof(Instructions));
         Raise(nameof(ReviewPrompt));
         Raise(nameof(ExpandPrompt));
+        Raise(nameof(StatusMinutes));
+        Raise(nameof(GlobalStatusMinutes));
         Raise(nameof(GlobalReviewPrompt));
         Raise(nameof(GlobalExpandPrompt));
     }

@@ -19,4 +19,9 @@ public sealed record ChatHistory
     /// Gets a value indicating whether the AI is working in the workspace.
     /// </summary>
     public bool Working { get; init; }
+
+    /// <summary>
+    /// Gets the latest status the AI reported while it works, or <see langword="null" /> when it has not reported one or is not working.
+    /// </summary>
+    public string? Status { get; init; }
 }
