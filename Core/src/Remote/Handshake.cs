@@ -20,4 +20,9 @@ public sealed record HandshakeResponse
     /// Gets a value indicating whether the access key was correct and requests may follow.
     /// </summary>
     public required bool Accepted { get; init; }
+
+    /// <summary>
+    /// Gets the version of the server, sent only with an acceptance; it is <see langword="null" /> from a server that predates the update system.
+    /// </summary>
+    public string? Version { get; init; }
 }

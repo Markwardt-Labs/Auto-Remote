@@ -17,6 +17,8 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private FakePrompter prompterOf = null!;
 
+    private readonly Mock<IServerUpdater> updater = new();
+
     public async Task InitializeAsync()
     {
         string fakeDotnet = temp.Combine("fake-dotnet");
@@ -41,9 +43,9 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object);
         await handler.Open(config, stopping.Token);
-        ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
+        ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
         server.Listening += listening.SetResult;
         running = server.Run(config, stopping.Token);
@@ -168,6 +170,22 @@ public sealed class EndToEndTests : IAsyncLifetime
     {
         Assert.Equal("said 3", await connection.Transcribe(new byte[] { 1, 2, 3 }, CancellationToken.None));
     }
+
+    [Fact]
+    public async Task UpdateServer_RunsTheUpdateOfTheServerOrCarriesItsRefusal()
+    {
+        await connection.UpdateServer(CancellationToken.None);
+
+        updater.Verify(x => x.Update(It.IsAny<CancellationToken>()), Times.Once);
+
+        updater.Setup(x => x.Update(It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The server is up to date at 1.2.3."));
+
+        RemoteException refusal = await Assert.ThrowsAsync<RemoteException>(() => connection.UpdateServer(CancellationToken.None));
+        Assert.Equal("The server is up to date at 1.2.3.", refusal.Message);
+    }
+
+    [Fact]
+    public void ServerVersion_IsTheOneTheServerSaysInItsHandshake() => Assert.Equal("1.2.3", connection.ServerVersion);
 
     [Fact]
     public async Task WrongKeyIsRejected()

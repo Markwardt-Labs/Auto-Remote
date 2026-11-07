@@ -3,11 +3,15 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
     private HomeViewModel? home;
+
+    private UpdateViewModel? update;
+
+    private object? beforeUpdate;
 
     private Guid? requested;
 
@@ -74,7 +78,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     /// <returns>A task that completes once the workspace is shown, or at once when the request is left waiting.</returns>
     public async Task Focus(Guid workspaceId)
     {
-        if (home is { } shown && connection is not null)
+        if (home is { } shown && connection is not null && update is not { IsUpdating: true })
         {
             Current = shown;
             await shown.Show(workspaceId);
@@ -138,14 +142,20 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
 
         connection = opened;
-        HomeViewModel opening = new(opened, layout, drafts, chime, null, notifier, keeper, recorder, newWindow);
-        home = opening;
-        opening.ChangeServerRequested += async () =>
+        UpdateViewModel updating = update ??= Track(opened);
+
+        if (IsMismatched(opened))
         {
-            ConnectionSettings? saved = await store.Load(CancellationToken.None);
-            await Close();
-            ShowConnect(saved, null);
-        };
+            home = null;
+            VersionMismatchViewModel mismatch = new(info, opened, updating);
+            mismatch.ChangeServerRequested += () => _ = ChangeServer();
+            Current = mismatch;
+            return;
+        }
+
+        HomeViewModel opening = new(opened, layout, drafts, chime, null, notifier, keeper, recorder, newWindow, updating);
+        home = opening;
+        opening.ChangeServerRequested += () => _ = ChangeServer();
         opening.NewWorkspaceRequested += async () =>
         {
             NewWorkspaceViewModel creating = new(opened);
@@ -183,12 +193,73 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         await opening.Start(target, false);
     }
 
+    private UpdateViewModel Track(IServerConnection opened)
+    {
+        UpdateViewModel tracking = new(info, opened, feed, updater);
+        tracking.ServerReconnected += () => _ = Recheck();
+        tracking.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(UpdateViewModel.Phase))
+            {
+                ShowUpdate(tracking);
+            }
+        };
+        _ = tracking.Watch();
+        return tracking;
+    }
+
+    private bool IsMismatched(IServerConnection opened) => opened.ServerVersion != info.Version;
+
+    private async Task ChangeServer()
+    {
+        ConnectionSettings? saved = await store.Load(CancellationToken.None);
+        await Close();
+        ShowConnect(saved, null);
+    }
+
+    private void ShowUpdate(UpdateViewModel updating)
+    {
+        if (updating.IsUpdating && current is not UpdateViewModel)
+        {
+            beforeUpdate = current;
+            Current = updating;
+        }
+        else if (!updating.IsUpdating && current is UpdateViewModel)
+        {
+            Current = beforeUpdate;
+            beforeUpdate = null;
+        }
+    }
+
+    private async Task Recheck()
+    {
+        if (connection is not { } opened || update is not { IsInstalling: false })
+        {
+            return;
+        }
+
+        if (IsMismatched(opened))
+        {
+            if (current is HomeViewModel)
+            {
+                await Open(opened, null);
+            }
+        }
+        else if (current is VersionMismatchViewModel)
+        {
+            await Open(opened, null);
+        }
+    }
+
     private async Task Close()
     {
         if (connection is { } old)
         {
             connection = null;
             home = null;
+            beforeUpdate = null;
+            update?.Dispose();
+            update = null;
             await old.DisposeAsync();
         }
     }

@@ -26,7 +26,7 @@ public sealed class ServerRunTests : IAsyncLifetime
                 logged.Add(message);
             }
         });
-        ConnectionServer server = new(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler.Object, new EventHub(), log.Object);
+        ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler.Object, new EventHub(), log.Object);
         TaskCompletionSource<int> listening = new();
         server.Listening += value => listening.SetResult(value);
         server.Certified += value => fingerprint = value;
@@ -88,7 +88,7 @@ public sealed class ServerRunTests : IAsyncLifetime
     [Fact]
     public async Task AdmitsOnlyClientsWithAccessKey()
     {
-        Assert.Equal("{\"accepted\":true}", await Connect("secret"));
+        Assert.Equal("{\"accepted\":true,\"version\":\"1.2.3\"}", await Connect("secret"));
         Assert.Equal("{\"accepted\":false}", await Connect("nope"));
     }
 
@@ -133,7 +133,7 @@ public sealed class ServerRunTests : IAsyncLifetime
     public async Task SpeaksTheProtocolOverWebSocket()
     {
         using ClientWebSocket socket = await OpenSocket();
-        Assert.Equal("{\"accepted\":true}", await Exchange(socket, "{\"accessKey\":\"secret\"}"));
+        Assert.Equal("{\"accepted\":true,\"version\":\"1.2.3\"}", await Exchange(socket, "{\"accessKey\":\"secret\"}"));
         Assert.Equal("{\"id\":1,\"catalog\":{\"groups\":[],\"workspaces\":[]}}", await Exchange(socket, "{\"id\":1,\"command\":\"ListWorkspaces\"}"));
 
         using ClientWebSocket denied = await OpenSocket();

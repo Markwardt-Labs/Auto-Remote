@@ -1,0 +1,17 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.UpdateDialogView"
+             x:CompileBindings="False">
+  <Border Background="{DynamicResource Scrim}">
+    <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+      <StackPanel Spacing="12">
+        <TextBlock Text="Update Auto Remote?" Classes="serif" FontSize="20" />
+        <TextBlock Text="{Binding Summary}" Classes="muted" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+        <local:TouchButton Content="Update" Command="{Binding ConfirmCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        <local:TouchButton Content="{Binding CloseText}" Command="{Binding CloseCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+      </StackPanel>
+    </Border>
+  </Border>
+</UserControl>

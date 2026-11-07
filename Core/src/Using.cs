@@ -5,3 +5,7 @@ global using System.Text.Json.Serialization;
 global using System.Net.WebSockets;
 global using System.Runtime.InteropServices;
 global using System.Globalization;
+global using System.Diagnostics.CodeAnalysis;
+global using System.Text.RegularExpressions;
+global using System.Net;
+global using System.Security.Cryptography;

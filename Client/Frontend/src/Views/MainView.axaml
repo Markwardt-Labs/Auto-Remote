@@ -24,6 +24,12 @@
         <DataTemplate DataType="local:CloneWorkspaceViewModel">
           <local:CloneWorkspaceView />
         </DataTemplate>
+        <DataTemplate DataType="local:UpdateViewModel">
+          <local:UpdatingView />
+        </DataTemplate>
+        <DataTemplate DataType="local:VersionMismatchViewModel">
+          <local:VersionMismatchView />
+        </DataTemplate>
       </ContentControl.DataTemplates>
     </ContentControl>
   </Border>

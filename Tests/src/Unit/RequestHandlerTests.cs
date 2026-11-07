@@ -32,6 +32,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IWorkspaceLoops> loops = new();
 
+    private readonly Mock<IServerUpdater> updater = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -42,7 +44,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object);
     }
 
     [Fact]
@@ -187,6 +189,29 @@ public sealed class RequestHandlerTests
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.UploadAttachment, WorkspaceId = workspace.Id, Name = "a.txt", Data = "AQ==" }, owner, CancellationToken.None);
 
         Assert.Equal("/srv/a.txt", response.AttachmentPath);
+    }
+
+    [Fact]
+    public async Task Handle_UpdateServer_UpdatesTheServerAndAnswers()
+    {
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 5, Command = RemoteCommand.UpdateServer }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        Assert.Equal(5, response.Id);
+        updater.Verify(x => x.Update(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(typeof(RequestException))]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    public async Task Handle_UpdateServer_ReportsWhyTheUpdateFailed(Type failure)
+    {
+        updater.Setup(x => x.Update(It.IsAny<CancellationToken>())).ThrowsAsync((Exception)Activator.CreateInstance(failure, "no way")!);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 6, Command = RemoteCommand.UpdateServer }, owner, CancellationToken.None);
+
+        Assert.Equal("no way", response.Error);
     }
 
     [Fact]

@@ -371,6 +371,139 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsTheUpdateButtonNextToTheWorkspacesButtonOnlyWhenAnUpdateIsAvailableAndConfirmsBeforeUpdating()
+    {
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
+        connection.SetupGet(x => x.ServerVersion).Returns("1.0.0");
+        Mock<IAppInfo> info = new();
+        info.SetupGet(x => x.Version).Returns("1.0.0");
+        Mock<IReleaseFeed> feed = new();
+        feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync(new ReleaseInfo { Version = new AppVersion { Major = 1, Minor = 1, Patch = 0 }, Assets = [] });
+
+        (bool hiddenWithout, bool hiddenBefore, bool shown, bool besideMenu, bool dialogBefore, bool dialogAfter, string[] texts, bool drawerButton) = await fixture.Run(() =>
+        {
+            bool drawerButton;
+            HomeViewModel plain = new(connection.Object);
+            HomeView plainView = new() { DataContext = plain };
+            Window plainWindow = new() { Width = 900, Height = 900, Content = plainView };
+            plainWindow.Show();
+            bool hiddenWithout = !plainWindow.GetVisualDescendants().OfType<Button>().Any(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available");
+            plainWindow.Close();
+
+            UpdateViewModel update = new(info.Object, connection.Object, feed.Object, null);
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels, null, null, null, null, null, null, null, update);
+            model.IsDrawerOpen = false;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            bool hiddenBefore = !window.GetVisualDescendants().OfType<Button>().Any(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available");
+            update.Check().GetAwaiter().GetResult();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Button menu = window.GetVisualDescendants().OfType<Button>().First(button => button.Content?.ToString() == "\u2630");
+            Button updating = window.GetVisualDescendants().OfType<Button>().Single(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available");
+            bool shown = updating.IsEffectivelyVisible;
+            Avalonia.Point menuPoint = Avalonia.VisualExtensions.TranslatePoint(menu, new Avalonia.Point(0, 0), window)!.Value;
+            Avalonia.Point updatePoint = Avalonia.VisualExtensions.TranslatePoint(updating, new Avalonia.Point(0, 0), window)!.Value;
+            bool besideMenu = updatePoint.X > menuPoint.X && updatePoint.X - menuPoint.X < 120 && Math.Abs(updatePoint.Y - menuPoint.Y) < 20;
+            bool dialogBefore = window.GetVisualDescendants().OfType<UpdateDialogView>().Any(dialog => dialog.IsEffectivelyVisible);
+            model.IsDrawerOpen = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Button inDrawer = window.GetVisualDescendants().OfType<Button>().Single(button => button != updating && button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available");
+            drawerButton = Avalonia.VisualExtensions.TranslatePoint(inDrawer, new Avalonia.Point(0, 0), window)!.Value.X < 340;
+            inDrawer.Command!.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            UpdateDialogView dialog = window.GetVisualDescendants().OfType<UpdateDialogView>().Single();
+            bool dialogAfter = dialog.IsEffectivelyVisible;
+            string[] texts = [.. dialog.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible).Select(block => block.Text ?? string.Empty), .. dialog.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty)];
+            window.Close();
+            return (hiddenWithout, hiddenBefore, shown, besideMenu, dialogBefore, dialogAfter, texts, drawerButton);
+        });
+
+        Assert.True(hiddenWithout);
+        Assert.True(hiddenBefore);
+        Assert.True(shown);
+        Assert.True(besideMenu);
+        Assert.True(drawerButton);
+        Assert.False(dialogBefore);
+        Assert.True(dialogAfter);
+        Assert.Contains("Update Auto Remote?", texts);
+        Assert.Contains("Update", texts);
+        Assert.Contains("Cancel", texts);
+        connection.Verify(x => x.UpdateServer(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task UpdatingView_ShowsTheStatusTheProgressAndCloseOnlyWhenTheScreenMayBeLeft()
+    {
+        connection.SetupGet(x => x.ServerVersion).Returns("1.0.0");
+        Mock<IAppInfo> info = new();
+        info.SetupGet(x => x.Version).Returns("1.0.0");
+        Mock<IReleaseFeed> feed = new();
+        feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync(new ReleaseInfo { Version = new AppVersion { Major = 1, Minor = 1, Patch = 0 }, Assets = [] });
+        TaskCompletionSource gate = new();
+        connection.Setup(x => x.UpdateServer(It.IsAny<CancellationToken>())).Returns(gate.Task);
+
+        (string[] running, bool closeWhileRunning, bool closeWhenWaiting) = await fixture.Run(() =>
+        {
+            UpdateViewModel update = new(info.Object, connection.Object, feed.Object, null);
+            update.Check().GetAwaiter().GetResult();
+            update.Begin();
+            update.ConfirmCommand.Execute(null);
+            UpdatingView view = new() { DataContext = update };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            string[] running = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible).Select(block => block.Text ?? string.Empty)];
+            bool closeWhileRunning = window.GetVisualDescendants().OfType<Button>().Any(button => button.IsEffectivelyVisible && button.Content?.ToString() == "Close");
+            gate.SetResult();
+            for (int attempt = 0; attempt < 100 && update.Phase != UpdatePhase.Waiting; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool closeWhenWaiting = window.GetVisualDescendants().OfType<Button>().Any(button => button.IsEffectivelyVisible && button.Content?.ToString() == "Close");
+            window.Close();
+            return (running, closeWhileRunning, closeWhenWaiting);
+        });
+
+        Assert.Contains("Updating the server", running);
+        Assert.False(closeWhileRunning);
+        Assert.True(closeWhenWaiting);
+    }
+
+    [Fact]
+    public async Task VersionMismatchView_OffersUpdateWhenOneExistsAndAlwaysChangeServer()
+    {
+        connection.SetupGet(x => x.ServerVersion).Returns("1.2.0");
+        Mock<IAppInfo> info = new();
+        info.SetupGet(x => x.Version).Returns("1.0.0");
+        Mock<IReleaseFeed> feed = new();
+        feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync((ReleaseInfo?)null);
+
+        (string[] before, string[] after) = await fixture.Run(() =>
+        {
+            UpdateViewModel update = new(info.Object, connection.Object, feed.Object, null);
+            VersionMismatchViewModel model = new(info.Object, connection.Object, update);
+            VersionMismatchView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            string[] Buttons() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty)];
+            update.Check().GetAwaiter().GetResult();
+            string[] before = Buttons();
+            feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync(new ReleaseInfo { Version = new AppVersion { Major = 1, Minor = 3, Patch = 0 }, Assets = [] });
+            update.Check().GetAwaiter().GetResult();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string[] after = Buttons();
+            window.Close();
+            return (before, after);
+        });
+
+        Assert.Equal(["Change server"], before);
+        Assert.Equal(["Update", "Change server"], after);
+    }
+
+    [Fact]
     public async Task HomeView_SidebarHasAGearThatOpensTheEnvironmentSettings()
     {
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });

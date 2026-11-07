@@ -29,6 +29,7 @@ Run `Scripts/Publish.cs` locally to cut a release:
    publishes the server and the desktop client (Windows and Linux x64) as self-contained single-file
    executables, the Android client as an APK signed with the release keystore (repository secrets `ANDROID_KEYSTORE_BASE64`, the PKCS12 keystore base64-encoded with alias `autoremote`, and `ANDROID_KEYSTORE_PASSWORD`, used for both store and key; losing the keystore means installed copies must be uninstalled before a differently signed update) and the web client
    as a single HTML file, and uploads them alongside `THIRD-PARTY-NOTICES.txt` as release assets.
+   The asset names and the plain version tag are what the self-update of installed copies relies on, so renaming either breaks it.
 4. It waits for that run to finish, rolling the release/tag back if the workflow fails, so a failed
    publish never leaves one behind. If it can't confirm the run happened at all, it leaves the release
    in place instead, rather than risk deleting one that's still running.

@@ -42,11 +42,11 @@ internal enum HandshakeOutcome
 }
 
 /// <inheritdoc />
-internal sealed class Handshake : IHandshake
+internal sealed class Handshake(IAppInfo info) : IHandshake
 {
     private readonly int maxLength = 1024;
 
-    private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
+    private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
 
     private readonly TimeSpan timeout = TimeSpan.FromSeconds(5);
 
@@ -67,7 +67,7 @@ internal sealed class Handshake : IHandshake
             return HandshakeOutcome.TimedOut;
         }
 
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new HandshakeResponse { Accepted = outcome == HandshakeOutcome.Accepted }, options) + "\n"), cancellation);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new HandshakeResponse { Accepted = outcome == HandshakeOutcome.Accepted, Version = outcome == HandshakeOutcome.Accepted ? info.Version : null }, options) + "\n"), cancellation);
         await stream.FlushAsync(cancellation);
         return outcome;
     }

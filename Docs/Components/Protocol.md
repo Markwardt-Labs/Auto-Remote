@@ -20,10 +20,11 @@ The client opens the WebSocket connection and sends one JSON line (at most 1024 
 | --- | --- | --- | --- |
 | Client to server | `accessKey` | string | The access key the client was configured with. |
 | Server to client | `accepted` | bool | `true` if the key was correct. |
+| Server to client | `version` | string | The server's version (`major.minor.patch`), sent only with an acceptance and left out by a server that predates version checks. The Avalonia clients compare it with their own on every connect and reconnect. |
 
 ```json
 {"accessKey": "change-me"}
-{"accepted": true}
+{"accepted": true, "version": "1.2.3"}
 ```
 
 ## Message formats
@@ -136,6 +137,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
+| `UpdateServer` | none | none | Makes the server look for the newest release on GitHub, download its server executable and restart with it, which closes every connection. Answers once the download is complete, a second before the restart. Refused when there is no newer release, GitHub cannot be reached, the server does not run from an installed executable or the folder is not writable. Not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
 | `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |

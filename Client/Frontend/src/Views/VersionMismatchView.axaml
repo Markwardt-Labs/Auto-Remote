@@ -1,0 +1,19 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.VersionMismatchView"
+             x:CompileBindings="False">
+  <Grid>
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel MaxWidth="440" Margin="24,48" Spacing="14" VerticalAlignment="Center">
+        <TextBlock Text="Auto Remote" Classes="serif" FontSize="34" HorizontalAlignment="Center" />
+        <TextBlock Text="The versions do not match" Classes="muted" HorizontalAlignment="Center" Margin="0,0,0,18" />
+        <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Hint}" Classes="muted" TextWrapping="Wrap" />
+        <local:TouchButton Content="Update" Command="{Binding Update.BeginCommand}" IsVisible="{Binding Update.IsAvailable}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
+        <local:TouchButton Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+      </StackPanel>
+    </ScrollViewer>
+    <local:UpdateDialogView DataContext="{Binding Update}" IsVisible="{Binding IsOpen}" />
+  </Grid>
+</UserControl>

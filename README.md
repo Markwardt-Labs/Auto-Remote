@@ -14,8 +14,10 @@ Auto Remote is a command line server that hosts Claude Code, OpenAI Codex or loc
 
 Download the server executable for your platform from the latest [Release](https://github.com/Markwardt-Labs/Auto-Remote/releases):
 
-- **Windows** - download `Markwardt.AutoRemote.Server.exe` and run it.
-- **Linux** - download `Markwardt.AutoRemote.Server`, mark it executable (`chmod +x Markwardt.AutoRemote.Server`), and run it.
+- **Windows** - download `AutoRemote-Server-win.exe` and run it.
+- **Linux** - download `AutoRemote-Server-linux`, mark it executable (`chmod +x AutoRemote-Server-linux`), and run it.
+
+The desktop client (`AutoRemote-win.exe`, `AutoRemote-linux`) and the Android client (`AutoRemote-android.apk`) are on the same page. Once installed, the server and these clients update themselves from the newest release: an update button appears when there is one, and updating a connected client updates its server too.
 
 ## Documentation
 

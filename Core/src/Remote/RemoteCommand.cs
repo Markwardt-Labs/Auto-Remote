@@ -314,5 +314,10 @@ public enum RemoteCommand
     /// <summary>
     /// Turns the speech in the base64 WAV audio <see cref="RemoteRequest.Data" /> (16 kHz, mono, 16 bit) into text with the server's speech command and answers with it in <see cref="RemoteResponse.Transcript" />. Fails when the server has no speech command, the audio is larger than the limit or the command fails.
     /// </summary>
-    Transcribe
+    Transcribe,
+
+    /// <summary>
+    /// Makes the server look on GitHub for a newer release than its own, download it and restart with it, which ends every connection; answered once the download is complete and before the restart. Fails when there is no newer release, GitHub cannot be reached or the server does not run from an installed release.
+    /// </summary>
+    UpdateServer
 }

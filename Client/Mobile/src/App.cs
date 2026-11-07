@@ -32,7 +32,7 @@ public sealed class App : ClientApp
     {
         if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
         {
-            view = CreateMainView(typeof(App).Assembly, ClientLayout.Tabs, null, new AndroidChime(new ChimeSound()), new AndroidReadyNotifier(), new AndroidWorkKeeper(), new AndroidVoiceRecorder());
+            view = CreateMainView(typeof(App).Assembly, ClientLayout.Tabs, null, new AndroidChime(new ChimeSound()), new AndroidReadyNotifier(), new AndroidWorkKeeper(), new AndroidVoiceRecorder(), null, new AndroidUpdater(new IReleaseFeed.Factory().Create()));
             singleView.MainView = view;
 
             if (requested is { } workspace)

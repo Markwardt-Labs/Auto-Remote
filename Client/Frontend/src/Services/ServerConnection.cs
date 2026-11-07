@@ -21,6 +21,11 @@ internal interface IServerConnection : IAsyncDisposable
     event Action? Reconnected;
 
     /// <summary>
+    /// Gets the version the server reported when the connection was opened, or <see langword="null" /> from a server that predates the update system; it is read again whenever the connection is reopened.
+    /// </summary>
+    string? ServerVersion { get; }
+
+    /// <summary>
     /// Drops the connection and opens a new one, for a connection that may have died silently, such as when the app was in the background; <see cref="Reconnected" /> is raised once it is open.
     /// </summary>
     /// <param name="cancellation">Cancels the wait.</param>
@@ -607,6 +612,13 @@ internal interface IServerConnection : IAsyncDisposable
     Task RemoveScript(Guid id, string path, CancellationToken cancellation);
 
     /// <summary>
+    /// Makes the server download the newest release from GitHub and restart with it; it is accepted once the download is complete, and the server restarts shortly after, which loses the connection until it is back.
+    /// </summary>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused, for example because there is no newer release or it does not run from an installed release.</exception>
+    Task UpdateServer(CancellationToken cancellation);
+
+    /// <summary>
     /// Opens <see cref="IServerConnection" /> instances.
     /// </summary>
     public interface IFactory
@@ -630,11 +642,11 @@ internal interface IServerConnection : IAsyncDisposable
         /// <inheritdoc />
         public async Task<IServerConnection> Connect(ConnectionSettings settings, CancellationToken cancellation)
         {
-            (ClientWebSocket socket, IMessageChannel channel) = await Open(settings, cancellation);
-            return new ServerConnection(socket, channel, token => Open(settings, token), log, $"{settings.Host}:{settings.Port}", environment);
+            (ClientWebSocket socket, IMessageChannel channel, string? version) = await Open(settings, cancellation);
+            return new ServerConnection(socket, channel, version, token => Open(settings, token), log, $"{settings.Host}:{settings.Port}", environment);
         }
 
-        private async Task<(ClientWebSocket socket, IMessageChannel channel)> Open(ConnectionSettings settings, CancellationToken cancellation)
+        private async Task<(ClientWebSocket socket, IMessageChannel channel, string? version)> Open(ConnectionSettings settings, CancellationToken cancellation)
         {
             ClientWebSocket socket = new();
             socket.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
@@ -687,7 +699,7 @@ internal interface IServerConnection : IAsyncDisposable
                 }
 
                 log.Write($"Connected to {server}");
-                return (socket, channel);
+                return (socket, channel, reply.Version);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
@@ -713,17 +725,19 @@ internal sealed class ServerConnection : IServerConnection
     /// </summary>
     /// <param name="socket">The connected WebSocket.</param>
     /// <param name="channel">The authenticated message channel over the WebSocket.</param>
+    /// <param name="version">The version the server reported, if it did.</param>
     /// <param name="reopen">Opens a new authenticated connection to the same server, used when the connection is lost.</param>
     /// <param name="log">Receives a line when the connection is lost.</param>
     /// <param name="server">The host and port, for the log.</param>
     /// <param name="environment">Reads an environment variable of this machine, or <see langword="null" /> to read the process's own.</param>
-    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel)>> reopen, ILog log, string server, Func<string, string?>? environment = null)
+    public ServerConnection(ClientWebSocket socket, IMessageChannel channel, string? version, Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel, string? version)>> reopen, ILog log, string server, Func<string, string?>? environment = null)
     {
         this.environment = environment ?? Environment.GetEnvironmentVariable;
         this.log = log;
         this.server = server;
         this.socket = socket;
         this.channel = channel;
+        ServerVersion = version;
         this.reopen = reopen;
         reading = Read(channel);
     }
@@ -734,7 +748,7 @@ internal sealed class ServerConnection : IServerConnection
 
     private readonly string server;
 
-    private readonly Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel)>> reopen;
+    private readonly Func<CancellationToken, Task<(ClientWebSocket socket, IMessageChannel channel, string? version)>> reopen;
 
     private readonly SynchronizationContext? context = SynchronizationContext.Current;
 
@@ -768,6 +782,9 @@ internal sealed class ServerConnection : IServerConnection
     public event Action? Reconnected;
 
     /// <inheritdoc />
+    public string? ServerVersion { get; private set; }
+
+    /// <inheritdoc />
     public async Task Reconnect(CancellationToken cancellation)
     {
         if (stopping.IsCancellationRequested)
@@ -779,6 +796,9 @@ internal sealed class ServerConnection : IServerConnection
         await reading;
         await Reopen(cancellation);
     }
+
+    /// <inheritdoc />
+    public async Task UpdateServer(CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.UpdateServer }, cancellation);
 
     /// <inheritdoc />
     public async Task<WorkspaceCatalog> ListWorkspaces(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListWorkspaces }, cancellation)).Catalog ?? throw Malformed();
@@ -1016,10 +1036,11 @@ internal sealed class ServerConnection : IServerConnection
 
             await reading;
             log.Write($"Reconnecting to {server}");
-            (ClientWebSocket opened, IMessageChannel openedChannel) = await reopen(cancellation);
+            (ClientWebSocket opened, IMessageChannel openedChannel, string? openedVersion) = await reopen(cancellation);
             socket.Dispose();
             socket = opened;
             channel = openedChannel;
+            ServerVersion = openedVersion;
             lost = false;
             reading = Read(openedChannel);
             Post(Reconnected);

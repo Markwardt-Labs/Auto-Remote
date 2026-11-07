@@ -24,8 +24,8 @@ public sealed class ServerConnectionTests
         Mock<IMessageChannel> graphicalChannel = Channel(sentGraphical, out _);
         Mock<IMessageChannel> plainChannel = Channel(sentPlain, out _);
         Dictionary<string, string> variables = new() { ["DISPLAY"] = ":1", ["XAUTHORITY"] = "/auth", ["PATH"] = "/bin" };
-        await using ServerConnection graphical = new(new ClientWebSocket(), graphicalChannel.Object, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", name => variables.GetValueOrDefault(name));
-        await using ServerConnection plain = new(new ClientWebSocket(), plainChannel.Object, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
+        await using ServerConnection graphical = new(new ClientWebSocket(), graphicalChannel.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", name => variables.GetValueOrDefault(name));
+        await using ServerConnection plain = new(new ClientWebSocket(), plainChannel.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
 
         await graphical.RunScript(Guid.NewGuid(), "a.cs", CancellationToken.None);
         await plain.RunScript(Guid.NewGuid(), "a.cs", CancellationToken.None);
@@ -42,10 +42,10 @@ public sealed class ServerConnectionTests
         Mock<IMessageChannel> first = Channel(sentFirst, out Channel<RemoteResponse> firstReplies);
         Mock<IMessageChannel> second = Channel(sentSecond, out _);
         int opened = 0;
-        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, _ =>
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, null, _ =>
         {
             opened++;
-            return Task.FromResult((new ClientWebSocket(), second.Object));
+            return Task.FromResult((new ClientWebSocket(), second.Object, (string?)null));
         }, Mock.Of<ILog>(), "box:1");
         Guid workspace = Guid.NewGuid();
 
@@ -64,7 +64,7 @@ public sealed class ServerConnectionTests
     {
         List<RemoteRequest> sent = [];
         Mock<IMessageChannel> first = Channel(sent, out Channel<RemoteResponse> replies);
-        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1");
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1");
 
         replies.Writer.Complete();
         await Task.Delay(100);
@@ -80,10 +80,10 @@ public sealed class ServerConnectionTests
         int opened = 0;
         int lost = 0;
         TaskCompletionSource reconnected = new();
-        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, _ =>
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, null, _ =>
         {
             opened++;
-            return Task.FromResult((new ClientWebSocket(), second.Object));
+            return Task.FromResult((new ClientWebSocket(), second.Object, (string?)null));
         }, Mock.Of<ILog>(), "box:1");
         connection.Lost += () => lost++;
         connection.Reconnected += () => reconnected.TrySetResult();
@@ -98,6 +98,35 @@ public sealed class ServerConnectionTests
     }
 
     [Fact]
+    public async Task UpdateServer_SendsTheCommand()
+    {
+        List<RemoteRequest> sent = [];
+        Mock<IMessageChannel> channel = Channel(sent, out _);
+        await using ServerConnection connection = new(new ClientWebSocket(), channel.Object, "1.2.3", _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1");
+
+        await connection.UpdateServer(CancellationToken.None);
+
+        Assert.Equal(RemoteCommand.UpdateServer, Assert.Single(sent).Command);
+    }
+
+    [Fact]
+    public async Task ServerVersion_IsTheOneTheServerReportedAndIsReadAgainWhenTheConnectionIsReopened()
+    {
+        Mock<IMessageChannel> first = Channel([], out Channel<RemoteResponse> firstReplies);
+        Mock<IMessageChannel> second = Channel([], out _);
+        TaskCompletionSource reconnected = new();
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, "1.2.3", _ => Task.FromResult((new ClientWebSocket(), second.Object, (string?)"1.3.0")), Mock.Of<ILog>(), "box:1");
+        connection.Reconnected += () => reconnected.TrySetResult();
+
+        Assert.Equal("1.2.3", connection.ServerVersion);
+
+        firstReplies.Writer.Complete();
+        await reconnected.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        Assert.Equal("1.3.0", connection.ServerVersion);
+    }
+
+    [Fact]
     public async Task Reconnect_ReplacesAConnectionThatLooksAlive()
     {
         List<RemoteRequest> sentSecond = [];
@@ -105,10 +134,10 @@ public sealed class ServerConnectionTests
         Mock<IMessageChannel> second = Channel(sentSecond, out _);
         int opened = 0;
         int reconnected = 0;
-        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, _ =>
+        await using ServerConnection connection = new(new ClientWebSocket(), first.Object, null, _ =>
         {
             opened++;
-            return Task.FromResult((new ClientWebSocket(), second.Object));
+            return Task.FromResult((new ClientWebSocket(), second.Object, (string?)null));
         }, Mock.Of<ILog>(), "box:1");
         connection.Reconnected += () => reconnected++;
 

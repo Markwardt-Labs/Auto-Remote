@@ -17,8 +17,10 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
     /// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
     /// <param name="newWindow">Opens another window of the app as a process of its own, or <see langword="null" /> when this client cannot, which hides the button.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null)
+    /// <param name="update">Offers an update of the client and the server, or <see langword="null" /> when none is offered.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, UpdateViewModel? update = null)
     {
+        Update = update;
         this.recorder = recorder;
         this.newWindow = newWindow;
         this.notifier = notifier;
@@ -556,6 +558,11 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the command that asks to change server.
     /// </summary>
     public AsyncCommand ChangeServerCommand { get; }
+
+    /// <summary>
+    /// Gets the update of the client and the server that is offered next to the workspaces button, or <see langword="null" /> when none is.
+    /// </summary>
+    public UpdateViewModel? Update { get; }
 
     /// <summary>
     /// Gets a value indicating whether this client can open another window of the app, which shows the button for it.

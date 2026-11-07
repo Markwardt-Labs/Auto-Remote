@@ -18,6 +18,7 @@ public sealed class MainViewModelTests
     {
         info.SetupGet(x => x.Name).Returns("Auto Remote");
         info.SetupGet(x => x.Version).Returns("1.0.0");
+        connection.SetupGet(x => x.ServerVersion).Returns("1.0.0");
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
         model = new MainViewModel(info.Object, factory.Object, store.Object);
     }
@@ -53,6 +54,199 @@ public sealed class MainViewModelTests
         ConnectViewModel connect = Assert.IsType<ConnectViewModel>(model.Current);
         Assert.Equal("box", connect.Host);
         Assert.Equal("timed out", connect.Error);
+    }
+
+    [Theory]
+    [InlineData("2.0.0")]
+    [InlineData(null)]
+    public async Task Start_WhenTheServerRunsAnotherVersion_ShowsOnlyTheMismatchScreen(string? serverVersion)
+    {
+        connection.SetupGet(x => x.ServerVersion).Returns(serverVersion);
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+
+        await model.Start();
+
+        VersionMismatchViewModel mismatch = Assert.IsType<VersionMismatchViewModel>(model.Current);
+        Assert.Contains("1.0.0", mismatch.Message);
+        connection.Verify(x => x.ListWorkspaces(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Connecting_ToAServerOfAnotherVersion_ShowsTheMismatchScreen()
+    {
+        connection.SetupGet(x => x.ServerVersion).Returns("2.0.0");
+        factory.Setup(x => x.Connect(It.IsAny<ConnectionSettings>(), It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        await model.Start();
+        ConnectViewModel connect = Assert.IsType<ConnectViewModel>(model.Current);
+        connect.Host = "box";
+        connect.AccessKey = "k";
+
+        connect.ConnectCommand.Execute(null);
+        await WaitFor(() => model.Current is VersionMismatchViewModel);
+
+        Assert.IsType<VersionMismatchViewModel>(model.Current);
+    }
+
+    [Fact]
+    public async Task MismatchScreen_ChangeServerClosesTheConnectionAndAsksForAServer()
+    {
+        connection.SetupGet(x => x.ServerVersion).Returns("2.0.0");
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        await model.Start();
+
+        Assert.IsType<VersionMismatchViewModel>(model.Current).ChangeServerCommand.Execute(null);
+        await WaitFor(() => model.Current is ConnectViewModel);
+
+        Assert.Equal("box", Assert.IsType<ConnectViewModel>(model.Current).Host);
+        connection.Verify(x => x.DisposeAsync(), Times.Once);
+    }
+
+    [Fact]
+    public async Task Reconnecting_ToAServerThatNowMatches_LeavesTheMismatchScreen()
+    {
+        string? version = "2.0.0";
+        connection.SetupGet(x => x.ServerVersion).Returns(() => version);
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        await model.Start();
+        Assert.IsType<VersionMismatchViewModel>(model.Current);
+
+        version = "1.0.0";
+        connection.Raise(x => x.Reconnected += null);
+        await WaitFor(() => model.Current is HomeViewModel);
+
+        Assert.IsType<HomeViewModel>(model.Current);
+    }
+
+    [Fact]
+    public async Task Reconnecting_ToAServerOfAnotherVersion_ReplacesTheWorkspacesWithTheMismatchScreen()
+    {
+        string? version = "1.0.0";
+        connection.SetupGet(x => x.ServerVersion).Returns(() => version);
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        await model.Start();
+        Assert.IsType<HomeViewModel>(model.Current);
+
+        version = "1.1.0";
+        connection.Raise(x => x.Reconnected += null);
+        await WaitFor(() => model.Current is VersionMismatchViewModel);
+
+        Assert.IsType<VersionMismatchViewModel>(model.Current);
+    }
+
+    private readonly Mock<IReleaseFeed> feed = new();
+
+    private readonly Mock<IClientUpdater> updater = new();
+
+    private MainViewModel Updating(string clientVersion, string? serverVersion)
+    {
+        info.SetupGet(x => x.Version).Returns(clientVersion);
+        connection.SetupGet(x => x.ServerVersion).Returns(() => currentServerVersion ?? serverVersion);
+        feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync(new ReleaseInfo { Version = new AppVersion { Major = 1, Minor = 1, Patch = 0 }, Assets = [] });
+        updater.SetupGet(x => x.IsSupported).Returns(true);
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        return new MainViewModel(info.Object, factory.Object, store.Object, ClientLayout.Tabs, null, null, null, null, null, null, feed.Object, updater.Object);
+    }
+
+    private string? currentServerVersion;
+
+    [Fact]
+    public async Task ConfirmingAnUpdate_ShowsTheUpdatingScreenWhileTheClientIsDownloadedAndComesBackOnClose()
+    {
+        MainViewModel updating = Updating("1.0.0", "1.0.0");
+        TaskCompletionSource gate = new();
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).Returns(gate.Task);
+        await updating.Start();
+        HomeViewModel home = Assert.IsType<HomeViewModel>(updating.Current);
+        await WaitFor(() => home.Update!.IsAvailable);
+
+        home.Update!.BeginCommand.Execute(null);
+        Assert.Same(home, updating.Current);
+        home.Update.ConfirmCommand.Execute(null);
+        await WaitFor(() => updating.Current is UpdateViewModel);
+
+        Assert.Same(home.Update, updating.Current);
+        Assert.Equal("Auto Remote", updating.WindowTitle);
+
+        gate.SetResult();
+        await WaitFor(() => home.Update.Phase == UpdatePhase.Finished);
+
+        Assert.Same(home.Update, updating.Current);
+
+        home.Update.CloseCommand.Execute(null);
+
+        Assert.Same(home, updating.Current);
+    }
+
+    [Fact]
+    public async Task Focus_DuringAnUpdate_LeavesTheUpdatingScreenInPlaceAndWaits()
+    {
+        MainViewModel updating = Updating("1.0.0", "1.0.0");
+        TaskCompletionSource gate = new();
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).Returns(gate.Task);
+        await updating.Start();
+        HomeViewModel home = Assert.IsType<HomeViewModel>(updating.Current);
+        await WaitFor(() => home.Update!.IsAvailable);
+        home.Update!.BeginCommand.Execute(null);
+        home.Update.ConfirmCommand.Execute(null);
+        await WaitFor(() => updating.Current is UpdateViewModel);
+
+        await updating.Focus(Guid.NewGuid());
+
+        Assert.Same(home.Update, updating.Current);
+        gate.SetResult();
+    }
+
+    [Fact]
+    public async Task AFailedUpdate_LeavesTheUpdatingScreenAndShowsTheErrorInTheConfirmation()
+    {
+        MainViewModel updating = Updating("1.0.0", "1.0.0");
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
+        await updating.Start();
+        HomeViewModel home = Assert.IsType<HomeViewModel>(updating.Current);
+        await WaitFor(() => home.Update!.IsAvailable);
+        home.Update!.BeginCommand.Execute(null);
+
+        home.Update.ConfirmCommand.Execute(null);
+        await WaitFor(() => home.Update.HasError);
+
+        Assert.Same(home, updating.Current);
+        Assert.True(home.Update.IsOpen);
+        Assert.Equal("disk full", home.Update.Error);
+    }
+
+    [Fact]
+    public async Task AServerUpdate_ShowsTheUpdatingScreenUntilTheServerIsBackAndThenTheScreenItCameFrom()
+    {
+        MainViewModel updating = Updating("1.1.0", "1.0.0");
+        await updating.Start();
+        VersionMismatchViewModel mismatch = Assert.IsType<VersionMismatchViewModel>(updating.Current);
+        await WaitFor(() => mismatch.Update.IsAvailable);
+        mismatch.Update.BeginCommand.Execute(null);
+
+        mismatch.Update.ConfirmCommand.Execute(null);
+        await WaitFor(() => updating.Current is UpdateViewModel && mismatch.Update.Phase == UpdatePhase.Waiting);
+
+        Assert.Same(mismatch.Update, updating.Current);
+        connection.Verify(x => x.UpdateServer(It.IsAny<CancellationToken>()), Times.Once);
+
+        currentServerVersion = "1.1.0";
+        connection.Raise(x => x.Reconnected += null);
+        await WaitFor(() => updating.Current is HomeViewModel);
+
+        Assert.IsType<HomeViewModel>(updating.Current);
+    }
+
+    private static async Task WaitFor(Func<bool> condition)
+    {
+        for (int attempt = 0; attempt < 500 && !condition(); attempt++)
+        {
+            await Task.Delay(20);
+        }
     }
 
     [Fact]

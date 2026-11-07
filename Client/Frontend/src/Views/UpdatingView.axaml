@@ -1,0 +1,15 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.UpdatingView"
+             x:CompileBindings="False">
+  <ScrollViewer VerticalScrollBarVisibility="Auto">
+    <StackPanel MaxWidth="440" Margin="24,48" Spacing="14" VerticalAlignment="Center">
+      <TextBlock Text="Auto Remote" Classes="serif" FontSize="34" HorizontalAlignment="Center" />
+      <TextBlock Text="Updating" Classes="muted" HorizontalAlignment="Center" Margin="0,0,0,18" />
+      <TextBlock Text="{Binding Status}" TextWrapping="Wrap" HorizontalAlignment="Center" TextAlignment="Center" />
+      <ProgressBar IsIndeterminate="{Binding IsProgressUnknown}" Minimum="0" Maximum="1" Value="{Binding Progress}" IsVisible="{Binding IsWorking}" Foreground="{DynamicResource Accent}" />
+      <local:TouchButton Content="{Binding CloseText}" Command="{Binding CloseCommand}" IsVisible="{Binding CanClose}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
+    </StackPanel>
+  </ScrollViewer>
+</UserControl>

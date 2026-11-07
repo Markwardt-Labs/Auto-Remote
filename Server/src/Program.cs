@@ -26,6 +26,11 @@ internal static class Program
         });
 
         IAppInfo info = new IAppInfo.Factory().Create(typeof(Program).Assembly);
+        IReleaseFeed feed = new IReleaseFeed.Factory().Create();
+        IExecutableInstaller installer = new IExecutableInstaller.Factory().Create(feed);
+        installer.Clean();
+        IServerRestart restart = new ServerRestart(cancellation, Console.Out, installer, [.. args], Environment.GetEnvironmentVariable, Launch, TimeSpan.FromSeconds(1));
+        IServerUpdater updater = new ServerUpdater(info, feed, installer, restart);
         ILog log = new ConsoleLog();
         IFolderBrowser folders = new FolderBrowser();
         IWorkspaceStore store = new WorkspaceStore();
@@ -40,17 +45,39 @@ internal static class Program
         IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity);
         IScriptRunner scripts = new ScriptRunner(events, activity);
         IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), host, loops, new WorkspaceWatcher(events, log));
-        IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log), Console.Out);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), host, loops, new WorkspaceWatcher(events, log), updater);
+        IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(info), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log), Console.Out);
+        int code;
+
         try
         {
-            return await application.Run(args, cancellation.Token);
+            code = await application.Run(args, cancellation.Token);
         }
         finally
         {
             Console.WriteLine("Closing the AI sessions");
             await prompts.Close();
             Console.WriteLine("Closed the AI sessions");
+        }
+
+        if (restart.IsRequested)
+        {
+            Environment.Exit(restart.Relaunch());
+        }
+
+        return code;
+    }
+
+    private static string? Launch(ProcessStartInfo info)
+    {
+        try
+        {
+            Process.Start(info)?.Dispose();
+            return null;
+        }
+        catch (Exception exception) when (exception is Win32Exception or IOException)
+        {
+            return exception.Message;
         }
     }
 }

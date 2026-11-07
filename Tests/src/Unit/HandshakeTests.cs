@@ -5,7 +5,7 @@ public sealed class HandshakeTests
     private static async Task<(HandshakeOutcome outcome, string reply)> Run(string sent, string key)
     {
         using DuplexStream stream = new(Encoding.UTF8.GetBytes(sent));
-        HandshakeOutcome outcome = await new Handshake().Perform(stream, key, CancellationToken.None);
+        HandshakeOutcome outcome = await new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")).Perform(stream, key, CancellationToken.None);
         return (outcome, Encoding.UTF8.GetString(stream.Written.ToArray()));
     }
 
@@ -15,7 +15,7 @@ public sealed class HandshakeTests
         (HandshakeOutcome outcome, string reply) = await Run("{\"accessKey\":\"secret\"}\r\n", "secret");
 
         Assert.Equal(HandshakeOutcome.Accepted, outcome);
-        Assert.Equal("{\"accepted\":true}\n", reply);
+        Assert.Equal("{\"accepted\":true,\"version\":\"1.2.3\"}\n", reply);
     }
 
     [Theory]

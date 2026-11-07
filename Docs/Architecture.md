@@ -18,6 +18,10 @@ The Android and desktop clients draw the same UI with Avalonia, so everything vi
 
 `Client/Web/index.html` is the whole browser frontend: HTML, CSS and JavaScript with no build step, no dependencies and no serving code, so it can be dropped on any static host (or opened from disk). It mirrors the Avalonia clients' screens and behavior and connects straight to the server, over secure WebSocket (`wss`), the same transport the Avalonia clients use (see the protocol document). It is hand-written JavaScript rather than a second Avalonia target because a single file with nothing to build is what lets it be hosted anywhere; the trade-off is that it is not covered by the .NET tests and has to be kept in step with the Avalonia clients by hand.
 
+## Client and server must run the same version
+
+The protocol is not versioned beyond the release, so the server tells its version in the handshake and a client that differs only offers an update or another server instead of risking calls the other side does not understand. Updating is therefore one action for both sides: a connected client updates its server first, then itself. The apps replace themselves from the GitHub release rather than through a package manager, because they ship as single files, and the web client, a file replaced by hand, takes no part.
+
 ## Access key handshake before any traffic
 
 Clients authenticate with a single shared access key sent as the first line on the connection, before the server accepts anything else. A per-user account system was rejected as unneeded for a single-owner server.

@@ -131,7 +131,9 @@ jobs:
           for rid in win-x64 linux-x64; do
             dotnet publish Client/Desktop/Desktop.csproj --configuration Release --runtime $rid --output publish/desktop-$rid -p:RestoreLockedMode=true -p:Version=$VERSION
           done
-          dotnet publish Client/Mobile/Mobile.csproj --configuration Release --output publish/mobile -p:AndroidPackageFormat=apk -p:RestoreLockedMode=true -p:Version=$VERSION -p:AndroidKeyStore=true -p:AndroidSigningKeyStore="$RUNNER_TEMP/release.keystore" -p:AndroidSigningKeyAlias=autoremote -p:AndroidSigningStorePass=env:ANDROID_KEYSTORE_PASSWORD -p:AndroidSigningKeyPass=env:ANDROID_KEYSTORE_PASSWORD
+          IFS=.- read -r MAJOR MINOR PATCH _ <<< "$VERSION"
+          CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+          dotnet publish Client/Mobile/Mobile.csproj --configuration Release --output publish/mobile -p:AndroidPackageFormat=apk -p:RestoreLockedMode=true -p:Version=$VERSION -p:ApplicationVersion=$CODE -p:AndroidKeyStore=true -p:AndroidSigningKeyStore="$RUNNER_TEMP/release.keystore" -p:AndroidSigningKeyAlias=autoremote -p:AndroidSigningStorePass=env:ANDROID_KEYSTORE_PASSWORD -p:AndroidSigningKeyPass=env:ANDROID_KEYSTORE_PASSWORD
 
       # The release asset names must be unique and say which app and platform they are for.
       - name: Stage release assets
