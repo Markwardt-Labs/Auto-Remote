@@ -14,7 +14,7 @@ internal sealed class LoopViewModel : ViewModelBase
     {
         this.connection = connection;
         this.workspace = workspace;
-        selectedCondition = All.First(choice => choice.Condition == LoopCondition.ForDuration);
+        selectedCondition = All.First(choice => choice.Condition == LoopCondition.Forever);
         StartCommand = new AsyncCommand(_ => Start());
         CancelCommand = new AsyncCommand(_ =>
         {
@@ -37,7 +37,7 @@ internal sealed class LoopViewModel : ViewModelBase
 
     private string customPrompt = string.Empty;
 
-    private decimal? intervalMinutes = 10;
+    private decimal? intervalMinutes = 15;
 
     private LoopConditionChoice selectedCondition;
 
@@ -262,7 +262,7 @@ internal sealed class LoopViewModel : ViewModelBase
         Error = null;
         UseReview = true;
         CustomPrompt = string.Empty;
-        IntervalMinutes = 10;
+        IntervalMinutes = 15;
         EndTime = new TimeSpan(TimeSpan.FromHours(23).Ticks);
         Hours = 2;
         Minutes = 0;
@@ -292,7 +292,7 @@ internal sealed class LoopViewModel : ViewModelBase
         windows = names;
         selectedWindow = names.Contains(selectedWindow ?? string.Empty) ? selectedWindow : names.FirstOrDefault();
 
-        SelectedCondition = All.First(choice => choice.Condition == LoopCondition.ForDuration);
+        SelectedCondition = All.First(choice => choice.Condition == LoopCondition.Forever);
 
         Raise(nameof(Conditions));
         Raise(nameof(Windows));

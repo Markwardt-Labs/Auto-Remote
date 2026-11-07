@@ -2242,7 +2242,7 @@ class WorkspaceView {
     reviewRadio.onchange = choosePrompt;
     expandRadio.onchange = choosePrompt;
     customRadio.onchange = choosePrompt;
-    const interval = h("input", { type: "number", min: "0", max: "1440", step: "1", value: "10" });
+    const interval = h("input", { type: "number", min: "0", max: "1440", step: "1", value: "15" });
     const conditions = [["Forever", "Until I cancel it"], ["UntilTime", "Until a time of day"], ["ForDuration", "For a length of time"], ["Runs", "For a number of runs"], ...(windows.length > 0 ? [["UntilWindow", "Until a usage limit reaches a share"]] : [])];
     const time = h("input", { type: "time", value: "23:00" });
     const hours = h("input", { type: "number", min: "0", max: "576", step: "1", value: "2" });
@@ -2258,7 +2258,7 @@ class WorkspaceView {
     };
     const kind = h("select", { onchange: () => show() }, conditions.map(([value, label]) => h("option", { value }, label)));
     const show = () => { for (const [name, box] of Object.entries(boxes)) { box.hidden = name !== kind.value; } };
-    kind.value = "ForDuration";
+    kind.value = "Forever";
     show();
     const start = async () => {
       const text = reviewRadio.checked ? reviewPrompt : expandRadio.checked ? expandPrompt : custom.value.trim();

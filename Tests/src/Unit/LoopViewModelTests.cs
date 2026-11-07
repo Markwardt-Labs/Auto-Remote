@@ -168,7 +168,7 @@ public sealed class LoopViewModelTests
     }
 
     [Fact]
-    public async Task Open_StartsFromTheReviewPromptEveryTenMinutesForTwoHoursEvenAfterEarlierChanges()
+    public async Task Open_StartsFromTheReviewPromptEveryFifteenMinutesUntilCancelledEvenAfterEarlierChanges()
     {
         Windows();
         LoopViewModel fresh = Opened();
@@ -182,7 +182,7 @@ public sealed class LoopViewModelTests
         await changed.Open();
         LoopSettings reset = changed.Build(now);
 
-        Assert.Equal(("review it", 600, LoopCondition.ForDuration, 7200), (initial.Prompt, initial.IntervalSeconds, initial.Condition, initial.DurationSeconds));
+        Assert.Equal(("review it", 900, LoopCondition.Forever), (initial.Prompt, initial.IntervalSeconds, initial.Condition));
         Assert.Equal(initial, reset);
         Assert.True(changed.UseReview);
     }
