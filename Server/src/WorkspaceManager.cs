@@ -70,6 +70,17 @@ internal interface IWorkspaceManager
     Task AttachSession(Guid id, string sessionId, CancellationToken cancellation);
 
     /// <summary>
+    /// Sets the review and expand prompts a workspace has of its own, which its buttons send instead of the ones of the environment.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="reviewPrompt">The review prompt, or <see langword="null" /> or blank to use the one of the environment.</param>
+    /// <param name="expandPrompt">The expand prompt, or <see langword="null" /> or blank to use the one of the environment.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The updated workspace.</returns>
+    /// <exception cref="RequestException">The workspace is unknown.</exception>
+    Task<WorkspaceInfo> SetPrompts(Guid id, string? reviewPrompt, string? expandPrompt, CancellationToken cancellation);
+
+    /// <summary>
     /// Moves a workspace into a group, or out of any group; it goes to the end of that group.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -214,7 +225,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             {
                 if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
                 {
-                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId });
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt });
 
                     if (stored.Adopt)
                     {
@@ -364,6 +375,18 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         using (await Lock(cancellation))
         {
             await Replace(Find(id) with { SessionId = sessionId }, cancellation, false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> SetPrompts(Guid id, string? reviewPrompt, string? expandPrompt, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo workspace = Find(id);
+            string? review = string.IsNullOrWhiteSpace(reviewPrompt) ? null : reviewPrompt.Trim();
+            string? expand = string.IsNullOrWhiteSpace(expandPrompt) ? null : expandPrompt.Trim();
+            return review == workspace.ReviewPrompt && expand == workspace.ExpandPrompt ? workspace : await Replace(workspace with { ReviewPrompt = review, ExpandPrompt = expand }, cancellation, false);
         }
     }
 
@@ -589,7 +612,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
     private async Task Save(CancellationToken cancellation, bool announce = true)
     {
-        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
+        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
 
         if (announce)
         {

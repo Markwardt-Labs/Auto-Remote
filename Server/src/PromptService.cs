@@ -406,7 +406,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 throw new RequestException(exception.Message);
             }
 
-            WorkspaceSettings described = Describe(workspace, session);
+            WorkspaceSettings described = Describe(await workspaces.SetPrompts(id, settings.ReviewPrompt, settings.ExpandPrompt, cancellation), session);
 
             if (!live.Working)
             {
@@ -614,7 +614,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     private WorkspaceSettings Describe(WorkspaceInfo workspace, IPromptSession session)
-        => new()
+    {
+        AiEnvironment environment = host.Get();
+        return new()
         {
             Service = workspace.Service,
             Capability = Enum.Parse<AiCapability>(session.Configuration.Capability.ToString()),
@@ -624,8 +626,13 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             IsWebAllowed = session.Configuration.IsWebAllowed,
             IsImageGenerationAllowed = session.Configuration.IsImageGenerationAllowed,
             Instructions = session.Configuration.Instructions,
+            ReviewPrompt = workspace.ReviewPrompt,
+            ExpandPrompt = workspace.ExpandPrompt,
+            GlobalReviewPrompt = environment.ReviewPrompt,
+            GlobalExpandPrompt = environment.ExpandPrompt,
             Descriptors = session.Descriptors.ToDictionary(pair => pair.Key, pair => pair.Value)
         };
+    }
 
     private async Task<PromptSendOptions> Options(string text, CancellationToken cancellation)
     {

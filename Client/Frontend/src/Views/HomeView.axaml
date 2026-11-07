@@ -16,17 +16,17 @@
           <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
             <local:TouchButton Content="☰" Classes="flat" FontSize="20" Command="{Binding ToggleDrawerCommand}" />
             <local:TouchButton Classes="flat" ToolTip.Tip="Update available" Command="{Binding Update.BeginCommand}" IsVisible="{Binding Update.IsAvailable, FallbackValue=False}" VerticalAlignment="Center">
-              <Path Classes="usageIcon" Stroke="{DynamicResource Accent}" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" Width="18" Height="18" />
+              <Path Classes="usageIcon" Stroke="{DynamicResource Accent}" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
             <local:TouchButton Classes="flat" ToolTip.Tip="Open a new window" Command="{Binding NewWindowCommand}" IsVisible="{Binding CanOpenNewWindow}" VerticalAlignment="Center">
-              <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource NewWindowIconGeometry}" Width="18" Height="18" />
+              <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource NewWindowIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
           </StackPanel>
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
             <TextBlock Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             <local:TouchButton Name="LoopIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}"
                   IsVisible="{Binding Active.IsLooping, FallbackValue=False}">
-              <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" Width="16" Height="16" />
+              <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="16" MaxHeight="16" />
               <Button.Flyout>
                 <Flyout Placement="Bottom">
                   <TextBlock Text="{Binding Active.LoopNext, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
@@ -37,10 +37,10 @@
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
               <local:TouchButton Classes="flat" ToolTip.Tip="Git remote" Command="{Binding Active.Git.RemoteCommand}">
-                <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource RemoteIconGeometry}" Width="18" Height="18" />
+                <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource RemoteIconGeometry}" MaxWidth="18" MaxHeight="18" />
               </local:TouchButton>
               <local:TouchButton Classes="flat" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
-                <Path Classes="usageIcon" Tag="{Binding Usage.IconPace}" Data="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" Width="18" Height="18" />
+                <Path Classes="usageIcon" Tag="{Binding Usage.IconPace}" Data="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" MaxWidth="18" MaxHeight="18" />
               </local:TouchButton>
               <local:TouchButton Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="Workspace settings" Command="{Binding Active.ToggleSettingsCommand}" />
             </StackPanel>
@@ -86,22 +86,22 @@
             <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" Margin="6,4,6,4">
               <TextBlock Grid.Column="1" Text="Changes" IsVisible="{Binding Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" />
               <local:TouchButton Grid.Column="2" Classes="icon" ToolTip.Tip="Open in file manager" Click="OnOpenFolderClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
-                <Path Classes="lineIcon" Data="{StaticResource OpenExternalIconGeometry}" Width="13" Height="13" />
+                <Path Classes="lineIcon" Data="{StaticResource OpenExternalIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </local:TouchButton>
               <local:TouchButton Grid.Column="3" Classes="icon" ToolTip.Tip="Copy workspace root path" Click="OnCopyPathClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
-                <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
+                <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </local:TouchButton>
               <ToggleButton Grid.Column="4" Classes="icon" ToolTip.Tip="Search files" IsChecked="{Binding Search.IsOpen, Mode=TwoWay}" Click="OnSearchToggled">
-                <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="13" Height="13" />
+                <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </ToggleButton>
               <ToggleButton Grid.Column="5" Classes="icon" ToolTip.Tip="Toggle changes mode" IsChecked="{Binding Git.IsChangesMode, Mode=TwoWay}" IsVisible="{Binding Git.IsRepo}">
-                <Path Classes="lineIcon" Data="{StaticResource ChangesIconGeometry}" Width="13" Height="13" />
+                <Path Classes="lineIcon" Data="{StaticResource ChangesIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </ToggleButton>
               <ToggleButton Grid.Column="6" Classes="icon" ToolTip.Tip="See hidden files" IsChecked="{Binding ShowHidden, Mode=TwoWay}">
-                <Path Classes="lineIcon" Data="{StaticResource EyeIconGeometry}" Width="13" Height="13" />
+                <Path Classes="lineIcon" Data="{StaticResource EyeIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </ToggleButton>
               <local:TouchButton Grid.Column="7" Classes="icon" ToolTip.Tip="Collapse All" Command="{Binding CollapseAllCommand}">
-                <Path Classes="lineIcon" Data="{StaticResource CollapseAllIconGeometry}" Width="13" Height="13" />
+                <Path Classes="lineIcon" Data="{StaticResource CollapseAllIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </local:TouchButton>
             </Grid>
             <TextBlock Grid.Row="2" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="10,0,8,8" />
@@ -137,8 +137,8 @@
                   <local:TouchButton Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Panel Width="12" Height="12">
-                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
-                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding !IsFolder}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" MaxWidth="12" MaxHeight="12" IsVisible="{Binding IsFolder}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" MaxWidth="11" MaxHeight="11" IsVisible="{Binding !IsFolder}" />
                       </Panel>
                       <TextBlock Text="{Binding Name}" FontSize="12" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.deleted="{Binding IsDeleted}" />
                     </StackPanel>
@@ -167,10 +167,10 @@
                     </Border.ContextMenu>
                     <StackPanel Orientation="Horizontal" Spacing="6">
                       <Panel Width="12" Height="12">
-                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
-                        <Path Classes="lineIcon" Data="{StaticResource ScriptFileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsScriptFile}" />
-                        <Path Classes="lineIcon" Data="{StaticResource TaskFileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsTaskFile}" />
-                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding IsPlainFile}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" MaxWidth="12" MaxHeight="12" IsVisible="{Binding IsFolder}" />
+                        <Path Classes="lineIcon" Data="{StaticResource ScriptFileIconGeometry}" MaxWidth="11" MaxHeight="11" IsVisible="{Binding IsScriptFile}" />
+                        <Path Classes="lineIcon" Data="{StaticResource TaskFileIconGeometry}" MaxWidth="11" MaxHeight="11" IsVisible="{Binding IsTaskFile}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" MaxWidth="11" MaxHeight="11" IsVisible="{Binding IsPlainFile}" />
                       </Panel>
                       <TextBlock Text="{Binding Name}" FontSize="12" TextTrimming="CharacterEllipsis" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.ignored="{Binding IsIgnored}" Classes.scriptRunning="{Binding IsScriptRunning}" />
                     </StackPanel>
@@ -218,7 +218,7 @@
                               <DataTemplate>
                                 <Border Background="{DynamicResource Background}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="8,3" Margin="0,0,6,4" ToolTip.Tip="{Binding Path}">
                                   <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                                    <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="11" Height="11" />
+                                    <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" MaxWidth="11" MaxHeight="11" />
                                     <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="260" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                                   </StackPanel>
                                 </Border>
@@ -241,7 +241,7 @@
             </ScrollViewer>
             <ToggleButton Classes="icon" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,8" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
                           ToolTip.Tip="Auto scroll to new messages" IsChecked="{Binding AutoScroll, Mode=TwoWay}" Click="OnChatAutoScrollToggled">
-              <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" Width="12" Height="12" />
+              <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" MaxWidth="12" MaxHeight="12" />
             </ToggleButton>
             </Panel>
             </DockPanel>
@@ -270,10 +270,10 @@
                 <DataTemplate>
                   <Border Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="6,2" Margin="0,0,6,4">
                     <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                      <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" />
+                      <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" MaxWidth="11" MaxHeight="11" />
                       <TextBlock Text="{Binding Name}" FontSize="12" MaxWidth="220" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
                       <local:TouchButton Classes="icon" ToolTip.Tip="Remove" Command="{Binding $parent[ItemsControl].DataContext.RemoveAttachmentCommand}" CommandParameter="{Binding}">
-                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="8" Height="8" />
+                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" MaxWidth="8" MaxHeight="8" />
                       </local:TouchButton>
                     </StackPanel>
                   </Border>
@@ -283,10 +283,10 @@
             <Grid Name="ChatInputRow" Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
               <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
                 <local:TouchButton Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" VerticalAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
                 <local:TouchButton Classes="icon" Classes.recording="{Binding IsRecording}" ToolTip.Tip="{Binding DictateTip}" Command="{Binding DictateCommand}" IsVisible="{Binding CanDictate}" VerticalAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource MicIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource MicIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
               </StackPanel>
               <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
@@ -295,31 +295,37 @@
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowLoopButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
                 <local:TouchButton Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.CancelLoopCommand}" ToolTip.Tip="Cancel the loop (the work in progress keeps going)" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowCancelLoopButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource LoopCancelIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource LoopCancelIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
                 <local:TouchButton Classes="primary" Command="{Binding ReviewCommand}" ToolTip.Tip="Review the workspace and its changes and fix any problems" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowReviewButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource ReviewIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource ReviewIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                </local:TouchButton>
+                <local:TouchButton Classes="primary" Command="{Binding ExpandCommand}" ToolTip.Tip="Expand upon the content of the workspace" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowExpandButton, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" MaxWidth="14" MaxHeight="14" Data="{StaticResource ExpandIconGeometry}" />
                 </local:TouchButton>
                 <local:TouchButton Classes="primary" Command="{Binding PauseCommand}" ToolTip.Tip="Pause: ask the AI to pause its current work" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowPauseButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
                 <local:TouchButton Classes="primary" Command="{Binding ResumeCommand}" ToolTip.Tip="Resume: ask the AI to resume its unfinished work" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowResumeButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource ResumeIconGeometry}" Width="14" Height="14" />
+                  <Path Classes="lineIcon" Data="{StaticResource ResumeIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
                 <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowSendButton, FallbackValue=False}"
@@ -345,7 +351,7 @@
                       <TextBlock Grid.Column="1" Text="{Binding Path}" FontSize="12" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
                       <local:TouchButton Grid.Column="2" Classes="icon" ToolTip.Tip="Remove" Margin="6,0,0,0" IsVisible="{Binding !IsActive}"
                               Command="{Binding $parent[ComboBox].DataContext.RemoveCommand}" CommandParameter="{Binding}">
-                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="9" Height="9" />
+                        <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" MaxWidth="9" MaxHeight="9" />
                       </local:TouchButton>
                     </Grid>
                   </DataTemplate>
@@ -386,10 +392,10 @@
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="6">
                   <ToggleButton Classes="icon" ToolTip.Tip="Auto scroll to new output" IsChecked="{Binding AutoScroll, Mode=TwoWay}" Click="OnOutputAutoScrollToggled">
-                    <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" Width="12" Height="12" />
+                    <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" MaxWidth="12" MaxHeight="12" />
                   </ToggleButton>
                   <local:TouchButton Classes="icon" ToolTip.Tip="Copy output" Click="OnCopyOutputClick">
-                    <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" Width="13" Height="13" />
+                    <Path Classes="lineIcon" Data="{StaticResource CopyIconGeometry}" MaxWidth="13" MaxHeight="13" />
                   </local:TouchButton>
                   <local:TouchButton Content="Stop" FontSize="11" Padding="8,4" Command="{Binding StopCommand}" IsVisible="{Binding ShowStop}" ToolTip.Tip="Forcefully stop this script" />
                 </StackPanel>
@@ -420,10 +426,10 @@
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="16,8,8,4">
               <StackPanel Grid.Column="1" Orientation="Horizontal">
                 <local:TouchButton Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}">
-                  <Path Classes="lineIcon" Data="M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13" Width="13" Height="13" />
+                  <Path Classes="lineIcon" Data="M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13" MaxWidth="13" MaxHeight="13" />
                 </local:TouchButton>
                 <local:TouchButton Classes="icon" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
-                  <Path Classes="lineIcon" Data="M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5" Width="13" Height="13" />
+                  <Path Classes="lineIcon" Data="M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5" MaxWidth="13" MaxHeight="13" />
                 </local:TouchButton>
               </StackPanel>
             </Grid>
@@ -502,8 +508,8 @@
                                   <local:TouchButton Classes="flat" Padding="2,1" HorizontalAlignment="Left" Command="{Binding OpenCommand}">
                                     <StackPanel Orientation="Horizontal" Spacing="6">
                                       <Panel Width="12" Height="12">
-                                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" Width="12" Height="12" IsVisible="{Binding IsFolder}" />
-                                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" Width="11" Height="11" IsVisible="{Binding !IsFolder}" />
+                                        <Path Classes="lineIcon" Data="{StaticResource FolderIconGeometry}" MaxWidth="12" MaxHeight="12" IsVisible="{Binding IsFolder}" />
+                                        <Path Classes="lineIcon" Data="{StaticResource FileIconGeometry}" MaxWidth="11" MaxHeight="11" IsVisible="{Binding !IsFolder}" />
                                       </Panel>
                                       <TextBlock Text="{Binding Name}" FontSize="12" Classes.added="{Binding IsAdded}" Classes.modified="{Binding IsModified}" Classes.deleted="{Binding IsDeleted}" />
                                     </StackPanel>
@@ -532,10 +538,10 @@
                   <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                     <StackPanel Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
                       <local:TouchButton Classes="icon" ToolTip.Tip="Back" Command="{Binding BackCommand}">
-                        <Path Classes="lineIcon" Data="{StaticResource BackIconGeometry}" Width="12" Height="12" />
+                        <Path Classes="lineIcon" Data="{StaticResource BackIconGeometry}" MaxWidth="12" MaxHeight="12" />
                       </local:TouchButton>
                       <local:TouchButton Classes="icon" ToolTip.Tip="Forward" Command="{Binding ForwardCommand}">
-                        <Path Classes="lineIcon" Data="{StaticResource ForwardIconGeometry}" Width="12" Height="12" />
+                        <Path Classes="lineIcon" Data="{StaticResource ForwardIconGeometry}" MaxWidth="12" MaxHeight="12" />
                       </local:TouchButton>
                     </StackPanel>
                     <Border Background="{DynamicResource Background}" CornerRadius="3" Padding="5,1" VerticalAlignment="Center" IsVisible="{Binding PreviewKind, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
@@ -546,19 +552,19 @@
                   </StackPanel>
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="4">
                     <ToggleButton Classes="icon" ToolTip.Tip="Find (Ctrl+F)" IsChecked="{Binding Find.IsOpen, Mode=TwoWay}" IsVisible="{Binding IsFindable}" Click="OnFindToggled">
-                      <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" Width="12" Height="12" />
+                      <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" MaxWidth="12" MaxHeight="12" />
                     </ToggleButton>
                     <ToggleButton Classes="icon" ToolTip.Tip="{Binding CollapseTip}" IsChecked="{Binding MarkdownCollapsed, Mode=TwoWay}" IsVisible="{Binding IsMarkdownPreview}">
                       <Panel>
-                        <Path Classes="lineIcon" Data="{StaticResource FoldAllIconGeometry}" Width="12" Height="12" IsVisible="{Binding !MarkdownCollapsed}" />
-                        <Path Classes="lineIcon" Data="{StaticResource UnfoldAllIconGeometry}" Width="12" Height="12" IsVisible="{Binding MarkdownCollapsed}" />
+                        <Path Classes="lineIcon" Data="{StaticResource FoldAllIconGeometry}" MaxWidth="12" MaxHeight="12" IsVisible="{Binding !MarkdownCollapsed}" />
+                        <Path Classes="lineIcon" Data="{StaticResource UnfoldAllIconGeometry}" MaxWidth="12" MaxHeight="12" IsVisible="{Binding MarkdownCollapsed}" />
                       </Panel>
                     </ToggleButton>
                     <ToggleButton Classes="icon" ToolTip.Tip="Word wrap" IsChecked="{Binding WrapLines, Mode=TwoWay}" IsVisible="{Binding !IsMarkdownPreview}">
-                      <Path Classes="lineIcon" Data="{StaticResource WrapIconGeometry}" Width="12" Height="12" />
+                      <Path Classes="lineIcon" Data="{StaticResource WrapIconGeometry}" MaxWidth="12" MaxHeight="12" />
                     </ToggleButton>
                     <local:TouchButton Classes="icon" ToolTip.Tip="Close" Command="{Binding ClosePreviewCommand}">
-                      <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
+                      <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" MaxWidth="10" MaxHeight="10" />
                     </local:TouchButton>
                   </StackPanel>
                 </Grid>
@@ -578,7 +584,7 @@
                   <local:TouchButton Grid.Column="4" Classes="icon" Content="▲" Command="{Binding PreviousCommand}" ToolTip.Tip="Previous match (Shift+Enter)" FontSize="10" Padding="6,3" />
                   <local:TouchButton Grid.Column="5" Classes="icon" Content="▼" Command="{Binding NextCommand}" ToolTip.Tip="Next match (Enter)" FontSize="10" Padding="6,3" />
                   <local:TouchButton Grid.Column="6" Classes="icon" Command="{Binding CloseCommand}" ToolTip.Tip="Close (Esc)">
-                    <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="10" Height="10" />
+                    <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" MaxWidth="10" MaxHeight="10" />
                   </local:TouchButton>
                 </Grid>
               </Border>
@@ -622,6 +628,22 @@
               <ToggleSwitch IsChecked="{Binding IsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
               <TextBlock Text="Instructions" Classes="muted" Margin="0,8,0,0" />
               <TextBox Text="{Binding Instructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
+              <TextBlock Text="Review prompt" Classes="muted" Margin="0,8,0,0" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                <TextBox Grid.Column="0" Text="{Binding ReviewPrompt}" PlaceholderText="{Binding GlobalReviewPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
+                <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the review prompt of the global settings" Command="{Binding ClearReviewPromptCommand}" VerticalAlignment="Top" Margin="0,4,0,0">
+                  <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
+                </local:TouchButton>
+              </Grid>
+              <TextBlock Text="Empty uses the review prompt of the global settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              <TextBlock Text="Expand prompt" Classes="muted" Margin="0,8,0,0" />
+              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                <TextBox Grid.Column="0" Text="{Binding ExpandPrompt}" PlaceholderText="{Binding GlobalExpandPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
+                <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the expand prompt of the global settings" Command="{Binding ClearExpandPromptCommand}" VerticalAlignment="Top" Margin="0,4,0,0">
+                  <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
+                </local:TouchButton>
+              </Grid>
+              <TextBlock Text="Empty uses the expand prompt of the global settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="How it runs" Classes="muted" Margin="0,8,0,0" IsVisible="{Binding HasDetails}" />
               <ItemsControl ItemsSource="{Binding Details}" IsVisible="{Binding HasDetails}">
                 <ItemsControl.ItemTemplate>
@@ -661,8 +683,9 @@
             <TextBlock Text="Loop" Classes="serif" FontSize="16" />
             <TextBlock Text="Sends a prompt to the AI over and over. It cancels from the loop button in the message box; stopping the work cancels it too." Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <TextBlock Text="Prompt" Classes="muted" Margin="0,6,0,0" />
-            <RadioButton GroupName="LoopPrompt" Content="Review the workspace and its changes" IsChecked="{Binding UseReview, Mode=TwoWay}" />
-            <RadioButton GroupName="LoopPrompt" Content="My own prompt" IsChecked="{Binding UseCustom, Mode=TwoWay}" />
+            <RadioButton GroupName="LoopPrompt" Content="Review" IsChecked="{Binding UseReview, Mode=TwoWay}" />
+            <RadioButton GroupName="LoopPrompt" Content="Expand" IsChecked="{Binding UseExpand, Mode=TwoWay}" />
+            <RadioButton GroupName="LoopPrompt" Content="Custom" IsChecked="{Binding UseCustom, Mode=TwoWay}" />
             <TextBox Text="{Binding CustomPrompt}" IsVisible="{Binding UseCustom}" PlaceholderText="Enter the prompt..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70" MaxHeight="160" />
             <TextBlock Text="Minutes between runs" Classes="muted" Margin="0,6,0,0" />
             <NumericUpDown Value="{Binding IntervalMinutes}" Minimum="0" Maximum="1440" Increment="1" FormatString="0.##" HorizontalAlignment="Stretch" />
@@ -735,7 +758,7 @@
           <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="8,8,8,12">
             <TextBlock Grid.Column="0" Text="Workspaces" Classes="serif" FontSize="22" VerticalAlignment="Center" />
             <local:TouchButton Grid.Column="1" Classes="flat" ToolTip.Tip="Update available" Command="{Binding Update.BeginCommand}" IsVisible="{Binding Update.IsAvailable, FallbackValue=False}" VerticalAlignment="Center">
-              <Path Classes="usageIcon" Stroke="{DynamicResource Accent}" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" Width="18" Height="18" />
+              <Path Classes="usageIcon" Stroke="{DynamicResource Accent}" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
           </Grid>
           <TextBox Grid.Row="1" Text="{Binding Filter}" PlaceholderText="Filter workspaces" Margin="0,0,0,8" />

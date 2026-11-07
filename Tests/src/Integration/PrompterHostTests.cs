@@ -89,6 +89,22 @@ public sealed class PrompterHostTests : IDisposable
     }
 
     [Fact]
+    public async Task Set_KeepsTrimmedReviewAndExpandPromptsAndRestoresTheDefaultForBlankOnes()
+    {
+        PrompterHost host = await Configured();
+        AiEnvironment defaults = new();
+        Assert.Equal(("review workspace and fix any problems or inconsistencies", "expand upon content in workspace in areas that make sense"), (host.Get().ReviewPrompt, host.Get().ExpandPrompt));
+
+        AiEnvironment own = await host.Set(host.Get() with { ReviewPrompt = "  review it  ", ExpandPrompt = "grow it" }, CancellationToken.None);
+        PrompterHost next = await Configured();
+        AiEnvironment blank = await host.Set(host.Get() with { ReviewPrompt = "   ", ExpandPrompt = string.Empty }, CancellationToken.None);
+
+        Assert.Equal(("review it", "grow it"), (own.ReviewPrompt, own.ExpandPrompt));
+        Assert.Equal(("review it", "grow it"), (next.Get().ReviewPrompt, next.Get().ExpandPrompt));
+        Assert.Equal((defaults.ReviewPrompt, defaults.ExpandPrompt), (blank.ReviewPrompt, blank.ExpandPrompt));
+    }
+
+    [Fact]
     public async Task Set_NeverGivesAnApiKeyBackAndMergesKeysLeftOutOrEmptied()
     {
         PrompterHost host = await Configured();

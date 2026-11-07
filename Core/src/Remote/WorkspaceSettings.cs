@@ -46,6 +46,26 @@ public sealed record WorkspaceSettings
     public string? Instructions { get; init; }
 
     /// <summary>
+    /// Gets the prompt the review button of this workspace sends instead of the one of the server's environment, or <see langword="null" /> to use that one. It belongs to the workspace, not to its AI session.
+    /// </summary>
+    public string? ReviewPrompt { get; init; }
+
+    /// <summary>
+    /// Gets the prompt the expand button of this workspace sends instead of the one of the server's environment, or <see langword="null" /> to use that one. It belongs to the workspace, not to its AI session.
+    /// </summary>
+    public string? ExpandPrompt { get; init; }
+
+    /// <summary>
+    /// Gets the review prompt of the server's environment, which the review button sends while <see cref="ReviewPrompt" /> is not set. It is only read; setting it has no effect.
+    /// </summary>
+    public string GlobalReviewPrompt { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the expand prompt of the server's environment, which the expand button sends while <see cref="ExpandPrompt" /> is not set. It is only read; setting it has no effect.
+    /// </summary>
+    public string GlobalExpandPrompt { get; init; } = string.Empty;
+
+    /// <summary>
     /// Gets what the session reports about how it is run, written for a person: the provider, and once a prompt has chosen the model, the model and its settings. It is only read; setting it has no effect.
     /// </summary>
     public IReadOnlyDictionary<string, string> Descriptors { get; init; } = new Dictionary<string, string>();

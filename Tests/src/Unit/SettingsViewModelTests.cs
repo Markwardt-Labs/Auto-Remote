@@ -125,6 +125,46 @@ public sealed class SettingsViewModelTests
     }
 
     [Fact]
+    public async Task Prompts_ShowTheOverridesOfTheWorkspaceNextToTheGlobalPromptsAndApplyWithTheOtherEdits()
+    {
+        Session(Current with { ReviewPrompt = "own review", GlobalReviewPrompt = "global review", GlobalExpandPrompt = "global expand" });
+        Accept();
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.Instructions.Length > 0);
+
+        Assert.Equal(("own review", string.Empty, "global review", "global expand"), (settings.ReviewPrompt, settings.ExpandPrompt, settings.GlobalReviewPrompt, settings.GlobalExpandPrompt));
+        Assert.False(settings.HasPending);
+
+        settings.ExpandPrompt = "  grow it  ";
+        Assert.True(settings.HasPending);
+        Assert.True(await settings.Apply());
+
+        Assert.Equal(("own review", "grow it"), (saved.Single().ReviewPrompt, saved.Single().ExpandPrompt));
+    }
+
+    [Fact]
+    public async Task ClearingAPrompt_SendsNoOverrideSoTheGlobalPromptIsUsedAgain()
+    {
+        Session(Current with { ReviewPrompt = "own review", ExpandPrompt = "own expand", GlobalReviewPrompt = "global review" });
+        Accept();
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.ReviewPrompt.Length > 0);
+        List<string?> changed = [];
+        settings.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        settings.ClearReviewPromptCommand.Execute(null);
+        settings.ExpandPrompt = "   ";
+
+        Assert.Equal((string.Empty, true), (settings.ReviewPrompt, settings.HasPending));
+        Assert.Contains(nameof(SettingsViewModel.ReviewPrompt), changed);
+        Assert.True(await settings.Apply());
+        Assert.Equal((null, null), (saved.Single().ReviewPrompt, saved.Single().ExpandPrompt));
+
+        settings.ClearExpandPromptCommand.Execute(null);
+        Assert.False(settings.HasPending);
+    }
+
+    [Fact]
     public async Task Apply_WithoutEditsOrWithEditsThatWereUndoneSendsNothing()
     {
         Session(Current);

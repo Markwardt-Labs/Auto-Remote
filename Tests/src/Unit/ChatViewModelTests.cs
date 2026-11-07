@@ -28,13 +28,13 @@ public sealed class ChatViewModelTests
     {
         List<string?> changed = [];
         chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
-        Assert.Equal((false, true, false), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null)));
+        Assert.Equal((false, true, false, true), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null), chat.ExpandCommand.CanExecute(null)));
 
         chat.Input = "  ";
         Assert.False(chat.HasContent);
 
         chat.Input = "fix it";
-        Assert.Equal((true, false, true), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null)));
+        Assert.Equal((true, false, true, false), (chat.HasContent, chat.ReviewCommand.CanExecute(null), chat.SendCommand.CanExecute(null), chat.ExpandCommand.CanExecute(null)));
 
         chat.Input = string.Empty;
         chat.Attach("a.txt", new byte[] { 1 });
@@ -65,28 +65,34 @@ public sealed class ChatViewModelTests
         Assert.Equal(("pause current work", "resume unfinished work"), (chat.PausePrompt, chat.ResumePrompt));
     }
 
-    [Fact]
-    public async Task Review_SendsTheReviewPromptAsTheUsersMessageWithoutTouchingTheMessageBox()
+    [Theory]
+    [InlineData(true, null, "review workspace and fix any problems or inconsistencies")]
+    [InlineData(true, "  review this workspace my way ", "review this workspace my way")]
+    [InlineData(false, null, "expand upon content in workspace in areas that make sense")]
+    [InlineData(false, "grow the docs", "grow the docs")]
+    public async Task ReviewAndExpand_SendThePromptOfTheWorkspaceOrTheGlobalOneAsTheUsersMessageWithoutTouchingTheMessageBox(bool review, string? own, string expected)
     {
+        connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { ReviewPrompt = review ? own : null, ExpandPrompt = review ? null : own, GlobalReviewPrompt = "review workspace and fix any problems or inconsistencies", GlobalExpandPrompt = "expand upon content in workspace in areas that make sense" });
         string? sent = null;
         connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => sent = text).Returns(Task.CompletedTask);
         int started = 0;
         chat.PromptStarted += () => started++;
 
-        chat.ReviewCommand.Execute(null);
+        (review ? chat.ReviewCommand : chat.ExpandCommand).Execute(null);
         for (int attempt = 0; attempt < 100 && sent is null; attempt++)
         {
             await Task.Delay(10);
         }
 
-        Assert.Equal("review workspace, fix any problems or inconsistencies", sent);
-        Assert.Equal(("review workspace, fix any problems or inconsistencies", 1, string.Empty), (chat.ReviewPrompt, started, chat.Input));
+        Assert.Equal(expected, sent);
+        Assert.Equal((1, string.Empty), (started, chat.Input));
         connection.Verify(x => x.UploadAttachment(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task Review_WhenTheServerRefusesReportsTheFailureAndDoesNotPutThePromptInTheMessageBox()
     {
+        connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review" });
         connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("A script is running."));
         bool failed = false;
         chat.PromptFailed += () => failed = true;
@@ -100,6 +106,29 @@ public sealed class ChatViewModelTests
         Assert.True(failed);
         Assert.Equal("A script is running.", chat.Error);
         Assert.Equal(string.Empty, chat.Input);
+    }
+
+    [Fact]
+    public async Task Expand_WhenThePromptCannotBeReadOrIsEmptySendsNothingAndSaysSo()
+    {
+        connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("down"));
+        chat.ExpandCommand.Execute(null);
+        for (int attempt = 0; attempt < 100 && chat.Error is null; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal("down", chat.Error);
+
+        connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        chat.ExpandCommand.Execute(null);
+        for (int attempt = 0; attempt < 100 && chat.Error == "down"; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal("The prompt of this button is empty.", chat.Error);
+        connection.Verify(x => x.Prompt(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

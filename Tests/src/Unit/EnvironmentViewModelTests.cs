@@ -20,7 +20,9 @@ public sealed class EnvironmentViewModelTests
         ImageGeneration = ImageGenerationKind.Local,
         LocalImageServer = "http://localhost:7860",
         LocalImageModels = new CapabilityNames { Fast = "a", Balanced = "b", Strong = "c", Max = "d" },
-        NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = true, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "be brief" }
+        NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = true, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "be brief" },
+        ReviewPrompt = "check everything",
+        ExpandPrompt = "write more"
     };
 
     private async Task Until(Func<bool> condition)
@@ -97,6 +99,21 @@ public sealed class EnvironmentViewModelTests
         await Until(() => saved.Count == 1);
 
         Assert.Equal(new WorkspaceDefaults { Capability = AiCapability.Max, Effort = AiEffort.High, IsShellAllowed = true, IsSystemAccessAllowed = false, IsWebAllowed = true, IsImageGenerationAllowed = false, Instructions = string.Empty }, saved[0].NewWorkspaces);
+    }
+
+    [Fact]
+    public async Task Prompts_AreReadFromTheEnvironmentAndSentTrimmedWhenTheSettingsClose()
+    {
+        EnvironmentViewModel model = Open();
+        await model.Load();
+        Assert.Equal(("check everything", "write more"), (model.ReviewPrompt, model.ExpandPrompt));
+
+        model.ReviewPrompt = "  review it twice  ";
+        model.ExpandPrompt = string.Empty;
+        model.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 1);
+
+        Assert.Equal(("review it twice", string.Empty), (saved[0].ReviewPrompt, saved[0].ExpandPrompt));
     }
 
     [Fact]

@@ -31,6 +31,16 @@ public sealed record WorkspaceInfo
     public AiService Service { get; init; } = AiService.ClaudeCode;
 
     /// <summary>
+    /// Gets the prompt the workspace's review button sends instead of the one of the server's environment, or <see langword="null" /> when it has none of its own. Set with <see cref="RemoteCommand.SetWorkspaceSettings" />.
+    /// </summary>
+    public string? ReviewPrompt { get; init; }
+
+    /// <summary>
+    /// Gets the prompt the workspace's expand button sends instead of the one of the server's environment, or <see langword="null" /> when it has none of its own. Set with <see cref="RemoteCommand.SetWorkspaceSettings" />.
+    /// </summary>
+    public string? ExpandPrompt { get; init; }
+
+    /// <summary>
     /// Gets the workspace's display name, which is the name of <see cref="Folder" />.
     /// </summary>
     [JsonIgnore]

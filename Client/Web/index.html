@@ -389,7 +389,6 @@ function messageStamp(time) {
   return date.getFullYear() === now.getFullYear() ? `${date.toLocaleDateString([], { month: "short", day: "numeric" })}, ${clock}` : `${date.toLocaleDateString()}, ${clock}`;
 }
 
-const reviewPrompt = "review workspace, fix any problems or inconsistencies";
 const pausePrompt = "pause current work";
 const resumePrompt = "resume unfinished work";
 const services = {
@@ -1457,22 +1456,23 @@ const icons = {
   up: ["M7,13 L7,2 M2,7 L7,2 L12,7", "2 2 10 11", 13],
   find: ["M1,5 A4,4 0 1,1 9,5 A4,4 0 1,1 1,5 Z M7.83,7.83 L13,13", "1 1 12 12", 13],
   close: ["M1,1 L13,13 M13,1 L1,13", "1 1 12 12", 10],
-  back: ["M8.5,1.5 L3,7 L8.5,12.5", "1 1 12 12", 12],
-  forward: ["M5.5,1.5 L11,7 L5.5,12.5", "1 1 12 12", 12],
-  scroll: ["M2,1 L7,6 L12,1 M2,6 L7,11 L12,6 M2,14 L12,14", "2 1 10 14", 13],
-  attach: ["M12,6.5 L6.8,11.7 A2.4,2.4 0 0 1 3.4,8.3 L8.9,2.8 A1.6,1.6 0 0 1 11.2,5.1 L5.8,10.5", "3 2 9 10", 14],
+  back: ["M8.5,1.5 L3,7 L8.5,12.5", "-0.25 1 12 12", 12],
+  forward: ["M5.5,1.5 L11,7 L5.5,12.5", "2.25 1 12 12", 12],
+  scroll: ["M2,1 L7,6 L12,1 M2,6 L7,11 L12,6 M2,14 L12,14", "2 0.5 10 14", 13],
+  attach: ["M12,6.5 L6.8,11.7 A2.4,2.4 0 0 1 3.4,8.3 L8.9,2.8 A1.6,1.6 0 0 1 11.2,5.1 L5.8,10.5", "2.85 2.35 9 10", 14],
   wrap: ["M1,3 L13,3 M1,7 L10,7 A2,2 0 0,1 10,11 L6,11 M8,9 L6,11 L8,13 M1,11 L3,11", "1 2 12 12", 12],
   eye: ["M1,7 C3,3 11,3 13,7 C11,11 3,11 1,7 Z M5,7 A2,2 0 1,1 9,7 A2,2 0 1,1 5,7 Z", "1 3 12 8", 13],
   changes: ["M2,3 L8,3 M2,7 L12,7 M2,11 L6,11", "2 3 10 8", 13],
-  refresh: ["M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5", "1 1 12 12", 13],
+  refresh: ["M12,7 A5,5 0 1,1 10.5,3.5 M12,1.5 L12,5 L8.5,5", "1 0.8 12 12", 13],
   loop: ["M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8", "1 1 12 12", 14],
   loopcancel: ["M11.5,5 A4.5,4.5 0 0 0 3.5,4 M3.5,1.3 L3.5,4.2 L6.4,4.2 M2.5,9 A4.5,4.5 0 0 0 10.5,10 M10.5,12.7 L10.5,9.8 L7.6,9.8 M1.5,12.5 L12.5,1.5", "1 1 12 12", 14],
   pause: ["M4.5,2 L4.5,12 M9.5,2 L9.5,12", "1 1 12 12", 14],
-  resume: ["M3.5,1.5 L11.5,7 L3.5,12.5 Z", "1 1 12 12", 14],
+  resume: ["M3.5,1.5 L11.5,7 L3.5,12.5 Z", "1.5 1 12 12", 14],
   review: ["M6,1.5 A4.5,4.5 0 1 1 6,10.5 A4.5,4.5 0 1 1 6,1.5 Z M9.3,9.3 L12.5,12.5 M4,6 L5.4,7.4 L8,4.6", "1 1 12 12", 14],
-  mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 1 10 13", 14],
-  foldAll: ["M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12", "1 2 12 11", 13],
-  unfoldAll: ["M1,7 L13,7 M4,5 L7,2 L10,5 M4,9 L7,12 L10,9", "1 2 12 11", 13],
+  expand: ["M8.5,1.5 L12.5,1.5 L12.5,5.5 M12.5,1.5 L7.8,6.2 M5.5,12.5 L1.5,12.5 L1.5,8.5 M1.5,12.5 L6.2,7.8", "1 1 12 12", 14],
+  mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 0.75 10 13", 14],
+  foldAll: ["M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12", "1 1.5 12 11", 13],
+  unfoldAll: ["M1,7 L13,7 M4,5 L7,2 L10,5 M4,9 L7,12 L10,9", "1 1.5 12 11", 13],
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
 };
 
@@ -1711,7 +1711,8 @@ class WorkspaceView {
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary act", title: "Send", hidden: true, onclick: () => this.send() }, "↑");
-    this.reviewButton = h("button", { class: "primary act", title: "Review the workspace and its changes and fix any problems", onclick: () => this.review() }, icon("review"));
+    this.reviewButton = h("button", { class: "primary act", title: "Review the workspace and its changes and fix any problems", onclick: () => this.preset("review") }, icon("review"));
+    this.expandButton = h("button", { class: "primary act", title: "Expand upon the content of the workspace", onclick: () => this.preset("expand") }, icon("expand"));
     this.pauseButton = h("button", { class: "primary act", title: "Pause: ask the AI to pause its current work", onclick: () => this.quick(pausePrompt) }, icon("pause"));
     this.resumeButton = h("button", { class: "primary act", title: "Resume: ask the AI to resume its unfinished work", onclick: () => this.quick(resumePrompt) }, icon("resume"));
     this.loopButton = h("button", { class: "act", title: "Loop: send a prompt over and over", onclick: () => this.openLoop() }, icon("loop"));
@@ -1735,7 +1736,7 @@ class WorkspaceView {
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loopButton, this.cancelLoopButton, this.reviewButton, this.pauseButton, this.resumeButton, this.sendButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -1860,6 +1861,12 @@ class WorkspaceView {
       return h("label", { class: "check", style: "margin-top:4px" }, box, label);
     };
     this.instructionsBox = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
+    this.reviewPromptBox = h("textarea", { rows: 2 });
+    this.expandPromptBox = h("textarea", { rows: 2 });
+    const promptRow = (label, box, title) => [
+      h("div", { class: "muted", style: "margin-top:8px" }, label),
+      h("div", { style: "display:flex;gap:6px;align-items:flex-start" }, box, h("button", { class: "flat icon", title, onclick: () => { box.value = ""; this.settingsEdits++; } }, icon("close"))),
+      h("div", { class: "muted small" }, `Empty uses the ${label.toLowerCase()} of the global settings.`)];
     this.detailsTitle = h("div", { class: "muted", style: "margin-top:8px", hidden: true }, "How it runs");
     this.detailsBox = h("div", { class: "stack tight" });
     this.current = null;
@@ -1877,6 +1884,8 @@ class WorkspaceView {
         switchRow("isWebAllowed", "Use the web"),
         switchRow("isImageGenerationAllowed", "Generate images"),
         h("div", { class: "muted", style: "margin-top:8px" }, "Instructions"), this.instructionsBox,
+        ...promptRow("Review prompt", this.reviewPromptBox, "Use the review prompt of the global settings"),
+        ...promptRow("Expand prompt", this.expandPromptBox, "Use the expand prompt of the global settings"),
         this.detailsTitle, this.detailsBox,
         this.settingsError.element,
         h("button", { class: "block", style: "margin-top:16px", onclick: () => this.home.beginRename() }, "Rename workspace"),
@@ -1957,6 +1966,10 @@ class WorkspaceView {
     }
 
     this.instructionsBox.value = settings.instructions ?? "";
+    this.reviewPromptBox.value = settings.reviewPrompt ?? "";
+    this.expandPromptBox.value = settings.expandPrompt ?? "";
+    this.reviewPromptBox.placeholder = settings.globalReviewPrompt ?? "";
+    this.expandPromptBox.placeholder = settings.globalExpandPrompt ?? "";
     const details = Object.entries(settings.descriptors ?? {});
     this.detailsTitle.hidden = details.length === 0;
     this.detailsBox.replaceChildren(...details.map(([name, value]) => h("div", { class: "row small", style: "display:flex;gap:12px" }, h("span", { class: "muted" }, name), h("span", {}, value))));
@@ -1968,7 +1981,9 @@ class WorkspaceView {
       capability: this.capabilitySelect.value,
       effort: this.effortSelect.value,
       ...Object.fromEntries(Object.entries(this.switches).map(([key, box]) => [key, box.checked])),
-      instructions: this.instructionsBox.value.trim()
+      instructions: this.instructionsBox.value.trim(),
+      reviewPrompt: this.reviewPromptBox.value.trim() || undefined,
+      expandPrompt: this.expandPromptBox.value.trim() || undefined
     };
   }
 
@@ -1981,7 +1996,9 @@ class WorkspaceView {
     return edited.capability !== this.current.capability
       || edited.effort !== this.current.effort
       || ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed"].some(key => !!edited[key] !== !!this.current[key])
-      || edited.instructions !== (this.current.instructions ?? "").trim();
+      || edited.instructions !== (this.current.instructions ?? "").trim()
+      || (edited.reviewPrompt ?? "") !== (this.current.reviewPrompt ?? "").trim()
+      || (edited.expandPrompt ?? "") !== (this.current.expandPrompt ?? "").trim();
   }
 
   async applySettings() {
@@ -2155,7 +2172,8 @@ class WorkspaceView {
       UntilWindow: () => `until ${settings.window} reaches ${settings.percent}%`
     }[settings.condition];
     const runs = loop.runs ?? 0;
-    return `Loop: ${settings.prompt === reviewPrompt ? "review" : "custom prompt"}, ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far`;
+    const line = settings.prompt.replace(/\s+/g, " ").trim();
+    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far`;
   }
 
   loopNext() {
@@ -2187,6 +2205,15 @@ class WorkspaceView {
 
   async openLoop() {
     let windows = [];
+    let reviewPrompt = "";
+    let expandPrompt = "";
+
+    try {
+      const settings = await this.connection.getWorkspaceSettings(this.info.id);
+      reviewPrompt = (settings.reviewPrompt ?? settings.globalReviewPrompt ?? "").trim();
+      expandPrompt = (settings.expandPrompt ?? settings.globalExpandPrompt ?? "").trim();
+    } catch (exception) {
+    }
 
     try {
       windows = ((await this.connection.getUsage(this.info.service))?.windows ?? []).map(window => window.name);
@@ -2195,10 +2222,12 @@ class WorkspaceView {
 
     const field = (label, ...controls) => h("div", { class: "stack tight", style: "margin-top:6px" }, h("div", { class: "muted" }, label), ...controls);
     const reviewRadio = h("input", { type: "radio", name: "loop-prompt", checked: true });
+    const expandRadio = h("input", { type: "radio", name: "loop-prompt" });
     const customRadio = h("input", { type: "radio", name: "loop-prompt" });
     const custom = h("textarea", { rows: 3, placeholder: "Enter the prompt...", hidden: true });
     const choosePrompt = () => { custom.hidden = !customRadio.checked; };
     reviewRadio.onchange = choosePrompt;
+    expandRadio.onchange = choosePrompt;
     customRadio.onchange = choosePrompt;
     const interval = h("input", { type: "number", min: "0", max: "1440", step: "1", value: "10" });
     const conditions = [["Forever", "Until I cancel it"], ["UntilTime", "Until a time of day"], ["ForDuration", "For a length of time"], ["Runs", "For a number of runs"], ...(windows.length > 0 ? [["UntilWindow", "Until a usage limit reaches a share"]] : [])];
@@ -2219,13 +2248,13 @@ class WorkspaceView {
     kind.value = "ForDuration";
     show();
     const start = async () => {
-      const text = reviewRadio.checked ? reviewPrompt : custom.value.trim();
+      const text = reviewRadio.checked ? reviewPrompt : expandRadio.checked ? expandPrompt : custom.value.trim();
       const minutesBetween = Number(interval.value);
       const condition = kind.value;
       const fail = message => this.home.dialogError.set(message);
 
       if (!text) {
-        return fail("Write the prompt the loop sends.");
+        return fail(reviewRadio.checked ? "The review prompt could not be read, so write the prompt the loop sends." : expandRadio.checked ? "The expand prompt could not be read, so write the prompt the loop sends." : "Write the prompt the loop sends.");
       }
 
       if (interval.value === "" || !(minutesBetween >= 0 && minutesBetween <= 1440)) {
@@ -2280,7 +2309,7 @@ class WorkspaceView {
       }
     };
     this.home.dialog("Loop", "Sends a prompt to the AI over and over. Cancel it from the loop button in the message box; stopping the work cancels it too.",
-      field("Prompt", h("label", { class: "row-check" }, reviewRadio, " Review the workspace and its changes"), h("label", { class: "row-check" }, customRadio, " My own prompt"), custom),
+      field("Prompt", h("label", { class: "row-check" }, reviewRadio, " Review"), h("label", { class: "row-check" }, expandRadio, " Expand"), h("label", { class: "row-check" }, customRadio, " Custom"), custom),
       field("Minutes between runs", interval, h("div", { class: "muted small" }, "From the start of one run to the start of the next. 0 runs again as soon as a run is done.")),
       field("Ends", kind),
       ...Object.values(boxes),
@@ -2884,6 +2913,8 @@ class WorkspaceView {
     this.sendButton.hidden = halt || empty;
     this.reviewButton.disabled = !this.takesAiInput();
     this.reviewButton.hidden = halt || !empty;
+    this.expandButton.disabled = !this.takesAiInput();
+    this.expandButton.hidden = halt || !empty;
     this.pauseButton.disabled = !this.takesAiInput();
     this.pauseButton.hidden = !(empty && state === "Working");
     this.resumeButton.disabled = !this.takesAiInput();
@@ -2993,8 +3024,26 @@ class WorkspaceView {
     }
   }
 
-  async review() {
-    await this.quick(reviewPrompt);
+  async preset(kind) {
+    if (this.input.value.trim() || this.attachments.length > 0 || !this.takesAiInput()) {
+      return;
+    }
+
+    const result = await attempt(async () => {
+      const settings = await this.connection.getWorkspaceSettings(this.info.id);
+      return ((kind === "review" ? settings.reviewPrompt ?? settings.globalReviewPrompt : settings.expandPrompt ?? settings.globalExpandPrompt) ?? "").trim();
+    }, this.chatError);
+
+    if (!result.ok) {
+      return;
+    }
+
+    if (!result.value) {
+      this.chatError.set("The prompt of this button is empty.");
+      return;
+    }
+
+    await this.deliver(result.value, []);
   }
 
   async quick(prompt) {
@@ -5218,6 +5267,8 @@ class AiEnvironmentScreen {
       return h("label", { class: "check" }, box, label);
     };
     this.newInstructions = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
+    this.reviewPrompt = h("textarea", { rows: 2 });
+    this.expandPrompt = h("textarea", { rows: 2 });
     this.claudeCommand = this.text();
     this.claudeFolder = this.text();
     this.claudeKey = this.keyField("API key");
@@ -5253,6 +5304,10 @@ class AiEnvironmentScreen {
           newSwitch("isWebAllowed", "Use the web"),
           newSwitch("isImageGenerationAllowed", "Generate images"),
           this.field("Instructions", this.newInstructions),
+          heading("Prompts"),
+          this.field("Review prompt", this.reviewPrompt),
+          this.field("Expand prompt", this.expandPrompt),
+          h("div", { class: "muted small" }, "Sent by the review and expand buttons of the message box. A workspace can set its own in its settings. Empty restores the default."),
           heading("Claude Code"),
           this.field("Command", this.claudeCommand),
           this.field("Configuration folder (optional)", this.claudeFolder),
@@ -5295,6 +5350,8 @@ class AiEnvironmentScreen {
     this.newCapability.value = defaults.capability ?? "Balanced";
     this.newEffort.value = defaults.effort ?? "High";
     this.newInstructions.value = defaults.instructions ?? "";
+    this.reviewPrompt.value = environment.reviewPrompt ?? "";
+    this.expandPrompt.value = environment.expandPrompt ?? "";
 
     for (const [key, box] of Object.entries(this.newSwitches)) {
       box.checked = !!defaults[key];
@@ -5347,7 +5404,9 @@ class AiEnvironmentScreen {
         effort: this.newEffort.value,
         ...Object.fromEntries(Object.entries(this.newSwitches).map(([key, box]) => [key, box.checked])),
         instructions: this.newInstructions.value.trim()
-      }
+      },
+      reviewPrompt: this.reviewPrompt.value.trim(),
+      expandPrompt: this.expandPrompt.value.trim()
     };
   }
 

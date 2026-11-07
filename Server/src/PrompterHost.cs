@@ -115,6 +115,8 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
 
     private string? file;
 
+    private readonly AiEnvironment defaults = new();
+
     private AiEnvironment kept = new();
 
     /// <inheritdoc />
@@ -170,6 +172,8 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
                 ClaudeConfigFolder = Blank(environment.ClaudeConfigFolder),
                 CodexConfigFolder = Blank(environment.CodexConfigFolder),
                 NewWorkspaces = given.NewWorkspaces with { Instructions = (given.NewWorkspaces.Instructions ?? string.Empty).Trim() },
+                ReviewPrompt = string.IsNullOrWhiteSpace(environment.ReviewPrompt) ? defaults.ReviewPrompt : environment.ReviewPrompt.Trim(),
+                ExpandPrompt = string.IsNullOrWhiteSpace(environment.ExpandPrompt) ? defaults.ExpandPrompt : environment.ExpandPrompt.Trim(),
                 ClaudeCommand = given.ClaudeCommand.Trim(),
                 CodexCommand = given.CodexCommand.Trim(),
                 LocalCommand = given.LocalCommand.Trim(),

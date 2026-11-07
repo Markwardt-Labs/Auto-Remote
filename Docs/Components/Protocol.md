@@ -128,8 +128,8 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes; does nothing when no loop runs. |
 | `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
-| `GetWorkspaceSettings` | `workspaceId` | `settings` | How the workspace's AI session is run, as the session stores it (the server keeps none of its own): the provider, capability, effort, whether the shell, files outside the workspace, the web and image generation are on, the instructions, and descriptors, which are lines the session writes about how it runs (the model it chose and so on). Makes the session when the workspace has none yet. |
-| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider and the descriptors in it are ignored) from its next prompt on; the session stores them. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
+| `GetWorkspaceSettings` | `workspaceId` | `settings` | How the workspace's AI session is run, as the session stores it (the server keeps none of its own): the provider, capability, effort, whether the shell, files outside the workspace, the web and image generation are on, the instructions, the workspace's own review and expand prompts next to the global ones, and descriptors, which are lines the session writes about how it runs (the model it chose and so on). Makes the session when the workspace has none yet. |
+| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider, the descriptors and the global prompts in it are ignored) from its next prompt on; the session stores them. The review and expand prompts are stored with the workspace instead, and an omitted or blank one clears the override. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
 | `GetAiEnvironment` | none | `aiEnvironment` | The environment of the server's AI. API keys are never sent, only whether one is set. |
 | `SetAiEnvironment` | `aiEnvironment` | `aiEnvironment` | Replaces the environment and applies it to every workspace from the next session on. A key left out stays as it is and an empty one is removed. Refused for an empty command, an address that is not http or https, a context size below one, local models for some capabilities but not all, OpenAI image generation without a key and local image generation without a checkpoint for every capability. |
 | `ListLocalModels` | optional `url` | `names` | The models the local model server offers (Ollama by default). Refused when the server cannot be reached. |
@@ -186,6 +186,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `sessionId` | string, optional | The live AI session that holds the workspace's folder, provider and AI configuration (32 hexadecimal digits). Informational: the server manages it and replaces it, keeping the workspace, when the session can no longer be used. |
 | `groupId` | GUID, optional | The group the workspace is filed in; omitted when it is at the top level. |
 | `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
+| `reviewPrompt`, `expandPrompt` | string, optional | The prompts of the workspace's own that its review and expand buttons send; omitted when it uses the environment's. |
 
 **catalog** (`ListWorkspaces`)
 
@@ -259,6 +260,8 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `isWebAllowed` | bool | Whether the AI may use the web. |
 | `isImageGenerationAllowed` | bool | Whether the AI may generate images; needs an image service in the environment. |
 | `instructions` | string, optional | Standing instructions for the AI. |
+| `reviewPrompt`, `expandPrompt` | string, optional | The prompts the workspace's review and expand buttons send instead of the ones of the environment; omitted (or blank when setting) means the environment's. They belong to the workspace, not to the session. |
+| `globalReviewPrompt`, `globalExpandPrompt` | string | The prompts of the environment, which the buttons send while the workspace has none of its own; read only. |
 | `descriptors` | object | What the session says about how it runs, text by name; read only. |
 
 **ai environment** (`GetAiEnvironment`, `SetAiEnvironment`)
@@ -276,6 +279,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `imageGeneration` | string | `None`, `OpenAi` or `Local`. |
 | `localImageServer` | string | Address of the Stable Diffusion server. |
 | `localImageModels` | capability names | The checkpoint for each capability; all four when `imageGeneration` is `Local`. |
+| `reviewPrompt`, `expandPrompt` | string | The prompts the review and expand buttons send in every workspace that has none of its own; trimmed, and a blank one is replaced by the default (`review workspace and fix any problems or inconsistencies`, `expand upon content in workspace in areas that make sense`). |
 | `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. A workspace keeps the values it was created with whatever this says later. |
 
 **usage** (`GetUsage`)

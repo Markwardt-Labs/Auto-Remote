@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// What the server keeps of a workspace in its workspaces file: who it is, which AI session holds its folder, provider and configuration, and the group it is filed in. Everything else about a workspace is read from its session.
+/// What the server keeps of a workspace in its workspaces file: who it is, which AI session holds its folder, provider and configuration, the group it is filed in and the review and expand prompts it has of its own. Everything else about a workspace is read from its session.
 /// </summary>
 internal sealed record StoredWorkspace
 {
@@ -19,6 +19,18 @@ internal sealed record StoredWorkspace
     /// Gets the group the workspace is filed in, or <see langword="null" /> when it is not in one.
     /// </summary>
     public Guid? GroupId { get; init; }
+
+    /// <summary>
+    /// Gets the review prompt of the workspace itself, or <see langword="null" /> when it uses the one of the environment.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ReviewPrompt { get; init; }
+
+    /// <summary>
+    /// Gets the expand prompt of the workspace itself, or <see langword="null" /> when it uses the one of the environment.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? ExpandPrompt { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the session was stored by an older release, before sessions kept the settings the server runs them with, and still has to be given them (<see cref="IPrompterHost.Adopt" />), which the server does when it starts and then clears this.

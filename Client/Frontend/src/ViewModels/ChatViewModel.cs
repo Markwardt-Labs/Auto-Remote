@@ -19,7 +19,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         this.workspaceId = workspaceId;
         this.drafts = drafts;
         SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && HasContent);
-        ReviewCommand = new AsyncCommand(_ => Deliver(ReviewPrompt, []), () => blockReason is null && !HasContent);
+        ReviewCommand = new AsyncCommand(_ => Preset(settings => settings.ReviewPrompt ?? settings.GlobalReviewPrompt), () => blockReason is null && !HasContent);
+        ExpandCommand = new AsyncCommand(_ => Preset(settings => settings.ExpandPrompt ?? settings.GlobalExpandPrompt), () => blockReason is null && !HasContent);
         PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, []), () => blockReason is null && !HasContent);
         ResumeCommand = new AsyncCommand(_ => Deliver(ResumePrompt, []), () => blockReason is null && !HasContent);
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
@@ -195,11 +196,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public int MaxAttachment { get; } = 2 * 1024 * 1024;
 
     /// <summary>
-    /// Gets the prompt the review command sends.
-    /// </summary>
-    public string ReviewPrompt { get; } = "review workspace, fix any problems or inconsistencies";
-
-    /// <summary>
     /// Gets the prompt the pause command sends.
     /// </summary>
     public string PausePrompt { get; } = "pause current work";
@@ -235,9 +231,14 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public AsyncCommand SendCommand { get; }
 
     /// <summary>
-    /// Gets the command that asks the AI to review the workspace and its changes and fix any problems or inconsistencies by sending <see cref="ReviewPrompt" />; it is available while nothing is typed, in the same states as <see cref="SendCommand" />.
+    /// Gets the command that asks the AI to review the workspace by sending the review prompt of the workspace, or the global one when it has none; it is available while nothing is typed, in the same states as <see cref="SendCommand" />.
     /// </summary>
     public AsyncCommand ReviewCommand { get; }
+
+    /// <summary>
+    /// Gets the command that asks the AI to expand upon the content of the workspace by sending the expand prompt of the workspace, or the global one when it has none; it is available in the same states as <see cref="ReviewCommand" />.
+    /// </summary>
+    public AsyncCommand ExpandCommand { get; }
 
     /// <summary>
     /// Gets the command that asks the AI to pause its current work by sending <see cref="PausePrompt" />; it is available in the same states as <see cref="ReviewCommand" />.
@@ -660,8 +661,25 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private void RefreshQuick()
     {
         ReviewCommand.Refresh();
+        ExpandCommand.Refresh();
         PauseCommand.Refresh();
         ResumeCommand.Refresh();
+    }
+
+    private async Task Preset(Func<WorkspaceSettings, string> choose)
+    {
+        string text = string.Empty;
+
+        if (await Attempt(async () => text = choose(await connection.GetWorkspaceSettings(workspaceId, CancellationToken.None)).Trim()))
+        {
+            if (text.Length == 0)
+            {
+                Error = "The prompt of this button is empty.";
+                return;
+            }
+
+            await Deliver(text, []);
+        }
     }
 
     private async Task<bool> Deliver(string text, List<ChatAttachment> sending)

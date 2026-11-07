@@ -63,6 +63,10 @@ internal sealed class EnvironmentViewModel : ViewModelBase
 
     private string localImageServer = string.Empty;
 
+    private string reviewPrompt = string.Empty;
+
+    private string expandPrompt = string.Empty;
+
     private IReadOnlyList<string> localModelNames = [];
 
     private IReadOnlyList<string> imageModelNames = [];
@@ -429,6 +433,24 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets the prompt the review button sends in every workspace that has none of its own; empty restores the default.
+    /// </summary>
+    public string ReviewPrompt
+    {
+        get => reviewPrompt;
+        set => Set(ref reviewPrompt, value ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Gets or sets the prompt the expand button sends in every workspace that has none of its own; empty restores the default.
+    /// </summary>
+    public string ExpandPrompt
+    {
+        get => expandPrompt;
+        set => Set(ref expandPrompt, value ?? string.Empty);
+    }
+
+    /// <summary>
     /// Reads the environment from the server.
     /// </summary>
     /// <returns>A task that completes once the read has finished.</returns>
@@ -470,7 +492,9 @@ internal sealed class EnvironmentViewModel : ViewModelBase
             OpenAiApiKey = KeyUpdate(openAiApiKey, clearOpenAiApiKey),
             LocalImageServer = localImageServer.Trim(),
             LocalImageModels = Names(ImageRows),
-            NewWorkspaces = defaults with { Instructions = defaults.Instructions.Trim() }
+            NewWorkspaces = defaults with { Instructions = defaults.Instructions.Trim() },
+            ReviewPrompt = reviewPrompt.Trim(),
+            ExpandPrompt = expandPrompt.Trim()
         };
     }
 
@@ -494,6 +518,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         hasOpenAiApiKey = environment.HasOpenAiApiKey;
         clearOpenAiApiKey = false;
         localImageServer = environment.LocalImageServer;
+        reviewPrompt = environment.ReviewPrompt;
+        expandPrompt = environment.ExpandPrompt;
         defaults = environment.NewWorkspaces;
         string[] local = [environment.LocalModels.Fast, environment.LocalModels.Balanced, environment.LocalModels.Strong, environment.LocalModels.Max];
         int?[] contexts = [environment.LocalContexts?.Fast, environment.LocalContexts?.Balanced, environment.LocalContexts?.Strong, environment.LocalContexts?.Max];

@@ -188,6 +188,25 @@ public sealed class EndToEndTests : IAsyncLifetime
     public void ServerVersion_IsTheOneTheServerSaysInItsHandshake() => Assert.Equal("1.2.3", connection.ServerVersion);
 
     [Fact]
+    public async Task ReviewAndExpandPrompts_GlobalOnesComeWithTheWorkspaceSettingsAndAWorkspaceCanOverrideAndClearThem()
+    {
+        FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "prompts", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, CancellationToken.None);
+        AiEnvironment environment = await connection.GetAiEnvironment(CancellationToken.None);
+
+        WorkspaceSettings first = await connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
+        await connection.SetAiEnvironment(environment with { ReviewPrompt = "global review" }, CancellationToken.None);
+        WorkspaceSettings own = await connection.SetWorkspaceSettings(workspace.Id, first with { ExpandPrompt = " my expand " }, CancellationToken.None);
+        WorkspaceInfo listed = Assert.Single((await connection.ListWorkspaces(CancellationToken.None)).Workspaces);
+        WorkspaceSettings cleared = await connection.SetWorkspaceSettings(workspace.Id, own with { ExpandPrompt = null }, CancellationToken.None);
+
+        Assert.Equal((null, null, "review workspace and fix any problems or inconsistencies", "expand upon content in workspace in areas that make sense"), (first.ReviewPrompt, first.ExpandPrompt, first.GlobalReviewPrompt, first.GlobalExpandPrompt));
+        Assert.Equal((null, "my expand", "global review"), (own.ReviewPrompt, own.ExpandPrompt, own.GlobalReviewPrompt));
+        Assert.Equal("my expand", listed.ExpandPrompt);
+        Assert.Null(cleared.ExpandPrompt);
+    }
+
+    [Fact]
     public async Task WrongKeyIsRejected()
     {
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>()).Connect(settings with { AccessKey = "wrong" }, CancellationToken.None));

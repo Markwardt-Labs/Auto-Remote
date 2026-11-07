@@ -8,14 +8,26 @@ public sealed class LoopViewModelTests
 
     private readonly DateTimeOffset now = new(2026, 11, 3, 15, 0, 0, TimeSpan.Zero);
 
-    private LoopViewModel Panel() => new(connection.Object, workspace, "review it");
+    public LoopViewModelTests() => connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it", GlobalExpandPrompt = "expand it" });
+
+    private LoopViewModel Opened()
+    {
+        Windows();
+        LoopViewModel panel = Panel();
+        panel.Open().GetAwaiter().GetResult();
+        return panel;
+    }
+
+    private LoopViewModel Panel() => new(connection.Object, workspace);
 
     private void Windows(params string[] names) => connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [.. names.Select(name => new UsagePeriod { Name = name, PercentUsed = 10, WindowMinutes = 300 })] });
 
     [Fact]
-    public void Build_SendsTheReviewPromptOrTheUsersOwnAndRunsForeverBackToBackWhenAsked()
+    public async Task Build_SendsTheReviewPromptOrTheUsersOwnAndRunsForeverBackToBackWhenAsked()
     {
+        Windows();
         LoopViewModel panel = Panel();
+        await panel.Open();
         panel.IntervalMinutes = 0;
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.Forever);
 
@@ -30,9 +42,56 @@ public sealed class LoopViewModelTests
     }
 
     [Fact]
+    public async Task Build_SendsTheExpandPromptWhenExpandIsChosenAndTheChoicesExcludeEachOther()
+    {
+        LoopViewModel panel = Opened();
+        List<string?> changed = [];
+        panel.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        panel.UseExpand = true;
+        LoopSettings expand = panel.Build(now);
+        bool afterExpand = panel.UseReview || panel.UseCustom;
+        panel.UseExpand = false;
+        bool ignoredFalse = panel.UseExpand;
+        panel.UseCustom = true;
+        panel.UseReview = true;
+        panel.UseCustom = false;
+        LoopSettings review = panel.Build(now);
+        await panel.Open();
+
+        Assert.Equal(("expand it", false, true), (expand.Prompt, afterExpand, ignoredFalse));
+        Assert.Equal("review it", review.Prompt);
+        Assert.Contains(nameof(LoopViewModel.UseExpand), changed);
+        Assert.True(panel.UseReview);
+    }
+
+    [Fact]
+    public async Task Open_ReadsTheReviewPromptOfTheWorkspaceOrTheGlobalOneAndBuildRefusesWhenItCouldNotBeRead()
+    {
+        Windows();
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { ReviewPrompt = "  custom review ", ExpandPrompt = " custom expand ", GlobalReviewPrompt = "global review", GlobalExpandPrompt = "global expand" });
+        LoopViewModel own = Panel();
+        await own.Open();
+
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "global review", GlobalExpandPrompt = "global expand" });
+        LoopViewModel global = Panel();
+        await global.Open();
+
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("down"));
+        LoopViewModel unread = Panel();
+        await unread.Open();
+
+        Assert.Equal(("custom review", "global review", string.Empty), (own.ReviewPrompt, global.ReviewPrompt, unread.ReviewPrompt));
+        Assert.Equal(("custom expand", "global expand", string.Empty), (own.ExpandPrompt, global.ExpandPrompt, unread.ExpandPrompt));
+        Assert.Contains("review prompt could not be read", Assert.Throws<InvalidOperationException>(() => unread.Build(now)).Message);
+        unread.UseExpand = true;
+        Assert.Contains("expand prompt could not be read", Assert.Throws<InvalidOperationException>(() => unread.Build(now)).Message);
+    }
+
+    [Fact]
     public void Build_TurnsTheMinutesIntoSecondsAndTheConditionIntoItsParameters()
     {
-        LoopViewModel panel = Panel();
+        LoopViewModel panel = Opened();
         panel.IntervalMinutes = 2.5m;
 
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.Runs);
@@ -50,7 +109,7 @@ public sealed class LoopViewModelTests
     [Fact]
     public void Build_EndsAtTheNextTimeItIsTheChosenTimeOfDay()
     {
-        LoopViewModel panel = Panel();
+        LoopViewModel panel = Opened();
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.UntilTime);
         DateTimeOffset local = new(new DateTime(2026, 11, 3, 15, 0, 0));
 
@@ -85,7 +144,7 @@ public sealed class LoopViewModelTests
     [Fact]
     public void Build_RefusesAnIntervalOutOfRange()
     {
-        LoopViewModel panel = Panel();
+        LoopViewModel panel = Opened();
         panel.IntervalMinutes = 2000;
 
         Assert.Contains("between 0 and 1440", Assert.Throws<InvalidOperationException>(() => panel.Build(now)).Message);
@@ -112,7 +171,7 @@ public sealed class LoopViewModelTests
     public async Task Open_StartsFromTheReviewPromptEveryTenMinutesForTwoHoursEvenAfterEarlierChanges()
     {
         Windows();
-        LoopViewModel fresh = Panel();
+        LoopViewModel fresh = Opened();
         LoopSettings initial = fresh.Build(now);
         LoopViewModel changed = Panel();
         changed.UseCustom = true;

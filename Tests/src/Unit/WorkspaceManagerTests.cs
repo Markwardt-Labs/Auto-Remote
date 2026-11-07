@@ -229,6 +229,35 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
+    public async Task SetPrompts_StoresTheTrimmedOverridesWithTheWorkspaceAndClearsBlankOnes()
+    {
+        string session = await Session("/work/a");
+        Guid id = Guid.NewGuid();
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [new StoredWorkspace { Id = id, SessionId = session, ReviewPrompt = "old review", ExpandPrompt = "old expand" }] });
+        List<StoredCatalog> saved = [];
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved.Add(catalog)).Returns(Task.CompletedTask);
+        await manager.Open("workspaces.json", CancellationToken.None);
+        Assert.Equal(("old review", "old expand"), ((await manager.Get(id, CancellationToken.None)).ReviewPrompt, (await manager.Get(id, CancellationToken.None)).ExpandPrompt));
+
+        WorkspaceInfo changed = await manager.SetPrompts(id, "  new review ", "   ", CancellationToken.None);
+        WorkspaceInfo same = await manager.SetPrompts(id, "new review", null, CancellationToken.None);
+
+        Assert.Equal(("new review", null), (changed.ReviewPrompt, changed.ExpandPrompt));
+        Assert.Equal(changed, same);
+        StoredWorkspace stored = Assert.Single(Assert.Single(saved).Workspaces);
+        Assert.Equal(("new review", null), (stored.ReviewPrompt, stored.ExpandPrompt));
+        events.Verify(x => x.Publish(It.IsAny<RemoteEvent>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task SetPrompts_RefusesAnUnknownWorkspace()
+    {
+        await manager.Open("workspaces.json", CancellationToken.None);
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.SetPrompts(Guid.NewGuid(), "a", "b", CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Move_PutsWorkspaceAtTheEndOfTheGroup()
     {
         WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);

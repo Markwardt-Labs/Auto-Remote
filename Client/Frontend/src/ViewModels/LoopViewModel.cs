@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The panel in which the user sets up a loop of the AI in a workspace: the prompt (the review prompt or their own), how often it is sent, and when the loop ends by itself.
+/// The panel in which the user sets up a loop of the AI in a workspace: the prompt (the review prompt, the expand prompt or their own), how often it is sent, and when the loop ends by itself.
 /// </summary>
 internal sealed class LoopViewModel : ViewModelBase
 {
@@ -10,12 +10,10 @@ internal sealed class LoopViewModel : ViewModelBase
     /// </summary>
     /// <param name="connection">The server connection.</param>
     /// <param name="workspace">The workspace.</param>
-    /// <param name="reviewPrompt">The prompt of the review choice.</param>
-    public LoopViewModel(IServerConnection connection, WorkspaceInfo workspace, string reviewPrompt)
+    public LoopViewModel(IServerConnection connection, WorkspaceInfo workspace)
     {
         this.connection = connection;
         this.workspace = workspace;
-        ReviewPrompt = reviewPrompt;
         selectedCondition = All.First(choice => choice.Condition == LoopCondition.ForDuration);
         StartCommand = new AsyncCommand(_ => Start());
         CancelCommand = new AsyncCommand(_ =>
@@ -31,7 +29,11 @@ internal sealed class LoopViewModel : ViewModelBase
 
     private bool isOpen;
 
-    private bool useReview = true;
+    private string reviewPrompt = string.Empty;
+
+    private string expandPrompt = string.Empty;
+
+    private LoopPromptKind kind = LoopPromptKind.Review;
 
     private string customPrompt = string.Empty;
 
@@ -59,9 +61,22 @@ internal sealed class LoopViewModel : ViewModelBase
     public event Action? Started;
 
     /// <summary>
-    /// Gets the prompt of the review choice.
+    /// Gets the prompt of the review choice, which is the review prompt of the workspace or the global one, as read when the panel opened.
     /// </summary>
-    public string ReviewPrompt { get; }
+    public string ReviewPrompt
+    {
+        get => reviewPrompt;
+        private set => Set(ref reviewPrompt, value);
+    }
+
+    /// <summary>
+    /// Gets the prompt of the expand choice, which is the expand prompt of the workspace or the global one, as read when the panel opened.
+    /// </summary>
+    public string ExpandPrompt
+    {
+        get => expandPrompt;
+        private set => Set(ref expandPrompt, value);
+    }
 
     /// <summary>
     /// Gets the ways a loop can end by itself: the ones that need a usage window only when the AI service reports some.
@@ -93,27 +108,30 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether every run sends the review prompt; otherwise it sends <see cref="CustomPrompt" />.
+    /// Gets or sets a value indicating whether every run sends the review prompt. Setting it to <see langword="false" /> changes nothing: another choice is made by setting that one.
     /// </summary>
     public bool UseReview
     {
-        get => useReview;
-        set
-        {
-            if (Set(ref useReview, value))
-            {
-                Raise(nameof(UseCustom));
-            }
-        }
+        get => kind == LoopPromptKind.Review;
+        set => Choose(LoopPromptKind.Review, value);
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether every run sends the user's own prompt.
+    /// Gets or sets a value indicating whether every run sends the expand prompt. Setting it to <see langword="false" /> changes nothing.
+    /// </summary>
+    public bool UseExpand
+    {
+        get => kind == LoopPromptKind.Expand;
+        set => Choose(LoopPromptKind.Expand, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether every run sends the user's own prompt. Setting it to <see langword="false" /> changes nothing.
     /// </summary>
     public bool UseCustom
     {
-        get => !useReview;
-        set => UseReview = !value;
+        get => kind == LoopPromptKind.Custom;
+        set => Choose(LoopPromptKind.Custom, value);
     }
 
     /// <summary>
@@ -236,7 +254,7 @@ internal sealed class LoopViewModel : ViewModelBase
     ];
 
     /// <summary>
-    /// Opens the panel, reading which usage windows the AI service reports so the loop can watch one.
+    /// Opens the panel, reading the review and expand prompts and which usage windows the AI service reports so the loop can watch one.
     /// </summary>
     /// <returns>A task that completes once the panel shows.</returns>
     public async Task Open()
@@ -252,6 +270,16 @@ internal sealed class LoopViewModel : ViewModelBase
         Percent = 90;
         IsOpen = true;
         IReadOnlyList<string> names = [];
+
+        try
+        {
+            WorkspaceSettings settings = await connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
+            ReviewPrompt = (settings.ReviewPrompt ?? settings.GlobalReviewPrompt).Trim();
+            ExpandPrompt = (settings.ExpandPrompt ?? settings.GlobalExpandPrompt).Trim();
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or RemoteException or ObjectDisposedException or InvalidDataException)
+        {
+        }
 
         try
         {
@@ -279,11 +307,21 @@ internal sealed class LoopViewModel : ViewModelBase
     /// <exception cref="InvalidOperationException">What the panel holds is not enough for a loop; the message says what is missing.</exception>
     public LoopSettings Build(DateTimeOffset now)
     {
-        string prompt = useReview ? ReviewPrompt : customPrompt.Trim();
+        string prompt = kind switch
+        {
+            LoopPromptKind.Review => ReviewPrompt,
+            LoopPromptKind.Expand => ExpandPrompt,
+            _ => customPrompt.Trim(),
+        };
 
         if (prompt.Length == 0)
         {
-            throw new InvalidOperationException("Write the prompt the loop sends.");
+            throw new InvalidOperationException(kind switch
+            {
+                LoopPromptKind.Review => "The review prompt could not be read, so write the prompt the loop sends.",
+                LoopPromptKind.Expand => "The expand prompt could not be read, so write the prompt the loop sends.",
+                _ => "Write the prompt the loop sends.",
+            });
         }
 
         if (intervalMinutes is not (>= 0 and <= 1440))
@@ -328,6 +366,17 @@ internal sealed class LoopViewModel : ViewModelBase
         {
             IsOpen = false;
             Started?.Invoke();
+        }
+    }
+
+    private void Choose(LoopPromptKind chosen, bool selected)
+    {
+        if (selected && kind != chosen)
+        {
+            kind = chosen;
+            Raise(nameof(UseReview));
+            Raise(nameof(UseExpand));
+            Raise(nameof(UseCustom));
         }
     }
 }

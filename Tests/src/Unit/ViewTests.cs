@@ -770,10 +770,11 @@ public sealed class ViewTests(HeadlessFixture fixture)
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { ExpandPrompt = "my expand", GlobalReviewPrompt = "review workspace and fix any problems or inconsistencies", GlobalExpandPrompt = "global expand" });
         string? prompted = null;
         connection.Setup(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => prompted = text).Returns(Task.CompletedTask);
 
-        (bool emptyReview, bool emptySend, bool typedReview, bool typedSend, bool reviewIsAction, string? sent) = await fixture.Run(() =>
+        (bool emptyReview, bool emptySend, bool typedReview, bool typedSend, bool reviewIsAction, string? sent, bool expandNextToReview, bool expandHiddenWhenTyped, string? expanded) = await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
             model.Start().GetAwaiter().GetResult();
@@ -793,16 +794,34 @@ public sealed class ViewTests(HeadlessFixture fixture)
                 Thread.Sleep(10);
             }
 
+            string? reviewed = prompted;
+            prompted = null;
+            TouchButton? Expand() => window.GetVisualDescendants().OfType<TouchButton>().FirstOrDefault(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString()?.StartsWith("Expand upon", StringComparison.Ordinal) == true);
+            Avalonia.Point reviewAt = Avalonia.VisualExtensions.TranslatePoint(Review()!, new Avalonia.Point(), window)!.Value;
+            Avalonia.Point expandAt = Avalonia.VisualExtensions.TranslatePoint(Expand()!, new Avalonia.Point(), window)!.Value;
+            bool expandNextToReview = expandAt.X > reviewAt.X && expandAt.X - reviewAt.X < 60 && Math.Abs(expandAt.Y - reviewAt.Y) < 1 && Expand()!.Width == 34 && Expand()!.Classes.Contains("primary");
+            model.Active.Chat.ExpandCommand.Execute(null);
+            for (int attempt = 0; attempt < 100 && prompted is null; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            string? expanded = prompted;
             model.Active.Chat.Input = "check the parser";
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             bool typedReview = Review() is not null;
             bool typedSend = Send() is not null;
+            bool expandHiddenWhenTyped = Expand() is null;
             window.Close();
-            return (emptyReview, emptySend, typedReview, typedSend, reviewIsAction, prompted);
+            return (emptyReview, emptySend, typedReview, typedSend, reviewIsAction, reviewed, expandNextToReview, expandHiddenWhenTyped, expanded);
         });
 
         Assert.Equal((true, false, false, true, true), (emptyReview, emptySend, typedReview, typedSend, reviewIsAction));
-        Assert.Equal("review workspace, fix any problems or inconsistencies", sent);
+        Assert.Equal("review workspace and fix any problems or inconsistencies", sent);
+        Assert.True(expandNextToReview);
+        Assert.True(expandHiddenWhenTyped);
+        Assert.Equal("my expand", expanded);
     }
 
     [Fact]
@@ -811,6 +830,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it" });
         connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "Session", PercentUsed = 10, WindowMinutes = 300 }] });
 
         (bool[] idle, bool panelOpen, string[] conditions, bool[] fields, bool[] looping, bool tipHasRuns, bool[] working) = await fixture.Run(() =>
@@ -836,7 +856,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             string[] conditions = [.. model.Active.Loop.Conditions.Select(choice => choice.Name)];
             bool Shown<T>() where T : Avalonia.Visual => window.GetVisualDescendants().OfType<T>().Any(item => item.IsEffectivelyVisible);
-            bool radios = Shown<RadioButton>();
+            bool radios = window.GetVisualDescendants().OfType<RadioButton>().Count(radio => radio.IsEffectivelyVisible) == 3;
             model.Active.Loop.SelectedCondition = model.Active.Loop.Conditions.Single(choice => choice.Condition == LoopCondition.UntilTime);
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             bool timePicker = Shown<TimePicker>();
@@ -1392,5 +1412,59 @@ public sealed class ViewTests(HeadlessFixture fixture)
             model.Start().GetAwaiter().GetResult();
             return Shows<ConnectView>(new MainView(), model);
         }));
+    }
+
+    [Theory]
+    [InlineData(ClientLayout.Tabs, 390, false, "")]
+    [InlineData(ClientLayout.Tabs, 390, true, "")]
+    [InlineData(ClientLayout.Tabs, 390, false, "typed")]
+    [InlineData(ClientLayout.Panels, 1280, false, "")]
+    [InlineData(ClientLayout.Panels, 1280, true, "")]
+    public async Task HomeView_EveryIconIsCenteredBothWaysInItsButton(ClientLayout layout, int width, bool working, string typed)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = working });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(working ? WorkspaceState.Working : WorkspaceState.Ready);
+        connection.Setup(x => x.ListFiles(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [new FileEntry { Name = "a.txt", Path = "a.txt", IsFolder = false, Size = 1 }] });
+
+        (List<string> off, int checkedIcons) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, layout);
+            model.Start().GetAwaiter().GetResult();
+            model.Active!.Chat.Input = typed;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = width, Height = 900, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            List<string> off = [];
+            int count = 0;
+
+            foreach (Button button in window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible))
+            {
+                if (button.Content is not Avalonia.Controls.Shapes.Path path || path.RenderedGeometry is not { } rendered)
+                {
+                    continue;
+                }
+
+                count++;
+                Avalonia.Point origin = Avalonia.VisualExtensions.TranslatePoint(path, new Avalonia.Point(0, 0), button)!.Value;
+                double x = origin.X + rendered.Bounds.Center.X - button.Bounds.Width / 2;
+                double y = origin.Y + rendered.Bounds.Center.Y - button.Bounds.Height / 2;
+
+                if (Math.Abs(x) > 0.75 || Math.Abs(y) > 0.75)
+                {
+                    off.Add($"{ToolTip.GetTip(button) ?? button.Command?.GetType().Name} off by ({x:0.0}, {y:0.0}), icon {path.Bounds} align {path.HorizontalAlignment}/{path.VerticalAlignment} rendered {rendered.Bounds} origin {origin} in {button.Bounds.Width}x{button.Bounds.Height}");
+                }
+            }
+
+            window.Close();
+            return (off, count);
+        });
+
+        Assert.True(checkedIcons >= 3, $"only {checkedIcons} icon buttons were found");
+        Assert.True(off.Count == 0, string.Join("\n", off));
     }
 }

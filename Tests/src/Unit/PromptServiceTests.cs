@@ -51,6 +51,7 @@ public sealed class PromptServiceTests : IDisposable
     {
         workspace = info;
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
+        workspaces.Setup(x => x.SetPrompts(workspace.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? review, string? expand, CancellationToken _) => workspace = workspace with { ReviewPrompt = string.IsNullOrWhiteSpace(review) ? null : review.Trim(), ExpandPrompt = string.IsNullOrWhiteSpace(expand) ? null : expand.Trim() });
         workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { SessionId = session }).Returns(Task.CompletedTask);
     }
 
@@ -383,6 +384,21 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal((false, false, false, true), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
         Assert.Equal("  be brief  ", configuration.Instructions);
         Assert.Equal((AiService.ClaudeCode, AiCapability.Max, AiEffort.Low), (saved.Service, saved.Capability, saved.Effort));
+    }
+
+    [Fact]
+    public async Task SettingsCarryTheReviewAndExpandPromptsOfTheWorkspaceNextToTheGlobalOnes()
+    {
+        host.Mock.Setup(x => x.Get()).Returns(new AiEnvironment { ReviewPrompt = "global review", ExpandPrompt = "global expand" });
+        WorkspaceSettings none = await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        WorkspaceSettings own = await service.SetSettings(workspace.Id, none with { ReviewPrompt = "  my review ", ExpandPrompt = "my expand" }, CancellationToken.None);
+        WorkspaceSettings cleared = await service.SetSettings(workspace.Id, own with { ReviewPrompt = null, ExpandPrompt = "   " }, CancellationToken.None);
+
+        Assert.Equal((null, null, "global review", "global expand"), (none.ReviewPrompt, none.ExpandPrompt, none.GlobalReviewPrompt, none.GlobalExpandPrompt));
+        Assert.Equal(("my review", "my expand", "global review", "global expand"), (own.ReviewPrompt, own.ExpandPrompt, own.GlobalReviewPrompt, own.GlobalExpandPrompt));
+        Assert.Equal((null, null), (cleared.ReviewPrompt, cleared.ExpandPrompt));
+        workspaces.Verify(x => x.SetPrompts(workspace.Id, null, "   ", It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

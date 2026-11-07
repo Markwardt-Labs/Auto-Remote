@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The settings of one workspace's AI session: how capable it is, how hard it thinks, what it may do and its standing instructions. The provider is fixed when the workspace is created and only shown. Edits are pending and are sent to the server together by <see cref="Apply" /> when the settings are closed; the server reads the values from the session and writes them back to it, so nothing is kept here beyond what is on screen.
+/// The settings of one workspace's AI session: how capable it is, how hard it thinks, what it may do and its standing instructions, plus the review and expand prompts the workspace has of its own. The provider is fixed when the workspace is created and only shown. Edits are pending and are sent to the server together by <see cref="Apply" /> when the settings are closed; the server reads the values from the session and writes them back to it, so nothing is kept here beyond what is on screen.
 /// </summary>
 internal sealed class SettingsViewModel : ViewModelBase
 {
@@ -15,6 +15,16 @@ internal sealed class SettingsViewModel : ViewModelBase
         this.connection = connection;
         ProviderName = workspace.Service.Label();
         workspaceId = workspace.Id;
+        ClearReviewPromptCommand = new AsyncCommand(_ =>
+        {
+            ReviewPrompt = string.Empty;
+            return Task.CompletedTask;
+        });
+        ClearExpandPromptCommand = new AsyncCommand(_ =>
+        {
+            ExpandPrompt = string.Empty;
+            return Task.CompletedTask;
+        });
         _ = Load();
     }
 
@@ -136,6 +146,52 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets the review prompt of this workspace; empty to use the one of the global settings.
+    /// </summary>
+    public string ReviewPrompt
+    {
+        get => pending.ReviewPrompt ?? string.Empty;
+        set
+        {
+            Edit(pending with { ReviewPrompt = value });
+            Raise(nameof(ReviewPrompt));
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the expand prompt of this workspace; empty to use the one of the global settings.
+    /// </summary>
+    public string ExpandPrompt
+    {
+        get => pending.ExpandPrompt ?? string.Empty;
+        set
+        {
+            Edit(pending with { ExpandPrompt = value });
+            Raise(nameof(ExpandPrompt));
+        }
+    }
+
+    /// <summary>
+    /// Gets the review prompt of the global settings, which the review button sends while this workspace has none of its own.
+    /// </summary>
+    public string GlobalReviewPrompt => pending.GlobalReviewPrompt;
+
+    /// <summary>
+    /// Gets the expand prompt of the global settings, which the expand button sends while this workspace has none of its own.
+    /// </summary>
+    public string GlobalExpandPrompt => pending.GlobalExpandPrompt;
+
+    /// <summary>
+    /// Gets the command that clears the review prompt of this workspace, so that the global one is used again.
+    /// </summary>
+    public AsyncCommand ClearReviewPromptCommand { get; }
+
+    /// <summary>
+    /// Gets the command that clears the expand prompt of this workspace, so that the global one is used again.
+    /// </summary>
+    public AsyncCommand ClearExpandPromptCommand { get; }
+
+    /// <summary>
     /// Reads the settings from the server again, unless there are edits that were not applied (they stay).
     /// </summary>
     /// <returns>A task that completes once the read has finished.</returns>
@@ -153,7 +209,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         }
 
         WorkspaceSettings? saved = null;
-        WorkspaceSettings wanted = pending with { Instructions = (pending.Instructions ?? string.Empty).Trim() };
+        WorkspaceSettings wanted = pending with { Instructions = (pending.Instructions ?? string.Empty).Trim(), ReviewPrompt = Blank(pending.ReviewPrompt), ExpandPrompt = Blank(pending.ExpandPrompt) };
 
         if (await Attempt(async () => saved = await connection.SetWorkspaceSettings(workspaceId, wanted, CancellationToken.None)) && saved is not null)
         {
@@ -165,7 +221,9 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     private bool Differs(WorkspaceSettings first, WorkspaceSettings second)
-        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, (first.Instructions ?? string.Empty).Trim()) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, (second.Instructions ?? string.Empty).Trim());
+        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt)) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt));
+
+    private string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
     private void Edit(WorkspaceSettings edited)
     {
@@ -210,5 +268,9 @@ internal sealed class SettingsViewModel : ViewModelBase
         Raise(nameof(IsWebAllowed));
         Raise(nameof(IsImageGenerationAllowed));
         Raise(nameof(Instructions));
+        Raise(nameof(ReviewPrompt));
+        Raise(nameof(ExpandPrompt));
+        Raise(nameof(GlobalReviewPrompt));
+        Raise(nameof(GlobalExpandPrompt));
     }
 }

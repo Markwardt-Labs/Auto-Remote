@@ -23,7 +23,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
-        Loop = new LoopViewModel(connection, workspace, Chat.ReviewPrompt);
+        Loop = new LoopViewModel(connection, workspace);
         Loop.Started += () => Chat.Notice = null;
         OpenLoopCommand = new AsyncCommand(_ => Loop.Open());
         CancelLoopCommand = new AsyncCommand(_ => CancelLoop());
@@ -34,6 +34,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowHaltButtons));
                 Raise(nameof(ShowSendButton));
                 Raise(nameof(ShowReviewButton));
+                Raise(nameof(ShowExpandButton));
                 Raise(nameof(ShowPromptButtons));
                 Raise(nameof(ShowPauseButton));
                 Raise(nameof(ShowResumeButton));
@@ -259,7 +260,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a description of the loop that runs, for the tooltip of its icon: what it sends, how often, when it ends and how many runs it made.
     /// </summary>
-    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {(activeLoop.Settings.Prompt == Chat.ReviewPrompt ? "review" : "custom prompt")}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far";
+    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far";
 
     /// <summary>
     /// Gets when the next automatic prompt of the loop is sent, in words, which the loop icon in the header shows when clicked and which counts down while it is open.
@@ -300,6 +301,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and the work buttons do not show.
     /// </summary>
     public bool ShowReviewButton => !ShowHaltButtons && !Chat.HasContent;
+
+    /// <summary>
+    /// Gets a value indicating whether the message box shows the expand button next to the review button, which is whenever the review button shows.
+    /// </summary>
+    public bool ShowExpandButton => ShowReviewButton;
 
     /// <summary>
     /// Gets a value indicating whether the workspace is in any state but <see cref="WorkspaceState.Ready" />, which turns the header blue.
@@ -526,6 +532,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowHaltButtons));
         Raise(nameof(ShowSendButton));
         Raise(nameof(ShowReviewButton));
+        Raise(nameof(ShowExpandButton));
         Raise(nameof(ShowPromptButtons));
         Raise(nameof(ShowPauseButton));
         Raise(nameof(ShowResumeButton));
@@ -661,6 +668,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         TimeSpan wait = next - now;
         string span = wait.TotalHours >= 1 ? $"{(int)wait.TotalHours} h {wait.Minutes} min" : wait.TotalMinutes >= 1 ? $"{(int)wait.TotalMinutes} min {wait.Seconds} s" : $"{Math.Max(1, wait.Seconds)} s";
         return busy ? $"The next prompt is sent in {span}, or when the workspace is free if that is later." : $"The next prompt is sent in {span}.";
+    }
+
+    private string Shorten(string prompt)
+    {
+        string line = prompt.ReplaceLineEndings(" ").Trim();
+        return line.Length <= 40 ? $"\"{line}\"" : $"\"{line[..40].TrimEnd()}...\"";
     }
 
     private string Describe(LoopSettings settings) => settings.Condition switch
