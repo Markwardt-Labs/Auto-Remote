@@ -202,8 +202,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 }
             }
 
-            ChatHistory read = await Read(live.Session!, cursor, Math.Clamp(limit ?? defaultChunk, 1, maxChunk), live.Working, cancellation);
-            return read with { Status = live.Working ? live.Status : null };
+            return await Read(live.Session!, cursor, Math.Clamp(limit ?? defaultChunk, 1, maxChunk), live.Working, cancellation);
         }
         finally
         {
@@ -646,38 +645,6 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
-    private PromptTool StatusTool(Guid id, Live live)
-        => new()
-        {
-            Name = host.StatusTool,
-            Description = "Shows the user a short status of your work: what you have done so far and what you are doing or will do next. Call it regularly while you work, at the interval the instructions give, and use it for every status update instead of writing one as a normal message. Do not use it for the final summary.",
-            InputSchema = JsonDocument.Parse("""{"type":"object","properties":{"status":{"type":"string","description":"The status: one or two short sentences."}},"required":["status"]}""").RootElement.Clone(),
-            Handler = (arguments, _) => Task.FromResult(Report(id, live, arguments))
-        };
-
-    private string Report(Guid id, Live live, JsonElement arguments)
-    {
-        string status = arguments.ValueKind == JsonValueKind.Object && arguments.TryGetProperty("status", out JsonElement value) && value.ValueKind == JsonValueKind.String ? value.GetString()!.Trim() : string.Empty;
-
-        if (status.Length == 0)
-        {
-            throw new ArgumentException("The status must be a text.");
-        }
-
-        lock (live.Sync)
-        {
-            if (!live.Working)
-            {
-                return "The user is not following the work right now, so the status was not shown.";
-            }
-
-            live.Status = status;
-        }
-
-        events.Publish(new RemoteEvent { Kind = RemoteEventKind.StatusChanged, WorkspaceId = id, Text = status });
-        return "The status was shown to the user.";
-    }
-
     private void Apply(IPromptSessionConfiguration configuration, WorkspaceSettings settings)
     {
         configuration.Capability = Enum.Parse<PromptCapability>(settings.Capability.ToString());
@@ -752,12 +719,6 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 session.Configuration.Instructions = wanted;
             }
 
-            foreach (PromptTool existing in session.Transient.Tools.Where(tool => tool.Name == host.StatusTool).ToList())
-            {
-                session.Transient.Tools.Remove(existing);
-            }
-
-            session.Transient.Tools.Add(StatusTool(id, live));
         }
         catch (Exception exception) when (exception is PromptSessionException or DirectoryNotFoundException or ArgumentException)
         {
@@ -1112,8 +1073,6 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (!working)
             {
-                live.Status = null;
-
                 if (activity.Get(id) == WorkspaceState.Working)
                 {
                     snapshots.Discard(id);
@@ -1196,8 +1155,6 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public Tally Tally { get; set; } = new();
 
         public bool Working { get; set; }
-
-        public string? Status { get; set; }
 
         public bool Expecting { get; set; }
 

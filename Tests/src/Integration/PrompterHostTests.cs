@@ -107,7 +107,6 @@ public sealed class PrompterHostTests : IDisposable
         Assert.Equal(builtIn.Compose(null, 12), prompter.Environment.Instructions);
         Assert.Equal(builtIn.Compose("x", 4), host.ComposeInstructions("x", 4));
         Assert.Equal(builtIn.Compose("x", 12), host.ComposeInstructions("x", null));
-        Assert.Equal("report_status", host.StatusTool);
     }
 
     [Fact]

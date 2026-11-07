@@ -52,14 +52,13 @@ public sealed class BuiltInInstructionsTests
     [InlineData(1, "at least once every minute")]
     [InlineData(5, "at least once every 5 minutes")]
     [InlineData(30, "at least once every 30 minutes")]
-    public void Text_TellsTheAiToReportItsStatusWithTheToolOnTheIntervalAndToReplyOnlyWithTheFinalSummary(int minutes, string interval)
+    public void Text_TellsTheAiToWriteAStatusUpdateAsANormalMessageOnTheInterval(int minutes, string interval)
     {
         string text = instructions.Text(minutes);
 
         Assert.Contains(interval, text);
-        Assert.Contains($"{instructions.StatusTool} tool", text);
-        Assert.Contains("never as a normal message", text);
-        Assert.Contains("final summary", text);
+        Assert.Contains("status update as a normal message", text);
         Assert.Contains("in the foreground", text);
+        Assert.DoesNotContain("tool", text);
     }
 }

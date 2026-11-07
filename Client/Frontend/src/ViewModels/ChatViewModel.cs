@@ -81,8 +81,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool isAiWorking;
 
-    private string? status;
-
     private string? blockReason;
 
     private bool loaded;
@@ -111,26 +109,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         get => isAiWorking;
         private set => Set(ref isAiWorking, value);
     }
-
-    /// <summary>
-    /// Gets the latest status the AI reported with its status tool while it works, or <see langword="null" /> when it has reported none yet or the work is over, which keeps the status bar hidden.
-    /// </summary>
-    public string? Status
-    {
-        get => status;
-        private set
-        {
-            if (Set(ref status, value))
-            {
-                Raise(nameof(HasStatus));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets a value indicating whether there is a status to show, which shows the status bar above the message box.
-    /// </summary>
-    public bool HasStatus => status is not null;
 
     /// <summary>
     /// Gets or sets why the AI cannot be given work now, such as a script or git running in the workspace, or <see langword="null" /> when it can; it is shown as the hint of the message box.
@@ -463,7 +441,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             older = history.Older;
             Raise(nameof(HasMore));
             IsAiWorking = history.Working;
-            Status = history.Working ? history.Status : null;
         }
     }
 
@@ -494,14 +471,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             case RemoteEventKind.WorkingChanged:
                 IsAiWorking = remoteEvent.Working == true;
 
-                if (remoteEvent.Working != true)
-                {
-                    Status = null;
-                }
-
-                break;
-            case RemoteEventKind.StatusChanged when !string.IsNullOrWhiteSpace(remoteEvent.Text):
-                Status = remoteEvent.Text;
                 break;
             case RemoteEventKind.Failed:
                 Error = remoteEvent.Error;

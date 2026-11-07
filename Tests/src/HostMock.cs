@@ -21,7 +21,6 @@ internal sealed class HostMock
             return session.Id;
         });
         Mock.Setup(x => x.ComposeInstructions(It.IsAny<string?>(), It.IsAny<int?>())).Returns((string? user, int? minutes) => BuiltIn.Compose(user, minutes ?? 5));
-        Mock.Setup(x => x.StatusTool).Returns(BuiltIn.StatusTool);
         Mock.Setup(x => x.UserInstructions(It.IsAny<string?>())).Returns((string? stored) => BuiltIn.Visible(stored));
         Mock.Setup(x => x.Adopt(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         Mock.Setup(x => x.MoveSession(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);

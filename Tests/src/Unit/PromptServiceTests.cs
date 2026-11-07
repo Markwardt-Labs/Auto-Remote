@@ -402,59 +402,13 @@ public sealed class PromptServiceTests : IDisposable
         workspaces.Verify(x => x.SetOverrides(workspace.Id, null, "   ", null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    private async Task<string> CallStatus(string json)
-    {
-        PromptTool tool = Session.Transient.Tools.Single(candidate => candidate.Name == host.Object.StatusTool);
-        using JsonDocument arguments = JsonDocument.Parse(json);
-        return await tool.Handler(arguments.RootElement, CancellationToken.None);
-    }
-
     [Fact]
-    public async Task OpeningASession_OffersTheStatusToolOnceAndGivesTheAiTheInstructionsForTheInterval()
+    public async Task OpeningASession_GivesTheAiTheInstructionsForTheInterval()
     {
         await service.GetSettings(workspace.Id, CancellationToken.None);
-        await service.GetSettings(workspace.Id, CancellationToken.None);
 
-        PromptTool tool = Assert.Single(Session.Transient.Tools);
-        Assert.Equal("report_status", tool.Name);
-        Assert.Contains("status", tool.Description);
-        Assert.True(tool.InputSchema.GetProperty("properties").TryGetProperty("status", out _));
+        Assert.Empty(Session.Transient.Tools);
         Assert.Equal(host.BuiltIn.Compose(null, 5), Session.Configuration.Instructions);
-    }
-
-    [Fact]
-    public async Task TheStatusTool_ShowsTheLatestStatusWhileTheAiWorksAndItIsGoneWhenTheWorkEnds()
-    {
-        TaskCompletionSource release = new();
-        prompter.OnCreate = session => session.ReplyWith(prompt => Slow(release.Task, "done"));
-        await service.Prompt(workspace.Id, "go", CancellationToken.None);
-        await Until(() => Session.Prompts.Count == 1);
-
-        string answer = await CallStatus("""{"status":"  reading the files  "}""");
-        await CallStatus("""{"status":"writing the tests"}""");
-
-        Assert.Contains("shown", answer);
-        Assert.Equal(["reading the files", "writing the tests"], Events(RemoteEventKind.StatusChanged).Select(remoteEvent => remoteEvent.Text).ToList());
-        Assert.All(Events(RemoteEventKind.StatusChanged), remoteEvent => Assert.Equal(workspace.Id, remoteEvent.WorkspaceId));
-        Assert.Equal("writing the tests", (await service.History(workspace.Id, null, null, CancellationToken.None)).Status);
-
-        release.SetResult();
-        await Until(() => !service.IsBusy(workspace.Id));
-
-        Assert.Null((await service.History(workspace.Id, null, null, CancellationToken.None)).Status);
-    }
-
-    [Fact]
-    public async Task TheStatusTool_RefusesAnEmptyStatusAndIgnoresOneWhileNothingWorks()
-    {
-        await service.GetSettings(workspace.Id, CancellationToken.None);
-
-        await Assert.ThrowsAsync<ArgumentException>(() => CallStatus("""{"status":"  "}"""));
-        await Assert.ThrowsAsync<ArgumentException>(() => CallStatus("""{"other":1}"""));
-        string idle = await CallStatus("""{"status":"hello"}""");
-
-        Assert.Contains("not shown", idle);
-        Assert.Empty(Events(RemoteEventKind.StatusChanged));
     }
 
     [Fact]

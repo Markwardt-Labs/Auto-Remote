@@ -255,9 +255,6 @@
                 <local:TouchButton Grid.Column="1" Content="Cancel and Undo" Command="{Binding CancelWorkCommand}" Margin="8,0,0,0" Padding="8,3" FontSize="12" />
               </Grid>
             </Border>
-            <Border Name="StatusBar" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="10,6" IsVisible="{Binding HasStatus}">
-              <TextBlock Text="{Binding Status}" FontSize="12" TextWrapping="Wrap" />
-            </Border>
             </StackPanel>
             <ItemsControl Grid.Row="1" ItemsSource="{Binding Attachments}" IsVisible="{Binding HasAttachments}" Margin="0,0,0,4">
               <ItemsControl.ItemsPanel>

@@ -300,8 +300,6 @@ button.refbtn { background: transparent; border: 0; padding: 0; margin: 0 4px 0 
 button.refbtn .ref { margin: 0; }
 .git-working { display: flex; align-items: center; gap: 8px; background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin-bottom: 6px; font-size: 12px; }
 .git-working[hidden] { display: none; }
-.status-bar { background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; padding: 6px 10px; margin-bottom: 6px; font-size: 12px; overflow-wrap: anywhere; }
-.status-bar[hidden] { display: none; }
 .git-working span { flex: 1; color: var(--muted); }
 .settings { overflow-y: auto; }
 .settings .inner { max-width: 820px; width: 100%; margin: 0 auto; padding: 8px 20px 20px; }
@@ -1734,14 +1732,13 @@ class WorkspaceView {
     this.gitBar = h("div", { class: "git-working", hidden: true },
       h("span", {}, "Git is working on the server."),
       h("button", { onclick: () => this.cancelGit() }, "Cancel and Undo"));
-    this.statusBar = h("div", { class: "status-bar", hidden: true });
     this.chatAutoButton = h("button", { class: "flat icon autoscroll on", title: "Auto scroll the chat to new messages", onclick: () => this.toggleChatAuto() }, icon("scroll"));
     this.chatBody = h("div", { class: "pane-body chat" },
       h("div", { class: "messages-wrap" }, this.scroller, this.chatAutoButton),
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
-      h("div", { class: "composer" }, this.gitBar, this.statusBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.sendButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2653,17 +2650,8 @@ class WorkspaceView {
     }
   }
 
-  showStatus(text) {
-    this.statusBar.textContent = text ?? "";
-    this.statusBar.hidden = !text;
-  }
-
   setWorking(value) {
     this.working = value;
-
-    if (!value) {
-      this.showStatus(null);
-    }
 
     if (value && this.gitWorking()) {
       this.showSide("chat");
@@ -2680,7 +2668,6 @@ class WorkspaceView {
       this.messages = [...result.value.messages];
       this.older = result.value.older ?? null;
       this.setWorking(result.value.working === true);
-      this.showStatus(result.value.working === true ? result.value.status : null);
       this.renderMessages();
     }
 
@@ -2783,8 +2770,6 @@ class WorkspaceView {
       this.appendMessage(event.message);
     } else if (event.kind === "WorkingChanged") {
       this.setWorking(event.working === true);
-    } else if (event.kind === "StatusChanged" && event.text) {
-      this.showStatus(event.text);
     } else if (event.kind === "Failed") {
       this.chatError.set(event.error);
     }

@@ -17,11 +17,6 @@ internal interface IPrompterHost
     AiService DefaultService { get; }
 
     /// <summary>
-    /// Gets the name of the tool the AI reports its status with.
-    /// </summary>
-    string StatusTool { get; }
-
-    /// <summary>
     /// Takes over the AI settings an older release kept in the server config when there is no stored environment yet, makes the prompter over the sessions in the data folder (Live AI upgrades the ones an earlier version stored itself) and applies the environment the server kept, which also holds what every new session starts with.
     /// </summary>
     /// <param name="config">The server settings.</param>
@@ -144,9 +139,6 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
 
     /// <inheritdoc />
     public AiService DefaultService => kept.DefaultService;
-
-    /// <inheritdoc />
-    public string StatusTool => builtIn.StatusTool;
 
     /// <inheritdoc />
     public async Task Configure(ServerConfig config, CancellationToken cancellation)
