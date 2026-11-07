@@ -12,7 +12,6 @@
 
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
       <StackPanel Spacing="8" Margin="0,0,0,12" MaxWidth="640">
-        <TextBlock Text="Where the AI tools are, what they sign in with and which models the local provider runs. It applies to every workspace on the server. Changes apply when you close this screen." Classes="muted" TextWrapping="Wrap" />
 
         <TextBlock Text="Default provider for new workspaces" Classes="muted" Margin="0,8,0,0" />
         <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding SelectedDefault}" HorizontalAlignment="Stretch">
@@ -24,7 +23,6 @@
         </ComboBox>
 
         <TextBlock Text="New workspaces" Classes="serif" FontSize="18" Margin="0,16,0,0" />
-        <TextBlock Text="What the AI session of a new workspace starts with. A workspace keeps its own settings afterwards." Classes="muted" FontSize="12" TextWrapping="Wrap" />
         <TextBlock Text="Capability" Classes="muted" />
         <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding NewCapability}" HorizontalAlignment="Stretch">
           <ComboBox.ItemTemplate>
@@ -51,13 +49,11 @@
         <TextBlock Text="Status" Classes="serif" FontSize="18" Margin="0,16,0,0" />
         <TextBlock Text="Status interval (minutes)" Classes="muted" />
         <NumericUpDown Value="{Binding StatusMinutes}" Minimum="1" Maximum="1440" Increment="1" FormatString="0" HorizontalAlignment="Stretch" />
-        <TextBlock Text="How often the AI is told to report its status while it works. A workspace can set its own in its settings. Empty restores the default of 5." Classes="muted" FontSize="12" TextWrapping="Wrap" />
         <TextBlock Text="Prompts" Classes="serif" FontSize="18" Margin="0,16,0,0" />
         <TextBlock Text="Review prompt" Classes="muted" />
         <TextBox Text="{Binding ReviewPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
         <TextBlock Text="Expand prompt" Classes="muted" />
         <TextBox Text="{Binding ExpandPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
-        <TextBlock Text="Sent by the review and expand buttons of the message box. A workspace can set its own in its settings. Empty restores the default." Classes="muted" FontSize="12" TextWrapping="Wrap" />
 
         <TextBlock Text="Claude Code" Classes="serif" FontSize="18" Margin="0,16,0,0" />
         <TextBlock Text="Command" Classes="muted" />
@@ -83,7 +79,6 @@
         <TextBlock Text="Model server address" Classes="muted" />
         <TextBox Text="{Binding LocalServer}" TextInputOptions.AutoCapitalization="False" />
         <local:TouchButton Content="Refresh Models" Command="{Binding RefreshLocalModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-        <TextBlock Text="A model for every capability, and optionally how many tokens of context it runs with." Classes="muted" FontSize="12" TextWrapping="Wrap" />
         <ItemsControl ItemsSource="{Binding LocalRows}">
           <ItemsControl.ItemTemplate>
             <DataTemplate>
@@ -113,7 +108,6 @@
           <TextBlock Text="Stable Diffusion server address" Classes="muted" />
           <TextBox Text="{Binding LocalImageServer}" TextInputOptions.AutoCapitalization="False" />
           <local:TouchButton Content="Refresh Checkpoints" Command="{Binding RefreshImageModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-          <TextBlock Text="A checkpoint for every capability." Classes="muted" FontSize="12" TextWrapping="Wrap" />
           <ItemsControl ItemsSource="{Binding ImageRows}">
             <ItemsControl.ItemTemplate>
               <DataTemplate>

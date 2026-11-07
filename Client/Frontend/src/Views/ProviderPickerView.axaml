@@ -13,6 +13,5 @@
       </ComboBox.ItemTemplate>
     </ComboBox>
     <TextBox Text="{Binding ApiKey}" PasswordChar="•" IsVisible="{Binding TakesApiKey}" PlaceholderText="API key for just this workspace (optional)" TextInputOptions.AutoCapitalization="False" />
-    <TextBlock Text="The provider cannot be changed once the workspace exists." Classes="muted" FontSize="12" TextWrapping="Wrap" />
   </StackPanel>
 </UserControl>

@@ -497,11 +497,6 @@ internal sealed class HomeViewModel : ViewModelBase
     public string EditingGroupName => editingGroup?.Name ?? string.Empty;
 
     /// <summary>
-    /// Gets the explanation shown in the new group dialog.
-    /// </summary>
-    public string NewGroupHint => "Groups only organize workspaces in Auto Remote. They are not created on the server's disk.";
-
-    /// <summary>
     /// Gets the choice of the group the new group is created in.
     /// </summary>
     public GroupPickerViewModel NewGroupParent { get; } = new();
@@ -892,7 +887,6 @@ internal sealed class HomeViewModel : ViewModelBase
         RenameText = text;
         Error = null;
         Raise(nameof(EditingGroupName));
-        Raise(nameof(NewGroupHint));
         EditMode = mode;
         return Task.CompletedTask;
     }

@@ -239,9 +239,9 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
     /// </summary>
     public string Summary => (ClientNeedsUpdate, ServerNeedsUpdate) switch
     {
-        (true, true) => $"Version {latest!.Version} replaces {info.Version} on this device and {connection.ServerVersion ?? "the older version"} on the server. The server restarts, which stops the AI work it is doing, and then this app restarts.",
-        (true, false) => $"Version {latest!.Version} replaces {info.Version} on this device. The app restarts.",
-        (false, true) => $"Version {latest!.Version} replaces {connection.ServerVersion ?? "the older version"} on the server. The server restarts, which stops the AI work it is doing.",
+        (true, true) => $"Version {latest!.Version} replaces {info.Version} on this device and {connection.ServerVersion ?? "the older version"} on the server.",
+        (true, false) => $"Version {latest!.Version} replaces {info.Version} on this device.",
+        (false, true) => $"Version {latest!.Version} replaces {connection.ServerVersion ?? "the older version"} on the server.",
         _ => "This client and its server are up to date.",
     };
 

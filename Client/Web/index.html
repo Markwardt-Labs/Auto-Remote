@@ -1732,7 +1732,7 @@ class WorkspaceView {
     this.input.addEventListener("paste", event => this.pasted(event));
     this.grip = h("div", { class: "composer-grip", onpointerdown: event => this.resizeInput(event) });
     this.gitBar = h("div", { class: "git-working", hidden: true },
-      h("span", {}, "Git is working on the server. If the AI is resolving conflicts, you can watch it here."),
+      h("span", {}, "Git is working on the server."),
       h("button", { onclick: () => this.cancelGit() }, "Cancel and Undo"));
     this.statusBar = h("div", { class: "status-bar", hidden: true });
     this.chatAutoButton = h("button", { class: "flat icon autoscroll on", title: "Auto scroll the chat to new messages", onclick: () => this.toggleChatAuto() }, icon("scroll"));
@@ -1871,8 +1871,7 @@ class WorkspaceView {
     this.expandPromptBox = h("textarea", { rows: 2 });
     const promptRow = (label, box, title) => [
       h("div", { class: "muted", style: "margin-top:8px" }, label),
-      h("div", { style: "display:flex;gap:6px;align-items:flex-start" }, box, h("button", { class: "flat icon", title, onclick: () => { box.value = ""; this.settingsEdits++; } }, icon("close"))),
-      h("div", { class: "muted small" }, `Empty uses the ${label.toLowerCase()} of the global settings.`)];
+      h("div", { style: "display:flex;gap:6px;align-items:flex-start" }, box, h("button", { class: "flat icon", title, onclick: () => { box.value = ""; this.settingsEdits++; } }, icon("close")))];
     this.detailsTitle = h("div", { class: "muted", style: "margin-top:8px", hidden: true }, "How it runs");
     this.detailsBox = h("div", { class: "stack tight" });
     this.current = null;
@@ -1880,9 +1879,7 @@ class WorkspaceView {
     this.syncSettings();
     this.settingsPane = h("div", { class: "pane settings" },
       h("div", { class: "inner stack tight" },
-        h("div", { class: "muted small" }, "Changes apply when you close the settings."),
         h("div", { class: "muted", style: "margin-top:8px" }, "AI provider"), this.providerLabel,
-        h("div", { class: "muted small" }, "Fixed when the workspace was created."),
         h("div", { class: "muted", style: "margin-top:8px" }, "Capability"), this.capabilitySelect,
         h("div", { class: "muted", style: "margin-top:8px" }, "Effort"), this.effortSelect,
         switchRow("isShellAllowed", "Run shell commands"),
@@ -1892,7 +1889,6 @@ class WorkspaceView {
         h("div", { class: "muted", style: "margin-top:8px" }, "Instructions"), this.instructionsBox,
         h("div", { class: "muted", style: "margin-top:8px" }, "Status interval (minutes)"),
         h("div", { style: "display:flex;gap:6px;align-items:flex-start" }, this.statusBox, h("button", { class: "flat icon", title: "Use the status interval of the global settings", onclick: () => { this.statusBox.value = ""; this.settingsEdits++; } }, icon("close"))),
-        h("div", { class: "muted small" }, "How often the AI reports its status while it works. Empty uses the status interval of the global settings."),
         ...promptRow("Review prompt", this.reviewPromptBox, "Use the review prompt of the global settings"),
         ...promptRow("Expand prompt", this.expandPromptBox, "Use the expand prompt of the global settings"),
         this.detailsTitle, this.detailsBox,
@@ -2321,9 +2317,9 @@ class WorkspaceView {
         this.home.closeDialog();
       }
     };
-    this.home.dialog("Loop", "Sends a prompt to the AI over and over. Cancel it from the loop button in the message box; stopping the work cancels it too.",
+    this.home.dialog("Loop", null,
       field("Prompt", h("label", { class: "row-check" }, reviewRadio, " Review"), h("label", { class: "row-check" }, expandRadio, " Expand"), h("label", { class: "row-check" }, customRadio, " Custom"), custom),
-      field("Minutes between runs", interval, h("div", { class: "muted small" }, "From the start of one run to the start of the next. 0 runs again as soon as a run is done.")),
+      field("Minutes between runs", interval),
       field("Ends", kind),
       ...Object.values(boxes),
       h("button", { class: "primary block", onclick: start }, "Start Loop"));
@@ -4308,7 +4304,6 @@ class Home {
     this.usageTimer = null;
     this.empty = h("div", { class: "empty" },
       h("h2", { class: "serif" }, "No workspace selected"),
-      h("div", { class: "muted" }, "Open the menu to pick a workspace or start a new one."),
       this.error.element);
     this.content.append(this.empty);
 
@@ -4722,7 +4717,6 @@ class Home {
     };
     this.haltDialog = h("div", { class: "dialog" },
       h("h3", { class: "serif" }, "Stop the work?"),
-      h("div", { class: "muted" }, "It stops at once and keeps what it did so far."),
       h("button", { class: "primary block", onclick: go }, "Stop"),
       this.dialogError.element,
       h("button", { class: "block", onclick: () => this.closeDialog() }, "Keep Working"));
@@ -4845,7 +4839,7 @@ class Home {
       this.submit(() => this.connection.renameWorkspace(workspace.id, name), renamed => this.start(renamed.id));
     };
     const box = this.nameBox(folderName(workspace.folder), confirm);
-    this.dialog("Rename workspace", "This renames the workspace's folder on the server.", box, h("button", { class: "primary block", onclick: confirm }, "Rename"));
+    this.dialog("Rename workspace", null, box, h("button", { class: "primary block", onclick: confirm }, "Rename"));
   }
 
   beginDelete() {
@@ -4878,7 +4872,7 @@ class Home {
     };
     const box = this.nameBox("", confirm);
     const picker = groupPicker(this.groups, "Create inside");
-    this.dialog("New group", "Groups only organize workspaces in Auto Remote. They are not created on the server's disk.", box, picker.element, h("button", { class: "primary block", onclick: confirm }, "Create"));
+    this.dialog("New group", null, box, picker.element, h("button", { class: "primary block", onclick: confirm }, "Create"));
   }
 
   beginRenameGroup(group) {
@@ -4897,7 +4891,7 @@ class Home {
   }
 
   beginDeleteGroup(group) {
-    this.dialog("Delete group?", `${group.name} will be removed. The workspaces and groups in it are kept and move up into its parent.`,
+    this.dialog("Delete group?", `${group.name} will be removed. What is in it moves up a level.`,
       h("button", { class: "danger block", onclick: () => this.submit(() => this.connection.deleteGroup(group.id), () => this.reload()) }, "Delete"));
   }
 
@@ -4922,7 +4916,7 @@ class Home {
     const select = h("select", {}, choices.map((choice, index) => h("option", { value: index }, choice.name)));
     select.value = Math.max(0, choices.findIndex(choice => choice.id === current));
     const name = workspace ? folderName(workspace.folder) : group.name;
-    const text = workspace ? `Choose where ${name} goes in the list.` : `Choose where ${name} goes in the list, with everything in it.`;
+    const text = name;
     const apply = () => {
       const destination = choices[Number(select.value)].id;
       return workspace ? this.connection.moveWorkspace(workspace.id, destination) : this.connection.moveGroup(group.id, destination);
@@ -4967,8 +4961,7 @@ function providerPicker(connection) {
     element: h("div", { class: "stack tight" },
       h("div", { class: "muted" }, "AI provider"),
       select,
-      key,
-      h("div", { class: "muted small" }, "The provider cannot be changed once the workspace exists.")),
+      key),
     service: () => select.value,
     key: () => services[select.value].takesKey && key.value.trim() ? key.value.trim() : undefined,
     async load() {
@@ -5008,7 +5001,6 @@ class NewWorkspace {
     this.startButton = h("button", { class: "primary block", disabled: true, onclick: () => this.start() }, "Start Workspace in This Folder");
     this.element = h("div", { class: "newws" },
       h("header", {}, h("h1", { class: "serif" }, "New workspace"), h("button", { class: "flat", onclick: () => this.app.showHome(this.home) }, "Cancel")),
-      h("div", { class: "muted", style: "margin-top:4px" }, "Choose the folder on the server that will host the workspace. The workspace is named after it."),
       h("div", { style: "margin-top:12px" }, this.provider.element, this.group.element),
       h("div", { class: "path" }, this.upButton, this.pathLabel),
       this.folders,
@@ -5100,7 +5092,6 @@ class MoveWorkspace {
     this.moveButton = h("button", { class: "primary block", disabled: true, onclick: () => this.move() }, "Use This Folder");
     this.element = h("div", { class: "newws" },
       h("header", {}, h("h1", { class: "serif" }, "Move workspace to folder"), h("button", { class: "flat", onclick: () => this.app.showHome(this.home) }, "Cancel")),
-      h("div", { class: "muted", style: "margin-top:4px" }, `Choose the folder on the server that '${folderName(this.workspace.folder)}' works in from now on. No files are moved: the folder has to exist, so move the project there first when it should go along.`),
       h("div", { class: "path" }, this.upButton, this.pathLabel),
       this.folders,
       h("div", { class: "create" }, this.nameBox, h("button", { onclick: () => this.createFolder() }, "Create")),
@@ -5190,7 +5181,6 @@ class CloneWorkspace {
     this.startButton = h("button", { class: "primary block", disabled: true, onclick: () => this.start() }, "Clone into This Folder");
     this.element = h("div", { class: "newws" },
       h("header", {}, h("h1", { class: "serif" }, "Clone workspace"), h("button", { class: "flat", onclick: () => this.app.showHome(this.home) }, "Cancel")),
-      h("div", { class: "muted", style: "margin-top:4px" }, "The server clones the repository into a new folder inside the folder you pick, and a workspace is created in it."),
       h("div", { style: "margin-top:12px" }, this.provider.element, this.group.element),
       h("div", { class: "fields" }, this.urlBox, this.folderBox),
       h("div", { class: "path" }, this.upButton, this.pathLabel),
@@ -5333,17 +5323,14 @@ class AiEnvironmentScreen {
     this.imageBox = h("div", { class: "stack tight", hidden: true },
       this.field("Stable Diffusion server address", this.imageServer),
       h("button", { class: "block", onclick: () => this.refreshImage() }, "Refresh Checkpoints"),
-      h("div", { class: "muted small" }, "A checkpoint for every capability."),
       ...this.imageRows.map(row => row.element));
     const heading = text => h("h3", { class: "serif", style: "margin-top:16px" }, text);
     this.element = h("div", { class: "newws" },
       h("header", {}, h("h1", { class: "serif" }, "AI environment"), h("button", { class: "flat", onclick: () => this.close() }, "Close")),
       h("div", { class: "settings", style: "flex:1;min-height:0;overflow-y:auto" },
         h("div", { class: "stack tight", style: "padding:8px 0 12px" },
-          h("div", { class: "muted" }, "Where the AI tools are, what they sign in with and which models the local provider runs. It applies to every workspace on the server. Changes apply when you close this screen."),
           this.field("Default provider for new workspaces", this.defaultSelect),
           heading("New workspaces"),
-          h("div", { class: "muted small" }, "What the AI session of a new workspace starts with. A workspace keeps its own settings afterwards."),
           this.field("Capability", this.newCapability),
           this.field("Effort", this.newEffort),
           newSwitch("isShellAllowed", "Run shell commands"),
@@ -5353,11 +5340,9 @@ class AiEnvironmentScreen {
           this.field("Instructions", this.newInstructions),
           heading("Status"),
           this.field("Status interval (minutes)", this.statusMinutes),
-          h("div", { class: "muted small" }, "How often the AI is told to report its status while it works. A workspace can set its own in its settings. Empty restores the default of 5."),
           heading("Prompts"),
           this.field("Review prompt", this.reviewPrompt),
           this.field("Expand prompt", this.expandPrompt),
-          h("div", { class: "muted small" }, "Sent by the review and expand buttons of the message box. A workspace can set its own in its settings. Empty restores the default."),
           heading("Claude Code"),
           this.field("Command", this.claudeCommand),
           this.field("Configuration folder (optional)", this.claudeFolder),
@@ -5370,7 +5355,6 @@ class AiEnvironmentScreen {
           this.field("OpenCode command", this.localCommand),
           this.field("Model server address", this.localServer),
           h("button", { class: "block", onclick: () => this.refreshLocal() }, "Refresh Models"),
-          h("div", { class: "muted small" }, "A model for every capability, and optionally how many tokens of context it runs with."),
           ...this.localRows.map(row => row.element),
           heading("Image generation"),
           this.imageSelect,

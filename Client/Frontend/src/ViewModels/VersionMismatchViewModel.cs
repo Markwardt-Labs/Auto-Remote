@@ -52,10 +52,10 @@ internal sealed class VersionMismatchViewModel : ViewModelBase
     /// <summary>
     /// Gets what is wrong, with both versions.
     /// </summary>
-    public string Message => $"This client is version {info.Version} and the server is {(connection.ServerVersion is { } server ? $"version {server}" : "from before versions were checked")}. They only work together when they run the same version, so the client cannot be used with this server as it is.";
+    public string Message => $"This client is version {info.Version} and the server is {(connection.ServerVersion is { } server ? $"version {server}" : "from before versions were checked")}.";
 
     /// <summary>
     /// Gets what the user can do about it.
     /// </summary>
-    public string Hint => Update.IsAvailable ? Update.Summary : Update.HasCheckError ? $"The newest release could not be looked up: {Update.CheckError}" : "No newer release would make them match. Choose another server, or update the older one by hand.";
+    public string Hint => Update.IsAvailable ? Update.Summary : Update.HasCheckError ? $"The newest release could not be looked up: {Update.CheckError}" : "No newer release would make them match.";
 }

@@ -49,7 +49,6 @@
       <Grid Grid.Row="1">
         <StackPanel IsVisible="{Binding !HasSelection}" VerticalAlignment="Center" HorizontalAlignment="Center" Spacing="12" Margin="32">
           <TextBlock Text="No workspace selected" Classes="serif" FontSize="24" HorizontalAlignment="Center" />
-          <TextBlock Text="Open the menu to pick a workspace or start a new one." Classes="muted" TextWrapping="Wrap" TextAlignment="Center" />
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
         </StackPanel>
 
@@ -252,7 +251,7 @@
               <Border Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0"
                     IsVisible="{Binding $parent[local:HomeView].DataContext.Active.Git.IsWorking, FallbackValue=False}">
               <Grid ColumnDefinitions="*,Auto" DataContext="{Binding $parent[local:HomeView].DataContext.Active.Git}">
-                <TextBlock Grid.Column="0" Text="Git is working on the server. If the AI is resolving conflicts, you can watch it here." Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="0" Text="Git is working on the server." Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
                 <local:TouchButton Grid.Column="1" Content="Cancel and Undo" Command="{Binding CancelWorkCommand}" Margin="8,0,0,0" Padding="8,3" FontSize="12" />
               </Grid>
             </Border>
@@ -605,10 +604,8 @@
           <Panel Grid.Column="0" Grid.ColumnSpan="5" IsVisible="{Binding ShowSettings, FallbackValue=False}" Background="{DynamicResource Background}">
            <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel DataContext="{Binding Settings}" Margin="20,8,20,20" Spacing="8">
-              <TextBlock Text="Changes apply when you close the settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="AI provider" Classes="muted" Margin="0,8,0,0" />
               <TextBlock Text="{Binding ProviderName}" />
-              <TextBlock Text="Fixed when the workspace was created." Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="Capability" Classes="muted" Margin="0,8,0,0" />
               <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding SelectedCapability}" HorizontalAlignment="Stretch">
                 <ComboBox.ItemTemplate>
@@ -638,7 +635,6 @@
                   <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
                 </local:TouchButton>
               </Grid>
-              <TextBlock Text="How often the AI reports its status while it works. Empty uses the status interval of the global settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="Review prompt" Classes="muted" Margin="0,8,0,0" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                 <TextBox Grid.Column="0" Text="{Binding ReviewPrompt}" PlaceholderText="{Binding GlobalReviewPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
@@ -646,7 +642,6 @@
                   <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
                 </local:TouchButton>
               </Grid>
-              <TextBlock Text="Empty uses the review prompt of the global settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="Expand prompt" Classes="muted" Margin="0,8,0,0" />
               <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
                 <TextBox Grid.Column="0" Text="{Binding ExpandPrompt}" PlaceholderText="{Binding GlobalExpandPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
@@ -654,7 +649,6 @@
                   <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
                 </local:TouchButton>
               </Grid>
-              <TextBlock Text="Empty uses the expand prompt of the global settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <TextBlock Text="How it runs" Classes="muted" Margin="0,8,0,0" IsVisible="{Binding HasDetails}" />
               <ItemsControl ItemsSource="{Binding Details}" IsVisible="{Binding HasDetails}">
                 <ItemsControl.ItemTemplate>
@@ -692,7 +686,6 @@
         <ScrollViewer VerticalScrollBarVisibility="Auto">
           <StackPanel DataContext="{Binding Active.Loop}" Spacing="8">
             <TextBlock Text="Loop" Classes="serif" FontSize="16" />
-            <TextBlock Text="Sends a prompt to the AI over and over. It cancels from the loop button in the message box; stopping the work cancels it too." Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <TextBlock Text="Prompt" Classes="muted" Margin="0,6,0,0" />
             <RadioButton GroupName="LoopPrompt" Content="Review" IsChecked="{Binding UseReview, Mode=TwoWay}" />
             <RadioButton GroupName="LoopPrompt" Content="Expand" IsChecked="{Binding UseExpand, Mode=TwoWay}" />
@@ -700,7 +693,6 @@
             <TextBox Text="{Binding CustomPrompt}" IsVisible="{Binding UseCustom}" PlaceholderText="Enter the prompt..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70" MaxHeight="160" />
             <TextBlock Text="Minutes between runs" Classes="muted" Margin="0,6,0,0" />
             <NumericUpDown Value="{Binding IntervalMinutes}" Minimum="0" Maximum="1440" Increment="1" FormatString="0.##" HorizontalAlignment="Stretch" />
-            <TextBlock Text="From the start of one run to the start of the next. 0 runs again as soon as a run is done." Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <TextBlock Text="Ends" Classes="muted" Margin="0,6,0,0" />
             <ComboBox ItemsSource="{Binding Conditions}" SelectedItem="{Binding SelectedCondition}" HorizontalAlignment="Stretch">
               <ComboBox.ItemTemplate>
@@ -825,11 +817,9 @@
         <StackPanel Spacing="12">
           <StackPanel IsVisible="{Binding IsRenaming}" Spacing="12">
             <TextBlock Text="Rename workspace" Classes="serif" FontSize="20" />
-            <TextBlock Text="This renames the workspace's folder on the server." Classes="muted" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsCreatingGroup}" Spacing="12">
             <TextBlock Text="New group" Classes="serif" FontSize="20" />
-            <TextBlock Text="{Binding NewGroupHint}" Classes="muted" TextWrapping="Wrap" />
           </StackPanel>
           <TextBlock IsVisible="{Binding IsRenamingGroup}" Text="Rename group" Classes="serif" FontSize="20" />
           <TextBox IsVisible="{Binding NeedsName}" Text="{Binding RenameText}" />
@@ -848,7 +838,6 @@
           <local:TouchButton IsVisible="{Binding IsRenamingGroup}" Content="Rename" Command="{Binding ConfirmRenameGroupCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <StackPanel IsVisible="{Binding IsStoppingWork}" Spacing="12">
             <TextBlock Text="Stop the work?" Classes="serif" FontSize="20" />
-            <TextBlock Text="It stops at once and keeps what it did so far." Classes="muted" TextWrapping="Wrap" />
             <local:TouchButton Content="Stop" Command="{Binding ConfirmHaltCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsDeleting}" Spacing="12">
@@ -859,11 +848,11 @@
           </StackPanel>
           <StackPanel IsVisible="{Binding IsMovingWorkspace}" Spacing="12">
             <TextBlock Text="Move workspace" Classes="serif" FontSize="20" />
-            <TextBlock Text="{Binding MovingName, StringFormat='{}Choose where {0} goes in the list.'}" Classes="muted" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding MovingName}" Classes="muted" TextWrapping="Wrap" />
           </StackPanel>
           <StackPanel IsVisible="{Binding IsMovingGroup}" Spacing="12">
             <TextBlock Text="Move group" Classes="serif" FontSize="20" />
-            <TextBlock Text="{Binding MovingName, StringFormat='{}Choose where {0} goes in the list, with everything in it.'}" Classes="muted" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding MovingName}" Classes="muted" TextWrapping="Wrap" />
           </StackPanel>
           <ComboBox IsVisible="{Binding IsMoving}" ItemsSource="{Binding Destinations}" SelectedItem="{Binding Destination}" HorizontalAlignment="Stretch">
             <ComboBox.ItemTemplate>
@@ -875,7 +864,7 @@
           <local:TouchButton IsVisible="{Binding IsMoving}" Content="Move" Command="{Binding ConfirmMoveCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <StackPanel IsVisible="{Binding IsDeletingGroup}" Spacing="12">
             <TextBlock Text="Delete group?" Classes="serif" FontSize="20" />
-            <TextBlock Text="{Binding EditingGroupName, StringFormat='{}{0} will be removed. The workspaces and groups in it are kept and move up into its parent.'}" Classes="muted" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding EditingGroupName, StringFormat='{}{0} will be removed. What is in it moves up a level.'}" Classes="muted" TextWrapping="Wrap" />
             <local:TouchButton Content="Delete" Command="{Binding ConfirmDeleteGroupCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />

@@ -50,7 +50,7 @@ internal sealed class MoveWorkspaceViewModel : ViewModelBase
     /// <summary>
     /// Gets the text that says what the screen does.
     /// </summary>
-    public string Description => $"Choose the folder on the server that '{Workspace.Name}' works in from now on. No files are moved: the folder has to exist, so move the project there first when it should go along.";
+    public string Description => $"'{Workspace.Name}'";
 
     /// <summary>
     /// Gets the folder browser.

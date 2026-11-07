@@ -9,7 +9,6 @@
       <local:TouchButton Grid.Column="1" Content="Cancel" Command="{Binding CancelCommand}" Classes="flat" />
     </Grid>
     <StackPanel Grid.Row="1" Spacing="12" Margin="0,0,0,12">
-      <TextBlock Text="Choose the folder on the server that will host the workspace. The workspace is named after it." Classes="muted" TextWrapping="Wrap" />
       <local:ProviderPickerView DataContext="{Binding Provider}" />
       <TextBlock Text="Group" Classes="muted" />
       <ComboBox ItemsSource="{Binding Group.Choices}" SelectedItem="{Binding Group.Selected}" HorizontalAlignment="Stretch">

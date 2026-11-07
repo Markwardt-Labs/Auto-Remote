@@ -19,7 +19,6 @@ public sealed class MoveWorkspaceViewModelTests
 
         Assert.Equal("/work", model.Browser.CurrentPath);
         Assert.Contains("'app'", model.Description);
-        Assert.Contains("No files are moved", model.Description);
         Assert.True(model.MoveCommand.CanExecute(null));
     }
 
