@@ -78,7 +78,7 @@
         <TextBox Text="{Binding LocalCommand}" TextInputOptions.AutoCapitalization="False" />
         <TextBlock Text="Model server address" Classes="muted" />
         <TextBox Text="{Binding LocalServer}" TextInputOptions.AutoCapitalization="False" />
-        <local:TouchButton Content="Refresh models" Command="{Binding RefreshLocalModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        <local:TouchButton Content="Refresh Models" Command="{Binding RefreshLocalModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         <TextBlock Text="A model for every capability, and optionally how many tokens of context it runs with." Classes="muted" FontSize="12" TextWrapping="Wrap" />
         <ItemsControl ItemsSource="{Binding LocalRows}">
           <ItemsControl.ItemTemplate>
@@ -108,7 +108,7 @@
         <StackPanel Spacing="8" IsVisible="{Binding UsesLocalImages}">
           <TextBlock Text="Stable Diffusion server address" Classes="muted" />
           <TextBox Text="{Binding LocalImageServer}" TextInputOptions.AutoCapitalization="False" />
-          <local:TouchButton Content="Refresh checkpoints" Command="{Binding RefreshImageModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="Refresh Checkpoints" Command="{Binding RefreshImageModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <TextBlock Text="A checkpoint for every capability." Classes="muted" FontSize="12" TextWrapping="Wrap" />
           <ItemsControl ItemsSource="{Binding ImageRows}">
             <ItemsControl.ItemTemplate>
@@ -128,7 +128,7 @@
         <StackPanel Spacing="8">
           <TextBlock Text="Updates" Classes="serif" FontSize="18" Margin="0,16,0,0" />
           <TextBlock Text="{Binding Versions}" Classes="muted" TextWrapping="Wrap" />
-          <local:TouchButton Content="Check for updates" Command="{Binding CheckCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="Check for Updates" Command="{Binding CheckCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <TextBlock Text="{Binding CheckResult}" IsVisible="{Binding HasCheckResult}" Classes="muted" TextWrapping="Wrap" />
           <local:TouchButton Content="Update" Command="{Binding BeginCommand}" IsVisible="{Binding IsAvailable}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         </StackPanel>

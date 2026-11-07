@@ -61,7 +61,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     }
 
     private Task<WorkspaceInfo> CreateWorkspace(string folder, RemoteRequest request, CancellationToken cancellation)
-        => workspaces.Create(folder, request.Service ?? host.DefaultService, request.ApiKey, cancellation);
+        => workspaces.Create(folder, request.Service ?? host.DefaultService, request.ApiKey, request.GroupId, cancellation);
 
     private async Task<RemoteResponse> Dispatch(RemoteRequest request, object owner, CancellationToken cancellation)
     {
@@ -112,9 +112,6 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0, Group = await workspaces.RenameGroup(RequireGroup(request), Require(request.Name, "name"), cancellation) };
             case RemoteCommand.DeleteGroup:
                 await workspaces.DeleteGroup(RequireGroup(request), cancellation);
-                return new RemoteResponse { Id = 0 };
-            case RemoteCommand.ShiftWorkspace:
-                await workspaces.ShiftWorkspace(RequireWorkspace(request), request.Offset ?? throw new RequestException("The request needs an offset."), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.ShiftGroup:
                 await workspaces.ShiftGroup(RequireGroup(request), request.Offset ?? throw new RequestException("The request needs an offset."), cancellation);

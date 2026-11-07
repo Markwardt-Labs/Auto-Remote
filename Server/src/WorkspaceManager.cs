@@ -35,10 +35,11 @@ internal interface IWorkspaceManager
     /// <param name="folder">The folder.</param>
     /// <param name="service">The AI service the workspace's prompts run on for good.</param>
     /// <param name="apiKey">An API key for just the workspace's session, or <see langword="null" />.</param>
+    /// <param name="groupId">The group to file the workspace in, or <see langword="null" /> for the top level.</param>
     /// <param name="cancellation">Cancels the call.</param>
     /// <returns>The new workspace.</returns>
-    /// <exception cref="RequestException">The folder is missing or already hosts a workspace, or the session cannot be made.</exception>
-    Task<WorkspaceInfo> Create(string folder, AiService service, string? apiKey, CancellationToken cancellation);
+    /// <exception cref="RequestException">The folder is missing or already hosts a workspace, the group no longer exists, or the session cannot be made.</exception>
+    Task<WorkspaceInfo> Create(string folder, AiService service, string? apiKey, Guid? groupId, CancellationToken cancellation);
 
     /// <summary>
     /// Renames a workspace by renaming its folder.
@@ -119,15 +120,6 @@ internal interface IWorkspaceManager
     /// <returns>The moved group.</returns>
     /// <exception cref="RequestException">The group or parent is unknown, the parent is the group or inside it, or the name is already used in the new place.</exception>
     Task<WorkspaceGroup> MoveGroup(Guid id, Guid? parentId, CancellationToken cancellation);
-
-    /// <summary>
-    /// Moves a workspace up or down among the workspaces in its group.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="offset">How many places to move: negative is up, positive is down. It stops at the first or last place.</param>
-    /// <param name="cancellation">Cancels the call.</param>
-    /// <exception cref="RequestException">The workspace is unknown.</exception>
-    Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation);
 
     /// <summary>
     /// Moves a group up or down among the groups with the same parent.
@@ -225,7 +217,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             {
                 if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
                 {
-                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt });
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt });
 
                     if (stored.Adopt)
                     {
@@ -248,8 +240,29 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     /// <inheritdoc />
     public async Task<WorkspaceCatalog> List(CancellationToken cancellation)
     {
+        Dictionary<string, PromptSessionInfo>? sessions = null;
+
+        try
+        {
+            sessions = (await host.Prompter.List(cancellation)).ToDictionary(info => info.Id);
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException or InvalidOperationException)
+        {
+        }
+
         using (await Lock(cancellation))
         {
+            if (sessions is not null)
+            {
+                for (int index = 0; index < workspaces.Count; index++)
+                {
+                    if (workspaces[index].SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && workspaces[index].LastUpdated != info.LastLoaded)
+                    {
+                        workspaces[index] = workspaces[index] with { LastUpdated = info.LastLoaded };
+                    }
+                }
+            }
+
             return Snapshot();
         }
     }
@@ -264,7 +277,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     }
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> Create(string folder, AiService service, string? apiKey, CancellationToken cancellation)
+    public async Task<WorkspaceInfo> Create(string folder, AiService service, string? apiKey, Guid? groupId, CancellationToken cancellation)
     {
         if (!await folders.Exists(folder, cancellation))
         {
@@ -280,8 +293,13 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 throw new RequestException("This folder already hosts a workspace.");
             }
 
+            if (groupId is { } target && groups.All(group => group.Id != target))
+            {
+                throw new RequestException("The group no longer exists.");
+            }
+
             string sessionId = await host.CreateSession(full, service, apiKey, cancellation);
-            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId };
+            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId, GroupId = groupId, LastUpdated = await Loaded(sessionId, cancellation) };
             workspaces.Add(created);
 
             try
@@ -480,17 +498,6 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     }
 
     /// <inheritdoc />
-    public async Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation)
-    {
-        using (await Lock(cancellation))
-        {
-            WorkspaceInfo workspace = Find(id);
-            Shift(workspaces, workspace, offset, other => other.GroupId == workspace.GroupId);
-            await Save(cancellation);
-        }
-    }
-
-    /// <inheritdoc />
     public async Task ShiftGroup(Guid id, int offset, CancellationToken cancellation)
     {
         using (await Lock(cancellation))
@@ -574,6 +581,18 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         }
         catch (Exception exception) when (exception is PromptSessionException or IOException or UnauthorizedAccessException)
         {
+        }
+    }
+
+    private async Task<DateTimeOffset> Loaded(string sessionId, CancellationToken cancellation)
+    {
+        try
+        {
+            return (await host.Prompter.List(cancellation)).FirstOrDefault(info => info.Id == sessionId)?.LastLoaded ?? DateTimeOffset.UtcNow;
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException or InvalidOperationException)
+        {
+            return DateTimeOffset.UtcNow;
         }
     }
 

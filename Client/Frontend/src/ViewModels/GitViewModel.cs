@@ -584,19 +584,19 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
 
     private Task NewBranch()
     {
-        Ask(GitPrompt.Input, "New branch", "Branch name", "Create branch", () => connection.GitCreateBranch(workspaceId, promptText.Trim(), CancellationToken.None), empty: "Enter a name.");
+        Ask(GitPrompt.Input, "New branch", "Branch name", "Create Branch", () => connection.GitCreateBranch(workspaceId, promptText.Trim(), CancellationToken.None), empty: "Enter a name.");
         return Task.CompletedTask;
     }
 
     private Task NewTag() => WithIdentity(() =>
     {
-        Ask(GitPrompt.Input, "New tag", "Tag name", "Create tag", () => connection.GitCreateTag(workspaceId, promptText.Trim(), CancellationToken.None), empty: "Enter a name.");
+        Ask(GitPrompt.Input, "New tag", "Tag name", "Create Tag", () => connection.GitCreateTag(workspaceId, promptText.Trim(), CancellationToken.None), empty: "Enter a name.");
         return Task.CompletedTask;
     });
 
     private Task SetRemote()
     {
-        Ask(GitPrompt.Input, "Git remote", status.IsRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", "Set remote", () => connection.GitSetRemote(workspaceId, promptText.Trim(), CancellationToken.None), Remote, empty: "Enter the remote URL.", capitalize: false);
+        Ask(GitPrompt.Input, "Git remote", status.IsRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", "Set Remote", () => connection.GitSetRemote(workspaceId, promptText.Trim(), CancellationToken.None), Remote, empty: "Enter the remote URL.", capitalize: false);
         return Task.CompletedTask;
     }
 
@@ -609,7 +609,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     {
         bool discard = status.HasChanges;
         string shown = name.Length > 12 && name.All(Uri.IsHexDigit) ? name[..7] : name;
-        Ask(GitPrompt.Confirm, "Checkout", discard ? $"Check out '{shown}'? This will discard your pending changes." : $"Check out '{shown}'?", discard ? "Discard and checkout" : "Checkout", () => connection.GitCheckout(workspaceId, name, discard, CancellationToken.None), destructive: discard);
+        Ask(GitPrompt.Confirm, "Checkout", discard ? $"Check out '{shown}'? This will discard your pending changes." : $"Check out '{shown}'?", discard ? "Discard and Checkout" : "Checkout", () => connection.GitCheckout(workspaceId, name, discard, CancellationToken.None), destructive: discard);
         return Task.CompletedTask;
     }
 

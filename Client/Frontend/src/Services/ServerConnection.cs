@@ -45,10 +45,11 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="folder">The folder's absolute path on the server.</param>
     /// <param name="service">The AI service the workspace runs on for good, or <see langword="null" /> for the default of the server's environment.</param>
     /// <param name="apiKey">An API key for just this workspace's session, or <see langword="null" /> to sign in the way the tool is signed in on the server.</param>
+    /// <param name="groupId">The group to file the workspace in, or <see langword="null" /> for the top level.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The new workspace.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, CancellationToken cancellation);
+    Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, Guid? groupId, CancellationToken cancellation);
 
     /// <summary>
     /// Renames a workspace by renaming its folder.
@@ -117,15 +118,6 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="cancellation">Cancels the wait.</param>
     /// <exception cref="RemoteException">The server refused.</exception>
     Task DeleteGroup(Guid id, CancellationToken cancellation);
-
-    /// <summary>
-    /// Moves a workspace up or down among the workspaces in its group.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="offset">How many places to move: negative is up, positive is down.</param>
-    /// <param name="cancellation">Cancels the wait.</param>
-    /// <exception cref="RemoteException">The server refused.</exception>
-    Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation);
 
     /// <summary>
     /// Moves a group up or down among the groups with the same parent.
@@ -253,10 +245,11 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="name">The new folder's name, or <see langword="null" /> to name it after the repository.</param>
     /// <param name="service">The AI service the workspace runs on for good, or <see langword="null" /> for the default of the server's environment.</param>
     /// <param name="apiKey">An API key for just this workspace's session, or <see langword="null" />.</param>
+    /// <param name="groupId">The group to file the workspace in, or <see langword="null" /> for the top level.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The new workspace.</returns>
     /// <exception cref="RemoteException">The server refused or the clone failed.</exception>
-    Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, AiService? service, string? apiKey, CancellationToken cancellation);
+    Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, AiService? service, string? apiKey, Guid? groupId, CancellationToken cancellation);
 
     /// <summary>
     /// Reads the git state of a workspace.
@@ -804,7 +797,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<WorkspaceCatalog> ListWorkspaces(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListWorkspaces }, cancellation)).Catalog ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateWorkspace, Path = folder, Service = service, ApiKey = apiKey }, cancellation)).Workspace ?? throw Malformed();
+    public async Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, Guid? groupId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateWorkspace, Path = folder, Service = service, ApiKey = apiKey, GroupId = groupId }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> MoveWorkspaceToFolder(Guid id, string folder, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = id, Path = folder }, cancellation)).Workspace ?? throw Malformed();
@@ -826,9 +819,6 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task DeleteGroup(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.DeleteGroup, GroupId = id }, cancellation);
-
-    /// <inheritdoc />
-    public async Task ShiftWorkspace(Guid id, int offset, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ShiftWorkspace, WorkspaceId = id, Offset = offset }, cancellation);
 
     /// <inheritdoc />
     public async Task ShiftGroup(Guid id, int offset, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ShiftGroup, GroupId = id, Offset = offset }, cancellation);
@@ -872,7 +862,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<FileContent> ReadFile(Guid id, string path, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ReadFile, WorkspaceId = id, Path = path }, cancellation)).Content ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, AiService? service, string? apiKey, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CloneWorkspace, Url = url, Path = parent, Name = name, Service = service, ApiKey = apiKey }, cancellation)).Workspace ?? throw Malformed();
+    public async Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, AiService? service, string? apiKey, Guid? groupId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CloneWorkspace, Url = url, Path = parent, Name = name, Service = service, ApiKey = apiKey, GroupId = groupId }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<GitStatus> GetGitStatus(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetGitStatus, WorkspaceId = id }, cancellation)).Git ?? throw Malformed();

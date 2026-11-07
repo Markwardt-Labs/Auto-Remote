@@ -110,7 +110,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("GIT_COMMITTER_NAME", "Tester");
         Environment.SetEnvironmentVariable("GIT_COMMITTER_EMAIL", "tester@example.com");
         FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "gitapp", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
 
         Assert.False((await connection.GetGitStatus(workspace.Id, CancellationToken.None)).IsRepo);
         await connection.GitSetRemote(workspace.Id, "/nonexistent/app.git", CancellationToken.None);
@@ -151,18 +151,18 @@ public sealed class EndToEndTests : IAsyncLifetime
         Environment.SetEnvironmentVariable("GIT_COMMITTER_NAME", "Tester");
         Environment.SetEnvironmentVariable("GIT_COMMITTER_EMAIL", "tester@example.com");
         FolderListing source = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "origin", CancellationToken.None);
-        WorkspaceInfo original = await connection.CreateWorkspace(source.Path, null, null, CancellationToken.None);
+        WorkspaceInfo original = await connection.CreateWorkspace(source.Path, null, null, null, CancellationToken.None);
         await connection.GitSetRemote(original.Id, "/nonexistent/app.git", CancellationToken.None);
         File.WriteAllText(Path.Combine(source.Path, "a.txt"), "hello");
         await connection.GitCommit(original.Id, "first", CancellationToken.None);
         FolderListing parent = await connection.CreateFolder(temp.Path, "clones", CancellationToken.None);
 
-        WorkspaceInfo cloned = await connection.CloneWorkspace(source.Path, parent.Path, "copy", null, null, CancellationToken.None);
+        WorkspaceInfo cloned = await connection.CloneWorkspace(source.Path, parent.Path, "copy", null, null, null, CancellationToken.None);
 
         Assert.Equal("copy", cloned.Name);
         Assert.Equal("hello", (await connection.ReadFile(cloned.Id, "a.txt", CancellationToken.None)).Text);
         Assert.Equal("first", (await connection.GetGitStatus(cloned.Id, CancellationToken.None)).Message);
-        await Assert.ThrowsAsync<RemoteException>(() => connection.CloneWorkspace(source.Path, parent.Path, "copy", null, null, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.CloneWorkspace(source.Path, parent.Path, "copy", null, null, null, CancellationToken.None));
     }
 
     [Fact]
@@ -191,7 +191,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task ReviewAndExpandPrompts_GlobalOnesComeWithTheWorkspaceSettingsAndAWorkspaceCanOverrideAndClearThem()
     {
         FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "prompts", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
         AiEnvironment environment = await connection.GetAiEnvironment(CancellationToken.None);
 
         WorkspaceSettings first = await connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
@@ -218,10 +218,10 @@ public sealed class EndToEndTests : IAsyncLifetime
         FolderListing parent = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "projects", CancellationToken.None);
         FolderListing app = await connection.CreateFolder(parent.Path, "app", CancellationToken.None);
 
-        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
         Assert.Equal("app", workspace.Name);
         Assert.Equal([workspace], (await connection.ListWorkspaces(CancellationToken.None)).Workspaces);
-        await Assert.ThrowsAsync<RemoteException>(() => connection.CreateWorkspace(app.Path, null, null, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None));
 
         File.WriteAllText(Path.Combine(app.Path, "notes.txt"), "remember");
         WorkspaceFiles files = await connection.ListFiles(workspace.Id, string.Empty, false, CancellationToken.None);
@@ -238,7 +238,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Empty((await connection.ListWorkspaces(CancellationToken.None)).Workspaces);
         Assert.True(Directory.Exists(renamed.Folder));
 
-        WorkspaceInfo again = await connection.CreateWorkspace(renamed.Folder, null, null, CancellationToken.None);
+        WorkspaceInfo again = await connection.CreateWorkspace(renamed.Folder, null, null, null, CancellationToken.None);
         await connection.DeleteWorkspace(again.Id, true, CancellationToken.None);
         Assert.False(Directory.Exists(renamed.Folder));
     }
@@ -247,7 +247,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task Prompt_StreamsTheConversationAsEventsAndResumesItsAiSessionAfterTheSessionWasClosed()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "work", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
         await connection.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && events.Last().Kind == RemoteEventKind.WorkingChanged);
@@ -265,7 +265,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task Prompt_SentWhileTheAiWorksWaitsAndIsAnsweredRightAfterInTheSameWorkingSpan()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "slow", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
         await connection.Prompt(workspace.Id, "long", CancellationToken.None);
         await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
@@ -282,7 +282,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "scripted", CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(folder.Path, "a.cs"), "// not run by the fake");
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
         Dictionary<string, string> client = new() { ["DISPLAY"] = ":7", ["WAYLAND_DISPLAY"] = "wayland-9", ["AUTO_REMOTE_PROBE"] = "leaked" };
         await using IServerConnection graphical = await new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>(), name => client.GetValueOrDefault(name)).Connect(settings, CancellationToken.None);
 
@@ -296,7 +296,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task History_IsReadInChunksFromTheNewestBackToTheBeginning()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "chunks", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
         for (int index = 0; index < 3; index++)
         {
@@ -317,7 +317,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task WatchWorkspace_PushesEventsForChangesAnywhereInTheFolderWhoeverMakesThem()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "watched", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
         Directory.CreateDirectory(Path.Combine(folder.Path, "src", "deep"));
         Directory.CreateDirectory(Path.Combine(folder.Path, ".git", "refs", "heads"));
         await connection.WatchWorkspace(workspace.Id, CancellationToken.None);
@@ -336,7 +336,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task WatchWorkspace_GoesQuietAgainWhenClientsReadTheGitStatusInResponseToEveryEvent()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "quiet", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(folder.Path, "a.txt"), "one");
         Git(folder.Path, "init", "-b", "main");
         Git(folder.Path, "add", "-A");
@@ -389,7 +389,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task Groups_OrganizeWorkspacesAndSettingsPersist()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "organized", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
         WorkspaceGroup group = await connection.CreateGroup("Clients", null, CancellationToken.None);
 
         await connection.MoveWorkspace(workspace.Id, group.Id, CancellationToken.None);
@@ -409,7 +409,6 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         WorkspaceGroup extra = await connection.CreateGroup("Extra", null, CancellationToken.None);
         await connection.ShiftGroup(extra.Id, -1, CancellationToken.None);
-        await connection.ShiftWorkspace(workspace.Id, 1, CancellationToken.None);
         Assert.Equal([extra.Id, other.Id], (await connection.ListWorkspaces(CancellationToken.None)).Groups.Where(listedGroup => listedGroup.ParentId is null).Select(listedGroup => listedGroup.Id));
 
         await connection.DeleteGroup(group.Id, CancellationToken.None);
@@ -438,9 +437,9 @@ public sealed class EndToEndTests : IAsyncLifetime
         FolderListing folder = await connection.CreateFolder(temp.Path, "keyed", CancellationToken.None);
         await connection.SetAiEnvironment((await connection.GetAiEnvironment(CancellationToken.None)) with { DefaultService = AiService.Codex }, CancellationToken.None);
 
-        WorkspaceInfo defaulted = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo defaulted = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
         FolderListing other = await connection.CreateFolder(temp.Path, "claude", CancellationToken.None);
-        WorkspaceInfo keyed = await connection.CreateWorkspace(other.Path, AiService.ClaudeCode, "sk-one", CancellationToken.None);
+        WorkspaceInfo keyed = await connection.CreateWorkspace(other.Path, AiService.ClaudeCode, "sk-one", null, CancellationToken.None);
         WorkspaceSettings settings = await connection.GetWorkspaceSettings(keyed.Id, CancellationToken.None);
 
         Assert.Equal(AiService.Codex, defaulted.Service);
@@ -453,7 +452,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task WorkspaceSettings_CoverEverythingTheSessionIsConfiguredWith()
     {
         FolderListing folder = await connection.CreateFolder(temp.Path, "settings", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
         WorkspaceSettings saved = await connection.SetWorkspaceSettings(workspace.Id, new WorkspaceSettings { Capability = AiCapability.Max, Effort = AiEffort.Medium, IsShellAllowed = false, IsSystemAccessAllowed = false, IsWebAllowed = false, IsImageGenerationAllowed = false, Instructions = "be brief" }, CancellationToken.None);
         WorkspaceSettings read = await connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
@@ -470,7 +469,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         FolderListing target = await connection.CreateFolder(temp.Path, "to", CancellationToken.None);
         FolderListing app = await connection.CreateFolder(source.Path, "app", CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(app.Path, "notes.txt"), "keep");
-        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
         string movedApp = Path.Combine(target.Path, "app2");
         Directory.Move(app.Path, movedApp);
 
@@ -482,7 +481,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal(movedApp, prompterOf.Sessions.Single().WorkspacePath);
         await Assert.ThrowsAsync<RemoteException>(() => connection.MoveWorkspaceToFolder(workspace.Id, Path.Combine(temp.Path, "missing"), CancellationToken.None));
         FolderListing other = await connection.CreateFolder(temp.Path, "other", CancellationToken.None);
-        await connection.CreateWorkspace(other.Path, null, null, CancellationToken.None);
+        await connection.CreateWorkspace(other.Path, null, null, null, CancellationToken.None);
         await Assert.ThrowsAsync<RemoteException>(() => connection.MoveWorkspaceToFolder(workspace.Id, other.Path, CancellationToken.None));
     }
 
@@ -495,7 +494,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         AiEnvironment saved = await connection.SetAiEnvironment(first with { NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = false, IsWebAllowed = true, IsImageGenerationAllowed = false, Instructions = string.Empty } }, CancellationToken.None);
         FolderListing folder = await connection.CreateFolder(temp.Path, "defaults", CancellationToken.None);
-        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
         WorkspaceSettings settings = await connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
 
         Assert.Equal(string.Empty, saved.NewWorkspaces.Instructions);

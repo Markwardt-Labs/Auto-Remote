@@ -14,6 +14,7 @@ public sealed class NewWorkspaceViewModelTests
     public NewWorkspaceViewModelTests()
     {
         connection.Setup(x => x.ListFolders(null, It.IsAny<CancellationToken>())).ReturnsAsync(home);
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [new WorkspaceGroup { Id = Guid.NewGuid(), Name = "Work" }], Workspaces = [] });
         connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment { DefaultService = AiService.Codex });
     }
 
@@ -69,13 +70,37 @@ public sealed class NewWorkspaceViewModelTests
     public async Task Start_CreatesTheWorkspaceWithTheChosenProviderAndTheKeyForItsSession()
     {
         WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = "/home/me", Service = AiService.Codex };
-        connection.Setup(x => x.CreateWorkspace("/home/me", AiService.Codex, "sk-1", It.IsAny<CancellationToken>())).ReturnsAsync(created);
+        connection.Setup(x => x.CreateWorkspace("/home/me", AiService.Codex, "sk-1", null, It.IsAny<CancellationToken>())).ReturnsAsync(created);
         NewWorkspaceViewModel model = new(connection.Object);
         WorkspaceInfo? raised = null;
         model.Created += workspace => raised = workspace;
         await model.Open();
         model.Provider.ApiKey = " sk-1 ";
 
+        model.StartCommand.Execute(null);
+        for (int attempt = 0; attempt < 500 && raised is null; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(created, raised);
+    }
+
+    [Fact]
+    public async Task Start_FilesTheWorkspaceInTheChosenGroupOrAtTheTopLevel()
+    {
+        Guid group = Guid.NewGuid();
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [new WorkspaceGroup { Id = group, Name = "Work" }], Workspaces = [] });
+        WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = "/home/me", GroupId = group };
+        connection.Setup(x => x.CreateWorkspace("/home/me", It.IsAny<AiService?>(), null, group, It.IsAny<CancellationToken>())).ReturnsAsync(created);
+        NewWorkspaceViewModel model = new(connection.Object);
+        WorkspaceInfo? raised = null;
+        model.Created += workspace => raised = workspace;
+        await model.Open();
+        Assert.Equal(["Top level", "Work"], model.Group.Choices.Select(choice => choice.Name));
+        Assert.Null(model.Group.GroupId);
+
+        model.Group.Selected = model.Group.Choices[1];
         model.StartCommand.Execute(null);
         for (int attempt = 0; attempt < 500 && raised is null; attempt++)
         {

@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The new workspace screen: pick or create the server folder that will host the workspace and choose the AI provider it runs on for good, with an optional API key for its session.
+/// The new workspace screen: pick or create the server folder that will host the workspace and choose the AI provider it runs on for good, with an optional API key for its session, and the group it is filed in.
 /// </summary>
 internal sealed class NewWorkspaceViewModel : ViewModelBase
 {
@@ -14,6 +14,7 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
         this.connection = connection;
         Browser = new FolderBrowserViewModel(connection);
         Provider = new ProviderPickerViewModel(connection);
+        Group = new GroupPickerViewModel();
         StartCommand = new AsyncCommand(_ => Start(), () => Browser.CanChoose);
         Browser.PropertyChanged += (_, args) =>
         {
@@ -52,6 +53,11 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
     public ProviderPickerViewModel Provider { get; }
 
     /// <summary>
+    /// Gets the choice of the group the workspace is filed in.
+    /// </summary>
+    public GroupPickerViewModel Group { get; }
+
+    /// <summary>
     /// Gets the command that creates the workspace in the browser's current folder.
     /// </summary>
     public AsyncCommand StartCommand { get; }
@@ -68,6 +74,7 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
     public async Task Open()
     {
         await Provider.Load();
+        await Group.Load(connection);
         await Browser.Start();
     }
 
@@ -75,7 +82,7 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
     {
         WorkspaceInfo? workspace = null;
 
-        if (await Attempt(async () => workspace = await connection.CreateWorkspace(Browser.CurrentPath, Provider.Service, Provider.Key, CancellationToken.None)) && workspace is not null)
+        if (await Attempt(async () => workspace = await connection.CreateWorkspace(Browser.CurrentPath, Provider.Service, Provider.Key, Group.GroupId, CancellationToken.None)) && workspace is not null)
         {
             Created?.Invoke(workspace);
         }

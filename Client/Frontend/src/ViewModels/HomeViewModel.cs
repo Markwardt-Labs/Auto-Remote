@@ -96,7 +96,7 @@ internal sealed class HomeViewModel : ViewModelBase
             },
             () => CanEditSelected);
         ConfirmDeleteCommand = new AsyncCommand(_ => Delete());
-        BeginNewGroupCommand = new AsyncCommand(parent => Begin(EditMode.NewGroup, string.Empty, parent as WorkspaceGroup));
+        BeginNewGroupCommand = new AsyncCommand(_ => BeginNewGroup());
         ConfirmNewGroupCommand = new AsyncCommand(_ => CreateGroup());
         BeginRenameGroupCommand = new AsyncCommand(group => Begin(EditMode.RenameGroup, (group as WorkspaceGroup)?.Name ?? string.Empty, group as WorkspaceGroup));
         ConfirmRenameGroupCommand = new AsyncCommand(_ => RenameGroup());
@@ -105,10 +105,8 @@ internal sealed class HomeViewModel : ViewModelBase
         BeginMoveWorkspaceCommand = new AsyncCommand(workspace => BeginMove(EditMode.MoveWorkspace, workspace as WorkspaceInfo, null));
         BeginMoveGroupCommand = new AsyncCommand(group => BeginMove(EditMode.MoveGroup, null, group as WorkspaceGroup));
         ConfirmMoveCommand = new AsyncCommand(_ => Move());
-        ShiftWorkspaceUpCommand = new AsyncCommand(workspace => Shift(workspace as WorkspaceInfo, null, -1));
-        ShiftWorkspaceDownCommand = new AsyncCommand(workspace => Shift(workspace as WorkspaceInfo, null, 1));
-        ShiftGroupUpCommand = new AsyncCommand(group => Shift(null, group as WorkspaceGroup, -1));
-        ShiftGroupDownCommand = new AsyncCommand(group => Shift(null, group as WorkspaceGroup, 1));
+        ShiftGroupUpCommand = new AsyncCommand(group => Shift(group as WorkspaceGroup, -1));
+        ShiftGroupDownCommand = new AsyncCommand(group => Shift(group as WorkspaceGroup, 1));
         CancelEditCommand = new AsyncCommand(_ =>
         {
             EditMode = EditMode.None;
@@ -143,7 +141,7 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private readonly List<WorkspaceGroup> groups = [];
 
-    private readonly HashSet<Guid> collapsed = [];
+    private readonly HashSet<Guid> expanded = [];
 
     private readonly Dictionary<Guid, WorkspaceViewModel> opened = [];
 
@@ -203,7 +201,7 @@ internal sealed class HomeViewModel : ViewModelBase
     public event Action? ChangeServerRequested;
 
     /// <summary>
-    /// Gets the drawer rows: the group tree flattened in display order: each group, then what is inside it, then the workspaces in no group.
+    /// Gets the drawer rows: the group tree flattened in display order. Within the top level and within each group the groups come first, in their manual order, and then the workspaces, the one whose AI session was loaded last first. Groups start collapsed.
     /// </summary>
     public ObservableCollection<DrawerEntry> Entries { get; } = [];
 
@@ -249,9 +247,9 @@ internal sealed class HomeViewModel : ViewModelBase
                     return;
                 }
 
-                if (!collapsed.Remove(group.Id))
+                if (!expanded.Remove(group.Id))
                 {
-                    collapsed.Add(group.Id);
+                    expanded.Add(group.Id);
                 }
 
                 BuildEntries();
@@ -475,7 +473,7 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <summary>
     /// Gets the label of the button that closes the showing dialog without doing anything.
     /// </summary>
-    public string CancelEditText => IsHalting ? "Keep working" : "Cancel";
+    public string CancelEditText => IsHalting ? "Keep Working" : "Cancel";
 
     /// <summary>
     /// Gets a value indicating whether any dialog is showing.
@@ -493,9 +491,14 @@ internal sealed class HomeViewModel : ViewModelBase
     public string EditingGroupName => editingGroup?.Name ?? string.Empty;
 
     /// <summary>
-    /// Gets the explanation shown in the new group dialog: where the group will be created.
+    /// Gets the explanation shown in the new group dialog.
     /// </summary>
-    public string NewGroupHint => (editingGroup is { } parent ? $"It will be created inside {parent.Name}. " : string.Empty) + "Groups only organize workspaces in Auto Remote. They are not created on the server's disk.";
+    public string NewGroupHint => "Groups only organize workspaces in Auto Remote. They are not created on the server's disk.";
+
+    /// <summary>
+    /// Gets the choice of the group the new group is created in.
+    /// </summary>
+    public GroupPickerViewModel NewGroupParent { get; } = new();
 
     /// <summary>
     /// Gets the name of what the move dialog moves: the workspace or the group.
@@ -610,7 +613,7 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand ConfirmDeleteCommand { get; }
 
     /// <summary>
-    /// Gets the command that opens the new group dialog, inside the group passed as its parameter if any.
+    /// Gets the command that opens the new group dialog, where the group it is created in is chosen.
     /// </summary>
     public AsyncCommand BeginNewGroupCommand { get; }
 
@@ -653,16 +656,6 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the command that applies the move.
     /// </summary>
     public AsyncCommand ConfirmMoveCommand { get; }
-
-    /// <summary>
-    /// Gets the command that moves the workspace passed as its parameter up among the workspaces in its group.
-    /// </summary>
-    public AsyncCommand ShiftWorkspaceUpCommand { get; }
-
-    /// <summary>
-    /// Gets the command that moves the workspace passed as its parameter down among the workspaces in its group.
-    /// </summary>
-    public AsyncCommand ShiftWorkspaceDownCommand { get; }
 
     /// <summary>
     /// Gets the command that moves the group passed as its parameter up among the groups with the same parent.
@@ -810,7 +803,7 @@ internal sealed class HomeViewModel : ViewModelBase
         workspaces.AddRange(catalog.Workspaces);
         groups.Clear();
         groups.AddRange(catalog.Groups);
-        collapsed.IntersectWith(groups.Select(group => group.Id));
+        expanded.IntersectWith(groups.Select(group => group.Id));
     }
 
     private WorkspaceViewModel Open(WorkspaceInfo workspace)
@@ -896,6 +889,12 @@ internal sealed class HomeViewModel : ViewModelBase
         Raise(nameof(NewGroupHint));
         EditMode = mode;
         return Task.CompletedTask;
+    }
+
+    private Task BeginNewGroup()
+    {
+        NewGroupParent.Fill(groups);
+        return Begin(EditMode.NewGroup, string.Empty);
     }
 
     private Task BeginMove(EditMode mode, WorkspaceInfo? workspace, WorkspaceGroup? group)
@@ -1004,7 +1003,7 @@ internal sealed class HomeViewModel : ViewModelBase
                 continue;
             }
 
-            bool isCollapsed = !IsFiltering && collapsed.Contains(group.Id);
+            bool isCollapsed = !IsFiltering && !expanded.Contains(group.Id);
             into.Add(new DrawerEntry { Group = group, IsCollapsed = isCollapsed, Depth = depth });
 
             if (!isCollapsed)
@@ -1013,7 +1012,7 @@ internal sealed class HomeViewModel : ViewModelBase
             }
         }
 
-        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))))
+        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
         {
             into.Add(new DrawerEntry { Workspace = workspace, Depth = depth });
         }
@@ -1093,8 +1092,13 @@ internal sealed class HomeViewModel : ViewModelBase
         {
             Error = "Enter a name.";
         }
-        else if (await Attempt(() => connection.CreateGroup(renameText, editingGroup?.Id, CancellationToken.None)))
+        else if (await Attempt(() => connection.CreateGroup(renameText, NewGroupParent.GroupId, CancellationToken.None)))
         {
+            if (NewGroupParent.GroupId is { } parent)
+            {
+                expanded.Add(parent);
+            }
+
             await Reload();
         }
     }
@@ -1136,18 +1140,18 @@ internal sealed class HomeViewModel : ViewModelBase
         }
     }
 
-    private async Task Shift(WorkspaceInfo? workspace, WorkspaceGroup? group, int offset)
+    private async Task Shift(WorkspaceGroup? group, int offset)
     {
         WorkspaceCatalog? catalog = null;
 
-        if (workspace is null && group is null)
+        if (group is null)
         {
             return;
         }
 
         if (await Attempt(async () =>
         {
-            await (workspace is null ? connection.ShiftGroup(group!.Id, offset, CancellationToken.None) : connection.ShiftWorkspace(workspace.Id, offset, CancellationToken.None));
+            await connection.ShiftGroup(group.Id, offset, CancellationToken.None);
             catalog = await connection.ListWorkspaces(CancellationToken.None);
         }))
         {

@@ -42,11 +42,11 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `id` | number | always | Client-chosen number echoed in the response. |
 | `command` | string | always | The command name. |
 | `workspaceId` | GUID | per command | The workspace targeted. |
-| `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group. |
+| `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group; for `CreateWorkspace` and `CloneWorkspace`, the group the new workspace is filed in (omitted: the top level), refused when it no longer exists. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
 | `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
-| `offset` | number | `ShiftWorkspace`, `ShiftGroup` | How many places to move: negative is up, positive is down. |
+| `offset` | number | `ShiftGroup` | How many places to move: negative is up, positive is down. |
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
 | `service` | string | `CreateWorkspace`, `CloneWorkspace`, `GetUsage` | `ClaudeCode`, `Codex` or `Local` (the models of a server on the server's machine such as Ollama, run through OpenCode); the provider a new workspace runs on for good, which is the default of the environment when omitted. `OpenCode` is accepted as `Local`. |
 | `apiKey` | string | no | `CreateWorkspace`, `CloneWorkspace`: an API key for just the new workspace's AI session (Claude Code and Codex), which Live AI stores with the session; the server keeps no copy. Refused for `Local`. |
@@ -109,15 +109,14 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 
 | Command | Request properties | Response property | Notes |
 | --- | --- | --- | --- |
-| `ListWorkspaces` | none | `catalog` | Workspaces and groups, each in its custom order. |
-| `CreateWorkspace` | `path` (existing folder on the server), optional `service`, optional `apiKey` | `workspace` | The workspace runs on `service` (the environment's default provider when omitted) for good; the provider cannot be changed afterwards. The AI session is made together with the workspace, on `apiKey` when one is given. A workspace whose session cannot be made (a key for a provider that takes none, or local models without a model for every capability) refuses the request and nothing is created. |
+| `ListWorkspaces` | none | `catalog` | The groups in their custom order and the workspaces, each with when its AI session was last loaded (`lastUpdated`), read from Live AI at each call. Clients order the workspaces of a group by it, latest first. |
+| `CreateWorkspace` | `path` (existing folder on the server), optional `service`, optional `apiKey`, optional `groupId` | `workspace` | The workspace runs on `service` (the environment's default provider when omitted) for good; the provider cannot be changed afterwards. The AI session is made together with the workspace, on `apiKey` when one is given. A workspace whose session cannot be made (a key for a provider that takes none, or local models without a model for every capability) refuses the request and nothing is created. |
 | `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused unless the workspace is Ready. |
 | `MoveWorkspaceToFolder` | `workspaceId`, `path` (existing folder the workspace works in from now on) | `workspace` | Tells the workspace's AI session that the workspace is in `path` now, which is what tracks the place of a workspace; no file is moved by the server, so the folder has to exist already (the project may have been moved on disk, even from a folder that is gone). The workspace keeps its identifier, session, group and place. Refused unless the workspace is Ready, when `path` does not exist, and when it already hosts another workspace. Moving it to the folder it is in changes nothing. |
 | `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. It goes to the end of the group. |
 | `CreateGroup` | `name`, optional `parentId` | `group` | Names are trimmed, must be non-empty and unique ignoring case among the groups with the same parent. The parent must exist. |
 | `RenameGroup` | `groupId`, `name` | `group` | Same name rules as `CreateGroup`. |
 | `MoveGroup` | `groupId`, optional `parentId` | `group` | Omitting `parentId` moves it to the top level. Refused into itself or anything inside it, and when the name is taken in the new place. It goes to the end of its new parent. |
-| `ShiftWorkspace` | `workspaceId`, `offset` | none | Moves the workspace among the workspaces in its group; it stops at the first or last place. |
 | `ShiftGroup` | `groupId`, `offset` | none | Moves the group among the groups with the same parent; it stops at the first or last place. |
 | `DeleteGroup` | `groupId` | none | Its workspaces and groups are kept and move into its parent. |
 | `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused unless the workspace is Ready. |
@@ -142,7 +141,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
 | `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |
 | `WatchWorkspace` | `workspaceId` | none | Says that this connection has the workspace open, in place of the one it had open before. The server watches the whole folder of every workspace some connection has open, however deep, and pushes what changes in it to every connection as `FilesChanged` and `GitChanged` events, also when the change was made outside Auto Remote. The watch ends with the connection, and a connection that reconnects sends it again. |
-| `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name`, optional `service`, optional `apiKey` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |
+| `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name`, optional `service`, optional `apiKey`, optional `groupId` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |
 | `GetGitStatus` | `workspaceId` | `git` | `isRepo` is false for a folder that is not the root of a repository, and when git is not installed on the server. |
 | `GetGitChanges` | `workspaceId` | `gitChanges` | Paths that differ from the head commit plus the ones git ignores; empty for a folder that is not a repository. |
 | `GetGitHistory` | `workspaceId`, optional `skip`, `limit` | `gitHistory` | Commits of every branch and tag, newest first; empty before the first commit. |
@@ -185,6 +184,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `folder` | string | Absolute path of the workspace's folder on the server. The display name is not sent; clients take the last segment of this. |
 | `sessionId` | string, optional | The live AI session that holds the workspace's folder, provider and AI configuration (32 hexadecimal digits). Informational: the server manages it and replaces it, keeping the workspace, when the session can no longer be used. |
 | `groupId` | GUID, optional | The group the workspace is filed in; omitted when it is at the top level. |
+| `lastUpdated` | timestamp, optional | When the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first); refreshed whenever the workspaces are listed. |
 | `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts of the workspace's own that its review and expand buttons send; omitted when it uses the environment's. |
 

@@ -137,7 +137,7 @@ internal sealed class RealServer : IAsyncDisposable
             Git(path, "commit", "-m", "base");
         }
 
-        WorkspaceInfo workspace = await Connection.CreateWorkspace(path, service, null, CancellationToken.None);
+        WorkspaceInfo workspace = await Connection.CreateWorkspace(path, service, null, null, CancellationToken.None);
         if (configure)
         {
             await Economize(workspace);

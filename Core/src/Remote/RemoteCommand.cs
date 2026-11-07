@@ -12,7 +12,7 @@ public enum RemoteCommand
     ListWorkspaces,
 
     /// <summary>
-    /// Creates a workspace in the existing folder <see cref="RemoteRequest.Path" /> with the provider <see cref="RemoteRequest.Service" /> and, optionally, its own <see cref="RemoteRequest.ApiKey" />; the provider is permanent. Answered in <see cref="RemoteResponse.Workspace" />.
+    /// Creates a workspace in the existing folder <see cref="RemoteRequest.Path" /> with the provider <see cref="RemoteRequest.Service" /> and, optionally, its own <see cref="RemoteRequest.ApiKey" />; the provider is permanent. The workspace is filed in the group <see cref="RemoteRequest.GroupId" /> when that is given, and otherwise at the top level. Answered in <see cref="RemoteResponse.Workspace" />.
     /// </summary>
     CreateWorkspace,
 
@@ -80,11 +80,6 @@ public enum RemoteCommand
     /// Deletes <see cref="RemoteRequest.GroupId" />; the workspaces and groups in it are kept and move into its parent.
     /// </summary>
     DeleteGroup,
-
-    /// <summary>
-    /// Moves <see cref="RemoteRequest.WorkspaceId" /> up or down among the workspaces in its group by <see cref="RemoteRequest.Offset" /> places.
-    /// </summary>
-    ShiftWorkspace,
 
     /// <summary>
     /// Moves <see cref="RemoteRequest.GroupId" /> up or down among the groups with the same parent by <see cref="RemoteRequest.Offset" /> places.
@@ -172,7 +167,7 @@ public enum RemoteCommand
     WatchWorkspace,
 
     /// <summary>
-    /// Clones the repository at <see cref="RemoteRequest.Url" /> into a new folder inside the existing folder <see cref="RemoteRequest.Path" /> and creates a workspace in it with the provider <see cref="RemoteRequest.Service" /> and, optionally, its own <see cref="RemoteRequest.ApiKey" />; the folder is named <see cref="RemoteRequest.Name" />, or after the repository when that is omitted. Answered in <see cref="RemoteResponse.Workspace" />.
+    /// Clones the repository at <see cref="RemoteRequest.Url" /> into a new folder inside the existing folder <see cref="RemoteRequest.Path" /> and creates a workspace in it with the provider <see cref="RemoteRequest.Service" /> and, optionally, its own <see cref="RemoteRequest.ApiKey" />; the folder is named <see cref="RemoteRequest.Name" />, or after the repository when that is omitted. The workspace is filed in the group <see cref="RemoteRequest.GroupId" /> when that is given. Answered in <see cref="RemoteResponse.Workspace" />.
     /// </summary>
     CloneWorkspace,
 

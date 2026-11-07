@@ -21,7 +21,7 @@ public sealed record RemoteRequest
     public Guid? WorkspaceId { get; init; }
 
     /// <summary>
-    /// Gets the group the command targets, if any.
+    /// Gets the group the command targets, if any; for <see cref="RemoteCommand.CreateWorkspace" /> and <see cref="RemoteCommand.CloneWorkspace" /> the group the new workspace is filed in.
     /// </summary>
     public Guid? GroupId { get; init; }
 
@@ -116,7 +116,7 @@ public sealed record RemoteRequest
     public int? Skip { get; init; }
 
     /// <summary>
-    /// Gets how many places <see cref="RemoteCommand.ShiftWorkspace" /> or <see cref="RemoteCommand.ShiftGroup" /> moves the item: negative moves it up the list, positive down.
+    /// Gets how many places <see cref="RemoteCommand.ShiftGroup" /> moves the group: negative moves it up the list, positive down.
     /// </summary>
     public int? Offset { get; init; }
 

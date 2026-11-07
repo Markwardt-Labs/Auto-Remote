@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The clone workspace screen: enter the repository URL, pick the server folder the clone's folder is created in and choose the AI provider the workspace runs on for good, with an optional API key for its session.
+/// The clone workspace screen: enter the repository URL, pick the server folder the clone's folder is created in and choose the AI provider the workspace runs on for good, with an optional API key for its session, and the group it is filed in.
 /// </summary>
 internal sealed class CloneWorkspaceViewModel : ViewModelBase
 {
@@ -14,6 +14,7 @@ internal sealed class CloneWorkspaceViewModel : ViewModelBase
         this.connection = connection;
         Browser = new FolderBrowserViewModel(connection);
         Provider = new ProviderPickerViewModel(connection);
+        Group = new GroupPickerViewModel();
         CloneCommand = new AsyncCommand(_ => Clone(), () => Browser.CanChoose && !string.IsNullOrWhiteSpace(url));
         Browser.PropertyChanged += (_, args) =>
         {
@@ -49,6 +50,11 @@ internal sealed class CloneWorkspaceViewModel : ViewModelBase
     /// Gets the folder browser that picks where the clone's folder is created.
     /// </summary>
     public FolderBrowserViewModel Browser { get; }
+
+    /// <summary>
+    /// Gets the choice of the group the workspace is filed in.
+    /// </summary>
+    public GroupPickerViewModel Group { get; }
 
     /// <summary>
     /// Gets or sets the URL of the repository to clone.
@@ -96,6 +102,7 @@ internal sealed class CloneWorkspaceViewModel : ViewModelBase
     public async Task Open()
     {
         await Provider.Load();
+        await Group.Load(connection);
         await Browser.Start();
     }
 
@@ -103,7 +110,7 @@ internal sealed class CloneWorkspaceViewModel : ViewModelBase
     {
         WorkspaceInfo? workspace = null;
 
-        if (await Attempt(async () => workspace = await connection.CloneWorkspace(url.Trim(), Browser.CurrentPath, string.IsNullOrWhiteSpace(name) ? null : name.Trim(), Provider.Service, Provider.Key, CancellationToken.None)) && workspace is not null)
+        if (await Attempt(async () => workspace = await connection.CloneWorkspace(url.Trim(), Browser.CurrentPath, string.IsNullOrWhiteSpace(name) ? null : name.Trim(), Provider.Service, Provider.Key, Group.GroupId, CancellationToken.None)) && workspace is not null)
         {
             Created?.Invoke(workspace);
         }

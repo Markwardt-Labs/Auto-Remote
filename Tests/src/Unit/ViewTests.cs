@@ -265,7 +265,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.True(await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
-            model.Start().GetAwaiter().GetResult();
+            model.Start(workspace.Id).GetAwaiter().GetResult();
             model.Active!.ShowFilesCommand.Execute(null);
             model.BeginDeleteCommand.Execute(null);
             return Shows<HomeView>(new HomeView(), model);
@@ -273,7 +273,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.True(await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
-            model.Start().GetAwaiter().GetResult();
+            model.Start(workspace.Id).GetAwaiter().GetResult();
             model.Active!.ToggleSettingsCommand.Execute(null);
             model.IsDrawerOpen = true;
             model.BeginRenameGroupCommand.Execute(group);
@@ -282,7 +282,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.True(await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
-            model.Start().GetAwaiter().GetResult();
+            model.Start(workspace.Id).GetAwaiter().GetResult();
             model.BeginMoveWorkspaceCommand.Execute(workspace);
             return Shows<HomeView>(new HomeView(), model);
         }));
@@ -408,9 +408,9 @@ public sealed class ViewTests(HeadlessFixture fixture)
             bool dialogBefore = window.GetVisualDescendants().OfType<UpdateDialogView>().Any(dialog => dialog.IsEffectivelyVisible);
             model.IsDrawerOpen = true;
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-            Button inDrawer = window.GetVisualDescendants().OfType<Button>().Single(button => button != updating && button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available");
-            drawerButton = Avalonia.VisualExtensions.TranslatePoint(inDrawer, new Avalonia.Point(0, 0), window)!.Value.X < 340;
-            inDrawer.Command!.Execute(null);
+            drawerButton = window.GetVisualDescendants().OfType<Button>().Count(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available") == 1;
+            model.IsDrawerOpen = false;
+            updating.Command!.Execute(null);
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             UpdateDialogView dialog = window.GetVisualDescendants().OfType<UpdateDialogView>().Single();
             bool dialogAfter = dialog.IsEffectivelyVisible;
@@ -499,8 +499,8 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (before, after);
         });
 
-        Assert.Equal(["Change server"], before);
-        Assert.Equal(["Update", "Change server"], after);
+        Assert.Equal(["Change Server"], before);
+        Assert.Equal(["Update", "Change Server"], after);
     }
 
     [Fact]
@@ -546,7 +546,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             window.Show();
             model.Active!.ToggleSettingsCommand.Execute(null);
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-            Button move = window.GetVisualDescendants().OfType<Button>().Single(button => button.Content?.ToString() == "Move workspace to folder");
+            Button move = window.GetVisualDescendants().OfType<Button>().Single(button => button.Content?.ToString() == "Move Workspace to Folder");
             bool visible = move.IsEffectivelyVisible;
             move.Command!.Execute(null);
             window.Close();
@@ -572,7 +572,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             window.Show();
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             bool described = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.Text?.Contains("'app'") == true);
-            bool button = window.GetVisualDescendants().OfType<Button>().Any(item => item.Content?.ToString() == "Use this folder");
+            bool button = window.GetVisualDescendants().OfType<Button>().Any(item => item.Content?.ToString() == "Use This Folder");
             window.Close();
             return (described, button);
         });
@@ -590,7 +590,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             NewWorkspaceView view = new() { DataContext = model };
             Window window = new() { Width = 600, Height = 900, Content = view };
             window.Show();
-            int providers = window.GetVisualDescendants().OfType<ComboBox>().Single().ItemCount;
+            int providers = window.GetVisualDescendants().OfType<ComboBox>().First().ItemCount;
             TextBox[] Keys() => [.. window.GetVisualDescendants().OfType<TextBox>().Where(box => box.PasswordChar != default && box.IsEffectivelyVisible)];
             int claude = Keys().Length;
             model.Provider.SelectedService = model.Provider.Services.Single(choice => choice.Service == AiService.Local);
@@ -618,7 +618,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             EnvironmentView view = new() { DataContext = model };
             Window window = new() { Width = 700, Height = 1400, Content = view };
             window.Show();
-            int Refresh() => window.GetVisualDescendants().OfType<Button>().Count(button => button.IsEffectivelyVisible && button.Content?.ToString() is "Refresh models" or "Refresh checkpoints");
+            int Refresh() => window.GetVisualDescendants().OfType<Button>().Count(button => button.IsEffectivelyVisible && button.Content?.ToString() is "Refresh Models" or "Refresh Checkpoints");
             int refreshButtons = Refresh();
             model.SelectedImage = model.ImageKinds.Single(choice => choice.Value == ImageGenerationKind.Local);
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
@@ -655,7 +655,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             ]
         });
 
-        string[] stamps = await fixture.Run(() =>
+        (string[] found, bool userStampOnTheLeft) stamps = await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object, ClientLayout.Panels);
             model.Start().GetAwaiter().GetResult();
@@ -670,13 +670,18 @@ public sealed class ViewTests(HeadlessFixture fixture)
             }
 
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-            string[] found = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible && block.FontSize == 11 && block.Classes.Contains("muted")).Select(block => block.Text ?? string.Empty)];
+            TextBlock[] blocks = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible && block.FontSize == 11 && block.Classes.Contains("muted"))];
+            string[] found = [.. blocks.Select(block => block.Text ?? string.Empty)];
+            Border bubble = blocks[0].FindAncestorOfType<Border>()!;
+            Avalonia.Point stampAt = Avalonia.VisualExtensions.TranslatePoint(blocks[0], new Avalonia.Point(0, 0), bubble)!.Value;
+            bool userStampOnTheLeft = blocks[0].HorizontalAlignment == Avalonia.Layout.HorizontalAlignment.Left && stampAt.X < 24 && bubble.Bounds.Width - stampAt.X - blocks[0].Bounds.Width > 24;
             window.Close();
-            return found;
+            return (found, userStampOnTheLeft);
         });
 
         string expected = written.ToStamp(DateTimeOffset.UtcNow);
-        Assert.Equal([expected, expected], stamps);
+        Assert.Equal([expected, expected], stamps.found);
+        Assert.True(stamps.userStampOnTheLeft);
     }
 
     [Fact]
@@ -1340,7 +1345,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal([true], enabled);
         Assert.True(typing);
         Assert.True(asking);
-        Assert.Equal("Keep working", dismiss);
+        Assert.Equal("Keep Working", dismiss);
         Assert.True(askedAndNothingSent);
         connection.Verify(x => x.StopWorkspace(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -1480,7 +1485,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         (string[] without, string[] before, string[] after, bool dialog) = await fixture.Run(() =>
         {
-            string[] Buttons(Window window) => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty).Where(text => text is "Check for updates" or "Update")];
+            string[] Buttons(Window window) => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty).Where(text => text is "Check for Updates" or "Update")];
             Window plain = new() { Width = 700, Height = 900, Content = new EnvironmentView { DataContext = new EnvironmentViewModel(connection.Object) } };
             plain.Show();
             string[] without = Buttons(plain);
@@ -1508,8 +1513,89 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Empty(without);
-        Assert.Equal(["Check for updates"], before);
-        Assert.Equal(["Check for updates", "Update"], after);
+        Assert.Equal(["Check for Updates"], before);
+        Assert.Equal(["Check for Updates", "Update"], after);
         Assert.True(dialog);
+    }
+
+    [Fact]
+    public async Task HomeView_SidebarHasTheGearAtTheTopFourMatchingTitleCaseButtonsBelowNoAddButtonsAndNoWorkspaceMoveButtons()
+    {
+        WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceInfo inGroup = new() { Id = Guid.NewGuid(), Folder = "/work/a", GroupId = group.Id };
+        WorkspaceInfo loose = new() { Id = Guid.NewGuid(), Folder = "/work/b" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [group], Workspaces = [inGroup, loose] });
+        connection.SetupGet(x => x.ServerVersion).Returns("1.0.0");
+
+        (bool gearAtTop, bool gearPlain, string[] bottom, bool bottomAlike, string[] groupButtons, string[] workspaceButtons, bool updateButton) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            model.SelectedEntry = model.Entries.First(entry => entry.Group == group);
+            model.IsDrawerOpen = true;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            List<Button> buttons = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible)];
+            Button gear = buttons.Single(button => ToolTip.GetTip(button)?.ToString() == "AI environment settings");
+            Avalonia.Point gearAt = Avalonia.VisualExtensions.TranslatePoint(gear, new Avalonia.Point(0, 0), window)!.Value;
+            bool gearAtTop = gearAt.Y < 60 && gearAt.X > 200 && gearAt.X < 340;
+            bool gearPlain = gear.Classes.Contains("flat") && !gear.Classes.Contains("primary");
+            Button[] bottom = [.. new[] { "New Workspace", "Clone Workspace", "New Group", "Change Server" }.Select(text => buttons.Single(button => button.Content?.ToString() == text))];
+            bool bottomAlike = bottom.All(button => button.Classes.SequenceEqual(bottom[0].Classes) && button.HorizontalAlignment == Avalonia.Layout.HorizontalAlignment.Stretch) && !bottom.Any(button => button.Classes.Contains("primary"));
+            DrawerEntry groupEntry = model.Entries.First(entry => entry.Group == group);
+            string[] groupButtons = [.. window.GetVisualDescendants().OfType<Grid>().Where(grid => ReferenceEquals(grid.DataContext, groupEntry) && grid.IsEffectivelyVisible).SelectMany(grid => grid.GetVisualDescendants().OfType<Button>()).Select(button => button.Content?.ToString() ?? string.Empty)];
+            DrawerEntry looseEntry = model.Entries.First(entry => entry.Workspace == loose);
+            string[] workspaceButtons = [.. window.GetVisualDescendants().OfType<Grid>().Where(grid => ReferenceEquals(grid.DataContext, looseEntry) && grid.IsEffectivelyVisible).SelectMany(grid => grid.GetVisualDescendants().OfType<Button>()).Select(button => button.Content?.ToString() ?? string.Empty)];
+            bool updateButton = buttons.Any(button => ToolTip.GetTip(button)?.ToString() == "Update available" && button.Bounds.Width > 0 && Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(0, 0), window)!.Value.X < 340);
+            window.Close();
+            return (gearAtTop, gearPlain, bottom.Select(button => button.Content!.ToString()!).ToArray(), bottomAlike, groupButtons, workspaceButtons, updateButton);
+        });
+
+        Assert.True(gearAtTop);
+        Assert.True(gearPlain);
+        Assert.Equal(["New Workspace", "Clone Workspace", "New Group", "Change Server"], bottom);
+        Assert.True(bottomAlike);
+        Assert.DoesNotContain("+", groupButtons);
+        Assert.Equal(["▲", "▼", "✎", "↪", "✕"], groupButtons);
+        Assert.Equal(["↪"], workspaceButtons);
+        Assert.False(updateButton);
+    }
+
+    [Fact]
+    public async Task HomeView_TopRightIconButtonsAndTheWindowControlsAreTheSameSizeAndEvenlySpaced()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetScripts(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new ScriptRuns { Runs = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = false });
+        connection.Setup(x => x.GetWorkspaceState(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(WorkspaceState.Ready);
+        connection.Setup(x => x.ListFiles(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceFiles { Path = string.Empty, Entries = [] });
+
+        (string[] tips, double[] widths, double[] gaps, double right) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1280, Height = 900, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Border topBar = window.GetVisualDescendants().OfType<Border>().Single(border => border.Classes.Contains("topbar"));
+            string[] wanted = ["AI usage limits", "Workspace settings", "Minimize", "Maximize", "Restore", "Close"];
+            List<Button> buttons = [.. topBar.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible && wanted.Contains(ToolTip.GetTip(button)?.ToString()))];
+            buttons.Sort((left, right) => Avalonia.VisualExtensions.TranslatePoint(left, new Avalonia.Point(0, 0), window)!.Value.X.CompareTo(Avalonia.VisualExtensions.TranslatePoint(right, new Avalonia.Point(0, 0), window)!.Value.X));
+            double[] lefts = [.. buttons.Select(button => Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(0, 0), window)!.Value.X)];
+            double[] gaps = [.. lefts.Zip(buttons, (left, button) => left + button.Bounds.Width).Zip(lefts.Skip(1), (end, next) => Math.Round(next - end, 2))];
+            double right = window.Width - (lefts[^1] + buttons[^1].Bounds.Width);
+            window.Close();
+            return (buttons.Select(button => ToolTip.GetTip(button)!.ToString()!).ToArray(), buttons.Select(button => Math.Round(button.Bounds.Width, 2)).ToArray(), gaps, right);
+        });
+
+        Assert.Equal(["AI usage limits", "Workspace settings", "Minimize", "Maximize", "Close"], tips);
+        Assert.Single(widths.Distinct());
+        Assert.All(gaps, gap => Assert.Equal(0, gap));
+        Assert.InRange(right, 0, 16);
     }
 }

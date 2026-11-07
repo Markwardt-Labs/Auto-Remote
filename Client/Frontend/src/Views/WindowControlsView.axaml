@@ -7,16 +7,16 @@
     </Style>
   </UserControl.Styles>
   <StackPanel Orientation="Horizontal">
-    <Button Classes="flat" ToolTip.Tip="Minimize" Click="OnMinimizeClick">
+    <Button Classes="flat toolbar" ToolTip.Tip="Minimize" Click="OnMinimizeClick">
       <Path Classes="lineIcon" Data="{StaticResource MinimizeIconGeometry}" Width="11" Height="11" Fill="White" Stroke="Transparent" />
     </Button>
-    <Button Name="MaximizeButton" Classes="flat" ToolTip.Tip="Maximize" Click="OnMaximizeRestoreClick">
+    <Button Name="MaximizeButton" Classes="flat toolbar" ToolTip.Tip="Maximize" Click="OnMaximizeRestoreClick">
       <Path Classes="lineIcon" Data="{StaticResource MaximizeIconGeometry}" Width="11" Height="11" />
     </Button>
-    <Button Name="RestoreButton" Classes="flat" ToolTip.Tip="Restore" Click="OnMaximizeRestoreClick" IsVisible="False">
+    <Button Name="RestoreButton" Classes="flat toolbar" ToolTip.Tip="Restore" Click="OnMaximizeRestoreClick" IsVisible="False">
       <Path Classes="lineIcon" Data="{StaticResource RestoreIconGeometry}" Width="11" Height="11" />
     </Button>
-    <Button Classes="flat" ToolTip.Tip="Close" Click="OnCloseClick">
+    <Button Classes="flat toolbar" ToolTip.Tip="Close" Click="OnCloseClick">
       <Path Classes="lineIcon" Data="{StaticResource CloseIconGeometry}" Width="11" Height="11" />
     </Button>
   </StackPanel>

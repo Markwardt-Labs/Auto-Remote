@@ -31,6 +31,11 @@ public sealed record WorkspaceInfo
     public AiService Service { get; init; } = AiService.ClaudeCode;
 
     /// <summary>
+    /// Gets when the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first), or <see langword="null" /> when it is not known.
+    /// </summary>
+    public DateTimeOffset? LastUpdated { get; init; }
+
+    /// <summary>
     /// Gets the prompt the workspace's review button sends instead of the one of the server's environment, or <see langword="null" /> when it has none of its own. Set with <see cref="RemoteCommand.SetWorkspaceSettings" />.
     /// </summary>
     public string? ReviewPrompt { get; init; }

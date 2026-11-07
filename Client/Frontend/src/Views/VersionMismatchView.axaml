@@ -11,7 +11,7 @@
         <TextBlock Text="{Binding Message}" TextWrapping="Wrap" />
         <TextBlock Text="{Binding Hint}" Classes="muted" TextWrapping="Wrap" />
         <local:TouchButton Content="Update" Command="{Binding Update.BeginCommand}" IsVisible="{Binding Update.IsAvailable}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
-        <local:TouchButton Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        <local:TouchButton Content="Change Server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
       </StackPanel>
     </ScrollViewer>
     <local:UpdateDialogView DataContext="{Binding Update}" IsVisible="{Binding IsOpen}" />

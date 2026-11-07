@@ -93,7 +93,6 @@ public sealed class HomeViewModelTests
         WorkspaceInfo other = new() { Id = Guid.NewGuid(), Folder = "/work/other", GroupId = clients.Id };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([clients, empty], acme, other, first));
         await model.Start();
-        model.SelectedEntry = model.Entries.First(entry => entry.Group == clients);
 
         model.Filter = "ACM";
 
@@ -240,7 +239,7 @@ public sealed class HomeViewModelTests
 
         model.BeginStopCommand.Execute(null);
         Assert.True(model.IsStoppingWork);
-        Assert.Equal("Keep working", model.CancelEditText);
+        Assert.Equal("Keep Working", model.CancelEditText);
         connection.Verify(x => x.StopWorkspace(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
 
         model.ConfirmHaltCommand.Execute(null);
@@ -308,7 +307,7 @@ public sealed class HomeViewModelTests
 
         await Changed(Catalog([group], first with { GroupId = group.Id }, second, added));
 
-        Assert.Equal([(object)group, first with { GroupId = group.Id }, second, added], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.Equal([(object)group, second, added], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
         Assert.Same(open, model.Active);
         Assert.Equal(first.Id, model.Selected?.Id);
         Assert.True(model.IsDrawerOpen);
@@ -406,11 +405,65 @@ public sealed class HomeViewModelTests
         Assert.Same(before[2], model.Entries[2]);
         Assert.Same(selectedBefore, model.SelectedEntry);
 
-        collectionChanges.Clear();
-        await Changed(Catalog([], second, first, third, added));
-
-        Assert.Equal(["Move"], collectionChanges);
         Assert.Same(selectedBefore, model.SelectedEntry);
+    }
+
+    [Fact]
+    public async Task NewGroup_AsksWhereToCreateItAndCreatesItThereAndOpensThatGroup()
+    {
+        WorkspaceGroup work = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceGroup inner = new() { Id = Guid.NewGuid(), Name = "Inner", ParentId = work.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work, inner], first, second));
+        connection.Setup(x => x.CreateGroup(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceGroup { Id = Guid.NewGuid(), Name = "New" });
+        await model.Start();
+
+        model.BeginNewGroupCommand.Execute(null);
+
+        Assert.True(model.IsCreatingGroup);
+        Assert.Equal(["Top level", "Work", "Work / Inner"], model.NewGroupParent.Choices.Select(choice => choice.Name));
+        Assert.Null(model.NewGroupParent.GroupId);
+
+        model.NewGroupParent.Selected = model.NewGroupParent.Choices[1];
+        model.RenameText = "New";
+        model.ConfirmNewGroupCommand.Execute(null);
+        await Task.Delay(100);
+
+        connection.Verify(x => x.CreateGroup("New", work.Id, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(model.Entries.First(entry => entry.Group == work).IsCollapsed);
+    }
+
+    [Fact]
+    public async Task NewGroup_AtTheTopLevelIsTheDefault()
+    {
+        connection.Setup(x => x.CreateGroup(It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceGroup { Id = Guid.NewGuid(), Name = "Top" });
+        await model.Start();
+
+        model.BeginNewGroupCommand.Execute(null);
+        model.RenameText = "Top";
+        model.ConfirmNewGroupCommand.Execute(null);
+        await Task.Delay(100);
+
+        connection.Verify(x => x.CreateGroup("Top", null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Entries_OrderWorkspacesBySessionLastUpdateLatestFirstAndGroupsStayBeforeThem()
+    {
+        DateTimeOffset now = new(2026, 11, 7, 12, 0, 0, TimeSpan.Zero);
+        WorkspaceInfo oldest = new() { Id = Guid.NewGuid(), Folder = "/work/zzz", LastUpdated = now.AddDays(-2) };
+        WorkspaceInfo newest = new() { Id = Guid.NewGuid(), Folder = "/work/aaa", LastUpdated = now };
+        WorkspaceInfo middle = new() { Id = Guid.NewGuid(), Folder = "/work/mmm", LastUpdated = now.AddDays(-1) };
+        WorkspaceInfo unknown = new() { Id = Guid.NewGuid(), Folder = "/work/bbb" };
+        WorkspaceGroup work = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceGroup sub = new() { Id = Guid.NewGuid(), Name = "Sub", ParentId = work.Id };
+        WorkspaceInfo inWork = new() { Id = Guid.NewGuid(), Folder = "/work/in", GroupId = work.Id, LastUpdated = now.AddDays(-3) };
+        WorkspaceInfo inWorkNewer = new() { Id = Guid.NewGuid(), Folder = "/work/out", GroupId = work.Id, LastUpdated = now.AddDays(-1) };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work, sub], oldest, inWork, newest, middle, unknown, inWorkNewer));
+
+        await model.Start();
+        model.SelectedEntry = model.Entries[0];
+
+        Assert.Equal([(object)work, sub, inWorkNewer, inWork, newest, middle, oldest, unknown], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
     }
 
     [Fact]
@@ -440,21 +493,23 @@ public sealed class HomeViewModelTests
         model.SelectedEntry = model.Entries.First(entry => entry.Group == clients);
         model.Filter = string.Empty;
 
-        Assert.False(model.Entries.First(entry => entry.Group == clients).IsCollapsed);
-        Assert.Contains(model.Entries, entry => entry.Workspace == acme);
+        Assert.True(model.Entries.First(entry => entry.Group == clients).IsCollapsed);
+        Assert.DoesNotContain(model.Entries, entry => entry.Workspace == acme);
     }
 
     [Fact]
-    public async Task ShiftCommands_AskTheServerAndShowTheNewOrder()
+    public async Task ShiftCommands_AskTheServerToMoveAGroupAndShowTheNewOrder()
     {
         WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceGroup other = new() { Id = Guid.NewGuid(), Name = "Play" };
         await model.Start();
-        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([group], second, first));
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([other, group], second, first));
 
-        model.ShiftWorkspaceUpCommand.Execute(second);
+        model.ShiftGroupUpCommand.Execute(group);
+        await Task.Delay(50);
 
-        connection.Verify(x => x.ShiftWorkspace(second.Id, -1, It.IsAny<CancellationToken>()), Times.Once);
-        Assert.Equal([group, second, first], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        connection.Verify(x => x.ShiftGroup(group.Id, -1, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal([other, group, first, second], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
 
         model.ShiftGroupDownCommand.Execute(group);
 
@@ -532,13 +587,15 @@ public sealed class HomeViewModelTests
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work], grouped, second));
 
         await model.Start();
+        Assert.Equal([(object)work, second], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        model.SelectedEntry = model.Entries[0];
 
         Assert.Equal(work, model.Entries[0].Group);
         Assert.Equal(grouped, model.Entries[1].Workspace);
         Assert.Equal(1, model.Entries[1].Depth);
         Assert.Equal(second, model.Entries[2].Workspace);
         Assert.Equal(0, model.Entries[2].Depth);
-        Assert.Equal(grouped, model.Selected);
+        Assert.Equal(second, model.Selected);
     }
 
     [Fact]
@@ -548,7 +605,6 @@ public sealed class HomeViewModelTests
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work], first with { GroupId = work.Id }, second));
         await model.Start();
 
-        model.SelectedEntry = model.Entries[0];
         Assert.Equal(2, model.Entries.Count);
         Assert.True(model.Entries[0].IsCollapsed);
         Assert.StartsWith("▸", model.Entries[0].Text);
@@ -556,6 +612,9 @@ public sealed class HomeViewModelTests
         model.SelectedEntry = model.Entries[0];
         Assert.Equal(3, model.Entries.Count);
         Assert.StartsWith("▾", model.Entries[0].Text);
+
+        model.SelectedEntry = model.Entries[0];
+        Assert.Equal(2, model.Entries.Count);
     }
 
     [Fact]
@@ -569,6 +628,9 @@ public sealed class HomeViewModelTests
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work, inner, deepest], top, deep));
 
         await model.Start();
+        model.SelectedEntry = model.Entries[0];
+        model.SelectedEntry = model.Entries[1];
+        model.SelectedEntry = model.Entries[2];
 
         Assert.Equal([(object)work, inner, deepest, deep, top], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
         Assert.Equal([0, 1, 2, 3, 1], model.Entries.Select(entry => entry.Depth));

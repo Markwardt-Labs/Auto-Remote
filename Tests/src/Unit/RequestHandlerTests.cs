@@ -76,7 +76,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_CreateWorkspace_UsesPath()
     {
-        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app" }, owner, CancellationToken.None);
 
@@ -95,7 +95,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_ManagerFailure_BecomesErrorResponse()
     {
-        workspaces.Setup(x => x.Create(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("taken"));
+        workspaces.Setup(x => x.Create(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("taken"));
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/x" }, owner, CancellationToken.None);
 
@@ -212,6 +212,18 @@ public sealed class RequestHandlerTests
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 6, Command = RemoteCommand.UpdateServer }, owner, CancellationToken.None);
 
         Assert.Equal("no way", response.Error);
+    }
+
+    [Fact]
+    public async Task Handle_CreateWorkspace_FilesItInTheGivenGroup()
+    {
+        Guid group = Guid.NewGuid();
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, group, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { GroupId = group });
+        host.SetupGet(x => x.DefaultService).Returns(AiService.ClaudeCode);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app", GroupId = group }, owner, CancellationToken.None);
+
+        Assert.Equal(group, response.Workspace?.GroupId);
     }
 
     [Fact]
@@ -346,7 +358,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_CreateWorkspace_GivesTheWorkspaceTheRequestedProviderAndTheKeyForItsSession()
     {
-        workspaces.Setup(x => x.Create("/work/app", AiService.Codex, "sk-1", It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Codex });
+        workspaces.Setup(x => x.Create("/work/app", AiService.Codex, "sk-1", null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Codex });
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app", Service = AiService.Codex, ApiKey = "sk-1" }, owner, CancellationToken.None);
 
@@ -358,7 +370,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_CreateWorkspace_UsesTheDefaultProviderOfTheEnvironmentWhenNoneIsGiven()
     {
         host.Setup(x => x.DefaultService).Returns(AiService.Local);
-        workspaces.Setup(x => x.Create("/work/app", AiService.Local, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Local });
+        workspaces.Setup(x => x.Create("/work/app", AiService.Local, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Local });
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app" }, owner, CancellationToken.None);
 
@@ -368,7 +380,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_CreateWorkspace_ReportsWhyTheWorkspaceOrItsSessionCannotBeMade()
     {
-        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, "bad", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The key was refused."));
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, "bad", null, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The key was refused."));
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app", ApiKey = "bad" }, owner, CancellationToken.None);
 
@@ -379,7 +391,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_CloneWorkspace_GivesTheCloneTheRequestedProviderAndKey()
     {
         git.Setup(x => x.Clone("/work", "https://x/app.git", null, It.IsAny<CancellationToken>())).ReturnsAsync("/work/app");
-        workspaces.Setup(x => x.Create("/work/app", AiService.Codex, "sk-2", It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Codex });
+        workspaces.Setup(x => x.Create("/work/app", AiService.Codex, "sk-2", null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Codex });
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CloneWorkspace, Path = "/work", Url = "https://x/app.git", Service = AiService.Codex, ApiKey = "sk-2" }, owner, CancellationToken.None);
 
@@ -465,14 +477,12 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ShiftCommands_PassTheOffsetAndNeedOne()
+    public async Task Handle_ShiftGroup_PassesTheOffsetAndNeedsOne()
     {
         Guid group = Guid.NewGuid();
 
-        Assert.Null((await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ShiftWorkspace, WorkspaceId = workspace.Id, Offset = -1 }, owner, CancellationToken.None)).Error);
         Assert.Null((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ShiftGroup, GroupId = group, Offset = 1 }, owner, CancellationToken.None)).Error);
         Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.ShiftGroup, GroupId = group }, owner, CancellationToken.None)).Error);
-        workspaces.Verify(x => x.ShiftWorkspace(workspace.Id, -1, It.IsAny<CancellationToken>()), Times.Once);
         workspaces.Verify(x => x.ShiftGroup(group, 1, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -564,7 +574,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_CloneWorkspace_ClonesThenCreatesTheWorkspace()
     {
         git.Setup(x => x.Clone("/work", "https://x/app.git", "app", It.IsAny<CancellationToken>())).ReturnsAsync("/work/app");
-        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CloneWorkspace, Path = "/work", Url = "https://x/app.git", Name = "app" }, owner, CancellationToken.None);
 
