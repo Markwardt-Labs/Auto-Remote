@@ -12,14 +12,14 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
     /// <param name="connection">The connection to the server, whose version is compared and which is told to update.</param>
     /// <param name="feed">Finds the newest release, or <see langword="null" /> when the client does not look for one.</param>
     /// <param name="updater">Installs the release over this client, or <see langword="null" /> when this client cannot update itself and only updates its server.</param>
-    /// <param name="interval">How often to look again, or <see langword="null" /> for every six hours.</param>
+    /// <param name="interval">How often to look again, or <see langword="null" /> for every hour.</param>
     public UpdateViewModel(IAppInfo info, IServerConnection connection, IReleaseFeed? feed, IClientUpdater? updater, TimeSpan? interval = null)
     {
         this.info = info;
         this.connection = connection;
         this.feed = feed;
         this.updater = updater;
-        this.interval = interval ?? TimeSpan.FromHours(6);
+        this.interval = interval ?? TimeSpan.FromHours(1);
         BeginCommand = new AsyncCommand(_ =>
         {
             Begin();

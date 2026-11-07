@@ -373,6 +373,39 @@ public sealed class UpdateViewModelTests
     }
 
     [Fact]
+    public async Task Reconnecting_LooksForANewerReleaseAgainAndOffersIt()
+    {
+        Latest("1.0.0");
+        using UpdateViewModel update = Create();
+        await update.Check();
+        Assert.False(update.IsAvailable);
+
+        Latest("1.1.0");
+        connection.Raise(x => x.Reconnected += null);
+        await WaitFor(() => update.IsAvailable);
+
+        Assert.True(update.IsAvailable);
+        Assert.Equal("1.1.0", update.Latest!.Version.ToString());
+    }
+
+    [Fact]
+    public async Task Watch_FindsAReleaseThatWasPublishedAfterTheFirstLookup()
+    {
+        Latest("1.0.0");
+        UpdateViewModel update = Create();
+        Task watching = update.Watch();
+        await WaitFor(() => update.Latest is not null);
+        Assert.False(update.IsAvailable);
+
+        Latest("1.2.0");
+        await WaitFor(() => update.IsAvailable);
+        update.Dispose();
+        await watching;
+
+        Assert.Equal("1.2.0", update.Latest!.Version.ToString());
+    }
+
+    [Fact]
     public async Task Reconnecting_ReadsTheServerVersionAgain()
     {
         using UpdateViewModel update = Create();
