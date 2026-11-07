@@ -122,7 +122,7 @@ internal sealed class RealServer : IAsyncDisposable
         connection = null;
     }
 
-    public async Task<WorkspaceInfo> Workspace(string name, AiService service, bool repository = true, string? folder = null, string? model = null, bool configure = true)
+    public async Task<WorkspaceInfo> Workspace(string name, AiService service, bool repository = true, string? folder = null, bool configure = true)
     {
         string path = folder ?? Path.Combine(Root, "work", name);
         Directory.CreateDirectory(path);
@@ -137,58 +137,23 @@ internal sealed class RealServer : IAsyncDisposable
             Git(path, "commit", "-m", "base");
         }
 
-        WorkspaceInfo workspace = await Connection.CreateWorkspace(path, CancellationToken.None);
+        WorkspaceInfo workspace = await Connection.CreateWorkspace(path, service, null, CancellationToken.None);
         if (configure)
         {
-            workspace = await Connection.ConfigureWorkspace(workspace.Id, service, model ?? CheapModel(service), Cheap(service), CancellationToken.None);
+            await Economize(workspace);
         }
 
         created.Add(workspace);
         return workspace;
     }
 
-    public static string CheapModel(AiService service) => service switch
-    {
-        AiService.Codex => "gpt-5.6-luna",
-        AiService.OpenCode => "ollama/gemma4:26b",
-        _ => "haiku"
-    };
+    public async Task Economize(WorkspaceInfo workspace, AiEffort effort = AiEffort.Low)
+        => await Connection.SetWorkspaceSettings(workspace.Id, (await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Capability = AiCapability.Fast, Effort = effort }, CancellationToken.None);
 
-    public static IReadOnlyDictionary<string, string> Cheap(AiService service, string effort = "low") => service == AiService.OpenCode ? new Dictionary<string, string>() : new Dictionary<string, string> { ["effort"] = effort };
+    public async Task Environment(Func<AiEnvironment, AiEnvironment> change)
+        => await Connection.SetAiEnvironment(change(await Connection.GetAiEnvironment(CancellationToken.None)), CancellationToken.None);
 
     public void Track(WorkspaceInfo workspace) => created.Add(workspace);
-
-    public static async Task<string> LegacySession(AiService service, string folder, string prompt)
-    {
-        string id = Guid.NewGuid().ToString();
-        ProcessStartInfo start = service == AiService.Codex
-            ? new("codex", ["exec", "--json", "--skip-git-repo-check", "-m", "gpt-5.6-luna", "-c", "model_reasoning_effort=\"low\"", "--dangerously-bypass-approvals-and-sandbox", prompt])
-            : new("claude", ["-p", "--model", "haiku", "--effort", "low", "--session-id", id, "--dangerously-skip-permissions", prompt]);
-        start.WorkingDirectory = folder;
-        start.RedirectStandardInput = true;
-        start.RedirectStandardOutput = true;
-        start.RedirectStandardError = true;
-        using Process process = Process.Start(start)!;
-        process.StandardInput.Close();
-        string output = await process.StandardOutput.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (service != AiService.Codex)
-        {
-            return id;
-        }
-
-        foreach (string line in output.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-        {
-            if (line.Contains("thread.started", StringComparison.Ordinal))
-            {
-                using JsonDocument document = JsonDocument.Parse(line);
-                return document.RootElement.GetProperty("thread_id").GetString()!;
-            }
-        }
-
-        throw new InvalidOperationException("Codex reported no thread: " + output);
-    }
 
     public async Task<string> Ask(WorkspaceInfo workspace, string text, int seconds = 240)
     {

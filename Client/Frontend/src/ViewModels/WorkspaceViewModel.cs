@@ -115,11 +115,14 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             _ = Git.Refresh();
             await Files.Start();
         });
-        ToggleSettingsCommand = new AsyncCommand(_ =>
+        ToggleSettingsCommand = new AsyncCommand(async _ =>
         {
             if (tab == WorkspaceTab.Settings)
             {
-                Tab = beforeSettings;
+                if (await Settings.Apply())
+                {
+                    Tab = beforeSettings;
+                }
             }
             else
             {
@@ -127,8 +130,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Tab = WorkspaceTab.Settings;
                 _ = Settings.Reload();
             }
-
-            return Task.CompletedTask;
         });
     }
 
@@ -313,8 +314,15 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         get => tab;
         private set
         {
+            WorkspaceTab previous = tab;
+
             if (Set(ref tab, value))
             {
+                if (previous == WorkspaceTab.Settings)
+                {
+                    _ = Settings.Apply();
+                }
+
                 Raise(nameof(ShowChat));
                 Raise(nameof(ShowFiles));
                 Raise(nameof(ShowHistory));

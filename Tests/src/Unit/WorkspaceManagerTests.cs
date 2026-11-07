@@ -8,35 +8,168 @@ public sealed class WorkspaceManagerTests
 
     private readonly Mock<IEventHub> events = new();
 
+    private readonly FakePrompter prompter = new();
+
+    private readonly HostMock host;
+
     private readonly WorkspaceManager manager;
 
     public WorkspaceManagerTests()
     {
-        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
+        host = new HostMock(prompter);
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog());
         folders.Setup(x => x.Exists(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
-        manager = new WorkspaceManager(store.Object, folders.Object, events.Object);
+        manager = new WorkspaceManager(store.Object, folders.Object, events.Object, host.Object);
     }
 
+    private async Task<string> Session(string folder, AiService service = AiService.ClaudeCode) => await host.Object.CreateSession(folder, service, null, CancellationToken.None);
+
     [Fact]
-    public async Task Open_LoadsStoredWorkspaces()
+    public async Task Open_ReadsTheFolderAndProviderOfEachWorkspaceFromItsSession()
     {
-        WorkspaceInfo stored = new() { Id = Guid.NewGuid(), Folder = "/work/b" };
-        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [stored] });
+        string first = await Session("/work/b", AiService.Codex);
+        string second = await Session("/work/a");
+        Guid group = Guid.NewGuid();
+        StoredWorkspace one = new() { Id = Guid.NewGuid(), SessionId = first, GroupId = group };
+        StoredWorkspace two = new() { Id = Guid.NewGuid(), SessionId = second };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Groups = [new WorkspaceGroup { Id = group, Name = "Work" }], Workspaces = [one, two] });
 
         await manager.Open("workspaces.json", CancellationToken.None);
 
         store.Verify(x => x.Open("workspaces.json"), Times.Once);
-        Assert.Equal([stored], (await manager.List(CancellationToken.None)).Workspaces);
+        WorkspaceCatalog catalog = await manager.List(CancellationToken.None);
+        Assert.Equal([new WorkspaceInfo { Id = one.Id, Folder = "/work/b", Service = AiService.Codex, SessionId = first, GroupId = group }, new WorkspaceInfo { Id = two.Id, Folder = "/work/a", Service = AiService.ClaudeCode, SessionId = second }], catalog.Workspaces);
+        Assert.Single(catalog.Groups);
+        store.Verify(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Open_GivesAWorkspaceAnOlderReleaseStoredWithoutASessionItsFirstOneAndStoresIt()
+    {
+        StoredWorkspace pending = new() { Id = Guid.NewGuid(), Folder = "/work/old", Service = AiService.Codex };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [pending] });
+        StoredCatalog? saved = null;
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved = catalog).Returns(Task.CompletedTask);
+
+        await manager.Open("workspaces.json", CancellationToken.None);
+
+        WorkspaceInfo workspace = Assert.Single((await manager.List(CancellationToken.None)).Workspaces);
+        Assert.Equal((pending.Id, "/work/old", AiService.Codex), (workspace.Id, workspace.Folder, workspace.Service));
+        Assert.IsType<CodexSetup>(Assert.Single(prompter.Created));
+        StoredWorkspace stored = Assert.Single(saved!.Workspaces);
+        Assert.Equal((workspace.SessionId, null, null), (stored.SessionId, stored.Folder, stored.Service));
+        events.Verify(x => x.Publish(It.IsAny<RemoteEvent>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Open_KeepsAWorkspaceWhoseSessionIsGoneInTheFileButDoesNotListItAndKeepsItWhenSaving()
+    {
+        string known = await Session("/work/a");
+        StoredWorkspace lost = new() { Id = Guid.NewGuid(), SessionId = "0123456789abcdef0123456789abcdef" };
+        StoredWorkspace kept = new() { Id = Guid.NewGuid(), SessionId = known };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [lost, kept] });
+        StoredCatalog? saved = null;
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved = catalog).Returns(Task.CompletedTask);
+        await manager.Open("workspaces.json", CancellationToken.None);
+
+        Assert.Equal([kept.Id], (await manager.List(CancellationToken.None)).Workspaces.Select(workspace => workspace.Id));
+        await manager.CreateGroup("Work", null, CancellationToken.None);
+
+        Assert.Equal([kept.Id, lost.Id], saved!.Workspaces.Select(workspace => workspace.Id));
+    }
+
+    [Fact]
+    public async Task Open_GivesASessionAnOlderReleaseStoredWhatTheServerRunsSessionsWithAndClearsTheMark()
+    {
+        string session = await Session("/work/a");
+        StoredWorkspace stored = new() { Id = Guid.NewGuid(), SessionId = session, Adopt = true };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [stored] });
+        StoredCatalog? saved = null;
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved = catalog).Returns(Task.CompletedTask);
+
+        await manager.Open("workspaces.json", CancellationToken.None);
+
+        host.Mock.Verify(x => x.Adopt(session, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(Assert.Single(saved!.Workspaces).Adopt);
+        Assert.Single((await manager.List(CancellationToken.None)).Workspaces);
+        events.Verify(x => x.Publish(It.IsAny<RemoteEvent>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Open_KeepsTheMarkOfASessionThatCannotBeAdoptedYetAndStillListsTheWorkspace()
+    {
+        string session = await Session("/work/a");
+        StoredWorkspace stored = new() { Id = Guid.NewGuid(), SessionId = session, Adopt = true };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [stored] });
+        host.Mock.Setup(x => x.Adopt(session, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The workspace folder does not exist."));
+        StoredCatalog? saved = null;
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved = catalog).Returns(Task.CompletedTask);
+
+        await manager.Open("workspaces.json", CancellationToken.None);
+        await manager.CreateGroup("Work", null, CancellationToken.None);
+
+        Assert.Single((await manager.List(CancellationToken.None)).Workspaces);
+        Assert.True(Assert.Single(saved!.Workspaces).Adopt);
+    }
+
+    [Fact]
+    public async Task Open_LeavesAPendingWorkspaceForNextTimeWhenItsSessionCannotBeMade()
+    {
+        StoredWorkspace pending = new() { Id = Guid.NewGuid(), Folder = "/work/old", Service = AiService.Local };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [pending] });
+        host.Mock.Setup(x => x.CreateSession("/work/old", AiService.Local, null, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("Local models need a model for every capability."));
+
+        await manager.Open("workspaces.json", CancellationToken.None);
+
+        Assert.Empty((await manager.List(CancellationToken.None)).Workspaces);
+        store.Verify(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
     public async Task Create_StoresWorkspaceNamedAfterFolder()
     {
-        WorkspaceInfo created = await manager.Create("/work/app/", CancellationToken.None);
+        WorkspaceInfo created = await manager.Create("/work/app/", AiService.ClaudeCode, null, CancellationToken.None);
 
         Assert.Equal("/work/app", created.Folder);
         Assert.Equal("app", created.Name);
-        store.Verify(x => x.Save(It.Is<WorkspaceCatalog>(catalog => catalog.Workspaces.Count == 1), It.IsAny<CancellationToken>()), Times.Once);
+        store.Verify(x => x.Save(It.Is<StoredCatalog>(catalog => catalog.Workspaces.Count == 1), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Create_MakesTheSessionThatHoldsTheFolderAndProviderAndStoresOnlyItsIdentifier()
+    {
+        StoredCatalog? saved = null;
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved = catalog).Returns(Task.CompletedTask);
+
+        WorkspaceInfo created = await manager.Create("/work/app", AiService.Codex, "sk-1", CancellationToken.None);
+
+        CodexSetup setup = Assert.IsType<CodexSetup>(Assert.Single(prompter.Created));
+        Assert.Equal(("/work/app", "sk-1"), (setup.WorkspacePath, setup.ApiKey));
+        Assert.Equal((AiService.Codex, prompter.Sessions[0].Id), (created.Service, created.SessionId));
+        StoredWorkspace stored = Assert.Single(saved!.Workspaces);
+        Assert.Equal((created.Id, created.SessionId, null, null), (stored.Id, stored.SessionId, stored.Folder, stored.Service));
+    }
+
+    [Fact]
+    public async Task Create_DoesNotAddTheWorkspaceWhenItsSessionCannotBeMade()
+    {
+        host.Mock.Setup(x => x.CreateSession(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The provider takes no key."));
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.Create("/work/app", AiService.Local, "sk-1", CancellationToken.None));
+
+        Assert.Empty((await manager.List(CancellationToken.None)).Workspaces);
+        store.Verify(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Create_DeletesTheSessionAgainWhenTheWorkspacesCannotBeStored()
+    {
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
+
+        await Assert.ThrowsAsync<IOException>(() => manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None));
+
+        Assert.Empty(prompter.Sessions);
+        Assert.Empty((await manager.List(CancellationToken.None)).Workspaces);
     }
 
     [Fact]
@@ -44,22 +177,22 @@ public sealed class WorkspaceManagerTests
     {
         folders.Setup(x => x.Exists("/nope", It.IsAny<CancellationToken>())).ReturnsAsync(false);
 
-        await Assert.ThrowsAsync<RequestException>(() => manager.Create("/nope", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => manager.Create("/nope", AiService.ClaudeCode, null, CancellationToken.None));
     }
 
     [Fact]
     public async Task Create_RejectsFolderAlreadyHostingWorkspace()
     {
-        await manager.Create("/work/app", CancellationToken.None);
+        await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
 
-        await Assert.ThrowsAsync<RequestException>(() => manager.Create("/work/app", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None));
     }
 
     [Fact]
     public async Task List_KeepsCreationOrderAndRenameKeepsPlace()
     {
-        await manager.Create("/work/zeta", CancellationToken.None);
-        WorkspaceInfo alpha = await manager.Create("/work/Alpha", CancellationToken.None);
+        await manager.Create("/work/zeta", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo alpha = await manager.Create("/work/Alpha", AiService.ClaudeCode, null, CancellationToken.None);
         folders.Setup(x => x.Rename("/work/Alpha", "omega", It.IsAny<CancellationToken>())).ReturnsAsync("/work/omega");
 
         await manager.Rename(alpha.Id, "omega", CancellationToken.None);
@@ -71,10 +204,10 @@ public sealed class WorkspaceManagerTests
     public async Task ShiftWorkspace_MovesAmongWorkspacesOfTheSameGroupAndStopsAtTheEnds()
     {
         WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
-        WorkspaceInfo a = await manager.Create("/work/a", CancellationToken.None);
-        WorkspaceInfo b = await manager.Create("/work/b", CancellationToken.None);
-        WorkspaceInfo c = await manager.Create("/work/c", CancellationToken.None);
-        WorkspaceInfo d = await manager.Create("/work/d", CancellationToken.None);
+        WorkspaceInfo a = await manager.Create("/work/a", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo b = await manager.Create("/work/b", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo c = await manager.Create("/work/c", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo d = await manager.Create("/work/d", AiService.ClaudeCode, null, CancellationToken.None);
         await manager.Move(b.Id, group.Id, CancellationToken.None);
         await manager.Move(d.Id, group.Id, CancellationToken.None);
 
@@ -91,7 +224,7 @@ public sealed class WorkspaceManagerTests
 
         await manager.ShiftWorkspace(c.Id, 1, CancellationToken.None);
         Assert.Equal(["a", "c"], await Names(null));
-        store.Verify(x => x.Save(It.IsAny<WorkspaceCatalog>(), It.IsAny<CancellationToken>()), Times.AtLeast(8));
+        store.Verify(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>()), Times.AtLeast(8));
         await Assert.ThrowsAsync<RequestException>(() => manager.ShiftWorkspace(Guid.NewGuid(), 1, CancellationToken.None));
     }
 
@@ -99,9 +232,9 @@ public sealed class WorkspaceManagerTests
     public async Task Move_PutsWorkspaceAtTheEndOfTheGroup()
     {
         WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
-        WorkspaceInfo a = await manager.Create("/work/a", CancellationToken.None);
-        WorkspaceInfo b = await manager.Create("/work/b", CancellationToken.None);
-        WorkspaceInfo c = await manager.Create("/work/c", CancellationToken.None);
+        WorkspaceInfo a = await manager.Create("/work/a", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo b = await manager.Create("/work/b", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo c = await manager.Create("/work/c", AiService.ClaudeCode, null, CancellationToken.None);
         await manager.Move(c.Id, group.Id, CancellationToken.None);
 
         await manager.Move(a.Id, group.Id, CancellationToken.None);
@@ -131,7 +264,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task Rename_RenamesFolderAndUpdatesWorkspace()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/old", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/old", AiService.ClaudeCode, null, CancellationToken.None);
         folders.Setup(x => x.Rename("/work/old", "fresh", It.IsAny<CancellationToken>())).ReturnsAsync("/work/fresh");
 
         WorkspaceInfo renamed = await manager.Rename(workspace.Id, "fresh", CancellationToken.None);
@@ -142,10 +275,97 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
+    public async Task Rename_MovesTheSessionToTheRenamedFolder()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/old", AiService.ClaudeCode, null, CancellationToken.None);
+        folders.Setup(x => x.Rename("/work/old", "fresh", It.IsAny<CancellationToken>())).ReturnsAsync("/work/fresh");
+
+        await manager.Rename(workspace.Id, "fresh", CancellationToken.None);
+
+        host.Mock.Verify(x => x.MoveSession(workspace.SessionId!, "/work/fresh", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Rename_PutsTheFolderBackWhenTheSessionCannotBeMoved()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/old", AiService.ClaudeCode, null, CancellationToken.None);
+        folders.Setup(x => x.Rename("/work/old", "fresh", It.IsAny<CancellationToken>())).ReturnsAsync("/work/fresh");
+        host.Mock.Setup(x => x.MoveSession(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The session is in use."));
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.Rename(workspace.Id, "fresh", CancellationToken.None));
+
+        folders.Verify(x => x.Rename("/work/fresh", "old", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("/work/old", (await manager.Get(workspace.Id, CancellationToken.None)).Folder);
+    }
+
+    [Fact]
+    public async Task MoveToFolder_TellsTheSessionTheWorkspaceIsThereNowAndKeepsItsIdentifierPlaceAndGroup()
+    {
+        WorkspaceInfo first = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
+        WorkspaceInfo other = await manager.Create("/work/other", AiService.ClaudeCode, null, CancellationToken.None);
+
+        WorkspaceInfo moved = await manager.MoveToFolder(first.Id, "/archive/app/", CancellationToken.None);
+
+        Assert.Equal(("/archive/app", "app", first.Id, first.SessionId), (moved.Folder, moved.Name, moved.Id, moved.SessionId));
+        host.Mock.Verify(x => x.MoveSession(first.SessionId!, "/archive/app", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal([first.Id, other.Id], (await manager.List(CancellationToken.None)).Workspaces.Select(workspace => workspace.Id));
+        Assert.Equal("/archive/app", (await manager.Get(first.Id, CancellationToken.None)).Folder);
+    }
+
+    [Fact]
+    public async Task MoveToFolder_StoresTheMoveAndAnnouncesIt()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
+        folders.Invocations.Clear();
+
+        await manager.MoveToFolder(workspace.Id, "/archive/app", CancellationToken.None);
+
+        store.Verify(x => x.Save(It.Is<StoredCatalog>(catalog => catalog.Workspaces.Single().Id == workspace.Id), It.IsAny<CancellationToken>()), Times.Exactly(2));
+        VerifyAnnounced(2);
+    }
+
+    [Fact]
+    public async Task MoveToFolder_ToTheFolderItIsInAlreadyChangesNothing()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
+
+        WorkspaceInfo moved = await manager.MoveToFolder(workspace.Id, "/work/app/", CancellationToken.None);
+
+        Assert.Equal(workspace, moved);
+        host.Mock.Verify(x => x.MoveSession(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MoveToFolder_KeepsEverythingWhenTheSessionCannotBeMoved()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
+        host.Mock.Setup(x => x.MoveSession(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The session is in use."));
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.MoveToFolder(workspace.Id, "/archive/app", CancellationToken.None));
+
+        Assert.Equal("/work/app", (await manager.Get(workspace.Id, CancellationToken.None)).Folder);
+    }
+
+    [Fact]
+    public async Task MoveToFolder_RefusesAFolderThatIsMissingOrAlreadyHostsAnotherWorkspaceOrAnUnknownWorkspace()
+    {
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
+        await manager.Create("/work/other", AiService.ClaudeCode, null, CancellationToken.None);
+        folders.Setup(x => x.Exists("/nope", It.IsAny<CancellationToken>())).ReturnsAsync(false);
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.MoveToFolder(workspace.Id, "/nope", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => manager.MoveToFolder(workspace.Id, "/work/other", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => manager.MoveToFolder(Guid.NewGuid(), "/archive/app", CancellationToken.None));
+
+        host.Mock.Verify(x => x.MoveSession(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal("/work/app", (await manager.Get(workspace.Id, CancellationToken.None)).Folder);
+    }
+
+    [Fact]
     public async Task Rename_RejectsWhenAnotherWorkspaceLivesInsideFolder()
     {
-        WorkspaceInfo outer = await manager.Create("/work/outer", CancellationToken.None);
-        await manager.Create("/work/outer/inner", CancellationToken.None);
+        WorkspaceInfo outer = await manager.Create("/work/outer", AiService.ClaudeCode, null, CancellationToken.None);
+        await manager.Create("/work/outer/inner", AiService.ClaudeCode, null, CancellationToken.None);
 
         await Assert.ThrowsAsync<RequestException>(() => manager.Rename(outer.Id, "x", CancellationToken.None));
         folders.Verify(x => x.Rename(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -154,7 +374,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task Delete_WithFolderRemovesFolderWorkspaceAndAttachments()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
 
         await manager.Delete(workspace.Id, true, CancellationToken.None);
 
@@ -166,7 +386,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task Delete_WithoutFolderKeepsFolder()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
 
         await manager.Delete(workspace.Id, false, CancellationToken.None);
 
@@ -177,47 +397,41 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task Delete_WithFolderRejectsFolderSharedWithAnotherWorkspace()
     {
-        WorkspaceInfo outer = await manager.Create("/work/outer", CancellationToken.None);
-        await manager.Create("/work/outer/inner", CancellationToken.None);
+        WorkspaceInfo outer = await manager.Create("/work/outer", AiService.ClaudeCode, null, CancellationToken.None);
+        await manager.Create("/work/outer/inner", AiService.ClaudeCode, null, CancellationToken.None);
 
         await Assert.ThrowsAsync<RequestException>(() => manager.Delete(outer.Id, true, CancellationToken.None));
         Assert.Equal(2, (await manager.List(CancellationToken.None)).Workspaces.Count);
     }
 
     [Fact]
-    public async Task Configure_SwitchingServiceStoresItAndDetachesTheAiSessionButKeepingTheServiceKeepsIt()
+    public async Task Create_StoresTheProviderTheWorkspaceRunsOnForGood()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
-        await manager.AttachAiSession(workspace.Id, Guid.NewGuid().ToString("N"), CancellationToken.None);
+        WorkspaceInfo codex = await manager.Create("/work/codex", AiService.Codex, null, CancellationToken.None);
+        WorkspaceInfo local = await manager.Create("/work/local", AiService.Local, null, CancellationToken.None);
 
-        WorkspaceInfo kept = await manager.Configure(workspace.Id, AiService.ClaudeCode, CancellationToken.None);
-        WorkspaceInfo switched = await manager.Configure(workspace.Id, AiService.Codex, CancellationToken.None);
-
-        Assert.NotNull(kept.AiSessionId);
-        Assert.Equal(AiService.Codex, switched.Service);
-        Assert.Null(switched.AiSessionId);
-        Assert.Equal(AiService.Codex, (await manager.Get(workspace.Id, CancellationToken.None)).Service);
+        Assert.Equal((AiService.Codex, AiService.Local), (codex.Service, local.Service));
+        Assert.Equal(AiService.Codex, (await manager.Get(codex.Id, CancellationToken.None)).Service);
     }
 
     [Fact]
     public async Task NewWorkspace_StartsOnClaudeCode()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
 
         Assert.Equal(AiService.ClaudeCode, workspace.Service);
-        Assert.Equal(AiService.ClaudeCode, workspace.Service);
-        Assert.Null(workspace.AiSessionId);
+        Assert.Matches("^[0-9a-f]{32}$", workspace.SessionId);
     }
 
     [Fact]
-    public async Task AttachAiSession_StoresIt()
+    public async Task AttachSession_StoresIt()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
         string attached = Guid.NewGuid().ToString("N");
 
-        await manager.AttachAiSession(workspace.Id, attached, CancellationToken.None);
+        await manager.AttachSession(workspace.Id, attached, CancellationToken.None);
 
-        Assert.Equal(attached, (await manager.Get(workspace.Id, CancellationToken.None)).AiSessionId);
+        Assert.Equal(attached, (await manager.Get(workspace.Id, CancellationToken.None)).SessionId);
     }
 
     [Fact]
@@ -271,7 +485,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task Move_PutsWorkspaceInGroupAndBackOut()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
         WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
 
         Assert.Equal(group.Id, (await manager.Move(workspace.Id, group.Id, CancellationToken.None)).GroupId);
@@ -281,7 +495,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task Move_RejectsUnknownGroup()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
 
         await Assert.ThrowsAsync<RequestException>(() => manager.Move(workspace.Id, Guid.NewGuid(), CancellationToken.None));
     }
@@ -289,7 +503,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task DeleteGroup_KeepsItsWorkspacesAndMovesThemOut()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
         WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
         await manager.Move(workspace.Id, group.Id, CancellationToken.None);
 
@@ -304,7 +518,7 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task DeleteGroup_MovesItsContentsIntoItsParent()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
         WorkspaceGroup outer = await manager.CreateGroup("Outer", null, CancellationToken.None);
         WorkspaceGroup middle = await manager.CreateGroup("Middle", outer.Id, CancellationToken.None);
         WorkspaceGroup inner = await manager.CreateGroup("Inner", middle.Id, CancellationToken.None);
@@ -335,27 +549,26 @@ public sealed class WorkspaceManagerTests
     [Fact]
     public async Task EveryChangeToTheWorkspacesOrGroupsIsAnnouncedToTheClients()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
         WorkspaceGroup group = await manager.CreateGroup("Work", null, CancellationToken.None);
         VerifyAnnounced(2);
 
         await manager.Move(workspace.Id, group.Id, CancellationToken.None);
         await manager.RenameGroup(group.Id, "Play", CancellationToken.None);
         await manager.ShiftWorkspace(workspace.Id, 1, CancellationToken.None);
-        await manager.Configure(workspace.Id, AiService.Codex, CancellationToken.None);
-        VerifyAnnounced(6);
+        VerifyAnnounced(5);
 
         await manager.DeleteGroup(group.Id, CancellationToken.None);
         await manager.Delete(workspace.Id, false, CancellationToken.None);
-        VerifyAnnounced(8);
+        VerifyAnnounced(7);
     }
 
     [Fact]
-    public async Task AttachingAnAiSessionIsNotAnnouncedAndARefusalIsNot()
+    public async Task AttachingASessionIsNotAnnouncedAndARefusalIsNot()
     {
-        WorkspaceInfo workspace = await manager.Create("/work/app", CancellationToken.None);
+        WorkspaceInfo workspace = await manager.Create("/work/app", AiService.ClaudeCode, null, CancellationToken.None);
 
-        await manager.AttachAiSession(workspace.Id, Guid.NewGuid().ToString("N"), CancellationToken.None);
+        await manager.AttachSession(workspace.Id, Guid.NewGuid().ToString("N"), CancellationToken.None);
         await Assert.ThrowsAsync<RequestException>(() => manager.CreateGroup("  ", null, CancellationToken.None));
 
         VerifyAnnounced(1);

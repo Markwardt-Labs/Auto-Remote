@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IModelService models, IWorkspaceLoops loops, IWorkspaceWatcher watcher) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -39,11 +39,10 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     /// <inheritdoc />
     public async Task Open(ServerConfig config, CancellationToken cancellation)
     {
-        prompts.Configure(config, cancellation);
+        await host.Configure(config, cancellation);
+        prompts.Configure(cancellation);
         scripts.Configure(config, cancellation);
-        usage.Configure(config);
         speech.Configure(config);
-        models.Configure(config);
         folders.Configure(config.DefaultFolder);
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
     }
@@ -61,6 +60,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         }
     }
 
+    private Task<WorkspaceInfo> CreateWorkspace(string folder, RemoteRequest request, CancellationToken cancellation)
+        => workspaces.Create(folder, request.Service ?? host.DefaultService, request.ApiKey, cancellation);
+
     private async Task<RemoteResponse> Dispatch(RemoteRequest request, object owner, CancellationToken cancellation)
     {
         switch (request.Command)
@@ -68,34 +70,15 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.ListWorkspaces:
                 return new RemoteResponse { Id = 0, Catalog = await workspaces.List(cancellation) };
             case RemoteCommand.CreateWorkspace:
-                return new RemoteResponse { Id = 0, Workspace = await workspaces.Create(Require(request.Path, "path"), cancellation) };
+                return new RemoteResponse { Id = 0, Workspace = await CreateWorkspace(Require(request.Path, "path"), request, cancellation) };
             case RemoteCommand.RenameWorkspace:
                 await RequireIdle(request);
                 watcher.Forget(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation) };
-            case RemoteCommand.ConfigureWorkspace:
-                AiService configured = request.Service ?? throw new RequestException("The request needs a service.");
-                string chosen = Require(request.Model, "model");
-                IReadOnlyDictionary<string, string> chosenSettings = request.ModelSettings ?? new Dictionary<string, string>();
-                Guid configuring = RequireWorkspace(request);
-                await models.Validate(configured, chosen, chosenSettings, cancellation);
-
-                if ((await workspaces.Get(configuring, cancellation)).Service != configured)
-                {
-                    if (prompts.IsBusy(configuring))
-                    {
-                        throw new RequestException("Stop the AI's work before switching its service.");
-                    }
-
-                    if (loops.Get(configuring) is not null)
-                    {
-                        throw new RequestException("Cancel the loop before switching the service.");
-                    }
-                }
-
-                WorkspaceInfo reconfigured = await workspaces.Configure(configuring, configured, cancellation);
-                await prompts.SetAi(configuring, chosen, chosenSettings, cancellation);
-                return new RemoteResponse { Id = 0, Workspace = reconfigured };
+            case RemoteCommand.MoveWorkspaceToFolder:
+                await RequireIdle(request);
+                watcher.Forget(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0, Workspace = await workspaces.MoveToFolder(RequireWorkspace(request), Require(request.Path, "path"), cancellation) };
             case RemoteCommand.StartLoop:
                 RequireAiInput(request);
                 await loops.Start(RequireWorkspace(request), request.Loop ?? throw new RequestException("The request needs a loop."), cancellation);
@@ -105,12 +88,20 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GetLoop:
                 return new RemoteResponse { Id = 0, Loop = loops.Get(RequireWorkspace(request)) };
-            case RemoteCommand.GetWorkspaceAi:
-                return new RemoteResponse { Id = 0, Ai = await prompts.GetAi(RequireWorkspace(request), cancellation) };
+            case RemoteCommand.GetWorkspaceSettings:
+                return new RemoteResponse { Id = 0, Settings = await prompts.GetSettings(RequireWorkspace(request), cancellation) };
+            case RemoteCommand.SetWorkspaceSettings:
+                return new RemoteResponse { Id = 0, Settings = await prompts.SetSettings(RequireWorkspace(request), request.Settings ?? throw new RequestException("The request needs settings."), cancellation) };
+            case RemoteCommand.GetAiEnvironment:
+                return new RemoteResponse { Id = 0, AiEnvironment = host.Get() };
+            case RemoteCommand.SetAiEnvironment:
+                return new RemoteResponse { Id = 0, AiEnvironment = await host.Set(request.AiEnvironment ?? throw new RequestException("The request needs an environment."), cancellation) };
             case RemoteCommand.GetUsage:
                 return new RemoteResponse { Id = 0, Usage = await usage.Get(request.Service ?? throw new RequestException("The request needs a service."), cancellation) };
-            case RemoteCommand.ListModels:
-                return new RemoteResponse { Id = 0, Models = await models.List(request.Service ?? throw new RequestException("The request needs a service."), cancellation) };
+            case RemoteCommand.ListLocalModels:
+                return new RemoteResponse { Id = 0, Names = await host.ListLocalModels(request.Url, cancellation) };
+            case RemoteCommand.ListImageModels:
+                return new RemoteResponse { Id = 0, Names = await host.ListImageModels(request.Url, cancellation) };
             case RemoteCommand.MoveWorkspace:
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.Move(RequireWorkspace(request), request.GroupId, cancellation) };
             case RemoteCommand.CreateGroup:
@@ -160,7 +151,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 Watch(owner, await workspaces.Get(RequireWorkspace(request), cancellation));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.CloneWorkspace:
-                return new RemoteResponse { Id = 0, Workspace = await workspaces.Create(await git.Clone(Require(request.Path, "path"), Require(request.Url, "URL"), request.Name, cancellation), cancellation) };
+                return new RemoteResponse { Id = 0, Workspace = await CreateWorkspace(await git.Clone(Require(request.Path, "path"), Require(request.Url, "URL"), request.Name, cancellation), request, cancellation) };
             case RemoteCommand.GetGitStatus:
                 return new RemoteResponse { Id = 0, Git = (await git.Status(await FolderOf(request, cancellation), cancellation)) with { Busy = versioning.IsBusy(RequireWorkspace(request)) } };
             case RemoteCommand.GetGitChanges:

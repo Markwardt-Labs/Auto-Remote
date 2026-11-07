@@ -67,10 +67,11 @@ internal sealed class FolderBrowserViewModel(IServerConnection connection) : Vie
     public AsyncCommand CreateFolderCommand => field ??= new(_ => CreateFolder());
 
     /// <summary>
-    /// Shows the server's default folder.
+    /// Shows a folder of the server.
     /// </summary>
+    /// <param name="path">The folder to show, or <see langword="null" /> for the server's default folder.</param>
     /// <returns>A task that completes once the folder is shown.</returns>
-    public Task Start() => Open(null);
+    public Task Start(string? path = null) => Open(path);
 
     private async Task Open(string? path)
     {

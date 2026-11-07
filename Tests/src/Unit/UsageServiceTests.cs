@@ -2,25 +2,21 @@ namespace Markwardt.AutoRemote.Tests.Unit;
 
 public sealed class UsageServiceTests
 {
-    private readonly Mock<IPromptProvider> provider = new();
+    private readonly FakePrompter prompter = new();
 
     private readonly UsageService service;
 
-    private AiService requested;
-
     public UsageServiceTests()
     {
-        service = new UsageService((_, ai) =>
-        {
-            requested = ai;
-            return provider.Object;
-        });
-        service.Configure(new ServerConfig { Port = 0, Key = "k" });
+        Mock<IPrompterHost> host = new();
+        host.Setup(x => x.Prompter).Returns(prompter);
+        host.Setup(x => x.Setup(It.IsAny<AiService>(), It.IsAny<string?>())).Returns((AiService ai, string? key) => ai switch { AiService.Codex => new CodexSetup(), AiService.Local => new LocalSetup(), _ => new ClaudeSetup() });
+        service = new UsageService(host.Object);
     }
 
     private PromptWindow Window(string name, double used, TimeSpan length, DateTimeOffset? resets) => new() { Name = name, Used = used, Length = length, ReadAt = DateTimeOffset.UtcNow, ResetsAt = resets };
 
-    private void Report(params PromptWindow[] windows) => provider.Setup(x => x.GetWindows(It.IsAny<CancellationToken>())).ReturnsAsync(windows);
+    private void Report(params PromptWindow[] windows) => prompter.TestResult = new PromptTestResult { IsAvailable = true, Windows = windows };
 
     [Fact]
     public async Task Get_ListsEveryWindowTheProviderReportsInItsOrderWithItsName()
@@ -31,7 +27,7 @@ public sealed class UsageServiceTests
 
         UsageStatus status = await service.Get(AiService.ClaudeCode, CancellationToken.None);
 
-        Assert.Equal(AiService.ClaudeCode, requested);
+        Assert.IsType<ClaudeSetup>(prompter.Tests.Single());
         Assert.Equal(AiService.ClaudeCode, status.Service);
         Assert.Equal(["Session", "Week", "Week (Opus)", "Monthly credits"], status.Windows.Select(window => window.Name).ToList());
         Assert.Equal((42.5, 300, session), (status.Windows[0].PercentUsed, status.Windows[0].WindowMinutes, status.Windows[0].ResetsAt));
@@ -40,13 +36,13 @@ public sealed class UsageServiceTests
     }
 
     [Fact]
-    public async Task Get_AsksTheProviderOfTheService()
+    public async Task Get_TestsTheSetupOfTheService()
     {
         Report(Window("5 hours", 0.05, TimeSpan.FromHours(5), DateTimeOffset.UtcNow.AddHours(1)));
 
         UsageStatus status = await service.Get(AiService.Codex, CancellationToken.None);
 
-        Assert.Equal(AiService.Codex, requested);
+        Assert.IsType<CodexSetup>(prompter.Tests.Single());
         Assert.Equal("5 hours", status.Windows.Single().Name);
     }
 
@@ -69,17 +65,42 @@ public sealed class UsageServiceTests
         await service.Get(AiService.ClaudeCode, CancellationToken.None);
         await service.Get(AiService.ClaudeCode, CancellationToken.None);
 
-        provider.Verify(x => x.GetWindows(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Single(prompter.Tests);
     }
 
     [Fact]
     public async Task Get_AnswersWithoutWindowsWhenTheServiceCannotBeRead()
     {
-        provider.Setup(x => x.GetWindows(It.IsAny<CancellationToken>())).ThrowsAsync(new PromptSessionException("no subscription"));
+        prompter.FailTests("no subscription");
 
         UsageStatus status = await service.Get(AiService.Codex, CancellationToken.None);
 
         Assert.Equal(AiService.Codex, status.Service);
         Assert.Empty(status.Windows);
+    }
+
+    [Fact]
+    public async Task Get_KeepsTheLastReadingWhenALaterReadFails()
+    {
+        Report(Window("Session", 0.3, TimeSpan.FromHours(5), null));
+        service.Note(AiService.Codex, [Window("5 hours", 0.2, TimeSpan.FromHours(5), null)]);
+
+        UsageStatus status = await service.Get(AiService.Codex, CancellationToken.None);
+
+        Assert.Equal("5 hours", status.Windows.Single().Name);
+        Assert.Empty(prompter.Tests);
+    }
+
+    [Fact]
+    public async Task Note_ReplacesTheCachedReadingWithWhatARunningSessionReported()
+    {
+        Report(Window("Session", 0.3, TimeSpan.FromHours(5), null));
+        await service.Get(AiService.ClaudeCode, CancellationToken.None);
+
+        service.Note(AiService.ClaudeCode, [Window("Session", 0.6, TimeSpan.FromHours(5), null)]);
+        UsageStatus status = await service.Get(AiService.ClaudeCode, CancellationToken.None);
+
+        Assert.Equal(60, status.Windows.Single().PercentUsed);
+        Assert.Single(prompter.Tests);
     }
 }

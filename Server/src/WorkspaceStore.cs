@@ -17,14 +17,14 @@ internal interface IWorkspaceStore
     /// <param name="cancellation">Cancels the read.</param>
     /// <returns>The catalog, empty if nothing was stored yet.</returns>
     /// <exception cref="InvalidDataException">The workspaces file is not valid.</exception>
-    Task<WorkspaceCatalog> Load(CancellationToken cancellation);
+    Task<StoredCatalog> Load(CancellationToken cancellation);
 
     /// <summary>
     /// Replaces the stored groups and workspaces.
     /// </summary>
     /// <param name="catalog">The catalog to store.</param>
     /// <param name="cancellation">Cancels the write.</param>
-    Task Save(WorkspaceCatalog catalog, CancellationToken cancellation);
+    Task Save(StoredCatalog catalog, CancellationToken cancellation);
 
     /// <summary>
     /// Stores a file attached to a prompt in the workspace's attachments folder beside the workspaces file.
@@ -46,9 +46,16 @@ internal interface IWorkspaceStore
 /// <inheritdoc />
 internal sealed class WorkspaceStore : IWorkspaceStore
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="WorkspaceStore" /> class.
+    /// </summary>
+    public WorkspaceStore() => file = new StoredFile([UpgradeToTwo, UpgradeToThree]);
+
     private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, WriteIndented = true };
 
     private readonly SemaphoreSlim gate = new(1, 1);
+
+    private readonly IStoredFile file;
 
     private string path = "workspaces.json";
 
@@ -56,17 +63,18 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     public void Open(string path) => this.path = Path.GetFullPath(path);
 
     /// <inheritdoc />
-    public async Task<WorkspaceCatalog> Load(CancellationToken cancellation)
+    public async Task<StoredCatalog> Load(CancellationToken cancellation)
     {
         if (!File.Exists(path))
         {
-            return new WorkspaceCatalog { Groups = [], Workspaces = [] };
+            return new StoredCatalog();
         }
+
+        JsonObject? content = await file.Read(path, cancellation);
 
         try
         {
-            await using FileStream stream = File.OpenRead(path);
-            return await JsonSerializer.DeserializeAsync<WorkspaceCatalog>(stream, options, cancellation) ?? new WorkspaceCatalog { Groups = [], Workspaces = [] };
+            return content?.Deserialize<StoredCatalog>(options) ?? new StoredCatalog();
         }
         catch (JsonException exception)
         {
@@ -75,16 +83,13 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     }
 
     /// <inheritdoc />
-    public async Task Save(WorkspaceCatalog catalog, CancellationToken cancellation)
+    public async Task Save(StoredCatalog catalog, CancellationToken cancellation)
     {
         await gate.WaitAsync(cancellation);
 
         try
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            string temporary = path + ".tmp";
-            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(catalog, options), cancellation);
-            File.Move(temporary, path, true);
+            await file.Write(path, JsonSerializer.SerializeToNode(catalog, options)!.AsObject(), cancellation);
         }
         finally
         {
@@ -113,4 +118,36 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     }
 
     private string AttachmentsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "attachments", id.ToString("N"));
+
+    private void UpgradeToTwo(JsonObject content)
+    {
+        foreach (JsonObject workspace in (content["workspaces"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            workspace.Remove("model");
+            workspace.Remove("effort");
+
+            if (workspace["service"]?.GetValue<string>() == "OpenCode")
+            {
+                workspace["service"] = "Local";
+            }
+        }
+    }
+
+    private void UpgradeToThree(JsonObject content)
+    {
+        foreach (JsonObject workspace in (content["workspaces"] as JsonArray ?? []).OfType<JsonObject>())
+        {
+            string? session = workspace["aiSessionId"]?.GetValue<string>();
+            bool usable = session is { Length: 32 } && !session.Contains('-', StringComparison.Ordinal);
+            workspace.Remove("aiSessionId");
+            workspace["sessionId"] = usable ? session : null;
+
+            if (usable)
+            {
+                workspace.Remove("folder");
+                workspace.Remove("service");
+                workspace["adopt"] = true;
+            }
+        }
+    }
 }

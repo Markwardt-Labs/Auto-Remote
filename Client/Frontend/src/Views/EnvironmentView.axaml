@@ -1,0 +1,124 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.EnvironmentView"
+             x:CompileBindings="False">
+  <Grid RowDefinitions="Auto,*,Auto" Margin="16">
+    <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+      <TextBlock Grid.Column="0" Text="AI environment" Classes="serif" FontSize="26" VerticalAlignment="Center" />
+      <local:TouchButton Grid.Column="1" Content="Close" Command="{Binding CloseCommand}" Classes="flat" />
+    </Grid>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="8" Margin="0,0,0,12" MaxWidth="640">
+        <TextBlock Text="Where the AI tools are, what they sign in with and which models the local provider runs. It applies to every workspace on the server. Changes apply when you close this screen." Classes="muted" TextWrapping="Wrap" />
+
+        <TextBlock Text="Default provider for new workspaces" Classes="muted" Margin="0,8,0,0" />
+        <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding SelectedDefault}" HorizontalAlignment="Stretch">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Name}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+
+        <TextBlock Text="New workspaces" Classes="serif" FontSize="18" Margin="0,16,0,0" />
+        <TextBlock Text="What the AI session of a new workspace starts with. A workspace keeps its own settings afterwards." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+        <TextBlock Text="Capability" Classes="muted" />
+        <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding NewCapability}" HorizontalAlignment="Stretch">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Name}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <TextBlock Text="Effort" Classes="muted" />
+        <ComboBox ItemsSource="{Binding Efforts}" SelectedItem="{Binding NewEffort}" HorizontalAlignment="Stretch">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Name}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <ToggleSwitch IsChecked="{Binding NewIsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" />
+        <ToggleSwitch IsChecked="{Binding NewIsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
+        <ToggleSwitch IsChecked="{Binding NewIsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
+        <ToggleSwitch IsChecked="{Binding NewIsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
+        <TextBlock Text="Instructions" Classes="muted" />
+        <TextBox Text="{Binding NewInstructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
+
+        <TextBlock Text="Claude Code" Classes="serif" FontSize="18" Margin="0,16,0,0" />
+        <TextBlock Text="Command" Classes="muted" />
+        <TextBox Text="{Binding ClaudeCommand}" TextInputOptions.AutoCapitalization="False" />
+        <TextBlock Text="Configuration folder (optional)" Classes="muted" />
+        <TextBox Text="{Binding ClaudeConfigFolder}" TextInputOptions.AutoCapitalization="False" />
+        <TextBlock Text="API key" Classes="muted" />
+        <TextBox Text="{Binding ClaudeApiKey}" PasswordChar="•" PlaceholderText="Enter a key to set or replace it" TextInputOptions.AutoCapitalization="False" />
+        <CheckBox Content="A key is set, remove it" IsChecked="{Binding ClearClaudeApiKey}" IsVisible="{Binding HasClaudeApiKey}" />
+
+        <TextBlock Text="OpenAI Codex" Classes="serif" FontSize="18" Margin="0,16,0,0" />
+        <TextBlock Text="Command" Classes="muted" />
+        <TextBox Text="{Binding CodexCommand}" TextInputOptions.AutoCapitalization="False" />
+        <TextBlock Text="Configuration folder (optional)" Classes="muted" />
+        <TextBox Text="{Binding CodexConfigFolder}" TextInputOptions.AutoCapitalization="False" />
+        <TextBlock Text="API key" Classes="muted" />
+        <TextBox Text="{Binding CodexApiKey}" PasswordChar="•" PlaceholderText="Enter a key to set or replace it" TextInputOptions.AutoCapitalization="False" />
+        <CheckBox Content="A key is set, remove it" IsChecked="{Binding ClearCodexApiKey}" IsVisible="{Binding HasCodexApiKey}" />
+
+        <TextBlock Text="Local models" Classes="serif" FontSize="18" Margin="0,16,0,0" />
+        <TextBlock Text="OpenCode command" Classes="muted" />
+        <TextBox Text="{Binding LocalCommand}" TextInputOptions.AutoCapitalization="False" />
+        <TextBlock Text="Model server address" Classes="muted" />
+        <TextBox Text="{Binding LocalServer}" TextInputOptions.AutoCapitalization="False" />
+        <local:TouchButton Content="Refresh models" Command="{Binding RefreshLocalModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        <TextBlock Text="A model for every capability, and optionally how many tokens of context it runs with." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+        <ItemsControl ItemsSource="{Binding LocalRows}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Grid ColumnDefinitions="72,*,120" ColumnSpacing="8" Margin="0,2">
+                <TextBlock Grid.Column="0" Text="{Binding Name}" VerticalAlignment="Center" />
+                <ComboBox Grid.Column="1" IsEditable="True" Text="{Binding Model}" ItemsSource="{Binding $parent[UserControl].DataContext.LocalModelNames}" HorizontalAlignment="Stretch" />
+                <NumericUpDown Grid.Column="2" Value="{Binding Context}" Minimum="1" Maximum="2000000" Increment="1024" FormatString="0" PlaceholderText="Context" />
+              </Grid>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <TextBlock Text="Image generation" Classes="serif" FontSize="18" Margin="0,16,0,0" />
+        <ComboBox ItemsSource="{Binding ImageKinds}" SelectedItem="{Binding SelectedImage}" HorizontalAlignment="Stretch">
+          <ComboBox.ItemTemplate>
+            <DataTemplate>
+              <TextBlock Text="{Binding Name}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+        <StackPanel Spacing="8" IsVisible="{Binding UsesOpenAi}">
+          <TextBlock Text="OpenAI API key" Classes="muted" />
+          <TextBox Text="{Binding OpenAiApiKey}" PasswordChar="•" PlaceholderText="Enter a key to set or replace it" TextInputOptions.AutoCapitalization="False" />
+          <CheckBox Content="A key is set, remove it" IsChecked="{Binding ClearOpenAiApiKey}" IsVisible="{Binding HasOpenAiApiKey}" />
+        </StackPanel>
+        <StackPanel Spacing="8" IsVisible="{Binding UsesLocalImages}">
+          <TextBlock Text="Stable Diffusion server address" Classes="muted" />
+          <TextBox Text="{Binding LocalImageServer}" TextInputOptions.AutoCapitalization="False" />
+          <local:TouchButton Content="Refresh checkpoints" Command="{Binding RefreshImageModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <TextBlock Text="A checkpoint for every capability." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+          <ItemsControl ItemsSource="{Binding ImageRows}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Grid ColumnDefinitions="72,*" ColumnSpacing="8" Margin="0,2">
+                  <TextBlock Grid.Column="0" Text="{Binding Name}" VerticalAlignment="Center" />
+                  <ComboBox Grid.Column="1" IsEditable="True" Text="{Binding Model}" ItemsSource="{Binding $parent[UserControl].DataContext.ImageModelNames}" HorizontalAlignment="Stretch" />
+                </Grid>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2" Spacing="8">
+      <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+      <TextBlock Text="{Binding Notice}" IsVisible="{Binding HasNotice}" Classes="muted" />
+    </StackPanel>
+  </Grid>
+</UserControl>

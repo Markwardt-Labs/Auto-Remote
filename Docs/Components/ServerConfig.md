@@ -8,10 +8,6 @@ The server reads one JSON file at startup (the path passed as the first argument
 | `port` | `52679` | The one port every client connects to, over secure WebSocket; 1 to 65535. |
 | `dataFolder` | `AutoRemote` folder in the server user's application data | Folder holding all data the server stores; created when missing. |
 | `defaultFolder` | the server user's home folder | Existing folder where browsing for a new workspace's folder starts. |
-| `claudeCommand` | `claude` | Claude Code executable run for prompts; must resolve on the server's machine. |
-| `codexCommand` | `codex` | Codex executable run for prompts; must resolve on the server's machine. |
-| `openCodeCommand` | `opencode` | OpenCode executable that runs the prompts of workspaces that use OpenCode (local models); must resolve on the server's machine. |
-| `localModelUrl` | `http://localhost:11434/v1` | Address, with its version path, of the OpenAI compatible API of the local model server whose models OpenCode offers: Ollama by default; LM Studio, llama.cpp and vLLM work too; must be an http or https address, otherwise the server refuses to start. |
 | `speechModel` | `small.en` | Whisper model that turns speech into text inside the server for voice input: a model name (`tiny.en`, `base.en`, `small.en`, `medium.en`, `small`, `large-v3-turbo` and so on, as named at `huggingface.co/ggerganov/whisper.cpp`) or the path of an existing `ggml` model file; empty turns the built-in voice input off. See Voice input below. |
 | `speechCommand` | none | Executable that turns a recording into text instead of the built-in model; when set, `speechModel` is not used. |
 | `speechArguments` | `[]` | Arguments of the speech command, in which `{file}` is replaced by the path of the recorded WAV file. |
@@ -27,8 +23,14 @@ The clients record speech and the server turns it into text, so it works the sam
 
 ## Data location
 
-The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (workspaces, groups and settings), the `liveai` folder where Live AI links each workspace's session to the AI tool's own, the attached files in an `attachments` folder, the Whisper `models` and the extracted `native` libraries of voice input, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
+The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (the workspaces, each as its session and group, and the groups), `environment.json` (the AI environment), the `liveai` folder where Live AI links each workspace's session to the AI tool's own, the attached files in an `attachments` folder, the Whisper `models` and the extracted `native` libraries of voice input, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
+
+## AI environment
+
+Where the AI tools are and how they sign in is not in this file: it is the AI environment, which clients edit from the gear next to the workspace list and the server keeps in `environment.json` in the data folder (readable by the server user only, since it can hold API keys). It holds the default provider for new workspaces and what the AI session of a new workspace starts with (capability, effort, the shell, files outside the workspace, the web and image generation, and the instructions), the executables and configuration folders of Claude Code, Codex and OpenCode, their API keys, the address of the local model server with the model and context size for each capability, and the image generation service (OpenAI, or a local Stable Diffusion server with a checkpoint for each capability). Changes apply to every workspace from its next session on. A server that starts without the file takes over `claudeCommand`, `codexCommand`, `openCodeCommand` and `localModelUrl` from a config written for an older release, once, and stores them in it; the config no longer reads them. Without those it uses the defaults (`claude`, `codex` and `opencode` on the path, Ollama at `http://localhost:11434/v1`, Claude Code as the provider).
+
+The files are versioned and upgraded by newer releases, which keep the original as a `.bak` file next to it.
 
 ## Fixed behavior
 
-Prompts run through Live AI with the AI's own file tools and a shell instead of the tool's (see Workspaces), never ask for permission, and always do their work in the foreground. `claudeCommand`, `codexCommand` and `openCodeCommand` name the executables Live AI starts and the usage reading uses. Which service a workspace uses is a workspace setting, not a server setting; the executables are only needed for the services in use.
+Prompts run through Live AI with the AI's own file tools and a shell instead of the tool's (see Workspaces), never ask for permission, and always do their work in the foreground. Which provider a workspace uses is chosen when it is created and never changes; the executables are only needed for the providers in use.

@@ -6,11 +6,10 @@ namespace Markwardt.AutoRemote.Server;
 internal interface IPromptService
 {
     /// <summary>
-    /// Supplies the settings used to run the AI services.
+    /// Supplies what ends every session when the server stops.
     /// </summary>
-    /// <param name="config">The server settings.</param>
     /// <param name="stopping">Ends every session when cancelled.</param>
-    void Configure(ServerConfig config, CancellationToken stopping);
+    void Configure(CancellationToken stopping);
 
     /// <summary>
     /// Checks whether the AI is currently working in a workspace.
@@ -31,23 +30,23 @@ internal interface IPromptService
     Task<ChatHistory> History(Guid id, string? before, int? limit, CancellationToken cancellation);
 
     /// <summary>
-    /// Reads the model and the values of its settings that a workspace's AI session runs with, making the session when the workspace has none yet.
+    /// Reads how the AI of a workspace is run, as its session stores it, making the session when the workspace has none yet.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="cancellation">Cancels the read.</param>
-    /// <returns>The model, or none when the session's stored model is no longer offered, and its settings.</returns>
-    /// <exception cref="RequestException">No such workspace exists, or the AI could not be asked.</exception>
-    Task<WorkspaceAi> GetAi(Guid id, CancellationToken cancellation);
+    /// <returns>The settings.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or the AI could not be set up.</exception>
+    Task<WorkspaceSettings> GetSettings(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Chooses the model and the values of its settings for a workspace's AI session, which applies them from its next prompt and stores them once that prompt starts; until then the server keeps the choice even when it closes an idle session.
+    /// Changes how the AI of a workspace is run, from its next prompt on; the session stores the change. The provider cannot be changed.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="model">The identifier of the model.</param>
-    /// <param name="settings">The values of the model's settings; a setting left out gets the model's default.</param>
+    /// <param name="settings">The new settings; the provider and the descriptors in them are ignored.</param>
     /// <param name="cancellation">Cancels the change.</param>
-    /// <exception cref="RequestException">No such workspace exists, or the service does not offer the model.</exception>
-    Task SetAi(Guid id, string model, IReadOnlyDictionary<string, string> settings, CancellationToken cancellation);
+    /// <returns>The settings as they now are.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or a setting is not allowed.</exception>
+    Task<WorkspaceSettings> SetSettings(Guid id, WorkspaceSettings settings, CancellationToken cancellation);
 
     /// <summary>
     /// Keeps a workspace's AI session open, or lets the idle timer close it again. A loop holds it for as long as it runs, since the session closing between two runs would only cost the next run a start.
@@ -116,13 +115,9 @@ internal interface IPromptService
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, Func<ServerConfig, AiService, IPromptProvider> createProvider, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
-
-    private readonly ConcurrentDictionary<AiService, IPromptProvider> providers = new();
-
-    private readonly string workInstruction = "Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished. While you work, write a short status update as a normal message, saying what you have done and what comes next, at least once every five minutes so the user can follow along; split the work so that no single step runs much longer than five minutes.";
 
     private readonly int defaultChunk = 50;
 
@@ -148,17 +143,10 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly string steeringNote = "You were sent this message while you were working and it may have been missed. If you already acted on it, say so briefly instead of doing it again; otherwise do it now.";
 
-    private ServerConfig config = new() { Port = 0, Key = string.Empty };
-
     private CancellationToken stopping;
 
     /// <inheritdoc />
-    public void Configure(ServerConfig config, CancellationToken stopping)
-    {
-        this.config = config;
-        this.stopping = stopping;
-        providers.Clear();
-    }
+    public void Configure(CancellationToken stopping) => this.stopping = stopping;
 
     /// <inheritdoc />
     public async Task Close()
@@ -173,7 +161,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         DateTime deadline = DateTime.UtcNow + shutdownWait;
 
-        while (tallies.Any(tally => Volatile.Read(ref tally.Count) > 0) && DateTime.UtcNow < deadline)
+        while (tallies.Any(tally => tally.Count > 0) && DateTime.UtcNow < deadline)
         {
             await Task.Delay(100);
         }
@@ -192,7 +180,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
-            if (live.Session is null && workspace.AiSessionId is null)
+            if (live.Session is null && workspace.SessionId is null)
             {
                 return new ChatHistory { Messages = [], Working = live.Working };
             }
@@ -260,13 +248,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             }
 
             IPromptSession session = await Session(id, workspace, live, cancellation);
-
-            if (session.Configuration.Model is null)
-            {
-                throw new RequestException($"{workspace.Service.Label()} has no model for this workspace. Choose one in the workspace settings.");
-            }
-
-            PromptOptions options = await Options(text, cancellation);
+            PromptSendOptions options = await Options(text, cancellation);
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow } });
 
             bool queued = false;
@@ -362,7 +344,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     /// <inheritdoc />
-    public async Task<WorkspaceAi> GetAi(Guid id, CancellationToken cancellation)
+    public async Task<WorkspaceSettings> GetSettings(Guid id, CancellationToken cancellation)
     {
         WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
         Live live = lives.GetOrAdd(id, _ => new Live());
@@ -380,7 +362,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 }
             }
 
-            return new WorkspaceAi { Model = session.Configuration.Model?.Id, ModelSettings = session.Configuration.ModelSettings.ToDictionary(pair => pair.Key, pair => pair.Value) };
+            return Describe(workspace, session);
         }
         finally
         {
@@ -389,8 +371,13 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     /// <inheritdoc />
-    public async Task SetAi(Guid id, string model, IReadOnlyDictionary<string, string> settings, CancellationToken cancellation)
+    public async Task<WorkspaceSettings> SetSettings(Guid id, WorkspaceSettings settings, CancellationToken cancellation)
     {
+        if (!Enum.IsDefined(settings.Capability) || !Enum.IsDefined(settings.Effort))
+        {
+            throw new RequestException("The capability or the effort is not one the AI knows.");
+        }
+
         WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
         Live live = lives.GetOrAdd(id, _ => new Live());
         await live.Gate.WaitAsync(cancellation);
@@ -399,19 +386,37 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             IPromptSession session = await Session(id, workspace, live, cancellation);
 
+            IPromptSessionConfiguration configuration = session.Configuration;
+            WorkspaceSettings before = Describe(workspace, session);
+
             try
             {
-                await Choose(Provider(workspace.Service), session, model, settings, cancellation);
+                Apply(configuration, settings);
             }
-            catch (PromptSessionException exception)
+            catch (Exception exception) when (exception is PromptSessionException or ArgumentException)
             {
+                try
+                {
+                    Apply(configuration, before);
+                }
+                catch (Exception restoring) when (restoring is PromptSessionException or ArgumentException)
+                {
+                }
+
                 throw new RequestException(exception.Message);
             }
 
-            lock (live.Sync)
+            WorkspaceSettings described = Describe(workspace, session);
+
+            if (!live.Working)
             {
-                live.Carried = null;
+                lock (live.Sync)
+                {
+                    Expire(id, live);
+                }
             }
+
+            return described;
         }
         finally
         {
@@ -511,7 +516,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         if (session is not null && live.Working)
         {
-            if (Volatile.Read(ref live.Tally.Count) > 0)
+            if (live.Tally.Count > 0)
             {
                 Detach(live)?.Dispose();
             }
@@ -537,11 +542,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             await session.DisposeAsync();
         }
 
-        if (conversation && workspace.AiSessionId is { } sessionId && IsLive(sessionId))
+        if (conversation && workspace.SessionId is { } sessionId)
         {
             try
             {
-                await Provider(workspace.Service).Delete(sessionId, CancellationToken.None);
+                await host.Prompter.Delete(sessionId, CancellationToken.None);
             }
             catch (Exception exception) when (exception is PromptSessionException or IOException or UnauthorizedAccessException or ArgumentException)
             {
@@ -574,12 +579,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             await Task.Delay(TimeSpan.FromMilliseconds(250));
         }
 
-        for (int attempt = 0; attempt < 3 && session.State == PromptSessionState.Waiting && Volatile.Read(ref live.Tally.Count) > 0; attempt++)
+        for (int attempt = 0; attempt < 3 && session.State == PromptSessionState.Waiting && live.Tally.Count > 0; attempt++)
         {
             await Task.Delay(100);
         }
 
-        if (session.State != PromptSessionState.Waiting || Volatile.Read(ref live.Tally.Count) > 0)
+        if (session.State != PromptSessionState.Waiting || live.Tally.Count > 0)
         {
             Detach(live)?.Dispose();
         }
@@ -590,12 +595,6 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         lock (live.Sync)
         {
             IPromptSession? session = live.Session;
-
-            if (session?.Configuration.Model is { } model)
-            {
-                live.Carried = new Carry(model.Id, session.Configuration.ModelSettings.ToDictionary(pair => pair.Key, pair => pair.Value));
-            }
-
             live.Session = null;
             live.Watch?.Dispose();
             live.Watch = null;
@@ -603,11 +602,32 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
-    private bool IsLive(string sessionId) => sessionId.Length == 32 && !sessionId.Contains('-', StringComparison.Ordinal);
+    private void Apply(IPromptSessionConfiguration configuration, WorkspaceSettings settings)
+    {
+        configuration.Capability = Enum.Parse<PromptCapability>(settings.Capability.ToString());
+        configuration.Effort = Enum.Parse<PromptEffort>(settings.Effort.ToString());
+        configuration.IsShellAllowed = settings.IsShellAllowed;
+        configuration.IsSystemAccessAllowed = settings.IsSystemAccessAllowed;
+        configuration.IsWebAllowed = settings.IsWebAllowed;
+        configuration.IsImageGenerationAllowed = settings.IsImageGenerationAllowed;
+        configuration.Instructions = string.IsNullOrWhiteSpace(settings.Instructions) ? null : settings.Instructions;
+    }
 
-    private IPromptProvider Provider(AiService service) => providers.GetOrAdd(service, _ => createProvider(config, service));
+    private WorkspaceSettings Describe(WorkspaceInfo workspace, IPromptSession session)
+        => new()
+        {
+            Service = workspace.Service,
+            Capability = Enum.Parse<AiCapability>(session.Configuration.Capability.ToString()),
+            Effort = Enum.Parse<AiEffort>(session.Configuration.Effort.ToString()),
+            IsShellAllowed = session.Configuration.IsShellAllowed,
+            IsSystemAccessAllowed = session.Configuration.IsSystemAccessAllowed,
+            IsWebAllowed = session.Configuration.IsWebAllowed,
+            IsImageGenerationAllowed = session.Configuration.IsImageGenerationAllowed,
+            Instructions = session.Configuration.Instructions,
+            Descriptors = session.Descriptors.ToDictionary(pair => pair.Key, pair => pair.Value)
+        };
 
-    private async Task<PromptOptions> Options(string text, CancellationToken cancellation)
+    private async Task<PromptSendOptions> Options(string text, CancellationToken cancellation)
     {
         List<PromptAttachment> attachments = [];
 
@@ -627,162 +647,70 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             }
         }
 
-        return new PromptOptions { Attachments = attachments };
+        return new PromptSendOptions { Attachments = attachments };
     }
 
     private async Task<IPromptSession> Session(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
-    {
-        if (live.Session is not null && live.Service != workspace.Service && !live.Working && !live.Held)
-        {
-            IPromptSession? old = Detach(live);
-
-            lock (live.Sync)
-            {
-                live.Carried = null;
-            }
-
-            if (old is not null)
-            {
-                await old.DisposeAsync();
-            }
-        }
-
-        return live.Session ??= await Open(id, workspace, live, cancellation);
-    }
+        => live.Session ??= await Open(id, workspace, live, cancellation);
 
     private async Task<IPromptSession> Open(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
     {
-        IPromptProvider provider = Provider(workspace.Service);
         IPromptSession session;
-        bool fresh;
 
         try
         {
-            (session, fresh) = workspace.AiSessionId is { } stored && IsLive(stored) ? await Load(provider, stored, workspace, cancellation) : (await Create(provider, workspace, cancellation), true);
-
-            try
-            {
-                if (live.Carried is { } carried)
-                {
-                    await Restore(provider, session, carried, cancellation);
-                }
-                else if (fresh && session.Configuration.Model is { } initial)
-                {
-                    await Choose(provider, session, initial.Id, workspace.Service.DefaultSettings(), cancellation);
-                }
-            }
-            catch
-            {
-                await session.DisposeAsync();
-                throw;
-            }
+            session = await Obtain(workspace, cancellation);
         }
-        catch (Exception exception) when (exception is PromptSessionException or DirectoryNotFoundException)
+        catch (Exception exception) when (exception is PromptSessionException or DirectoryNotFoundException or ArgumentException)
         {
             throw new RequestException(exception.Message);
         }
 
-        Tally tally = new();
-        IPromptSessionConfiguration settings = session.Configuration;
-        settings.IsPersistent = true;
-        settings.EnableShell = true;
-        settings.Instructions = workInstruction;
-        settings.BeforeToolCall = (call, _) =>
-        {
-            if (call.Name == "shell")
-            {
-                Interlocked.Increment(ref tally.Count);
-            }
-
-            return Task.FromResult(PromptToolDecision.Allow);
-        };
-        settings.AfterToolCall = (call, _, _, _) =>
-        {
-            if (call.Name == "shell")
-            {
-                Interlocked.Decrement(ref tally.Count);
-            }
-
-            return Task.CompletedTask;
-        };
-
         lock (live.Sync)
         {
-            live.Tally = tally;
-            live.Service = workspace.Service;
-            live.Carried = null;
-            live.Watch = session.Output.Subscribe(new Watcher(output => Handle(id, live, session, workspace.Service, output)));
+            live.Tally = new Tally();
+            live.Watch = session.Subscribe(new Watcher(output => Handle(id, live, session, workspace.Service, output)));
         }
 
         return session;
     }
 
-    private async Task Choose(IPromptProvider provider, IPromptSession session, string modelId, IReadOnlyDictionary<string, string> chosen, CancellationToken cancellation)
+    private async Task<IPromptSession> Obtain(WorkspaceInfo workspace, CancellationToken cancellation)
     {
-        PromptModel model = await provider.GetModel(modelId, null, cancellation);
-        session.Configuration.Model = model;
-
-        foreach (PromptModelSetting setting in model.Settings ?? [])
+        if (workspace.SessionId is { } stored)
         {
-            session.Configuration.ModelSettings[setting.Id] = chosen.TryGetValue(setting.Id, out string? value) && setting.Accepts(value) ? value : setting.Default;
-        }
-    }
+            IPromptSession? loaded = null;
 
-    private async Task Restore(IPromptProvider provider, IPromptSession session, Carry carried, CancellationToken cancellation)
-    {
-        try
-        {
-            await Choose(provider, session, carried.Model, carried.Settings, cancellation);
-        }
-        catch (PromptSessionModelException)
-        {
-        }
-    }
-
-    private async Task<PromptModel> Initial(IPromptProvider provider, AiService service, CancellationToken cancellation)
-    {
-        IReadOnlyList<PromptModel> listed = [.. (await provider.GetModels(null, cancellation)).Where(model => model.CallsTools != false)];
-        return listed.FirstOrDefault(candidate => candidate.Id == service.DefaultModel()) ?? listed.FirstOrDefault() ?? throw new PromptSessionModelException($"{service.Label()} offers no models. Is it installed and signed in?");
-    }
-
-    private async Task<(IPromptSession Session, bool Fresh)> Load(IPromptProvider provider, string stored, WorkspaceInfo workspace, CancellationToken cancellation)
-    {
-        try
-        {
-            return (await provider.Load(stored, null, cancellation), false);
-        }
-        catch (Exception exception) when (exception is PromptSessionNotFoundException or DirectoryNotFoundException)
-        {
-            return (await Create(provider, workspace with { AiSessionId = null }, cancellation), true);
-        }
-    }
-
-    private async Task<IPromptSession> Create(IPromptProvider provider, WorkspaceInfo workspace, CancellationToken cancellation)
-    {
-        PromptSessionOptions where = new() { WorkspacePath = workspace.Folder, Sandbox = false };
-        IPromptSession session = await provider.Create(where with { Model = await Initial(provider, workspace.Service, cancellation) }, cancellation);
-
-        try
-        {
-            if (workspace.AiSessionId is { } legacy)
+            try
             {
-                try
+                loaded = await host.Prompter.Load(stored, cancellation);
+
+                if (!SameFolder(loaded.WorkspacePath, workspace.Folder))
                 {
-                    await session.AttachTo(legacy, where, cancellation);
+                    await loaded.Move(workspace.Folder, cancellation);
                 }
-                catch (PromptSessionNotFoundException)
+
+                return loaded;
+            }
+            catch (Exception exception) when (exception is PromptSessionException and not PromptToolStartException or DirectoryNotFoundException or ArgumentException)
+            {
+                if (loaded is not null)
                 {
+                    await loaded.DisposeAsync();
                 }
             }
+        }
 
-            await workspaces.AttachAiSession(workspace.Id, session.Id, CancellationToken.None);
-            return session;
-        }
-        catch
-        {
-            await session.DisposeAsync();
-            throw;
-        }
+        return await Replace(workspace, cancellation);
+    }
+
+    private bool SameFolder(string first, string second) => string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(first)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(second)), StringComparison.Ordinal);
+
+    private async Task<IPromptSession> Replace(WorkspaceInfo workspace, CancellationToken cancellation)
+    {
+        string sessionId = await host.CreateSession(workspace.Folder, workspace.Service, null, cancellation);
+        await workspaces.AttachSession(workspace.Id, sessionId, CancellationToken.None);
+        return await host.Prompter.Load(sessionId, cancellation);
     }
 
     private string Encode(PromptHistoryPoint point) => $"{point.Position.ToString(CultureInfo.InvariantCulture)}:{point.Index.ToString(CultureInfo.InvariantCulture)}";
@@ -874,6 +802,15 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             case PromptMessageEvent { Text: { Length: > 0 } reply }:
                 events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow } });
                 break;
+            case PromptToolCallEvent { Name: "shell" } call:
+                live.Tally.Running[call.Id] = 0;
+                break;
+            case PromptToolResultEvent result:
+                live.Tally.Running.TryRemove(result.Id, out _);
+                break;
+            case PromptWindowsEvent windows:
+                usage?.Note(service, windows.Windows);
+                break;
             case PromptFailureEvent failure:
                 lock (live.Sync)
                 {
@@ -902,7 +839,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             while (again)
             {
-                List<(string Text, PromptOptions Options)> steered;
+                List<(string Text, PromptSendOptions Options)> steered;
                 int epoch;
 
                 lock (live.Sync)
@@ -914,11 +851,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
                 if (steered.Count > 0)
                 {
-                    List<(string Text, PromptOptions Options)> missed = await Unanswered(session, steered);
+                    List<(string Text, PromptSendOptions Options)> missed = await Unanswered(session, steered);
 
                     lock (live.Sync)
                     {
-                        foreach ((string text, PromptOptions options) in live.Epoch == epoch ? missed : [])
+                        foreach ((string text, PromptSendOptions options) in live.Epoch == epoch ? missed : [])
                         {
                             live.Pending.Enqueue((text, options with { Notes = [.. options.Notes, steeringNote] }));
                         }
@@ -929,7 +866,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
                 try
                 {
-                    (string Text, PromptOptions Options) next;
+                    (string Text, PromptSendOptions Options) next;
 
                     lock (live.Sync)
                     {
@@ -987,7 +924,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
-    private async Task<List<(string Text, PromptOptions Options)>> Unanswered(IPromptSession session, List<(string Text, PromptOptions Options)> steered)
+    private async Task<List<(string Text, PromptSendOptions Options)>> Unanswered(IPromptSession session, List<(string Text, PromptSendOptions Options)> steered)
     {
         List<string> inputs = [];
 
@@ -1005,9 +942,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
         }
 
-        List<(string Text, PromptOptions Options)> missed = [];
+        List<(string Text, PromptSendOptions Options)> missed = [];
 
-        foreach ((string text, PromptOptions options) in steered)
+        foreach ((string text, PromptSendOptions options) in steered)
         {
             int found = inputs.FindIndex(input => input.Contains(text.Trim(), StringComparison.Ordinal));
 
@@ -1127,11 +1064,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
-    private sealed record Carry(string Model, Dictionary<string, string> Settings);
-
     private sealed class Tally
     {
-        public int Count;
+        public ConcurrentDictionary<string, byte> Running { get; } = new();
+
+        public int Count => Running.Count;
     }
 
     private sealed class Live
@@ -1144,13 +1081,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         public IDisposable? Watch { get; set; }
 
-        public AiService Service { get; set; }
-
-        public Carry? Carried { get; set; }
-
         public bool Held { get; set; }
 
-        public Queue<(string Text, PromptOptions Options)> Pending { get; } = new();
+        public Queue<(string Text, PromptSendOptions Options)> Pending { get; } = new();
 
         public bool Draining { get; set; }
 
@@ -1158,7 +1091,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         public int Sending { get; set; }
 
-        public List<(string Text, PromptOptions Options)> Steered { get; } = [];
+        public List<(string Text, PromptSendOptions Options)> Steered { get; } = [];
 
         public Tally Tally { get; set; } = new();
 

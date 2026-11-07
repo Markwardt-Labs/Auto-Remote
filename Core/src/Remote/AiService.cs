@@ -1,60 +1,68 @@
 namespace Markwardt.AutoRemote;
 
 /// <summary>
-/// The AI service a workspace's prompts run on.
+/// The AI provider of a workspace, one for each kind of setup Live AI offers. It is chosen when the workspace is made and never changes.
 /// </summary>
-[JsonConverter(typeof(JsonStringEnumConverter))]
+[JsonConverter(typeof(AiServiceConverter))]
 public enum AiService
 {
     /// <summary>
-    /// Anthropic's Claude Code.
+    /// Claude Code.
     /// </summary>
     ClaudeCode,
 
     /// <summary>
-    /// OpenAI's Codex.
+    /// OpenAI Codex.
     /// </summary>
     Codex,
 
     /// <summary>
-    /// OpenCode, which runs the models of servers on the server's machine (Ollama or another OpenAI compatible server) and those of its own configuration.
+    /// Models on this machine or the network, run through OpenCode and a model server such as Ollama.
     /// </summary>
-    OpenCode
+    Local
 }
 
 /// <summary>
-/// What each <see cref="AiService" /> offers.
+/// Reads and writes an <see cref="AiService" /> as its name, also reading the name <c>OpenCode</c> that <see cref="AiService.Local" /> had before.
+/// </summary>
+public sealed class AiServiceConverter : JsonConverter<AiService>
+{
+    /// <inheritdoc />
+    public override AiService Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        => reader.GetString() switch
+        {
+            "OpenCode" => AiService.Local,
+            { } name when Enum.TryParse(name, true, out AiService service) => service,
+            _ => throw new JsonException("Not the name of an AI service.")
+        };
+
+    /// <inheritdoc />
+    public override void Write(Utf8JsonWriter writer, AiService value, JsonSerializerOptions options)
+        => writer.WriteStringValue(value.ToString());
+}
+
+/// <summary>
+/// Describes an <see cref="AiService" />.
 /// </summary>
 public static class AiServiceExtensions
 {
     extension(AiService service)
     {
         /// <summary>
-        /// Gets the name shown to the user.
+        /// Gets the name to show for the service.
         /// </summary>
-        /// <returns>The display name.</returns>
+        /// <returns>The name.</returns>
         public string Label() => service switch
         {
             AiService.Codex => "OpenAI Codex",
-            AiService.OpenCode => "OpenCode",
+            AiService.Local => "Local models",
             _ => "Claude Code"
         };
 
         /// <summary>
-        /// Gets the model a workspace starts with on the service when the service offers it.
+        /// Gets a value indicating whether a session of the service can run on an API key of its own.
         /// </summary>
-        /// <returns>The identifier of the model, or <see langword="null" /> when the first model the service lists is used.</returns>
-        public string? DefaultModel() => service switch
-        {
-            AiService.ClaudeCode => "sonnet",
-            AiService.Codex => "gpt-5.6-terra",
-            _ => null
-        };
-
-        /// <summary>
-        /// Gets the values of model settings a new session on the service starts with in place of the model's own defaults, used for the settings the model has and takes.
-        /// </summary>
-        /// <returns>The values by setting identifier.</returns>
-        public IReadOnlyDictionary<string, string> DefaultSettings() => service == AiService.ClaudeCode ? new Dictionary<string, string> { ["effort"] = "high" } : new Dictionary<string, string>();
+        /// <returns><see langword="true" /> for Claude Code and Codex.</returns>
+        public bool TakesApiKey() => service != AiService.Local;
     }
 }

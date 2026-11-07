@@ -45,23 +45,27 @@ public sealed class WorkScenarios
     [InlineData(AiService.Codex)]
     public async Task AToolThatCannotBeStartedIsReportedAsAFailureAndTheWorkspaceReturnsToReady(AiService service)
     {
-        await using RealServer server = await RealServer.Start(configure: new() { ["claudeCommand"] = "/nonexistent/claude", ["codexCommand"] = "/nonexistent/codex" });
+        await using RealServer server = await RealServer.Start();
+        await server.Environment(environment => environment with { ClaudeCommand = "/nonexistent/claude", CodexCommand = "/nonexistent/codex" });
         WorkspaceInfo workspace = await server.Workspace("missing", service, configure: false);
+        int mark = server.Mark();
 
-        RemoteException refused = await Assert.ThrowsAsync<RemoteException>(() => server.Connection.ConfigureWorkspace(workspace.Id, service, RealServer.CheapModel(service), RealServer.Cheap(service), CancellationToken.None));
-        RemoteException prompted = await Assert.ThrowsAsync<RemoteException>(() => server.Connection.Prompt(workspace.Id, "hello", CancellationToken.None));
+        await server.Connection.Prompt(workspace.Id, "hello", CancellationToken.None);
+        await server.Until(() => server.Failures(workspace, mark).Count > 0, 60, "the failure");
+        await server.Idle(workspace, mark, 60);
 
-        Assert.Contains("offers no models", refused.Message);
-        Assert.Contains("offers no models", prompted.Message);
+        Assert.Contains("could not be started", server.Failures(workspace, mark)[0]);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
         Assert.False((await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Working);
     }
 
     [LocalModelFact]
-    public async Task AnOpenCodeWorkspaceRunsAPromptThroughOpenCodeAndOllamaAndEditsFiles()
+    public async Task ALocalWorkspaceRunsAPromptThroughOpenCodeAndOllamaAndEditsFiles()
     {
         await using RealServer server = await RealServer.Start();
-        WorkspaceInfo workspace = await server.Workspace("local", AiService.OpenCode, model: LocalModelFactAttribute.Model);
+        string model = LocalModelFactAttribute.Model!;
+        await server.Environment(environment => environment with { LocalModels = new CapabilityNames { Fast = model, Balanced = model, Strong = model, Max = model } });
+        WorkspaceInfo workspace = await server.Workspace("local", AiService.Local);
 
         string reply = await server.Ask(workspace, "Create a file named hello.txt containing exactly the word banana, then tell me you did.", 900);
 
@@ -69,29 +73,30 @@ public sealed class WorkScenarios
         Assert.False(string.IsNullOrWhiteSpace(reply));
         Assert.Empty(server.Failures(workspace));
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
-        Assert.Matches("^[0-9a-f]{32}$", (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single().AiSessionId);
+        Assert.Matches("^[0-9a-f]{32}$", (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single().SessionId);
         ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
         Assert.Contains(history.Messages, message => message.Role == MessageRole.User && message.Text.Contains("hello.txt", StringComparison.Ordinal));
     }
 
     [RealAiFact]
-    public async Task AnOpenCodeWorkspaceWhoseToolCannotBeStartedIsReportedAsAFailureAndReturnsToReady()
+    public async Task ALocalWorkspaceWhoseToolCannotBeStartedIsReportedAsAFailureAndReturnsToReady()
     {
-        await using RealServer server = await RealServer.Start(configure: new() { ["openCodeCommand"] = "/nonexistent/opencode" });
-        WorkspaceInfo workspace = await server.Workspace("local-missing", AiService.OpenCode);
+        await using RealServer server = await RealServer.Start();
+        await server.Environment(environment => environment with { LocalCommand = "/nonexistent/opencode", LocalModels = new CapabilityNames { Fast = "ollama/gemma4:26b", Balanced = "ollama/gemma4:26b", Strong = "ollama/gemma4:26b", Max = "ollama/gemma4:26b" } });
+        WorkspaceInfo workspace = await server.Workspace("local-missing", AiService.Local);
         int mark = server.Mark();
 
-        Assert.Equal(("ollama/gemma4:26b", AiService.OpenCode), ((await server.Connection.GetWorkspaceAi(workspace.Id, CancellationToken.None)).Model, workspace.Service));
+        Assert.Equal(AiService.Local, workspace.Service);
         await server.Connection.Prompt(workspace.Id, "hello", CancellationToken.None);
         await server.Until(() => server.Failures(workspace, mark).Count > 0, 60, "the failure");
         await server.Idle(workspace, mark, 60);
 
-        Assert.Contains("OpenCode could not be started", server.Failures(workspace, mark)[0]);
+        Assert.Contains("could not be started", server.Failures(workspace, mark)[0]);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
     }
 
     [RealAiFact]
-    public async Task TheModelsOfOpenCodeAreTheOnesOfTheLocalServerThatCanCallTools()
+    public async Task TheModelsOfTheLocalServerAreTheOnesItHasInstalled()
     {
         using HttpClient http = new();
         string[] installed;
@@ -108,9 +113,9 @@ public sealed class WorkScenarios
 
         await using RealServer server = await RealServer.Start();
 
-        IReadOnlyList<ModelInfo> models = await server.Connection.ListModels(AiService.OpenCode, CancellationToken.None);
+        IReadOnlyList<string> models = await server.Connection.ListLocalModels(null, CancellationToken.None);
 
-        Assert.All(models, model => Assert.Contains(model.Id.Replace("ollama/", string.Empty, StringComparison.Ordinal), installed));
+        Assert.All(models, model => Assert.Contains(model.Replace("ollama/", string.Empty, StringComparison.Ordinal), installed));
         Assert.True(models.Count <= installed.Length);
     }
 

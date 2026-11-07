@@ -8,9 +8,9 @@ public sealed class PromptServiceTests : IDisposable
 
     private readonly Mock<IWorkspaceStore> store = new();
 
-    private readonly FakePromptProvider prompter = new();
+    private readonly FakePrompter prompter = new();
 
-    private readonly FakePromptProvider codex = new();
+    private readonly HostMock host;
 
     private readonly Mock<IEventHub> hub = new();
 
@@ -37,9 +37,10 @@ public sealed class PromptServiceTests : IDisposable
             }
         });
         activity = new WorkspaceActivity(hub.Object);
-        service = new PromptService(workspaces.Object, store.Object, (_, ai) => ai == AiService.Codex ? codex : prompter, hub.Object, activity, snapshots.Object);
+        host = new HostMock(prompter);
+        service = new PromptService(workspaces.Object, store.Object, host.Object, hub.Object, activity, snapshots.Object);
         Use(workspace);
-        service.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
+        service.Configure(stopping.Token);
     }
 
     public void Dispose() => temp.Dispose();
@@ -50,19 +51,19 @@ public sealed class PromptServiceTests : IDisposable
     {
         workspace = info;
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
-        workspaces.Setup(x => x.AttachAiSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { AiSessionId = session }).Returns(Task.CompletedTask);
+        workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { SessionId = session }).Returns(Task.CompletedTask);
     }
 
     private PromptService Restart()
     {
-        service = new PromptService(workspaces.Object, store.Object, (_, ai) => ai == AiService.Codex ? codex : prompter, hub.Object, activity, snapshots.Object);
-        service.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
+        service = new PromptService(workspaces.Object, store.Object, host.Object, hub.Object, activity, snapshots.Object);
+        service.Configure(stopping.Token);
         return service;
     }
 
     private async Task Until(Func<bool> condition)
     {
-        for (int attempt = 0; attempt < 150 && !condition(); attempt++)
+        for (int attempt = 0; attempt < 500 && !condition(); attempt++)
         {
             await Task.Delay(20);
         }
@@ -325,193 +326,116 @@ public sealed class PromptServiceTests : IDisposable
     [Fact]
     public async Task Prompt_RejectsEmptyText() => await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "  ", CancellationToken.None));
 
-    private PromptModel Model(string id, params PromptModelSetting[] settings) => new() { Id = id, Name = id, CallsTools = true, Settings = settings };
-
-    private Mock<IPromptProvider> Forgetful()
+    private IPromptSession Existing()
     {
-        Mock<IPromptProvider> forgetful = new();
-        forgetful.Setup(x => x.GetModels(It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns((string? key, CancellationToken cancellation) => prompter.GetModels(key, cancellation));
-        forgetful.Setup(x => x.GetModel(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns((string id, string? key, CancellationToken cancellation) => prompter.GetModel(id, key, cancellation));
-        forgetful.Setup(x => x.Create(It.IsAny<PromptSessionOptions?>(), It.IsAny<CancellationToken>())).Returns((PromptSessionOptions? options, CancellationToken cancellation) => prompter.Create(options, cancellation));
-        forgetful.Setup(x => x.Load(It.IsAny<string>(), It.IsAny<PromptSessionOptions?>(), It.IsAny<CancellationToken>())).Returns(async (string id, PromptSessionOptions? options, CancellationToken cancellation) =>
-        {
-            IPromptSession loaded = await prompter.Load(id, options, cancellation);
-            loaded.Configuration.Model = null;
-            return loaded;
-        });
-        service = new PromptService(workspaces.Object, store.Object, (_, _) => forgetful.Object, hub.Object, activity, snapshots.Object);
-        service.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
-        return forgetful;
+        ClaudeSetup setup = new() { WorkspacePath = workspace.Folder };
+        return prompter.Create(setup).GetAwaiter().GetResult();
     }
 
+    private void Broken(string message) => host.Mock.Setup(x => x.CreateSession(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException(message));
+
     [Fact]
-    public async Task Prompt_OpensASessionOnTheProviderOfTheServiceInTheWorkspaceFolderConfiguresItAndAttachesItsIdentifier()
+    public async Task Prompt_MakesASessionOnTheWorkspacesProviderInItsFolderAndAttachesItsIdentifierWhenTheWorkspaceHasNone()
     {
         prompter.OnCreate = session => session.Reply("ok");
-        codex.OnCreate = session => session.Reply("ok");
-        codex.Models = [Model("gpt-5.6-terra", PromptModelSetting.Choose("effort", "Effort", ["low", "medium", "high", "max"]))];
         Use(workspace with { Service = AiService.Codex });
 
         await service.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
 
-        IPromptSessionConfiguration configuration = codex.Sessions.Single().Configuration;
-        Assert.Empty(prompter.Sessions);
-        Assert.Equal("gpt-5.6-terra", configuration.Model?.Id);
-        Assert.Equal("medium", configuration.ModelSettings["effort"]);
-        Assert.True(configuration.IsPersistent);
-        Assert.True(configuration.EnableShell);
-        Assert.Contains("in the foreground", configuration.Instructions);
-        Assert.Contains("status update", configuration.Instructions);
-        Assert.IsAssignableFrom<IDiskStore>(configuration.Workspace);
-        Assert.False(((IDiskStore)configuration.Workspace!).IsSandboxed);
-        workspaces.Verify(x => x.AttachAiSession(workspace.Id, codex.Sessions.Single().Id, It.IsAny<CancellationToken>()), Times.Once);
+        host.Mock.Verify(x => x.CreateSession(workspace.Folder, AiService.Codex, null, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.IsType<CodexSetup>(Assert.Single(prompter.Created));
+        workspaces.Verify(x => x.AttachSession(workspace.Id, Session.Id, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task Prompt_StartsANewSessionOnTheDefaultModelOfTheServiceWithItsDefaultSettingsOrOtherwiseTheFirstModel()
+    public async Task Prompt_RefusesASessionThatCannotBeMadeWithItsMessageAndLeavesTheWorkspaceReady()
     {
-        prompter.OnCreate = session => session.Reply("ok");
-        codex.OnCreate = session => session.Reply("ok");
-        prompter.Models = [Model("opus"), Model("sonnet", PromptModelSetting.Choose("effort", "Effort", ["low", "medium", "high"]))];
-        codex.Models = [Model("first", PromptModelSetting.Choose("effort", "Effort", ["low", "medium", "high"])), Model("second")];
-
-        await service.Prompt(workspace.Id, "one", CancellationToken.None);
-        await Until(() => !service.IsBusy(workspace.Id));
-        Use(workspace with { Service = AiService.Codex, AiSessionId = null });
-        await service.Prompt(workspace.Id, "two", CancellationToken.None);
-        await Until(() => !service.IsBusy(workspace.Id));
-
-        Assert.Equal(("sonnet", "high"), (prompter.Sessions.Single().Configuration.Model?.Id, prompter.Sessions.Single().Configuration.ModelSettings["effort"]));
-        Assert.True(prompter.Sessions.Single().IsDisposed);
-        Assert.Equal(("first", "medium"), (codex.Sessions.Single().Configuration.Model?.Id, codex.Sessions.Single().Configuration.ModelSettings["effort"]));
-    }
-
-    [Fact]
-    public async Task Prompt_RefusesAServiceThatOffersNoModelsAndLeavesTheWorkspaceReady()
-    {
-        codex.Models = [];
-        Use(workspace with { Service = AiService.OpenCode });
-        service = new PromptService(workspaces.Object, store.Object, (_, _) => codex, hub.Object, activity, snapshots.Object);
-        service.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
+        Broken("Local models need a model for every capability.");
 
         RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "hello", CancellationToken.None));
 
-        Assert.Contains("offers no models", exception.Message);
+        Assert.Contains("Local models need a model", exception.Message);
         Assert.False(service.IsBusy(workspace.Id));
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
-        Assert.Empty(codex.Sessions);
     }
 
     [Fact]
-    public async Task GetAi_ReadsTheModelAndSettingsOfTheSessionAndMakesTheSessionWhenThereIsNone()
+    public async Task GetSettings_ReadsHowTheSessionRunsAndMakesTheSessionWhenThereIsNone()
     {
-        prompter.Models = [Model("sonnet", PromptModelSetting.Choose("effort", "Effort", ["low", "medium", "high"]), PromptModelSetting.Switch("thinking", "Thinking"))];
+        WorkspaceSettings settings = await service.GetSettings(workspace.Id, CancellationToken.None);
 
-        WorkspaceAi ai = await service.GetAi(workspace.Id, CancellationToken.None);
-
-        Assert.Equal("sonnet", ai.Model);
-        Assert.Equal(new Dictionary<string, string> { ["effort"] = "high", ["thinking"] = "false" }, ai.ModelSettings.ToDictionary(pair => pair.Key, pair => pair.Value));
-        Assert.Equal(Session.Id, workspace.AiSessionId);
-        workspaces.Verify(x => x.AttachAiSession(workspace.Id, Session.Id, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Theory]
-    [InlineData("high", "high")]
-    [InlineData("ultra", "medium")]
-    [InlineData(null, "medium")]
-    public async Task SetAi_GivesTheSessionTheModelWithTheValuesItTakesAndTheDefaultForTheRest(string? effort, string expected)
-    {
-        prompter.Models = [Model("small"), Model("big", PromptModelSetting.Choose("effort", "Effort", ["low", "medium", "high"]), PromptModelSetting.Switch("thinking", "Thinking", true), PromptModelSetting.Count("context", "Context", 1024, 32768, 4096))];
-        Dictionary<string, string> chosen = new() { ["thinking"] = "false", ["context"] = "16384", ["gone"] = "x" };
-
-        if (effort is not null)
-        {
-            chosen["effort"] = effort;
-        }
-
-        await service.SetAi(workspace.Id, "big", chosen, CancellationToken.None);
-
-        Assert.Equal("big", Session.Configuration.Model?.Id);
-        Assert.Equal(new Dictionary<string, string> { ["effort"] = expected, ["thinking"] = "false", ["context"] = "16384" }, Session.Configuration.ModelSettings.ToDictionary(pair => pair.Key, pair => pair.Value));
-        WorkspaceAi ai = await service.GetAi(workspace.Id, CancellationToken.None);
-        Assert.Equal(("big", "16384"), (ai.Model, ai.ModelSettings["context"]));
+        Assert.Equal((AiService.ClaudeCode, AiCapability.Balanced), (settings.Service, settings.Capability));
+        Assert.Equal("Fake", settings.Descriptors["Provider"]);
+        Assert.Equal(Session.Id, workspace.SessionId);
+        workspaces.Verify(x => x.AttachSession(workspace.Id, Session.Id, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task SetAi_RefusesAModelTheServiceDoesNotOfferAndKeepsTheSessionsModel()
+    public async Task SetSettings_GivesTheSessionEveryValueAndAnswersHowItNowRuns()
     {
-        prompter.Models = [Model("sonnet")];
-        await service.GetAi(workspace.Id, CancellationToken.None);
+        WorkspaceSettings wanted = new() { Service = AiService.Codex, Capability = AiCapability.Max, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = false, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "  be brief  " };
 
-        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.SetAi(workspace.Id, "retired", new Dictionary<string, string>(), CancellationToken.None));
+        WorkspaceSettings saved = await service.SetSettings(workspace.Id, wanted, CancellationToken.None);
 
-        Assert.Contains("retired", exception.Message);
-        Assert.Equal("sonnet", Session.Configuration.Model?.Id);
+        IPromptSessionConfiguration configuration = Session.Configuration;
+        Assert.Equal((PromptCapability.Max, PromptEffort.Low), (configuration.Capability, configuration.Effort));
+        Assert.Equal((false, false, false, true), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
+        Assert.Equal("  be brief  ", configuration.Instructions);
+        Assert.Equal((AiService.ClaudeCode, AiCapability.Max, AiEffort.Low), (saved.Service, saved.Capability, saved.Effort));
     }
 
     [Fact]
-    public async Task SetAi_KeepsAChoiceTheSessionHasNotStoredYetWhenTheIdleSessionIsClosedAndOpenedAgain()
+    public async Task SetSettings_TurnsBlankInstructionsIntoNone()
     {
-        prompter.Models = [Model("sonnet"), Model("big", PromptModelSetting.Count("context", "Context", 1024, 32768, 4096))];
-        Forgetful();
-        await service.SetAi(workspace.Id, "big", new Dictionary<string, string> { ["context"] = "16384" }, CancellationToken.None);
+        WorkspaceSettings current = await service.GetSettings(workspace.Id, CancellationToken.None);
 
-        await service.Release(workspace.Id);
-        WorkspaceAi ai = await service.GetAi(workspace.Id, CancellationToken.None);
-        WorkspaceAi again = await service.GetAi(workspace.Id, CancellationToken.None);
+        WorkspaceSettings saved = await service.SetSettings(workspace.Id, current with { Instructions = "   " }, CancellationToken.None);
 
-        Assert.Equal(("big", "16384"), (ai.Model, ai.ModelSettings["context"]));
-        Assert.Equal(ai.Model, again.Model);
+        Assert.Null(saved.Instructions);
+        Assert.Null(Session.Configuration.Instructions);
+    }
+
+    [Fact]
+    public async Task SetSettings_RefusesAValueTheAiDoesNotKnow()
+    {
+        await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        await Assert.ThrowsAsync<RequestException>(() => service.SetSettings(workspace.Id, new WorkspaceSettings { Capability = (AiCapability)99 }, CancellationToken.None));
+
+        Assert.Equal(PromptCapability.Balanced, Session.Configuration.Capability);
+    }
+
+    [Fact]
+    public async Task SetSettings_ReachesTheSessionAgainWhenTheIdleSessionIsClosedAndOpenedAgain()
+    {
+        await service.SetSettings(workspace.Id, new WorkspaceSettings { Capability = AiCapability.Strong, Effort = AiEffort.Max }, CancellationToken.None);
+
+        WorkspaceSettings again = await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        Assert.Equal((AiCapability.Strong, AiEffort.Max), (again.Capability, again.Effort));
         Assert.Single(prompter.Sessions);
     }
 
     [Fact]
-    public async Task GetAi_ShowsNoModelForASessionWhoseStoredModelIsNoLongerOfferedAndAPromptAsksForOne()
+    public async Task SetSettings_AppliesToTheNextPromptOfTheSession()
     {
         prompter.OnCreate = session => session.Reply("ok");
-        IPromptSession existing = await prompter.Create(new PromptSessionOptions { WorkspacePath = workspace.Folder, Sandbox = false });
-        await existing.DisposeAsync();
-        Use(workspace with { AiSessionId = existing.Id });
-        Forgetful();
+        await service.SetSettings(workspace.Id, new WorkspaceSettings { Capability = AiCapability.Fast, Effort = AiEffort.Medium }, CancellationToken.None);
 
-        WorkspaceAi ai = await service.GetAi(workspace.Id, CancellationToken.None);
-        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "hello", CancellationToken.None));
-
-        Assert.Null(ai.Model);
-        Assert.Contains("Choose one in the workspace settings", exception.Message);
-        Assert.False(service.IsBusy(workspace.Id));
-        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
-
-        await service.SetAi(workspace.Id, "fake-model", new Dictionary<string, string>(), CancellationToken.None);
-        await service.Prompt(workspace.Id, "hello again", CancellationToken.None);
+        await service.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
-        Assert.Equal(["hello again"], Session.Prompts.Select(prompt => prompt.Text).ToList());
-    }
 
-    [Fact]
-    public async Task ChangingTheService_ClosesTheSessionOfTheOldOneAndOpensASessionOfTheNewOneWithoutTheOldChoice()
-    {
-        prompter.Models = [Model("sonnet"), Model("opus")];
-        codex.Models = [Model("gpt-5.6-terra")];
-        await service.SetAi(workspace.Id, "opus", new Dictionary<string, string>(), CancellationToken.None);
-        FakePromptSession old = Session;
-
-        Use(workspace with { Service = AiService.Codex, AiSessionId = null });
-        WorkspaceAi ai = await service.GetAi(workspace.Id, CancellationToken.None);
-
-        Assert.True(old.IsDisposed);
-        Assert.Equal("gpt-5.6-terra", ai.Model);
-        Assert.Single(codex.Sessions);
+        Assert.Equal((PromptCapability.Fast, PromptEffort.Medium), (Session.Prompts.Single().Capability, Session.Prompts.Single().Effort));
     }
 
     [Fact]
     public async Task Prompt_ResumesTheAttachedLiveSessionAndKeepsItForTheNextPrompt()
     {
-        IPromptSession existing = await prompter.Create(new PromptSessionOptions { WorkspacePath = workspace.Folder, Sandbox = false });
+        IPromptSession existing = Existing();
         ((FakePromptSession)existing).ReplyWith(_ => [new PromptMessageEvent { Text = "again" }]);
         await existing.DisposeAsync();
-        Use(workspace with { AiSessionId = existing.Id });
+        Use(workspace with { SessionId = existing.Id });
 
         await service.Prompt(workspace.Id, "one", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
@@ -520,56 +444,53 @@ public sealed class PromptServiceTests : IDisposable
 
         Assert.Single(prompter.Sessions);
         Assert.Equal(["one", "two"], Session.Prompts.Select(prompt => prompt.Text).ToList());
-        workspaces.Verify(x => x.AttachAiSession(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        workspaces.Verify(x => x.AttachSession(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
-    public async Task Prompt_MovesAnAiSessionStoredByAnOlderServerIntoALiveSession()
+    public async Task Prompt_StartsANewSessionWhenTheStoredIdentifierIsOneAnOlderServerWrote()
     {
         string legacy = Guid.NewGuid().ToString();
         prompter.OnCreate = session => session.Reply("ok");
-        Use(workspace with { AiSessionId = legacy });
+        Use(workspace with { SessionId = legacy });
 
         await service.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
 
-        Assert.Equal(legacy, Session.AttachedTo);
-        Assert.NotEqual(legacy, workspace.AiSessionId);
-        Assert.Equal(Session.Id, workspace.AiSessionId);
+        Assert.Single(prompter.Sessions);
+        Assert.Equal(Session.Id, workspace.SessionId);
     }
 
     [Fact]
     public async Task Prompt_StartsANewSessionWhenTheStoredOneIsGone()
     {
         prompter.OnCreate = session => session.Reply("ok");
-        Use(workspace with { AiSessionId = Guid.NewGuid().ToString("N") });
+        Use(workspace with { SessionId = Guid.NewGuid().ToString("N") });
 
         await service.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
 
         Assert.Single(prompter.Sessions);
-        Assert.Equal(Session.Id, workspace.AiSessionId);
+        Assert.Equal(Session.Id, workspace.SessionId);
     }
 
     [Fact]
-    public async Task Prompt_StartsANewSessionInTheCurrentFolderWhenTheStoredOneRanInAFolderThatWasRenamed()
+    public async Task Prompt_MovesTheLoadedSessionToTheCurrentFolderWhenTheWorkspaceWasRenamed()
     {
-        prompter.OnCreate = session => session.Reply("ok");
-        Mock<IPromptProvider> renamed = new();
-        renamed.Setup(x => x.GetModels(It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns((string? key, CancellationToken cancellation) => prompter.GetModels(key, cancellation));
-        renamed.Setup(x => x.GetModel(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns((string id, string? key, CancellationToken cancellation) => prompter.GetModel(id, key, cancellation));
-        renamed.Setup(x => x.Load(It.IsAny<string>(), It.IsAny<PromptSessionOptions?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new DirectoryNotFoundException());
-        renamed.Setup(x => x.Create(It.IsAny<PromptSessionOptions?>(), It.IsAny<CancellationToken>())).Returns((PromptSessionOptions? options, CancellationToken cancellation) => prompter.Create(options, cancellation));
-        service = new PromptService(workspaces.Object, store.Object, (_, _) => renamed.Object, hub.Object, activity, snapshots.Object);
-        service.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
-        Use(workspace with { AiSessionId = Guid.NewGuid().ToString("N") });
+        string renamed = Path.Combine(temp.Path, "renamed");
+        Directory.CreateDirectory(renamed);
+        IPromptSession existing = Existing();
+        ((FakePromptSession)existing).ReplyWith(_ => [new PromptMessageEvent { Text = "ok" }]);
+        await existing.DisposeAsync();
+        Use(workspace with { SessionId = existing.Id, Folder = renamed });
 
         await service.Prompt(workspace.Id, "hello", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
 
+        Assert.Single(prompter.Sessions);
+        Assert.Equal(Path.GetFullPath(renamed), Path.GetFullPath(Session.WorkspacePath));
+        Assert.Equal(existing.Id, workspace.SessionId);
         Assert.Empty(Events(RemoteEventKind.Failed));
-        Assert.Equal(Session.Id, workspace.AiSessionId);
-        Assert.Equal(["hello"], Session.Prompts.Select(prompt => prompt.Text).ToList());
     }
 
     [Fact]
@@ -613,7 +534,7 @@ public sealed class PromptServiceTests : IDisposable
     [Fact]
     public async Task Prompt_ClosesTheSessionItMadeWhenItCannotBeAttachedToTheWorkspace()
     {
-        workspaces.Setup(x => x.AttachAiSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
+        workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
 
         await Assert.ThrowsAsync<IOException>(() => service.Prompt(workspace.Id, "hello", CancellationToken.None));
 
@@ -660,12 +581,7 @@ public sealed class PromptServiceTests : IDisposable
     [Fact]
     public async Task Prompt_WhenTheSessionCannotBeOpenedFailsAndLeavesTheWorkspaceReady()
     {
-        Mock<IPromptProvider> broken = new();
-        broken.Setup(x => x.GetModels(It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns((string? key, CancellationToken cancellation) => prompter.GetModels(key, cancellation));
-        broken.Setup(x => x.GetModel(It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).Returns((string id, string? key, CancellationToken cancellation) => prompter.GetModel(id, key, cancellation));
-        broken.Setup(x => x.Create(It.IsAny<PromptSessionOptions?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new DirectoryNotFoundException("The workspace folder does not exist."));
-        service = new PromptService(workspaces.Object, store.Object, (_, _) => broken.Object, hub.Object, activity, snapshots.Object);
-        service.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
+        Broken("The workspace folder does not exist.");
 
         RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "hello", CancellationToken.None));
 
@@ -700,16 +616,39 @@ public sealed class PromptServiceTests : IDisposable
 
     private PromptToolCallEvent Command() => new() { Id = "1", Name = "shell", Input = "{\"command\":\"sleep 100\"}" };
 
+    private (ManualResetEventSlim Release, ManualResetEventSlim Reached) RunCommand(bool ending)
+    {
+        ManualResetEventSlim release = new();
+        ManualResetEventSlim reached = new();
+        IPromptSession existing = Existing();
+        ((FakePromptSession)existing).ReplyWith(prompt => prompt.Text == "long job" ? Running(release, reached, ending) : [new PromptMessageEvent { Text = "after" }]);
+        Use(workspace with { SessionId = existing.Id });
+        return (release, reached);
+    }
+
+    private IEnumerable<PromptEvent> Running(ManualResetEventSlim release, ManualResetEventSlim reached, bool ending)
+    {
+        yield return Command();
+
+        if (ending)
+        {
+            yield return new PromptToolResultEvent { Id = "1", Output = "done" };
+        }
+
+        reached.Set();
+        release.Wait(TimeSpan.FromSeconds(10));
+    }
+
     [Fact]
     public async Task Interrupt_WithAShellCommandStillRunningClosesTheSessionSoTheCommandEndsAndTheNextPromptReopensIt()
     {
-        prompter.OnCreate = session => session.Hang().Reply("after");
+        (ManualResetEventSlim release, ManualResetEventSlim reached) = RunCommand(false);
         await service.Prompt(workspace.Id, "long job", CancellationToken.None);
-        await Until(() => prompter.Sessions.Count == 1 && Session.Prompts.Count == 1);
         FakePromptSession first = Session;
-        await first.Configuration.BeforeToolCall!(Command(), CancellationToken.None);
+        await Until(() => reached.IsSet);
 
         await service.Interrupt(workspace.Id);
+        release.Set();
 
         Assert.True(first.IsDisposed);
         Assert.False(service.IsBusy(workspace.Id));
@@ -726,13 +665,12 @@ public sealed class PromptServiceTests : IDisposable
     [Fact]
     public async Task Interrupt_AfterTheShellCommandEndedKeepsTheSessionOpen()
     {
-        prompter.OnCreate = session => session.Hang();
+        (ManualResetEventSlim release, ManualResetEventSlim reached) = RunCommand(true);
         await service.Prompt(workspace.Id, "long job", CancellationToken.None);
-        await Until(() => prompter.Sessions.Count == 1 && Session.Prompts.Count == 1);
-        await Session.Configuration.BeforeToolCall!(Command(), CancellationToken.None);
-        await Session.Configuration.AfterToolCall!(Command(), new PromptToolResultEvent { Id = "1", Output = "done" }, TimeSpan.FromSeconds(1), CancellationToken.None);
+        await Until(() => reached.IsSet);
 
         await service.Interrupt(workspace.Id);
+        release.Set();
 
         Assert.False(Session.IsDisposed);
         Assert.False(service.IsBusy(workspace.Id));
@@ -854,19 +792,6 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Null(history.Older);
         Assert.Empty(prompter.Sessions);
         await Assert.ThrowsAsync<RequestException>(() => service.History(workspace.Id, "nonsense", null, CancellationToken.None));
-    }
-
-    [Fact]
-    public async Task History_OfAWorkspaceFromAnOlderServerOpensItsConversation()
-    {
-        string legacy = Guid.NewGuid().ToString();
-        Use(workspace with { AiSessionId = legacy });
-
-        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
-
-        Assert.Empty(history.Messages);
-        Assert.Equal(legacy, Session.AttachedTo);
-        Assert.Equal(Session.Id, workspace.AiSessionId);
     }
 
     private IEnumerable<PromptEvent> Failing(Task gate)

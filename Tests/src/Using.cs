@@ -11,6 +11,7 @@ global using Avalonia.Controls;
 global using Avalonia.Headless;
 global using Avalonia.VisualTree;
 global using System.Text.Json;
+global using System.Text.Json.Nodes;
 global using System.Threading.Channels;
 global using System.Net.WebSockets;
 global using System.Net.Security;

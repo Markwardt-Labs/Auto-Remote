@@ -1,0 +1,18 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.ProviderPickerView"
+             x:CompileBindings="False">
+  <StackPanel Spacing="6">
+    <TextBlock Text="AI provider" Classes="muted" />
+    <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding SelectedService}" HorizontalAlignment="Stretch">
+      <ComboBox.ItemTemplate>
+        <DataTemplate>
+          <TextBlock Text="{Binding Name}" />
+        </DataTemplate>
+      </ComboBox.ItemTemplate>
+    </ComboBox>
+    <TextBox Text="{Binding ApiKey}" PasswordChar="•" IsVisible="{Binding TakesApiKey}" PlaceholderText="API key for just this workspace (optional)" TextInputOptions.AutoCapitalization="False" />
+    <TextBlock Text="The provider cannot be changed once the workspace exists." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+  </StackPanel>
+</UserControl>

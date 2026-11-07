@@ -6,7 +6,7 @@ namespace Markwardt.AutoRemote.Server;
 internal interface IWorkspaceManager
 {
     /// <summary>
-    /// Loads the stored workspaces.
+    /// Loads the stored workspaces and reads the folder and provider of each from its AI session; a workspace an older release stored without a usable session is given its first one. A stored workspace whose session cannot be found stays in the file but is not listed.
     /// </summary>
     /// <param name="path">The workspaces file.</param>
     /// <param name="cancellation">Cancels the load.</param>
@@ -30,13 +30,15 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> Get(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Creates a workspace hosted by an existing folder.
+    /// Creates a workspace hosted by an existing folder, with the AI session that holds its folder, provider and configuration.
     /// </summary>
     /// <param name="folder">The folder.</param>
+    /// <param name="service">The AI service the workspace's prompts run on for good.</param>
+    /// <param name="apiKey">An API key for just the workspace's session, or <see langword="null" />.</param>
     /// <param name="cancellation">Cancels the call.</param>
     /// <returns>The new workspace.</returns>
-    /// <exception cref="RequestException">The folder is missing or already hosts a workspace.</exception>
-    Task<WorkspaceInfo> Create(string folder, CancellationToken cancellation);
+    /// <exception cref="RequestException">The folder is missing or already hosts a workspace, or the session cannot be made.</exception>
+    Task<WorkspaceInfo> Create(string folder, AiService service, string? apiKey, CancellationToken cancellation);
 
     /// <summary>
     /// Renames a workspace by renaming its folder.
@@ -49,23 +51,23 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> Rename(Guid id, string name, CancellationToken cancellation);
 
     /// <summary>
-    /// Changes the AI service a workspace's prompts run on.
+    /// Moves a workspace to another folder: tells the AI session that the workspace is there now, which is what tracks its place. No file is moved, so the folder must already exist.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="service">The AI service; changing it detaches the workspace's AI session, since sessions belong to one service.</param>
+    /// <param name="folder">The existing folder the workspace works in from now on.</param>
     /// <param name="cancellation">Cancels the call.</param>
-    /// <returns>The updated workspace.</returns>
-    /// <exception cref="RequestException">The workspace is unknown.</exception>
-    Task<WorkspaceInfo> Configure(Guid id, AiService service, CancellationToken cancellation);
+    /// <returns>The moved workspace.</returns>
+    /// <exception cref="RequestException">The workspace is unknown, the folder does not exist or already hosts another workspace, or the session cannot be moved.</exception>
+    Task<WorkspaceInfo> MoveToFolder(Guid id, string folder, CancellationToken cancellation);
 
     /// <summary>
     /// Attaches a live AI session to a workspace, replacing any earlier one.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="aiSessionId">The live AI session identifier.</param>
+    /// <param name="sessionId">The live AI session identifier.</param>
     /// <param name="cancellation">Cancels the call.</param>
     /// <exception cref="RequestException">The workspace is unknown.</exception>
-    Task AttachAiSession(Guid id, string aiSessionId, CancellationToken cancellation);
+    Task AttachSession(Guid id, string sessionId, CancellationToken cancellation);
 
     /// <summary>
     /// Moves a workspace into a group, or out of any group; it goes to the end of that group.
@@ -144,7 +146,7 @@ internal interface IWorkspaceManager
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser folders, IEventHub events) : IWorkspaceManager
+internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser folders, IEventHub events, IPrompterHost host) : IWorkspaceManager
 {
     private readonly SemaphoreSlim gate = new(1, 1);
 
@@ -152,20 +154,83 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
     private readonly List<WorkspaceGroup> groups = [];
 
+    private readonly List<StoredWorkspace> unresolved = [];
+
+    private readonly HashSet<Guid> adopting = [];
+
     private readonly StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     /// <inheritdoc />
     public async Task Open(string path, CancellationToken cancellation)
     {
         store.Open(path);
-        WorkspaceCatalog loaded = await store.Load(cancellation);
+        StoredCatalog loaded = await store.Load(cancellation);
+        List<StoredWorkspace> entries = [];
+        bool changed = false;
+
+        foreach (StoredWorkspace stored in loaded.Workspaces)
+        {
+            if (stored.SessionId is null && stored.Folder is { } folder)
+            {
+                try
+                {
+                    entries.Add(stored with { SessionId = await host.CreateSession(folder, stored.Service ?? AiService.ClaudeCode, null, cancellation), Folder = null, Service = null });
+                    changed = true;
+                    continue;
+                }
+                catch (RequestException)
+                {
+                }
+            }
+
+            if (stored is { Adopt: true, SessionId: { } adoptable })
+            {
+                try
+                {
+                    await host.Adopt(adoptable, cancellation);
+                    entries.Add(stored with { Adopt = false });
+                    changed = true;
+                    continue;
+                }
+                catch (RequestException)
+                {
+                }
+            }
+
+            entries.Add(stored);
+        }
+
+        Dictionary<string, PromptSessionInfo> sessions = (await host.Prompter.List(cancellation)).ToDictionary(info => info.Id);
 
         using (await Lock(cancellation))
         {
             workspaces.Clear();
-            workspaces.AddRange(loaded.Workspaces);
+            unresolved.Clear();
+            adopting.Clear();
             groups.Clear();
             groups.AddRange(loaded.Groups);
+
+            foreach (StoredWorkspace stored in entries)
+            {
+                if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
+                {
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId });
+
+                    if (stored.Adopt)
+                    {
+                        adopting.Add(stored.Id);
+                    }
+                }
+                else
+                {
+                    unresolved.Add(stored);
+                }
+            }
+
+            if (changed)
+            {
+                await Save(cancellation, false);
+            }
         }
     }
 
@@ -188,7 +253,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     }
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> Create(string folder, CancellationToken cancellation)
+    public async Task<WorkspaceInfo> Create(string folder, AiService service, string? apiKey, CancellationToken cancellation)
     {
         if (!await folders.Exists(folder, cancellation))
         {
@@ -204,9 +269,21 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 throw new RequestException("This folder already hosts a workspace.");
             }
 
-            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full };
+            string sessionId = await host.CreateSession(full, service, apiKey, cancellation);
+            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId };
             workspaces.Add(created);
-            await Save(cancellation);
+
+            try
+            {
+                await Save(cancellation);
+            }
+            catch
+            {
+                workspaces.Remove(created);
+                await Discard(sessionId);
+                throw;
+            }
+
             return created;
         }
     }
@@ -223,7 +300,22 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 throw new RequestException("Another workspace lives inside this folder, so it cannot be renamed.");
             }
 
-            WorkspaceInfo renamed = workspace with { Folder = await folders.Rename(workspace.Folder, name, cancellation) };
+            string renamedFolder = await folders.Rename(workspace.Folder, name, cancellation);
+
+            if (workspace.SessionId is { } sessionId)
+            {
+                try
+                {
+                    await host.MoveSession(sessionId, renamedFolder, cancellation);
+                }
+                catch (RequestException)
+                {
+                    await folders.Rename(renamedFolder, Path.GetFileName(Path.TrimEndingDirectorySeparator(workspace.Folder)), CancellationToken.None);
+                    throw;
+                }
+            }
+
+            WorkspaceInfo renamed = workspace with { Folder = renamedFolder };
             workspaces[workspaces.IndexOf(workspace)] = renamed;
             await Save(cancellation);
             return renamed;
@@ -231,21 +323,47 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     }
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> Configure(Guid id, AiService service, CancellationToken cancellation)
+    public async Task<WorkspaceInfo> MoveToFolder(Guid id, string folder, CancellationToken cancellation)
     {
+        if (!await folders.Exists(folder, cancellation))
+        {
+            throw new RequestException($"The folder '{folder}' does not exist.");
+        }
+
+        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder));
+
         using (await Lock(cancellation))
         {
             WorkspaceInfo workspace = Find(id);
-            return await Replace(workspace with { Service = service, AiSessionId = service == workspace.Service ? workspace.AiSessionId : null }, cancellation);
+
+            if (string.Equals(workspace.Folder, full, comparison))
+            {
+                return workspace;
+            }
+
+            if (workspaces.Any(other => string.Equals(other.Folder, full, comparison)))
+            {
+                throw new RequestException("This folder already hosts a workspace.");
+            }
+
+            if (workspace.SessionId is { } sessionId)
+            {
+                await host.MoveSession(sessionId, full, cancellation);
+            }
+
+            WorkspaceInfo moved = workspace with { Folder = full };
+            workspaces[workspaces.IndexOf(workspace)] = moved;
+            await Save(cancellation);
+            return moved;
         }
     }
 
     /// <inheritdoc />
-    public async Task AttachAiSession(Guid id, string aiSessionId, CancellationToken cancellation)
+    public async Task AttachSession(Guid id, string sessionId, CancellationToken cancellation)
     {
         using (await Lock(cancellation))
         {
-            await Replace(Find(id) with { AiSessionId = aiSessionId }, cancellation, false);
+            await Replace(Find(id) with { SessionId = sessionId }, cancellation, false);
         }
     }
 
@@ -417,6 +535,25 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         return new Releaser(gate);
     }
 
+    private AiService ServiceOf(PromptProvider provider)
+        => provider switch
+        {
+            PromptProvider.Codex => AiService.Codex,
+            PromptProvider.Local => AiService.Local,
+            _ => AiService.ClaudeCode
+        };
+
+    private async Task Discard(string sessionId)
+    {
+        try
+        {
+            await host.Prompter.Delete(sessionId, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
     private WorkspaceCatalog Snapshot() => new() { Groups = [.. groups], Workspaces = [.. workspaces] };
 
     private void Shift<T>(List<T> items, T item, int offset, Func<T, bool> isSibling)
@@ -452,7 +589,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
     private async Task Save(CancellationToken cancellation, bool announce = true)
     {
-        await store.Save(Snapshot(), cancellation);
+        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
 
         if (announce)
         {

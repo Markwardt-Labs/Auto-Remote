@@ -62,6 +62,11 @@ internal sealed class HomeViewModel : ViewModelBase
             CloneWorkspaceRequested?.Invoke();
             return Task.CompletedTask;
         });
+        EnvironmentCommand = new AsyncCommand(_ =>
+        {
+            EnvironmentRequested?.Invoke();
+            return Task.CompletedTask;
+        });
         NewWindowCommand = new AsyncCommand(_ => OpenNewWindow());
         ChangeServerCommand = new AsyncCommand(_ =>
         {
@@ -70,6 +75,15 @@ internal sealed class HomeViewModel : ViewModelBase
         });
         BeginStopCommand = new AsyncCommand(_ => Begin(EditMode.StopWork, string.Empty), () => active?.CanHalt ?? false);
         ConfirmHaltCommand = new AsyncCommand(_ => Halt());
+        MoveWorkspaceToFolderCommand = new AsyncCommand(
+            async _ =>
+            {
+                if (selected is not null && (active is null || await active.Settings.Apply()))
+                {
+                    MoveWorkspaceRequested?.Invoke(selected);
+                }
+            },
+            () => CanEditSelected);
         BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => CanEditSelected);
         ConfirmRenameCommand = new AsyncCommand(_ => Rename());
         BeginDeleteCommand = new AsyncCommand(
@@ -172,6 +186,16 @@ internal sealed class HomeViewModel : ViewModelBase
     public event Action? CloneWorkspaceRequested;
 
     /// <summary>
+    /// Raised when the user opens the environment settings of the server's AI.
+    /// </summary>
+    public event Action? EnvironmentRequested;
+
+    /// <summary>
+    /// Raised with the selected workspace when the user asks to move it to another folder.
+    /// </summary>
+    public event Action<WorkspaceInfo>? MoveWorkspaceRequested;
+
+    /// <summary>
     /// Raised when the user asks to connect to a different server.
     /// </summary>
     public event Action? ChangeServerRequested;
@@ -272,6 +296,7 @@ internal sealed class HomeViewModel : ViewModelBase
             IsDrawerOpen = false;
             IsUsageOpen = false;
             EditMode = EditMode.None;
+            _ = active?.Settings.Apply();
             Active = value is null ? null : Open(value);
             BeginStopCommand.Refresh();
             _ = Active?.Focus();
@@ -281,6 +306,7 @@ internal sealed class HomeViewModel : ViewModelBase
             Raise(nameof(Title));
             SyncSelectedEntry();
             BeginRenameCommand.Refresh();
+            MoveWorkspaceToFolderCommand.Refresh();
             BeginDeleteCommand.Refresh();
         }
     }
@@ -522,6 +548,11 @@ internal sealed class HomeViewModel : ViewModelBase
     public AsyncCommand CloneWorkspaceCommand { get; }
 
     /// <summary>
+    /// Gets the command that opens the environment settings of the server's AI.
+    /// </summary>
+    public AsyncCommand EnvironmentCommand { get; }
+
+    /// <summary>
     /// Gets the command that asks to change server.
     /// </summary>
     public AsyncCommand ChangeServerCommand { get; }
@@ -550,6 +581,11 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the command that opens the workspace rename dialog.
     /// </summary>
     public AsyncCommand BeginRenameCommand { get; }
+
+    /// <summary>
+    /// Gets the command that opens the screen that moves the selected workspace to another folder.
+    /// </summary>
+    public AsyncCommand MoveWorkspaceToFolderCommand { get; }
 
     /// <summary>
     /// Gets the command that applies the workspace rename.
@@ -778,7 +814,6 @@ internal sealed class HomeViewModel : ViewModelBase
         }
 
         WorkspaceViewModel created = new(connection, workspace, layout, drafts, recorder);
-        created.Settings.Changed += Replace;
         created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, workspace.Name);
         created.Chat.PromptFailed += () => keeper?.Release(workspace.Id);
         WorkspaceState previous = created.State;
@@ -825,6 +860,7 @@ internal sealed class HomeViewModel : ViewModelBase
             {
                 Raise(nameof(IsWorking));
                 BeginRenameCommand.Refresh();
+                MoveWorkspaceToFolderCommand.Refresh();
                 BeginDeleteCommand.Refresh();
             }
 
@@ -900,24 +936,6 @@ internal sealed class HomeViewModel : ViewModelBase
     private IEnumerable<WorkspaceGroup> Children(Guid? parent) => groups.Where(group => Parent(group.ParentId) == parent);
 
     private Guid? Parent(Guid? id) => id is { } known && groups.Any(group => group.Id == known) ? known : null;
-
-    private void Replace(WorkspaceInfo updated)
-    {
-        workspaces[workspaces.FindIndex(workspace => workspace.Id == updated.Id)] = updated;
-
-        if (selected?.Id == updated.Id)
-        {
-            AiService? before = selected.Service;
-            selected = updated;
-
-            if (before != updated.Service)
-            {
-                _ = Usage.Show(updated.Service);
-            }
-        }
-
-        BuildEntries();
-    }
 
     private void BuildEntries()
     {

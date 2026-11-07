@@ -593,39 +593,46 @@
           <Panel Grid.Column="0" Grid.ColumnSpan="5" IsVisible="{Binding ShowSettings, FallbackValue=False}" Background="{DynamicResource Background}">
            <ScrollViewer VerticalScrollBarVisibility="Auto">
             <StackPanel DataContext="{Binding Settings}" Margin="20,8,20,20" Spacing="8">
-              <TextBlock Text="AI service" Classes="muted" />
-              <ComboBox ItemsSource="{Binding Services}" SelectedItem="{Binding SelectedService}" HorizontalAlignment="Stretch">
+              <TextBlock Text="Changes apply when you close the settings." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              <TextBlock Text="AI provider" Classes="muted" Margin="0,8,0,0" />
+              <TextBlock Text="{Binding ProviderName}" />
+              <TextBlock Text="Fixed when the workspace was created." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              <TextBlock Text="Capability" Classes="muted" Margin="0,8,0,0" />
+              <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding SelectedCapability}" HorizontalAlignment="Stretch">
                 <ComboBox.ItemTemplate>
                   <DataTemplate>
                     <TextBlock Text="{Binding Name}" />
                   </DataTemplate>
                 </ComboBox.ItemTemplate>
               </ComboBox>
-              <TextBlock Text="Model" Classes="muted" Margin="0,8,0,0" />
-              <ComboBox ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" HorizontalAlignment="Stretch">
+              <TextBlock Text="Effort" Classes="muted" Margin="0,8,0,0" />
+              <ComboBox ItemsSource="{Binding Efforts}" SelectedItem="{Binding SelectedEffort}" HorizontalAlignment="Stretch">
                 <ComboBox.ItemTemplate>
                   <DataTemplate>
                     <TextBlock Text="{Binding Name}" />
                   </DataTemplate>
                 </ComboBox.ItemTemplate>
               </ComboBox>
-              <TextBlock Text="{Binding ModelDescription}" IsVisible="{Binding HasModelDescription}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
-              <ItemsControl ItemsSource="{Binding Settings}">
+              <ToggleSwitch IsChecked="{Binding IsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" Margin="0,8,0,0" />
+              <ToggleSwitch IsChecked="{Binding IsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
+              <ToggleSwitch IsChecked="{Binding IsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
+              <ToggleSwitch IsChecked="{Binding IsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
+              <TextBlock Text="Instructions" Classes="muted" Margin="0,8,0,0" />
+              <TextBox Text="{Binding Instructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
+              <TextBlock Text="How it runs" Classes="muted" Margin="0,8,0,0" IsVisible="{Binding HasDetails}" />
+              <ItemsControl ItemsSource="{Binding Details}" IsVisible="{Binding HasDetails}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>
-                    <StackPanel Spacing="4" Margin="0,8,0,0">
-                      <TextBlock Text="{Binding Name}" Classes="muted" />
-                      <ComboBox ItemsSource="{Binding Choices}" SelectedItem="{Binding ChoiceValue}" IsVisible="{Binding IsChoice}" HorizontalAlignment="Stretch" />
-                      <ToggleSwitch IsChecked="{Binding ToggleValue}" IsVisible="{Binding IsToggle}" OnContent="On" OffContent="Off" />
-                      <NumericUpDown Value="{Binding NumberValue}" Minimum="{Binding Minimum}" Maximum="{Binding Maximum}" Increment="{Binding Increment}" FormatString="0" IsVisible="{Binding IsNumber}" HorizontalAlignment="Stretch" />
-                      <TextBlock Text="{Binding Description}" IsVisible="{Binding HasDescription}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
-                    </StackPanel>
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                      <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="muted" FontSize="12" />
+                      <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" TextWrapping="Wrap" />
+                    </Grid>
                   </DataTemplate>
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
-              <local:TouchButton Content="Refresh models" Command="{Binding RefreshModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
               <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
               <local:TouchButton Content="Rename workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,16,0,0" />
+              <local:TouchButton Content="Move workspace to folder" Command="{Binding $parent[UserControl].DataContext.MoveWorkspaceToFolderCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
               <local:TouchButton Content="Delete workspace" Command="{Binding $parent[UserControl].DataContext.BeginDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             </StackPanel>
            </ScrollViewer>
@@ -755,7 +762,10 @@
             <local:TouchButton Content="New workspace" Command="{Binding NewWorkspaceCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             <local:TouchButton Content="Clone workspace" Command="{Binding CloneWorkspaceCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             <local:TouchButton Content="New group" Command="{Binding BeginNewGroupCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-            <local:TouchButton Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+              <local:TouchButton Grid.Column="0" Content="Change server" Command="{Binding ChangeServerCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+              <local:TouchButton Grid.Column="1" Content="&#x2699;&#xFE0E;" FontSize="20" ToolTip.Tip="AI environment settings" Command="{Binding EnvironmentCommand}" />
+            </Grid>
           </StackPanel>
         </Grid>
       </Border>

@@ -36,14 +36,15 @@ public sealed class WorkspaceControlTests : IDisposable
         workspace = new WorkspaceInfo { Id = Guid.NewGuid(), Folder = work };
         Mock<IWorkspaceManager> workspaces = new();
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
-        workspaces.Setup(x => x.AttachAiSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { AiSessionId = session }).Returns(Task.CompletedTask);
+        workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { SessionId = session }).Returns(Task.CompletedTask);
         Mock<IWorkspaceStore> store = new();
         GitService git = new();
         activity = new WorkspaceActivity(hub);
         WorkspaceSnapshots snapshots = new(git);
-        FakePromptProvider prompter = new() { OnCreate = session => session.Hang().Hang(), Models = [new PromptModel { Id = "sonnet", CallsTools = true }] };
-        prompts = new PromptService(workspaces.Object, store.Object, (_, _) => prompter, hub, activity, snapshots);
-        prompts.Configure(new ServerConfig { Port = 0, Key = "k" }, CancellationToken.None);
+        FakePrompter prompter = new() { OnCreate = session => session.Hang().Hang() };
+        HostMock host = new(prompter);
+        prompts = new PromptService(workspaces.Object, store.Object, host.Object, hub, activity, snapshots);
+        prompts.Configure(CancellationToken.None);
         loops = new WorkspaceLoops(workspaces.Object, prompts, activity, Mock.Of<IUsageService>(), hub, TimeSpan.FromMilliseconds(20));
         control = new WorkspaceControl(activity, prompts, loops, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots);
     }

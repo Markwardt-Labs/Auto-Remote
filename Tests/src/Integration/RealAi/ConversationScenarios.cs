@@ -19,7 +19,7 @@ public sealed class ConversationScenarios
         Assert.Equal([true, false], events.Where(item => item.Kind == RemoteEventKind.WorkingChanged).Select(item => item.Working == true).ToList());
         Assert.Empty(server.Failures(workspace));
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
-        Assert.Matches("^[0-9a-f]{32}$", (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single().AiSessionId);
+        Assert.Matches("^[0-9a-f]{32}$", (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single().SessionId);
     }
 
     [RealAiTheory]
@@ -32,7 +32,7 @@ public sealed class ConversationScenarios
         await server.Ask(workspace, "Remember the code word TANGERINE. Reply with just OK.");
         Assert.Contains("TANGERINE", await server.Ask(workspace, "What was the code word? Reply with just the word."), StringComparison.OrdinalIgnoreCase);
 
-        await server.Connection.ConfigureWorkspace(workspace.Id, service, RealServer.CheapModel(service), RealServer.Cheap(service, "medium"), CancellationToken.None);
+        await server.Economize(workspace, AiEffort.Medium);
         Assert.Contains("TANGERINE", await server.Ask(workspace, "What was the code word? Reply with just the word."), StringComparison.OrdinalIgnoreCase);
 
         await server.Stop();
@@ -47,7 +47,7 @@ public sealed class ConversationScenarios
     [RealAiTheory]
     [InlineData(AiService.ClaudeCode)]
     [InlineData(AiService.Codex)]
-    public async Task TheModelAndSettingsChosenInTheSettingsAreStoredByTheSessionOnceAPromptStartedAndComeBackAfterARestart(AiService service)
+    public async Task TheCapabilityAndEffortChosenInTheSettingsAreStoredByTheSessionOnceAPromptStartedAndComeBackAfterARestart(AiService service)
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("stored", service);
@@ -55,9 +55,9 @@ public sealed class ConversationScenarios
 
         await server.Stop();
         await server.Launch();
-        WorkspaceAi ai = await server.Connection.GetWorkspaceAi(workspace.Id, CancellationToken.None);
+        WorkspaceSettings settings = await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
 
-        Assert.Equal((RealServer.CheapModel(service), "low"), (ai.Model, ai.ModelSettings["effort"]));
+        Assert.Equal((AiCapability.Fast, AiEffort.Low), (settings.Capability, settings.Effort));
         Assert.Empty(server.Failures(workspace));
     }
 
@@ -71,9 +71,9 @@ public sealed class ConversationScenarios
 
         WorkspaceInfo renamed = await server.Connection.RenameWorkspace(workspace.Id, "later", CancellationToken.None);
         server.Track(renamed);
-        WorkspaceAi ai = await server.Connection.GetWorkspaceAi(renamed.Id, CancellationToken.None);
+        WorkspaceSettings settings = await server.Connection.GetWorkspaceSettings(renamed.Id, CancellationToken.None);
 
-        Assert.Equal((RealServer.CheapModel(service), "low"), (ai.Model, ai.ModelSettings["effort"]));
+        Assert.Equal((AiCapability.Fast, AiEffort.Low), (settings.Capability, settings.Effort));
     }
 
     [RealAiTheory]

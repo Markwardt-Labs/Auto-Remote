@@ -12,7 +12,7 @@ public enum RemoteCommand
     ListWorkspaces,
 
     /// <summary>
-    /// Creates a workspace in the existing folder <see cref="RemoteRequest.Path" />; answered in <see cref="RemoteResponse.Workspace" />.
+    /// Creates a workspace in the existing folder <see cref="RemoteRequest.Path" /> with the provider <see cref="RemoteRequest.Service" /> and, optionally, its own <see cref="RemoteRequest.ApiKey" />; the provider is permanent. Answered in <see cref="RemoteResponse.Workspace" />.
     /// </summary>
     CreateWorkspace,
 
@@ -22,9 +22,39 @@ public enum RemoteCommand
     RenameWorkspace,
 
     /// <summary>
-    /// Sets <see cref="RemoteRequest.Service" /> and, on the AI session, <see cref="RemoteRequest.Model" /> and <see cref="RemoteRequest.ModelSettings" /> for <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.Workspace" />.
+    /// Moves <see cref="RemoteRequest.WorkspaceId" /> to the existing folder <see cref="RemoteRequest.Path" />: the AI session is told that the workspace is there now, and no file is moved; answered in <see cref="RemoteResponse.Workspace" />.
     /// </summary>
-    ConfigureWorkspace,
+    MoveWorkspaceToFolder,
+
+    /// <summary>
+    /// Reads how the AI of <see cref="RemoteRequest.WorkspaceId" /> is run, which its session stores; answered in <see cref="RemoteResponse.Settings" />. The session is made when the workspace has none yet.
+    /// </summary>
+    GetWorkspaceSettings,
+
+    /// <summary>
+    /// Sets <see cref="RemoteRequest.Settings" /> on the AI session of <see cref="RemoteRequest.WorkspaceId" />, from its next prompt on, and answers with the settings as they now are in <see cref="RemoteResponse.Settings" />. The provider cannot be changed.
+    /// </summary>
+    SetWorkspaceSettings,
+
+    /// <summary>
+    /// Reads the environment the AI providers run in, without any API key; answered in <see cref="RemoteResponse.AiEnvironment" />.
+    /// </summary>
+    GetAiEnvironment,
+
+    /// <summary>
+    /// Replaces the environment the AI providers run in with <see cref="RemoteRequest.AiEnvironment" />, which the server keeps; answered with the environment as it now is in <see cref="RemoteResponse.AiEnvironment" />. An API key left out stays as it is.
+    /// </summary>
+    SetAiEnvironment,
+
+    /// <summary>
+    /// Asks the model server at <see cref="RemoteRequest.Url" /> (the one of the environment when omitted) which models it offers; answered in <see cref="RemoteResponse.Names" />.
+    /// </summary>
+    ListLocalModels,
+
+    /// <summary>
+    /// Asks the Stable Diffusion server at <see cref="RemoteRequest.Url" /> (the one of the environment when omitted) which checkpoints it offers; answered in <see cref="RemoteResponse.Names" />.
+    /// </summary>
+    ListImageModels,
 
     /// <summary>
     /// Moves <see cref="RemoteRequest.WorkspaceId" /> into the group <see cref="RemoteRequest.GroupId" />, or out of any group when that is omitted; answered in <see cref="RemoteResponse.Workspace" />.
@@ -117,16 +147,6 @@ public enum RemoteCommand
     GetLoop,
 
     /// <summary>
-    /// Reads the model and the values of its settings that the AI session of <see cref="RemoteRequest.WorkspaceId" /> runs with, which the session stores; answered in <see cref="RemoteResponse.Ai" />. The session is made when the workspace has none yet.
-    /// </summary>
-    GetWorkspaceAi,
-
-    /// <summary>
-    /// Lists the models <see cref="RemoteRequest.Service" /> can run with the settings each offers; answered in <see cref="RemoteResponse.Models" />, empty when the service is not installed or has none.
-    /// </summary>
-    ListModels,
-
-    /// <summary>
     /// Sends <see cref="RemoteRequest.Text" /> to the AI in <see cref="RemoteRequest.WorkspaceId" /> and answers at once; if the AI is already working the text joins that work. The conversation and the work arrive as <see cref="RemoteEvent" /> pushes.
     /// </summary>
     Prompt,
@@ -152,7 +172,7 @@ public enum RemoteCommand
     WatchWorkspace,
 
     /// <summary>
-    /// Clones the repository at <see cref="RemoteRequest.Url" /> into a new folder inside the existing folder <see cref="RemoteRequest.Path" /> and creates a workspace in it; the folder is named <see cref="RemoteRequest.Name" />, or after the repository when that is omitted. Answered in <see cref="RemoteResponse.Workspace" />.
+    /// Clones the repository at <see cref="RemoteRequest.Url" /> into a new folder inside the existing folder <see cref="RemoteRequest.Path" /> and creates a workspace in it with the provider <see cref="RemoteRequest.Service" /> and, optionally, its own <see cref="RemoteRequest.ApiKey" />; the folder is named <see cref="RemoteRequest.Name" />, or after the repository when that is omitted. Answered in <see cref="RemoteResponse.Workspace" />.
     /// </summary>
     CloneWorkspace,
 

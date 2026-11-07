@@ -47,15 +47,16 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
 | `offset` | number | `ShiftWorkspace`, `ShiftGroup` | How many places to move: negative is up, positive is down. |
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
-| `service` | string | `ConfigureWorkspace`, `GetUsage`, `ListModels` | `ClaudeCode`, `Codex` or `OpenCode` (the models of servers on the server's machine, such as Ollama, and those of OpenCode's own configuration). |
-| `model` | string | `ConfigureWorkspace` | The identifier of one of the models `ListModels` returns for the service, for the workspace's AI session. Refused when the service does not offer it. |
+| `service` | string | `CreateWorkspace`, `CloneWorkspace`, `GetUsage` | `ClaudeCode`, `Codex` or `Local` (the models of a server on the server's machine such as Ollama, run through OpenCode); the provider a new workspace runs on for good, which is the default of the environment when omitted. `OpenCode` is accepted as `Local`. |
+| `apiKey` | string | no | `CreateWorkspace`, `CloneWorkspace`: an API key for just the new workspace's AI session (Claude Code and Codex), which Live AI stores with the session; the server keeps no copy. Refused for `Local`. |
+| `settings` | workspace settings | `SetWorkspaceSettings` | How the workspace's AI session is run. |
+| `aiEnvironment` | ai environment | `SetAiEnvironment` | The environment of the server's AI. |
 | `loop` | loop settings | `StartLoop` | What the loop sends, how often and when it ends. |
-| `modelSettings` | object | `ConfigureWorkspace` | The values of the model's settings, text by setting identifier; refused for a setting the model does not have or a value it does not take, and a setting left out uses the model's default. |
 | `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
 | `data` | string | `UploadAttachment`, `Transcribe` | The file content or the WAV recording, base64 encoded. |
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
 | `environment` | object, optional | `RunScript` | The client's `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY` and `XDG_SESSION_TYPE`, when it has them. |
-| `url` | string | `CloneWorkspace`, `GitSetRemote` | A git repository URL. |
+| `url` | string | `CloneWorkspace`, `GitSetRemote`, `ListLocalModels`, `ListImageModels` | A git repository URL; for the two list commands the optional address of the model server or image server to ask, the one of the environment when omitted. |
 | `commit` | string | per command | A commit hash, 4 to 64 hexadecimal characters. |
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
@@ -80,14 +81,15 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `id` | number | Always; the request's `id`. |
 | `error` | string | Failure only. |
 | `catalog` | catalog | `ListWorkspaces` |
-| `workspace` | workspace | `CreateWorkspace`, `CloneWorkspace`, `RenameWorkspace`, `ConfigureWorkspace`, `MoveWorkspace` |
+| `workspace` | workspace | `CreateWorkspace`, `CloneWorkspace`, `RenameWorkspace`, `MoveWorkspace` |
 | `group` | group | `CreateGroup`, `RenameGroup`, `MoveGroup` |
 | `listing` | listing | `ListFolders`, `CreateFolder` |
 | `history` | history | `GetHistory` |
 | `usage` | usage | `GetUsage` |
-| `ai` | workspace ai | `GetWorkspaceAi` |
+| `settings` | workspace settings | `GetWorkspaceSettings`, `SetWorkspaceSettings` |
+| `aiEnvironment` | ai environment | `GetAiEnvironment`, `SetAiEnvironment` |
 | `loop` | loop, optional | `GetLoop` |
-| `models` | array of model | `ListModels` |
+| `names` | array of string | `ListLocalModels`, `ListImageModels` |
 | `files` | files | `ListFiles` |
 | `searchResults` | array of search result | `SearchFiles` |
 | `content` | content | `ReadFile` |
@@ -107,9 +109,9 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | Command | Request properties | Response property | Notes |
 | --- | --- | --- | --- |
 | `ListWorkspaces` | none | `catalog` | Workspaces and groups, each in its custom order. |
-| `CreateWorkspace` | `path` (existing folder on the server) | `workspace` | |
+| `CreateWorkspace` | `path` (existing folder on the server), optional `service`, optional `apiKey` | `workspace` | The workspace runs on `service` (the environment's default provider when omitted) for good; the provider cannot be changed afterwards. The AI session is made together with the workspace, on `apiKey` when one is given. A workspace whose session cannot be made (a key for a provider that takes none, or local models without a model for every capability) refuses the request and nothing is created. |
 | `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused unless the workspace is Ready. |
-| `ConfigureWorkspace` | `workspaceId`, `service`, `model`, optional `modelSettings` | `workspace` | The server checks the model and the settings against `ListModels` first and refuses what the service does not offer, and refuses to switch the service while the AI works. The service is stored with the workspace; the model and settings go to the AI session, which applies them from its next prompt and stores them when that prompt starts (until then the server keeps the choice, also when it closes an idle session). Switching the service detaches the workspace's AI session, since sessions belong to one service, and the new service gets a session of its own.
+| `MoveWorkspaceToFolder` | `workspaceId`, `path` (existing folder the workspace works in from now on) | `workspace` | Tells the workspace's AI session that the workspace is in `path` now, which is what tracks the place of a workspace; no file is moved by the server, so the folder has to exist already (the project may have been moved on disk, even from a folder that is gone). The workspace keeps its identifier, session, group and place. Refused unless the workspace is Ready, when `path` does not exist, and when it already hosts another workspace. Moving it to the folder it is in changes nothing. |
 | `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. It goes to the end of the group. |
 | `CreateGroup` | `name`, optional `parentId` | `group` | Names are trimmed, must be non-empty and unique ignoring case among the groups with the same parent. The parent must exist. |
 | `RenameGroup` | `groupId`, `name` | `group` | Same name rules as `CreateGroup`. |
@@ -125,8 +127,12 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes; does nothing when no loop runs. |
 | `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
-| `GetWorkspaceAi` | `workspaceId` | `ai` | The model and the values of its settings the workspace's AI session runs with, which the session stores (the server keeps none of its own); `ai.model` is omitted when the model the session was stored with is no longer offered. Makes the session when the workspace has none yet. |
-| `ListModels` | `service` | `models` | The models the service can run with tools, with the settings each offers (a reasoning effort, a context size and so on); empty when the service is not installed or signed in, or has none. Claude Code's and Codex's lists come from the tools themselves and OpenCode's from the local model server (Ollama by default) and its own configuration; the server asks again after about a minute. |
+| `GetWorkspaceSettings` | `workspaceId` | `settings` | How the workspace's AI session is run, as the session stores it (the server keeps none of its own): the provider, capability, effort, whether the shell, files outside the workspace, the web and image generation are on, the instructions, and descriptors, which are lines the session writes about how it runs (the model it chose and so on). Makes the session when the workspace has none yet. |
+| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider and the descriptors in it are ignored) from its next prompt on; the session stores them. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
+| `GetAiEnvironment` | none | `aiEnvironment` | The environment of the server's AI. API keys are never sent, only whether one is set. |
+| `SetAiEnvironment` | `aiEnvironment` | `aiEnvironment` | Replaces the environment and applies it to every workspace from the next session on. A key left out stays as it is and an empty one is removed. Refused for an empty command, an address that is not http or https, a context size below one, local models for some capabilities but not all, OpenAI image generation without a key and local image generation without a checkpoint for every capability. |
+| `ListLocalModels` | optional `url` | `names` | The models the local model server offers (Ollama by default). Refused when the server cannot be reached. |
+| `ListImageModels` | optional `url` | `names` | The checkpoints the Stable Diffusion server offers. Refused when the server cannot be reached. |
 | `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
@@ -134,7 +140,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
 | `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |
 | `WatchWorkspace` | `workspaceId` | none | Says that this connection has the workspace open, in place of the one it had open before. The server watches the whole folder of every workspace some connection has open, however deep, and pushes what changes in it to every connection as `FilesChanged` and `GitChanged` events, also when the change was made outside Auto Remote. The watch ends with the connection, and a connection that reconnects sends it again. |
-| `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |
+| `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name`, optional `service`, optional `apiKey` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |
 | `GetGitStatus` | `workspaceId` | `git` | `isRepo` is false for a folder that is not the root of a repository, and when git is not installed on the server. |
 | `GetGitChanges` | `workspaceId` | `gitChanges` | Paths that differ from the head commit plus the ones git ignores; empty for a folder that is not a repository. |
 | `GetGitHistory` | `workspaceId`, optional `skip`, `limit` | `gitHistory` | Commits of every branch and tag, newest first; empty before the first commit. |
@@ -175,9 +181,9 @@ Nested objects are shown after the table of the object that contains them. Optio
 | --- | --- | --- |
 | `id` | GUID | The workspace's identifier. |
 | `folder` | string | Absolute path of the workspace's folder on the server. The display name is not sent; clients take the last segment of this. |
-| `aiSessionId` | string, optional | The live AI session attached to the workspace (32 hexadecimal digits; an older server stored the tool's own GUID); omitted until the first prompt. Informational: the server manages it. |
+| `sessionId` | string, optional | The live AI session that holds the workspace's folder, provider and AI configuration (32 hexadecimal digits). Informational: the server manages it and replaces it, keeping the workspace, when the session can no longer be used. |
 | `groupId` | GUID, optional | The group the workspace is filed in; omitted when it is at the top level. |
-| `service` | string | The AI service the workspace's prompts run on; `ClaudeCode` by default. |
+| `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
 
 **catalog** (`ListWorkspaces`)
 
@@ -239,35 +245,36 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `nextRunAt` | string, optional | The earliest time the next prompt is sent (the interval after the start of the last run), absent before the first run; it waits further while the workspace is busy. |
 | `runs` | number | How many runs the loop has started. |
 
-**workspace ai** (`GetWorkspaceAi`)
+**workspace settings** (`GetWorkspaceSettings`, `SetWorkspaceSettings`)
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `model` | string, optional | The identifier of the model, one `ListModels` returns for the workspace's service; omitted when the session has none. |
-| `modelSettings` | object | The values of the model's settings, text by setting identifier. |
+| `service` | string | The provider, fixed when the workspace was created. |
+| `capability` | string | `Fast`, `Balanced`, `Strong` or `Max`; the model is picked from it. |
+| `effort` | string | `Low`, `Medium`, `High` or `Max`. |
+| `isShellAllowed` | bool | Whether the AI may run shell commands. |
+| `isSystemAccessAllowed` | bool | Whether the AI's file tools may use any path on the server's machine and not only the ones inside the workspace folder (the shell is not confined either way). |
+| `isWebAllowed` | bool | Whether the AI may use the web. |
+| `isImageGenerationAllowed` | bool | Whether the AI may generate images; needs an image service in the environment. |
+| `instructions` | string, optional | Standing instructions for the AI. |
+| `descriptors` | object | What the session says about how it runs, text by name; read only. |
 
-**model** (items of `models`)
-
-| Property | Type | Meaning |
-| --- | --- | --- |
-| `id` | string | The name the service takes for the model; what `model` holds. |
-| `name` | string, optional | The name to show; the id when omitted. |
-| `description` | string, optional | What the service says about the model. |
-| `acceptsImages` | bool, optional | Whether the model takes images; omitted when the service does not say. |
-| `contextLimit` | number, optional | Tokens the context window holds as the service runs the model; omitted when not known. |
-| `settings` | array of model setting | The settings the model offers; empty when it has none. |
-
-**model setting** (items of `model.settings`)
+**ai environment** (`GetAiEnvironment`, `SetAiEnvironment`)
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `id` | string | The key of the setting in `modelSettings` (of the request and of `ai`). |
-| `name` | string | The name to show. |
-| `description` | string, optional | What the setting does. |
-| `kind` | string | `Choice` (one of `choices`, from the lowest to the highest), `Toggle` (`true` or `false`) or `Number` (a whole number from `minimum` to `maximum`). |
-| `choices` | array of string | The values of a `Choice` setting; empty for the other kinds. |
-| `minimum`, `maximum` | number, optional | The range of a `Number` setting. |
-| `default` | string | The value used until another is chosen. |
+| `defaultService` | string | The provider new workspaces start with. |
+| `claudeCommand`, `codexCommand`, `localCommand` | string | The executables of Claude Code, Codex and OpenCode. |
+| `claudeConfigFolder`, `codexConfigFolder` | string, optional | The folder a tool keeps its configuration in. |
+| `hasClaudeApiKey`, `hasCodexApiKey`, `hasOpenAiApiKey` | bool | Whether the server holds the key; set by the server. |
+| `claudeApiKey`, `codexApiKey`, `openAiApiKey` | string, optional | Write only: a key to set (empty removes it, omitted keeps it). Never sent by the server. |
+| `localServer` | string | Address of the OpenAI compatible model server. |
+| `localModels` | capability names | The local model for each capability (`fast`, `balanced`, `strong`, `max`); all four or none. |
+| `localContexts` | capability contexts, optional | The context size in tokens for each capability, each optional. |
+| `imageGeneration` | string | `None`, `OpenAi` or `Local`. |
+| `localImageServer` | string | Address of the Stable Diffusion server. |
+| `localImageModels` | capability names | The checkpoint for each capability; all four when `imageGeneration` is `Local`. |
+| `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. A workspace keeps the values it was created with whatever this says later. |
 
 **usage** (`GetUsage`)
 

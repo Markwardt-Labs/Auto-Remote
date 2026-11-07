@@ -26,11 +26,6 @@ internal sealed record ServerConfig
     public string DefaultFolder { get; init; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
 
     /// <summary>
-    /// Gets the Claude Code executable to run for prompts.
-    /// </summary>
-    public string ClaudeCommand { get; init; } = "claude";
-
-    /// <summary>
     /// Gets the .NET command that runs scripts with <c>run --file</c>.
     /// </summary>
     public string DotnetCommand { get; init; } = "dotnet";
@@ -46,21 +41,6 @@ internal sealed record ServerConfig
     public string? CertificatePassword { get; init; }
 
     /// <summary>
-    /// Gets the Codex executable to run for prompts.
-    /// </summary>
-    public string CodexCommand { get; init; } = "codex";
-
-    /// <summary>
-    /// Gets the OpenCode executable that runs the prompts of workspaces that use a local model.
-    /// </summary>
-    public string OpenCodeCommand { get; init; } = "opencode";
-
-    /// <summary>
-    /// Gets the address of the OpenAI compatible API, with its version path, of the server that runs the local models (Ollama by default; LM Studio, llama.cpp and vLLM work too).
-    /// </summary>
-    public string LocalModelUrl { get; init; } = "http://localhost:11434/v1";
-
-    /// <summary>
     /// Gets the Whisper model that turns speech into text inside the server for voice input: a model name such as <c>small.en</c>, downloaded into the <c>models</c> folder of the data folder the first time, or the path of an existing <c>ggml</c> model file. Empty turns the built-in voice input off, unless <see cref="SpeechCommand" /> is set.
     /// </summary>
     public string? SpeechModel { get; init; } = "small.en";
@@ -74,4 +54,10 @@ internal sealed record ServerConfig
     /// Gets the arguments of the speech command, in which <c>{file}</c> stands for the path of the recorded WAV file; the command prints the text to its standard output.
     /// </summary>
     public IReadOnlyList<string> SpeechArguments { get; init; } = [];
+
+    /// <summary>
+    /// Gets the settings the file holds that this release does not read, by name as written. Only used to take the AI settings of an older release over once (see <see cref="IPrompterHost.Configure" />).
+    /// </summary>
+    [JsonExtensionData]
+    public IDictionary<string, JsonElement>? Other { get; init; }
 }

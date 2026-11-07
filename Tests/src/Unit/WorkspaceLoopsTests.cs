@@ -12,7 +12,9 @@ public sealed class WorkspaceLoopsTests : IDisposable
 
     private readonly Mock<IUsageService> usage = new();
 
-    private readonly FakePromptProvider prompter = new();
+    private readonly FakePrompter prompter = new();
+
+    private readonly HostMock host;
 
     private readonly EventHub hub = new();
 
@@ -32,7 +34,7 @@ public sealed class WorkspaceLoopsTests : IDisposable
     {
         workspace = new WorkspaceInfo { Id = Guid.NewGuid(), Folder = temp.Path };
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
-        workspaces.Setup(x => x.AttachAiSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         subscription = hub.Subscribe(remoteEvent =>
         {
             lock (events)
@@ -41,8 +43,9 @@ public sealed class WorkspaceLoopsTests : IDisposable
             }
         });
         activity = new WorkspaceActivity(hub);
-        prompts = new PromptService(workspaces.Object, store.Object, (_, _) => prompter, hub, activity, snapshots.Object);
-        prompts.Configure(new ServerConfig { Port = 0, Key = "k" }, stopping.Token);
+        host = new HostMock(prompter);
+        prompts = new PromptService(workspaces.Object, store.Object, host.Object, hub, activity, snapshots.Object);
+        prompts.Configure(stopping.Token);
         prompter.OnCreate = session => session.ReplyWith(prompt => [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
         usage.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(10));
     }

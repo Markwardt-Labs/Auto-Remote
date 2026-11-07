@@ -1,27 +1,28 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// Reads how much of the subscription of an AI service is used, from the service's own report.
+/// Reads how much of the subscription of an AI provider is used, from the provider's own report.
 /// </summary>
 internal interface IUsageService
 {
     /// <summary>
-    /// Supplies the settings that name the AI executables.
+    /// Reads the usage limits of a provider as of at most a minute ago, so asking often costs nothing. A reading that is due runs a minimal prompt of the provider, which Live AI does to learn the limits, unless a prompt of a workspace reported them lately.
     /// </summary>
-    /// <param name="config">The server settings.</param>
-    void Configure(ServerConfig config);
+    /// <param name="service">The AI provider.</param>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The limits the provider reports; without any windows when it reports none or could not be read.</returns>
+    Task<UsageStatus> Get(AiService service, CancellationToken cancellation);
 
     /// <summary>
-    /// Reads the usage limits of a service as of at most a minute ago, so asking often costs nothing.
+    /// Takes the limits a prompt of a workspace reported, which are as good as a reading and cost nothing.
     /// </summary>
-    /// <param name="service">The AI service.</param>
-    /// <param name="cancellation">Cancels the read.</param>
-    /// <returns>The limits the service reports; without any windows when it reports none or could not be read.</returns>
-    Task<UsageStatus> Get(AiService service, CancellationToken cancellation);
+    /// <param name="service">The AI provider.</param>
+    /// <param name="windows">The limits.</param>
+    void Note(AiService service, IReadOnlyList<PromptWindow> windows);
 }
 
 /// <inheritdoc />
-internal sealed class UsageService(Func<ServerConfig, AiService, IPromptProvider> createProvider) : IUsageService
+internal sealed class UsageService(IPrompterHost host) : IUsageService
 {
     private readonly ConcurrentDictionary<AiService, Cached> cache = new();
 
@@ -31,10 +32,8 @@ internal sealed class UsageService(Func<ServerConfig, AiService, IPromptProvider
 
     private readonly TimeSpan retry = TimeSpan.FromSeconds(10);
 
-    private ServerConfig config = new() { Port = 0, Key = string.Empty };
-
     /// <inheritdoc />
-    public void Configure(ServerConfig config) => this.config = config;
+    public void Note(AiService service, IReadOnlyList<PromptWindow> windows) => cache[service] = new Cached(Status(service, windows), DateTimeOffset.UtcNow + lifetime);
 
     /// <inheritdoc />
     public async Task<UsageStatus> Get(AiService service, CancellationToken cancellation)
@@ -63,15 +62,17 @@ internal sealed class UsageService(Func<ServerConfig, AiService, IPromptProvider
     {
         try
         {
-            IReadOnlyList<PromptWindow> windows = await createProvider(config, service).GetWindows(cancellation);
-            return new UsageStatus { Service = service, Windows = [.. windows.Select(Period)] };
+            PromptTestResult result = await host.Prompter.Test(host.Setup(service), cancellation);
+            return result.IsAvailable ? Status(service, result.Windows ?? []) : null;
         }
-        catch (Exception exception) when (exception is PromptSessionException or IOException)
+        catch (Exception exception) when (exception is PromptSessionException or IOException or ArgumentException or RequestException)
         {
             cancellation.ThrowIfCancellationRequested();
             return null;
         }
     }
+
+    private UsageStatus Status(AiService service, IReadOnlyList<PromptWindow> windows) => new() { Service = service, Windows = [.. windows.Select(Period)] };
 
     private UsagePeriod Period(PromptWindow window)
     {

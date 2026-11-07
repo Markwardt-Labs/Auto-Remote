@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The new workspace screen: pick or create the server folder that will host the workspace.
+/// The new workspace screen: pick or create the server folder that will host the workspace and choose the AI provider it runs on for good, with an optional API key for its session.
 /// </summary>
 internal sealed class NewWorkspaceViewModel : ViewModelBase
 {
@@ -13,6 +13,7 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
     {
         this.connection = connection;
         Browser = new FolderBrowserViewModel(connection);
+        Provider = new ProviderPickerViewModel(connection);
         StartCommand = new AsyncCommand(_ => Start(), () => Browser.CanChoose);
         Browser.PropertyChanged += (_, args) =>
         {
@@ -46,6 +47,11 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
     public FolderBrowserViewModel Browser { get; }
 
     /// <summary>
+    /// Gets the choice of the provider the workspace runs on for good.
+    /// </summary>
+    public ProviderPickerViewModel Provider { get; }
+
+    /// <summary>
     /// Gets the command that creates the workspace in the browser's current folder.
     /// </summary>
     public AsyncCommand StartCommand { get; }
@@ -56,16 +62,20 @@ internal sealed class NewWorkspaceViewModel : ViewModelBase
     public AsyncCommand CancelCommand { get; }
 
     /// <summary>
-    /// Shows the folder browser at the server's default folder.
+    /// Shows the folder browser at the server's default folder and selects the default provider.
     /// </summary>
-    /// <returns>A task that completes once the folder is shown.</returns>
-    public Task Open() => Browser.Start();
+    /// <returns>A task that completes once both are shown.</returns>
+    public async Task Open()
+    {
+        await Provider.Load();
+        await Browser.Start();
+    }
 
     private async Task Start()
     {
         WorkspaceInfo? workspace = null;
 
-        if (await Attempt(async () => workspace = await connection.CreateWorkspace(Browser.CurrentPath, CancellationToken.None)) && workspace is not null)
+        if (await Attempt(async () => workspace = await connection.CreateWorkspace(Browser.CurrentPath, Provider.Service, Provider.Key, CancellationToken.None)) && workspace is not null)
         {
             Created?.Invoke(workspace);
         }

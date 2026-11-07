@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The settings of one workspace: the AI service, the model of that service and the settings that model offers. The models come from the server and so do their settings, which are shown according to their kind; the model and the values the workspace's AI session runs with are read from the server too, which keeps no copy of its own.
+/// The settings of one workspace's AI session: how capable it is, how hard it thinks, what it may do and its standing instructions. The provider is fixed when the workspace is created and only shown. Edits are pending and are sent to the server together by <see cref="Apply" /> when the settings are closed; the server reads the values from the session and writes them back to it, so nothing is kept here beyond what is on screen.
 /// </summary>
 internal sealed class SettingsViewModel : ViewModelBase
 {
@@ -13,214 +13,202 @@ internal sealed class SettingsViewModel : ViewModelBase
     public SettingsViewModel(IServerConnection connection, WorkspaceInfo workspace)
     {
         this.connection = connection;
-        this.workspace = workspace;
-        selectedService = Services.First(choice => choice.Service == workspace.Service);
-        values = [];
-        RefreshModelsCommand = new AsyncCommand(_ => Load());
+        ProviderName = workspace.Service.Label();
+        workspaceId = workspace.Id;
         _ = Load();
     }
 
     private readonly IServerConnection connection;
 
-    private WorkspaceInfo workspace;
+    private readonly Guid workspaceId;
 
-    private ServiceChoice selectedService;
+    private WorkspaceSettings current = new();
 
-    private string? modelId;
+    private WorkspaceSettings pending = new();
 
-    private Dictionary<string, string> values;
+    private IReadOnlyList<DetailLine> details = [];
 
-    private List<ModelInfo> offered = [];
-
-    private IReadOnlyList<ModelChoice> models = [];
-
-    private IReadOnlyList<ModelSettingViewModel> settings = [];
+    private int edits;
 
     /// <summary>
-    /// Raised with the updated workspace after the server accepts a change.
+    /// Gets the name of the provider the workspace runs on, which never changes.
     /// </summary>
-    public event Action<WorkspaceInfo>? Changed;
+    public string ProviderName { get; }
 
     /// <summary>
-    /// Reads the models of the chosen service and the model and settings of the workspace's AI session from the server again.
+    /// Gets the capabilities to choose from.
+    /// </summary>
+    public IReadOnlyList<Choice<AiCapability>> Capabilities { get; } = [.. Enum.GetValues<AiCapability>().Select(value => new Choice<AiCapability>(value, value.ToString()))];
+
+    /// <summary>
+    /// Gets the efforts to choose from.
+    /// </summary>
+    public IReadOnlyList<Choice<AiEffort>> Efforts { get; } = [.. Enum.GetValues<AiEffort>().Select(value => new Choice<AiEffort>(value, value.ToString()))];
+
+    /// <summary>
+    /// Gets what the session says about how it runs (the model it chose and the settings it runs that model with).
+    /// </summary>
+    public IReadOnlyList<DetailLine> Details => details;
+
+    /// <summary>
+    /// Gets a value indicating whether the session says anything about how it runs.
+    /// </summary>
+    public bool HasDetails => details.Count > 0;
+
+    /// <summary>
+    /// Gets a value indicating whether something was changed that <see cref="Apply" /> has not sent yet.
+    /// </summary>
+    public bool HasPending => Differs(pending, current);
+
+    /// <summary>
+    /// Gets or sets the capability, which decides the model.
+    /// </summary>
+    public Choice<AiCapability> SelectedCapability
+    {
+        get => Capabilities.First(choice => choice.Value == pending.Capability);
+        set
+        {
+            if (value is not null)
+            {
+                Edit(pending with { Capability = value.Value });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the effort.
+    /// </summary>
+    public Choice<AiEffort> SelectedEffort
+    {
+        get => Efforts.First(choice => choice.Value == pending.Effort);
+        set
+        {
+            if (value is not null)
+            {
+                Edit(pending with { Effort = value.Value });
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets whether the AI may run shell commands.
+    /// </summary>
+    public bool IsShellAllowed
+    {
+        get => pending.IsShellAllowed;
+        set => Edit(pending with { IsShellAllowed = value });
+    }
+
+    /// <summary>
+    /// Gets or sets whether the AI's file tools may use any path on the server's machine and not only the ones inside the workspace.
+    /// </summary>
+    public bool IsSystemAccessAllowed
+    {
+        get => pending.IsSystemAccessAllowed;
+        set => Edit(pending with { IsSystemAccessAllowed = value });
+    }
+
+    /// <summary>
+    /// Gets or sets whether the AI may use the web.
+    /// </summary>
+    public bool IsWebAllowed
+    {
+        get => pending.IsWebAllowed;
+        set => Edit(pending with { IsWebAllowed = value });
+    }
+
+    /// <summary>
+    /// Gets or sets whether the AI may generate images.
+    /// </summary>
+    public bool IsImageGenerationAllowed
+    {
+        get => pending.IsImageGenerationAllowed;
+        set => Edit(pending with { IsImageGenerationAllowed = value });
+    }
+
+    /// <summary>
+    /// Gets or sets the standing instructions the AI is given.
+    /// </summary>
+    public string Instructions
+    {
+        get => pending.Instructions ?? string.Empty;
+        set => Edit(pending with { Instructions = value });
+    }
+
+    /// <summary>
+    /// Reads the settings from the server again, unless there are edits that were not applied (they stay).
     /// </summary>
     /// <returns>A task that completes once the read has finished.</returns>
-    public Task Reload() => Load();
+    public Task Reload() => HasPending ? Task.CompletedTask : Load();
 
     /// <summary>
-    /// Gets the AI services to choose from.
+    /// Sends the edits to the server, which gives them to the session from its next prompt on.
     /// </summary>
-    public IReadOnlyList<ServiceChoice> Services { get; } = [.. Enum.GetValues<AiService>().Select(service => new ServiceChoice(service, service.Label()))];
-
-    /// <summary>
-    /// Gets the command that reads the models of the chosen service from the server again.
-    /// </summary>
-    public AsyncCommand RefreshModelsCommand { get; }
-
-    /// <summary>
-    /// Gets the models the chosen service offers, the one the workspace uses included.
-    /// </summary>
-    public IReadOnlyList<ModelChoice> Models => models;
-
-    /// <summary>
-    /// Gets the settings the selected model offers.
-    /// </summary>
-    public IReadOnlyList<ModelSettingViewModel> Settings => settings;
-
-    /// <summary>
-    /// Gets a value indicating whether the selected model offers any setting.
-    /// </summary>
-    public bool HasSettings => settings.Count > 0;
-
-    /// <summary>
-    /// Gets what the service says about the selected model, or an empty text.
-    /// </summary>
-    public string ModelDescription => Selected()?.Description ?? string.Empty;
-
-    /// <summary>
-    /// Gets a value indicating whether the service says something about the selected model.
-    /// </summary>
-    public bool HasModelDescription => ModelDescription.Length > 0;
-
-    /// <summary>
-    /// Gets or sets the AI service; setting it switches to that service's default model and saves it to the server.
-    /// </summary>
-    public ServiceChoice SelectedService
+    /// <returns><see langword="true" /> when there was nothing to send or the server took the edits; <see langword="false" /> when it refused, which <see cref="ViewModelBase.Error" /> says, and the edits stay pending.</returns>
+    public async Task<bool> Apply()
     {
-        get => selectedService;
-        set
+        if (!HasPending)
         {
-            if (value is not null && value != selectedService)
-            {
-                _ = SelectService(value);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the model; setting it keeps the values of the settings both models have, gives the rest their defaults and saves it to the server.
-    /// </summary>
-    public ModelChoice? SelectedModel
-    {
-        get => models.FirstOrDefault(choice => choice.Id == modelId);
-        set
-        {
-            if (value is not null && value.Id != modelId)
-            {
-                modelId = value.Id;
-                values = Carry(Selected());
-                BuildSettings();
-                _ = Configure();
-            }
-        }
-    }
-
-    private ModelInfo? Selected() => offered.FirstOrDefault(model => model.Id == modelId);
-
-    private Dictionary<string, string> Carry(ModelInfo? model) => model is null ? [] : model.Settings.ToDictionary(setting => setting.Id, setting => values.TryGetValue(setting.Id, out string? kept) && setting.Accepts(kept) ? kept : setting.Default);
-
-    private void BuildSettings()
-    {
-        settings = [.. (Selected()?.Settings ?? []).Select(setting => new ModelSettingViewModel(setting, values.GetValueOrDefault(setting.Id, setting.Default), Change))];
-        Raise(nameof(Settings));
-        Raise(nameof(HasSettings));
-        Raise(nameof(ModelDescription));
-        Raise(nameof(HasModelDescription));
-        Raise(nameof(SelectedModel));
-    }
-
-    private void Change(string id, string value)
-    {
-        values[id] = value;
-        _ = Configure();
-    }
-
-    private async Task<IReadOnlyList<ModelInfo>?> List(AiService service)
-    {
-        IReadOnlyList<ModelInfo> found = [];
-        return await Attempt(async () => found = await connection.ListModels(service, CancellationToken.None)) ? found : null;
-    }
-
-    private void Show(IReadOnlyList<ModelInfo> found)
-    {
-        offered = [.. found];
-        List<ModelChoice> choices = [.. found.Select(model => new ModelChoice(model.Id, model.Name ?? model.Id))];
-
-        if (modelId is not null && choices.All(choice => choice.Id != modelId))
-        {
-            choices.Insert(0, new ModelChoice(modelId, modelId));
+            return true;
         }
 
-        models = choices;
-        Raise(nameof(Models));
-        BuildSettings();
+        WorkspaceSettings? saved = null;
+        WorkspaceSettings wanted = pending with { Instructions = (pending.Instructions ?? string.Empty).Trim() };
+
+        if (await Attempt(async () => saved = await connection.SetWorkspaceSettings(workspaceId, wanted, CancellationToken.None)) && saved is not null)
+        {
+            Show(saved);
+            return true;
+        }
+
+        return false;
+    }
+
+    private bool Differs(WorkspaceSettings first, WorkspaceSettings second)
+        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, (first.Instructions ?? string.Empty).Trim()) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, (second.Instructions ?? string.Empty).Trim());
+
+    private void Edit(WorkspaceSettings edited)
+    {
+        edits++;
+        pending = edited;
+        Raise(nameof(HasPending));
     }
 
     private async Task Load()
     {
-        if (await List(selectedService.Service) is not { } found)
-        {
-            return;
-        }
+        WorkspaceSettings? read = null;
+        int before = edits;
 
-        if (selectedService.Service == workspace.Service)
+        if (await Attempt(async () => read = await connection.GetWorkspaceSettings(workspaceId, CancellationToken.None)) && read is not null)
         {
-            WorkspaceAi? ai = null;
-
-            if (!await Attempt(async () => ai = await connection.GetWorkspaceAi(workspace.Id, CancellationToken.None)) || ai is null)
+            if (edits == before)
             {
+                Show(read);
                 return;
             }
 
-            modelId = ai.Model;
-            values = new Dictionary<string, string>(ai.ModelSettings);
+            current = read;
+            details = [.. read.Descriptors.Select(pair => new DetailLine(pair.Key, pair.Value))];
+            Raise(nameof(Details));
+            Raise(nameof(HasDetails));
+            Raise(nameof(HasPending));
         }
-
-        Show(found);
     }
 
-    private async Task SelectService(ServiceChoice choice)
+    private void Show(WorkspaceSettings settings)
     {
-        IReadOnlyList<ModelInfo>? found = await List(choice.Service);
-
-        if (found is null)
-        {
-            Raise(nameof(SelectedService));
-            return;
-        }
-
-        if (found.Count == 0)
-        {
-            Error = $"{choice.Name} offers no models. Is it installed and signed in on the server's machine?";
-            Raise(nameof(SelectedService));
-            return;
-        }
-
-        selectedService = choice;
-        modelId = (found.FirstOrDefault(model => model.Id == choice.Service.DefaultModel()) ?? found[0]).Id;
-        values = [];
-        Show(found);
-        values = Carry(Selected());
-        BuildSettings();
-        Raise(nameof(SelectedService));
-        await Configure();
-    }
-
-    private async Task Configure()
-    {
-        WorkspaceInfo? updated = null;
-
-        if (modelId is not null && await Attempt(async () => updated = await connection.ConfigureWorkspace(workspace.Id, selectedService.Service, modelId, values, CancellationToken.None)) && updated is not null)
-        {
-            workspace = updated;
-            Changed?.Invoke(updated);
-            return;
-        }
-
-        selectedService = Services.First(choice => choice.Service == workspace.Service);
-        Raise(nameof(SelectedService));
-        string? failure = Error;
-        await Load();
-        Error ??= failure;
+        current = settings;
+        pending = settings;
+        details = [.. settings.Descriptors.Select(pair => new DetailLine(pair.Key, pair.Value))];
+        Raise(nameof(Details));
+        Raise(nameof(HasDetails));
+        Raise(nameof(HasPending));
+        Raise(nameof(SelectedCapability));
+        Raise(nameof(SelectedEffort));
+        Raise(nameof(IsShellAllowed));
+        Raise(nameof(IsSystemAccessAllowed));
+        Raise(nameof(IsWebAllowed));
+        Raise(nameof(IsImageGenerationAllowed));
+        Raise(nameof(Instructions));
     }
 }

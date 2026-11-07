@@ -11,7 +11,11 @@ public sealed class NewWorkspaceViewModelTests
         Folders = [new FolderEntry { Name = "code", Path = "/home/me/code" }],
     };
 
-    public NewWorkspaceViewModelTests() => connection.Setup(x => x.ListFolders(null, It.IsAny<CancellationToken>())).ReturnsAsync(home);
+    public NewWorkspaceViewModelTests()
+    {
+        connection.Setup(x => x.ListFolders(null, It.IsAny<CancellationToken>())).ReturnsAsync(home);
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment { DefaultService = AiService.Codex });
+    }
 
     [Fact]
     public async Task Open_ShowsHomeFolder()
@@ -36,5 +40,74 @@ public sealed class NewWorkspaceViewModelTests
         model.CancelCommand.Execute(null);
 
         Assert.True(cancelled);
+    }
+
+    [Fact]
+    public async Task Open_SelectsTheDefaultProviderOfTheEnvironment()
+    {
+        NewWorkspaceViewModel model = new(connection.Object);
+
+        await model.Open();
+
+        Assert.Equal(AiService.Codex, model.Provider.Service);
+        Assert.Equal(["Claude Code", "OpenAI Codex", "Local models"], model.Provider.Services.Select(choice => choice.Name));
+    }
+
+    [Fact]
+    public async Task Open_KeepsTheFirstProviderWhenTheEnvironmentCannotBeRead()
+    {
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("offline"));
+        NewWorkspaceViewModel model = new(connection.Object);
+
+        await model.Open();
+
+        Assert.Equal(AiService.ClaudeCode, model.Provider.Service);
+        Assert.True(model.StartCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task Start_CreatesTheWorkspaceWithTheChosenProviderAndTheKeyForItsSession()
+    {
+        WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = "/home/me", Service = AiService.Codex };
+        connection.Setup(x => x.CreateWorkspace("/home/me", AiService.Codex, "sk-1", It.IsAny<CancellationToken>())).ReturnsAsync(created);
+        NewWorkspaceViewModel model = new(connection.Object);
+        WorkspaceInfo? raised = null;
+        model.Created += workspace => raised = workspace;
+        await model.Open();
+        model.Provider.ApiKey = " sk-1 ";
+
+        model.StartCommand.Execute(null);
+        for (int attempt = 0; attempt < 500 && raised is null; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(created, raised);
+    }
+
+    [Fact]
+    public async Task Provider_OffersNoKeyFieldForLocalModelsAndSendsNoKeyForThem()
+    {
+        NewWorkspaceViewModel model = new(connection.Object);
+        await model.Open();
+        model.Provider.ApiKey = "sk-1";
+
+        model.Provider.SelectedService = model.Provider.Services.Single(choice => choice.Service == AiService.Local);
+
+        Assert.False(model.Provider.TakesApiKey);
+        Assert.Null(model.Provider.Key);
+        model.Provider.SelectedService = model.Provider.Services.Single(choice => choice.Service == AiService.ClaudeCode);
+        Assert.True(model.Provider.TakesApiKey);
+        Assert.Equal("sk-1", model.Provider.Key);
+    }
+
+    [Fact]
+    public async Task Provider_SendsNoKeyWhenItIsBlank()
+    {
+        NewWorkspaceViewModel model = new(connection.Object);
+        await model.Open();
+        model.Provider.ApiKey = "   ";
+
+        Assert.Null(model.Provider.Key);
     }
 }

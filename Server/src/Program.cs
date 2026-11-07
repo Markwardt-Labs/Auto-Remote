@@ -30,17 +30,17 @@ internal static class Program
         IFolderBrowser folders = new FolderBrowser();
         IWorkspaceStore store = new WorkspaceStore();
         IEventHub events = new EventHub();
-        IWorkspaceManager workspaces = new WorkspaceManager(store, folders, events);
+        IPrompterHost host = new PrompterHost();
+        IWorkspaceManager workspaces = new WorkspaceManager(store, folders, events, host);
         IGitService git = new GitService();
         IWorkspaceActivity activity = new WorkspaceActivity(events);
         IWorkspaceSnapshots snapshots = new WorkspaceSnapshots(git);
-        IAiProviders providers = new AiProviders();
-        IPromptService prompts = new PromptService(workspaces, store, providers.Create, events, activity, snapshots);
+        IUsageService usage = new UsageService(host);
+        IPromptService prompts = new PromptService(workspaces, store, host, events, activity, snapshots, usage);
         IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity);
         IScriptRunner scripts = new ScriptRunner(events, activity);
-        IUsageService usage = new UsageService(providers.Create);
         IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), new ModelService(providers.Create), loops, new WorkspaceWatcher(events, log));
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), host, loops, new WorkspaceWatcher(events, log));
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log), Console.Out);
         try
         {

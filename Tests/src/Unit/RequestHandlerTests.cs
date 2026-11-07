@@ -28,7 +28,7 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<ISpeechService> speech = new();
 
-    private readonly Mock<IModelService> models = new();
+    private readonly Mock<IPrompterHost> host = new();
 
     private readonly Mock<IWorkspaceLoops> loops = new();
 
@@ -42,7 +42,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, models.Object, loops.Object, watcher.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object);
     }
 
     [Fact]
@@ -52,7 +52,8 @@ public sealed class RequestHandlerTests
 
         await handler.Open(config, CancellationToken.None);
 
-        prompts.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
+        host.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
+        prompts.Verify(x => x.Configure(CancellationToken.None), Times.Once);
         speech.Verify(x => x.Configure(config), Times.Once);
         scripts.Verify(x => x.Configure(config, CancellationToken.None), Times.Once);
         folders.Verify(x => x.Configure(config.DefaultFolder), Times.Once);
@@ -73,7 +74,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_CreateWorkspace_UsesPath()
     {
-        workspaces.Setup(x => x.Create("/work/app", It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app" }, owner, CancellationToken.None);
 
@@ -92,7 +93,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_ManagerFailure_BecomesErrorResponse()
     {
-        workspaces.Setup(x => x.Create(It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("taken"));
+        workspaces.Setup(x => x.Create(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("taken"));
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/x" }, owner, CancellationToken.None);
 
@@ -101,8 +102,9 @@ public sealed class RequestHandlerTests
 
     [Theory]
     [InlineData(RemoteCommand.RenameWorkspace)]
+    [InlineData(RemoteCommand.MoveWorkspaceToFolder)]
     [InlineData(RemoteCommand.DeleteWorkspace)]
-    public async Task Handle_RenameOrDeleteWhileNotReady_IsRefused(RemoteCommand command)
+    public async Task Handle_RenameMoveOrDeleteWhileNotReady_IsRefused(RemoteCommand command)
     {
         activity.TryEnter(workspace.Id, WorkspaceState.Managing);
 
@@ -111,6 +113,32 @@ public sealed class RequestHandlerTests
         Assert.NotNull(response.Error);
         workspaces.Verify(x => x.Delete(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
         workspaces.Verify(x => x.Rename(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        workspaces.Verify(x => x.MoveToFolder(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Handle_MoveWorkspaceToFolder_ClosesTheSessionStopsWatchingAndMovesTheWorkspaceToThePath()
+    {
+        WorkspaceInfo moved = workspace with { Folder = "/archive/app" };
+        workspaces.Setup(x => x.MoveToFolder(workspace.Id, "/archive", It.IsAny<CancellationToken>())).ReturnsAsync(moved);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = workspace.Id, Path = "/archive" }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal(moved, response.Workspace);
+        Assert.Contains("needs a path", missing.Error);
+        prompts.Verify(x => x.Release(workspace.Id), Times.AtLeastOnce);
+        watcher.Verify(x => x.Forget(workspace.Id), Times.AtLeastOnce);
+    }
+
+    [Fact]
+    public async Task Handle_MoveWorkspaceToFolder_ReportsWhyTheWorkspaceCannotMove()
+    {
+        workspaces.Setup(x => x.MoveToFolder(workspace.Id, "/archive", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("'app' already exists in '/archive'."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = workspace.Id, Path = "/archive" }, owner, CancellationToken.None);
+
+        Assert.Contains("already exists", response.Error);
     }
 
     [Fact]
@@ -261,50 +289,6 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ConfigureWorkspace_ChecksTheModelAndItsSettingsThenStoresTheServiceAndGivesTheModelToTheAiSession()
-    {
-        Dictionary<string, string> settings = new() { ["effort"] = "max" };
-        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        workspaces.Setup(x => x.Configure(workspace.Id, AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.ClaudeCode, Model = "opus", ModelSettings = settings }, owner, CancellationToken.None);
-
-        Assert.Null(response.Error);
-        Assert.Equal(workspace, response.Workspace);
-        models.Verify(x => x.Validate(AiService.ClaudeCode, "opus", settings, It.IsAny<CancellationToken>()), Times.Once);
-        prompts.Verify(x => x.SetAi(workspace.Id, "opus", settings, It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
-    public async Task Handle_ConfigureWorkspace_RefusesWhatTheServiceDoesNotOfferWithoutChangingAnything()
-    {
-        models.Setup(x => x.Validate(AiService.Codex, "nope", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("OpenAI Codex does not offer the model nope."));
-
-        RemoteResponse refused = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex, Model = "nope" }, owner, CancellationToken.None);
-        RemoteResponse incomplete = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex }, owner, CancellationToken.None);
-
-        Assert.Contains("does not offer the model nope", refused.Error);
-        Assert.Contains("needs", incomplete.Error);
-        workspaces.Verify(x => x.Configure(It.IsAny<Guid>(), It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.Never);
-        prompts.Verify(x => x.SetAi(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Never);
-    }
-
-    [Fact]
-    public async Task Handle_ConfigureWorkspace_RefusesSwitchingTheServiceWhileTheAiWorksButAllowsChangingTheModel()
-    {
-        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        workspaces.Setup(x => x.Configure(workspace.Id, It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        prompts.Setup(x => x.IsBusy(workspace.Id)).Returns(true);
-
-        RemoteResponse switching = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex, Model = "gpt-5.6-terra" }, owner, CancellationToken.None);
-        RemoteResponse same = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.ClaudeCode, Model = "opus" }, owner, CancellationToken.None);
-
-        Assert.Contains("Stop the AI's work", switching.Error);
-        Assert.Null(same.Error);
-        prompts.Verify(x => x.SetAi(workspace.Id, "opus", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Once);
-    }
-
-    [Fact]
     public async Task Handle_StartLoop_PassesTheSettingsOnWhileTheAiCanTakeInput()
     {
         LoopSettings settings = new() { Prompt = "check", Condition = LoopCondition.Runs, Runs = 3, IntervalSeconds = 60 };
@@ -335,39 +319,113 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ConfigureWorkspace_RefusesSwitchingTheServiceWhileALoopRuns()
+    public async Task Handle_CreateWorkspace_GivesTheWorkspaceTheRequestedProviderAndTheKeyForItsSession()
     {
-        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        loops.Setup(x => x.Get(workspace.Id)).Returns(new LoopInfo { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UtcNow });
+        workspaces.Setup(x => x.Create("/work/app", AiService.Codex, "sk-1", It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Codex });
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = workspace.Id, Service = AiService.Codex, Model = "gpt-5.6-terra" }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app", Service = AiService.Codex, ApiKey = "sk-1" }, owner, CancellationToken.None);
 
-        Assert.Contains("Cancel the loop", response.Error);
-        workspaces.Verify(x => x.Configure(It.IsAny<Guid>(), It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Null(response.Error);
+        Assert.Equal(AiService.Codex, response.Workspace?.Service);
     }
 
     [Fact]
-    public async Task Handle_GetWorkspaceAi_AnswersWithTheModelAndSettingsOfTheAiSession()
+    public async Task Handle_CreateWorkspace_UsesTheDefaultProviderOfTheEnvironmentWhenNoneIsGiven()
     {
-        WorkspaceAi ai = new() { Model = "sonnet", ModelSettings = new Dictionary<string, string> { ["effort"] = "high" } };
-        prompts.Setup(x => x.GetAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(ai);
+        host.Setup(x => x.DefaultService).Returns(AiService.Local);
+        workspaces.Setup(x => x.Create("/work/app", AiService.Local, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Local });
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 6, Command = RemoteCommand.GetWorkspaceAi, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app" }, owner, CancellationToken.None);
 
-        Assert.Equal(ai, response.Ai);
+        Assert.Equal(AiService.Local, response.Workspace?.Service);
     }
 
     [Fact]
-    public async Task Handle_ListModels_AnswersWithTheModelsOfTheService()
+    public async Task Handle_CreateWorkspace_ReportsWhyTheWorkspaceOrItsSessionCannotBeMade()
     {
-        ModelInfo[] offered = [new ModelInfo { Id = "ollama/gemma4:26b", Settings = [new ModelSettingInfo { Id = "context", Name = "Context window", Kind = ModelSettingKind.Number, Minimum = 1024, Maximum = 262144, Default = "4096" }] }, new ModelInfo { Id = "ollama/qwen3:8b" }];
-        models.Setup(x => x.List(AiService.OpenCode, It.IsAny<CancellationToken>())).ReturnsAsync(offered);
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, "bad", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The key was refused."));
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 4, Command = RemoteCommand.ListModels, Service = AiService.OpenCode }, owner, CancellationToken.None);
-        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 5, Command = RemoteCommand.ListModels }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CreateWorkspace, Path = "/work/app", ApiKey = "bad" }, owner, CancellationToken.None);
 
-        Assert.Equal(offered, response.Models);
-        Assert.Contains("needs a service", missing.Error);
+        Assert.Equal("The key was refused.", response.Error);
+    }
+
+    [Fact]
+    public async Task Handle_CloneWorkspace_GivesTheCloneTheRequestedProviderAndKey()
+    {
+        git.Setup(x => x.Clone("/work", "https://x/app.git", null, It.IsAny<CancellationToken>())).ReturnsAsync("/work/app");
+        workspaces.Setup(x => x.Create("/work/app", AiService.Codex, "sk-2", It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { Service = AiService.Codex });
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CloneWorkspace, Path = "/work", Url = "https://x/app.git", Service = AiService.Codex, ApiKey = "sk-2" }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        Assert.Equal(AiService.Codex, response.Workspace?.Service);
+    }
+
+    [Fact]
+    public async Task Handle_GetAndSetWorkspaceSettings_ReadAndChangeHowTheAiSessionRuns()
+    {
+        WorkspaceSettings settings = new() { Capability = AiCapability.Strong, Effort = AiEffort.Max, IsShellAllowed = true };
+        prompts.Setup(x => x.GetSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(settings);
+        prompts.Setup(x => x.SetSettings(workspace.Id, settings, It.IsAny<CancellationToken>())).ReturnsAsync(settings with { Instructions = "kept" });
+
+        RemoteResponse read = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetWorkspaceSettings, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        RemoteResponse written = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.SetWorkspaceSettings, WorkspaceId = workspace.Id, Settings = settings }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.SetWorkspaceSettings, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal(settings, read.Settings);
+        Assert.Equal("kept", written.Settings?.Instructions);
+        Assert.Contains("needs settings", missing.Error);
+    }
+
+    [Fact]
+    public async Task Handle_GetAndSetAiEnvironment_ReadAndChangeTheEnvironment()
+    {
+        AiEnvironment environment = new() { DefaultService = AiService.Codex, HasCodexApiKey = true };
+        AiEnvironment given = new() { DefaultService = AiService.Codex, CodexApiKey = "sk-3" };
+        host.Setup(x => x.Get()).Returns(environment);
+        host.Setup(x => x.Set(given, It.IsAny<CancellationToken>())).ReturnsAsync(environment);
+
+        RemoteResponse read = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetAiEnvironment }, owner, CancellationToken.None);
+        RemoteResponse written = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.SetAiEnvironment, AiEnvironment = given }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.SetAiEnvironment }, owner, CancellationToken.None);
+
+        Assert.Equal(environment, read.AiEnvironment);
+        Assert.Equal(environment, written.AiEnvironment);
+        Assert.Contains("needs an environment", missing.Error);
+    }
+
+    [Fact]
+    public async Task Handle_SetAiEnvironment_ReportsWhyTheEnvironmentWasRefused()
+    {
+        host.Setup(x => x.Set(It.IsAny<AiEnvironment>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("OpenAI image generation needs an API key."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.SetAiEnvironment, AiEnvironment = new AiEnvironment() }, owner, CancellationToken.None);
+
+        Assert.Contains("needs an API key", response.Error);
+    }
+
+    [Fact]
+    public async Task Handle_ListLocalModelsAndListImageModels_AskTheGivenServerOrTheEnvironmentsOwn()
+    {
+        host.Setup(x => x.ListLocalModels("http://other:1234/v1", It.IsAny<CancellationToken>())).ReturnsAsync(["gemma", "qwen"]);
+        host.Setup(x => x.ListImageModels(null, It.IsAny<CancellationToken>())).ReturnsAsync(["sdxl"]);
+
+        RemoteResponse models = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ListLocalModels, Url = "http://other:1234/v1" }, owner, CancellationToken.None);
+        RemoteResponse checkpoints = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ListImageModels }, owner, CancellationToken.None);
+
+        Assert.Equal(["gemma", "qwen"], models.Names);
+        Assert.Equal(["sdxl"], checkpoints.Names);
+    }
+
+    [Fact]
+    public async Task Handle_ListLocalModels_ReportsAServerThatCannotBeReached()
+    {
+        host.Setup(x => x.ListLocalModels(It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The model server could not be reached."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ListLocalModels }, owner, CancellationToken.None);
+
+        Assert.Contains("could not be reached", response.Error);
     }
 
     [Fact]
@@ -481,7 +539,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_CloneWorkspace_ClonesThenCreatesTheWorkspace()
     {
         git.Setup(x => x.Clone("/work", "https://x/app.git", "app", It.IsAny<CancellationToken>())).ReturnsAsync("/work/app");
-        workspaces.Setup(x => x.Create("/work/app", It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        workspaces.Setup(x => x.Create("/work/app", AiService.ClaudeCode, null, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CloneWorkspace, Path = "/work", Url = "https://x/app.git", Name = "app" }, owner, CancellationToken.None);
 

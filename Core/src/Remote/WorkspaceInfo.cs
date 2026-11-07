@@ -16,9 +16,9 @@ public sealed record WorkspaceInfo
     public required string Folder { get; init; }
 
     /// <summary>
-    /// Gets the identifier of the live AI session of <see cref="Service" /> attached to the workspace (32 hexadecimal digits), or <see langword="null" /> until the first prompt starts one. A workspace stored by an older server holds the AI service's own session identifier here, written with hyphens, which the server turns into a live session when it is first used.
+    /// Gets the identifier of the live AI session of <see cref="Service" /> that holds the workspace's folder, provider and AI configuration (32 hexadecimal digits). Informational: the server manages it, and replaces the session, keeping the workspace, when the session can no longer be used.
     /// </summary>
-    public string? AiSessionId { get; init; }
+    public string? SessionId { get; init; }
 
     /// <summary>
     /// Gets the group the workspace is organized into, or <see langword="null" /> when it is not in one.
@@ -26,7 +26,7 @@ public sealed record WorkspaceInfo
     public Guid? GroupId { get; init; }
 
     /// <summary>
-    /// Gets the AI service the workspace's prompts run on. Its model and the settings of the model belong to the AI session and are read with <see cref="RemoteCommand.GetWorkspaceAi" />.
+    /// Gets the provider the workspace's prompts run on, chosen when the workspace was made and permanent. How its AI is run belongs to the AI session and is read with <see cref="RemoteCommand.GetWorkspaceSettings" />.
     /// </summary>
     public AiService Service { get; init; } = AiService.ClaudeCode;
 

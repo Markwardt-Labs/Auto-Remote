@@ -36,19 +36,24 @@ public sealed record RemoteRequest
     public LoopSettings? Loop { get; init; }
 
     /// <summary>
-    /// Gets the AI service for <see cref="RemoteCommand.ConfigureWorkspace" />, <see cref="RemoteCommand.GetUsage" /> or <see cref="RemoteCommand.ListModels" />.
+    /// Gets the provider of the workspace for <see cref="RemoteCommand.CreateWorkspace" /> and <see cref="RemoteCommand.CloneWorkspace" />, or <see langword="null" /> for the default of the environment; and the provider whose usage <see cref="RemoteCommand.GetUsage" /> reads.
     /// </summary>
     public AiService? Service { get; init; }
 
     /// <summary>
-    /// Gets the identifier of the model for <see cref="RemoteCommand.ConfigureWorkspace" />.
+    /// Gets the API key the AI session of the new workspace runs on for <see cref="RemoteCommand.CreateWorkspace" /> and <see cref="RemoteCommand.CloneWorkspace" />, or <see langword="null" /> to use the key of the environment or the subscription already signed in. Live AI stores it with the session and the server keeps no copy.
     /// </summary>
-    public string? Model { get; init; }
+    public string? ApiKey { get; init; }
 
     /// <summary>
-    /// Gets the values of the model's settings for <see cref="RemoteCommand.ConfigureWorkspace" />, by setting identifier; a setting left out uses the model's default.
+    /// Gets the settings of the workspace for <see cref="RemoteCommand.SetWorkspaceSettings" />.
     /// </summary>
-    public IReadOnlyDictionary<string, string>? ModelSettings { get; init; }
+    public WorkspaceSettings? Settings { get; init; }
+
+    /// <summary>
+    /// Gets the environment for <see cref="RemoteCommand.SetAiEnvironment" />.
+    /// </summary>
+    public AiEnvironment? AiEnvironment { get; init; }
 
     /// <summary>
     /// Gets the folder or group name the command needs, if any.

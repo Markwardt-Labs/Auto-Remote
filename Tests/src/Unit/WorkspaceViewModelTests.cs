@@ -155,20 +155,104 @@ public sealed class WorkspaceViewModelTests
     }
 
     [Fact]
-    public async Task Settings_ShowTheModelAndSettingsOfTheAiSession()
+    public async Task Settings_ShowHowTheAiSessionRuns()
     {
-        connection.Setup(x => x.ListModels(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync([new ModelInfo { Id = "sonnet", Name = "Sonnet 5.5", Settings = [new ModelSettingInfo { Id = "effort", Name = "Effort", Kind = ModelSettingKind.Choice, Choices = ["low", "medium", "high"], Default = "medium" }] }]);
-
-        connection.Setup(x => x.GetWorkspaceAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceAi { Model = "sonnet", ModelSettings = new Dictionary<string, string> { ["effort"] = "high" } });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Capability = AiCapability.Max, Effort = AiEffort.Low });
 
         WorkspaceViewModel model = new(connection.Object, workspace);
-        for (int attempt = 0; attempt < 100 && model.Settings.Settings.Count == 0; attempt++)
+        for (int attempt = 0; attempt < 100 && model.Settings.SelectedCapability.Value != AiCapability.Max; attempt++)
         {
             await Task.Delay(20);
         }
 
-        Assert.Equal("sonnet", model.Settings.SelectedModel?.Id);
-        Assert.Equal("high", model.Settings.Settings.Single().ChoiceValue);
+        Assert.Equal(AiCapability.Max, model.Settings.SelectedCapability.Value);
+        Assert.Equal(AiEffort.Low, model.Settings.SelectedEffort.Value);
+    }
+
+    private async Task<WorkspaceViewModel> OpenSettings(Func<WorkspaceSettings, Task>? onSet = null)
+    {
+        WorkspaceSettings stored = new() { Capability = AiCapability.Balanced, Effort = AiEffort.High };
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(stored);
+        connection.Setup(x => x.SetWorkspaceSettings(workspace.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).Returns(async (Guid _, WorkspaceSettings given, CancellationToken _) =>
+        {
+            if (onSet is not null)
+            {
+                await onSet(given);
+            }
+
+            return given;
+        });
+        WorkspaceViewModel model = new(connection.Object, workspace);
+        for (int attempt = 0; attempt < 100 && model.Settings.SelectedEffort.Value != AiEffort.High; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        model.ToggleSettingsCommand.Execute(null);
+        return model;
+    }
+
+    private async Task Until(Func<bool> condition)
+    {
+        for (int attempt = 0; attempt < 500 && !condition(); attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.True(condition());
+    }
+
+    [Fact]
+    public async Task ClosingTheSettings_SendsWhatWasEditedOnceAndGoesBackToTheTabItCameFrom()
+    {
+        WorkspaceViewModel model = await OpenSettings();
+        model.Settings.SelectedEffort = model.Settings.Efforts.Single(choice => choice.Value == AiEffort.Low);
+        model.Settings.IsShellAllowed = true;
+        connection.Invocations.Clear();
+
+        model.ToggleSettingsCommand.Execute(null);
+        await Until(() => !model.ShowSettings);
+
+        connection.Verify(x => x.SetWorkspaceSettings(workspace.Id, It.Is<WorkspaceSettings>(sent => sent.Effort == AiEffort.Low && sent.IsShellAllowed), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(model.Settings.HasPending);
+    }
+
+    [Fact]
+    public async Task ClosingTheSettings_WithoutEditsSendsNothing()
+    {
+        WorkspaceViewModel model = await OpenSettings();
+
+        model.ToggleSettingsCommand.Execute(null);
+        await Until(() => !model.ShowSettings);
+
+        connection.Verify(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ClosingTheSettings_StaysOnThemShowingWhyWhenTheServerRefusesTheEdits()
+    {
+        WorkspaceViewModel model = await OpenSettings(_ => throw new RemoteException("System access cannot be turned off with this provider."));
+        model.Settings.IsSystemAccessAllowed = true;
+
+        model.ToggleSettingsCommand.Execute(null);
+        await Until(() => model.Settings.HasError);
+
+        Assert.True(model.ShowSettings);
+        Assert.Equal("System access cannot be turned off with this provider.", model.Settings.Error);
+        Assert.True(model.Settings.HasPending);
+    }
+
+    [Fact]
+    public async Task LeavingTheSettingsByAnotherTab_AppliesTheEditsToo()
+    {
+        WorkspaceViewModel model = await OpenSettings();
+        model.Settings.IsWebAllowed = true;
+
+        model.ShowChatCommand.Execute(null);
+        await Until(() => !model.Settings.HasPending);
+
+        connection.Verify(x => x.SetWorkspaceSettings(workspace.Id, It.Is<WorkspaceSettings>(sent => sent.IsWebAllowed), It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(model.ShowSettings);
     }
 
     [Fact]

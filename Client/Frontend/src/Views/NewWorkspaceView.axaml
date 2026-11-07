@@ -8,7 +8,10 @@
       <TextBlock Grid.Column="0" Text="New workspace" Classes="serif" FontSize="26" VerticalAlignment="Center" />
       <local:TouchButton Grid.Column="1" Content="Cancel" Command="{Binding CancelCommand}" Classes="flat" />
     </Grid>
-    <TextBlock Grid.Row="1" Text="Choose the folder on the server that will host the workspace. The workspace is named after it." Classes="muted" TextWrapping="Wrap" Margin="0,0,0,12" />
+    <StackPanel Grid.Row="1" Spacing="12" Margin="0,0,0,12">
+      <TextBlock Text="Choose the folder on the server that will host the workspace. The workspace is named after it." Classes="muted" TextWrapping="Wrap" />
+      <local:ProviderPickerView DataContext="{Binding Provider}" />
+    </StackPanel>
 
     <Grid Grid.Row="2" DataContext="{Binding Browser}" ColumnDefinitions="Auto,*" Margin="0,0,0,8">
       <local:TouchButton Grid.Column="0" Content="↑ Up" Command="{Binding UpCommand}" />

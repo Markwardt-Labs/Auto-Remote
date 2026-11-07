@@ -8,6 +8,8 @@ global using System.Net.Sockets;
 global using System.Security.Cryptography;
 global using System.Text;
 global using System.Text.Json;
+global using System.Text.Json.Nodes;
+global using System.Text.Json.Serialization;
 global using Markwardt.AutoRemote;
 global using System.Runtime.CompilerServices;
 global using System.Threading.Channels;

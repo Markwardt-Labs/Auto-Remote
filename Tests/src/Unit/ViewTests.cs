@@ -326,21 +326,14 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_SettingsShowTheModelsOfTheServiceAndOneControlForEachSettingOfTheSelectedModel()
+    public async Task HomeView_SettingsShowTheLockedProviderAndOneControlForEachSetting()
     {
-        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", Service = AiService.Codex };
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
-        connection.Setup(x => x.ListModels(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(
-        [
-            new ModelInfo { Id = "sonnet", Name = "Sonnet 5.5", Description = "Most efficient", Settings = [new ModelSettingInfo { Id = "effort", Name = "Effort", Kind = ModelSettingKind.Choice, Choices = ["low", "medium", "high"], Default = "medium" }] },
-            new ModelInfo { Id = "tuned", Name = "Tuned", Settings = [new ModelSettingInfo { Id = "thinking", Name = "Thinking", Kind = ModelSettingKind.Toggle, Default = "false" }, new ModelSettingInfo { Id = "context", Name = "Context window", Kind = ModelSettingKind.Number, Minimum = 1024, Maximum = 262144, Default = "4096" }] }
-        ]);
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Service = AiService.Codex, Capability = AiCapability.Strong, Effort = AiEffort.Low, IsShellAllowed = true, Instructions = "be brief", Descriptors = new Dictionary<string, string> { ["Model"] = "GPT 5.6" } });
 
-        connection.Setup(x => x.ConfigureWorkspace(workspace.Id, It.IsAny<AiService>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, AiService service, string chosen, IReadOnlyDictionary<string, string> values, CancellationToken _) => workspace with { Service = service });
-        connection.Setup(x => x.GetWorkspaceAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceAi { Model = "sonnet", ModelSettings = new Dictionary<string, string> { ["effort"] = "medium" } });
-
-        (string[] models, int choiceBoxes, int toggles, int numbers, string[] names) = await fixture.Run(() =>
+        (int choiceBoxes, int toggles, int numbers, bool providerShown, bool instructionsShown, bool detailShown, string capability) = await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
             model.Start().GetAwaiter().GetResult();
@@ -349,30 +342,168 @@ public sealed class ViewTests(HeadlessFixture fixture)
             window.Show();
             model.Active!.ToggleSettingsCommand.Execute(null);
 
-            for (int attempt = 0; attempt < 100 && model.Active.Settings.Models.Count == 0; attempt++)
+            for (int attempt = 0; attempt < 100 && model.Active.Settings.Instructions.Length == 0; attempt++)
             {
                 Avalonia.Threading.Dispatcher.UIThread.RunJobs();
                 Thread.Sleep(20);
             }
 
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
-            ComboBox[] Visible() => [.. window.GetVisualDescendants().OfType<ComboBox>().Where(box => box.IsEffectivelyVisible)];
-            string[] models = [.. model.Active.Settings.Models.Select(choice => choice.Name)];
-            int choiceBoxes = Visible().Length;
-
-            model.Active.Settings.SelectedModel = model.Active.Settings.Models.Single(choice => choice.Id == "tuned");
-            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            int choiceBoxes = window.GetVisualDescendants().OfType<ComboBox>().Count(box => box.IsEffectivelyVisible);
             int toggles = window.GetVisualDescendants().OfType<ToggleSwitch>().Count(item => item.IsEffectivelyVisible);
             int numbers = window.GetVisualDescendants().OfType<NumericUpDown>().Count(item => item.IsEffectivelyVisible);
-            string[] names = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible).Select(block => block.Text ?? string.Empty).Where(text => text is "Thinking" or "Context window" or "Effort")];
+            TextBlock[] texts = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible)];
+            bool providerShown = texts.Any(block => block.Text == "OpenAI Codex");
+            bool instructionsShown = window.GetVisualDescendants().OfType<TextBox>().Any(box => box.IsEffectivelyVisible && box.Text == "be brief");
+            bool detailShown = texts.Any(block => block.Text == "GPT 5.6");
+            string capability = model.Active.Settings.SelectedCapability.Name;
             window.Close();
-            return (models, choiceBoxes, toggles, numbers, names);
+            return (choiceBoxes, toggles, numbers, providerShown, instructionsShown, detailShown, capability);
         });
 
-        Assert.Equal(["Sonnet 5.5", "Tuned"], models);
-        Assert.Equal(3, choiceBoxes);
-        Assert.Equal((1, 1), (toggles, numbers));
-        Assert.Equal(["Thinking", "Context window"], names);
+        Assert.Equal(2, choiceBoxes);
+        Assert.Equal(4, toggles);
+        Assert.Equal(0, numbers);
+        Assert.True(providerShown);
+        Assert.True(instructionsShown);
+        Assert.True(detailShown);
+        Assert.Equal("Strong", capability);
+    }
+
+    [Fact]
+    public async Task HomeView_SidebarHasAGearThatOpensTheEnvironmentSettings()
+    {
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
+
+        (bool found, bool raised) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            bool raised = false;
+            model.EnvironmentRequested += () => raised = true;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            Button gear = window.GetVisualDescendants().OfType<Button>().Single(button => button.Content?.ToString() == "\u2699\uFE0E" && ToolTip.GetTip(button)?.ToString() == "AI environment settings");
+            gear.Command!.Execute(null);
+            window.Close();
+            return (gear is not null, raised);
+        });
+
+        Assert.True(found);
+        Assert.True(raised);
+    }
+
+    [Fact]
+    public async Task HomeView_SettingsHaveAMoveWorkspaceToFolderButtonThatAsksToMoveTheSelectedWorkspace()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+
+        (bool visible, WorkspaceInfo? requested) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            WorkspaceInfo? requested = null;
+            model.MoveWorkspaceRequested += asked => requested = asked;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            model.Active!.ToggleSettingsCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Button move = window.GetVisualDescendants().OfType<Button>().Single(button => button.Content?.ToString() == "Move workspace to folder");
+            bool visible = move.IsEffectivelyVisible;
+            move.Command!.Execute(null);
+            window.Close();
+            return (visible, requested);
+        });
+
+        Assert.True(visible);
+        Assert.Equal(workspace, requested);
+    }
+
+    [Fact]
+    public async Task MoveWorkspaceView_ShowsWhatMovesAndABrowserForTheTarget()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListFolders("/work", It.IsAny<CancellationToken>())).ReturnsAsync(new FolderListing { Path = "/work", Parent = "/", Folders = [new FolderEntry { Name = "other", Path = "/work/other" }] });
+
+        (bool described, bool button) = await fixture.Run(() =>
+        {
+            MoveWorkspaceViewModel model = new(connection.Object, workspace);
+            model.Open().GetAwaiter().GetResult();
+            MoveWorkspaceView view = new() { DataContext = model };
+            Window window = new() { Width = 600, Height = 900, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool described = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.Text?.Contains("'app'") == true);
+            bool button = window.GetVisualDescendants().OfType<Button>().Any(item => item.Content?.ToString() == "Use this folder");
+            window.Close();
+            return (described, button);
+        });
+
+        Assert.True(described);
+        Assert.True(button);
+    }
+
+    [Fact]
+    public async Task NewAndCloneWorkspaceViews_OfferTheProvidersAndAKeyFieldForTheOnesThatTakeOne()
+    {
+        (int providers, int keyFieldsClaude, int keyFieldsLocal) = await fixture.Run(() =>
+        {
+            NewWorkspaceViewModel model = new(connection.Object);
+            NewWorkspaceView view = new() { DataContext = model };
+            Window window = new() { Width = 600, Height = 900, Content = view };
+            window.Show();
+            int providers = window.GetVisualDescendants().OfType<ComboBox>().Single().ItemCount;
+            TextBox[] Keys() => [.. window.GetVisualDescendants().OfType<TextBox>().Where(box => box.PasswordChar != default && box.IsEffectivelyVisible)];
+            int claude = Keys().Length;
+            model.Provider.SelectedService = model.Provider.Services.Single(choice => choice.Service == AiService.Local);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            int local = Keys().Length;
+            window.Close();
+            return (providers, claude, local);
+        });
+        bool cloneBuilds = await fixture.Run(() => Shows<CloneWorkspaceView>(new CloneWorkspaceView(), new CloneWorkspaceViewModel(connection.Object)));
+
+        Assert.Equal(3, providers);
+        Assert.Equal((1, 0), (keyFieldsClaude, keyFieldsLocal));
+        Assert.True(cloneBuilds);
+    }
+
+    [Fact]
+    public async Task EnvironmentView_ShowsTheProviderFieldsAndTheImageFieldsOfTheChosenService()
+    {
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment { HasClaudeApiKey = true, ImageGeneration = ImageGenerationKind.None });
+
+        (int refreshButtons, int refreshWithLocal, int rowBoxes, int clearBoxes, int switchesAndDefaults, bool defaultsShown) = await fixture.Run(() =>
+        {
+            EnvironmentViewModel model = new(connection.Object);
+            model.Load().GetAwaiter().GetResult();
+            EnvironmentView view = new() { DataContext = model };
+            Window window = new() { Width = 700, Height = 1400, Content = view };
+            window.Show();
+            int Refresh() => window.GetVisualDescendants().OfType<Button>().Count(button => button.IsEffectivelyVisible && button.Content?.ToString() is "Refresh models" or "Refresh checkpoints");
+            int refreshButtons = Refresh();
+            model.SelectedImage = model.ImageKinds.Single(choice => choice.Value == ImageGenerationKind.Local);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            int refreshWithLocal = Refresh();
+            int rowBoxes = window.GetVisualDescendants().OfType<ComboBox>().Count(box => box.IsEditable && box.IsEffectivelyVisible);
+            int clearBoxes = window.GetVisualDescendants().OfType<CheckBox>().Count(box => box.IsEffectivelyVisible);
+            int switchesAndDefaults = window.GetVisualDescendants().OfType<ToggleSwitch>().Count(item => item.IsEffectivelyVisible);
+            bool defaultsShown = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.Text == "New workspaces") && window.GetVisualDescendants().OfType<TextBox>().Any(box => box.IsEffectivelyVisible && box.PlaceholderText == "Standing instructions for the AI...");
+            window.Close();
+            return (refreshButtons, refreshWithLocal, rowBoxes, clearBoxes, switchesAndDefaults, defaultsShown);
+        });
+
+        Assert.Equal(1, refreshButtons);
+        Assert.Equal(2, refreshWithLocal);
+        Assert.Equal(4, switchesAndDefaults);
+        Assert.True(defaultsShown);
+        Assert.Equal(8, rowBoxes);
+        Assert.Equal(1, clearBoxes);
     }
 
     [Fact]

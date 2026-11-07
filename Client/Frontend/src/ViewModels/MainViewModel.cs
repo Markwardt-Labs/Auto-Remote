@@ -162,6 +162,21 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             Current = cloning;
             await cloning.Open();
         };
+        opening.MoveWorkspaceRequested += async workspace =>
+        {
+            MoveWorkspaceViewModel moving = new(opened, workspace);
+            moving.Moved += async moved => await Open(opened, moved.Id);
+            moving.Cancelled += () => Current = opening;
+            Current = moving;
+            await moving.Open();
+        };
+        opening.EnvironmentRequested += async () =>
+        {
+            EnvironmentViewModel configuring = new(opened);
+            configuring.Closed += () => Current = opening;
+            Current = configuring;
+            await configuring.Load();
+        };
         Current = opening;
         Guid? target = requested ?? focus;
         requested = null;

@@ -21,7 +21,7 @@ public sealed record RemoteResponse
     public WorkspaceCatalog? Catalog { get; init; }
 
     /// <summary>
-    /// Gets the workspace answering <see cref="RemoteCommand.CreateWorkspace" />, <see cref="RemoteCommand.CloneWorkspace" />, <see cref="RemoteCommand.RenameWorkspace" />, <see cref="RemoteCommand.ConfigureWorkspace" /> or <see cref="RemoteCommand.MoveWorkspace" />.
+    /// Gets the workspace answering <see cref="RemoteCommand.CreateWorkspace" />, <see cref="RemoteCommand.CloneWorkspace" />, <see cref="RemoteCommand.RenameWorkspace" /> or <see cref="RemoteCommand.MoveWorkspace" />.
     /// </summary>
     public WorkspaceInfo? Workspace { get; init; }
 
@@ -71,14 +71,19 @@ public sealed record RemoteResponse
     public LoopInfo? Loop { get; init; }
 
     /// <summary>
-    /// Gets the model and settings answering <see cref="RemoteCommand.GetWorkspaceAi" />.
+    /// Gets the settings answering <see cref="RemoteCommand.GetWorkspaceSettings" /> or <see cref="RemoteCommand.SetWorkspaceSettings" />.
     /// </summary>
-    public WorkspaceAi? Ai { get; init; }
+    public WorkspaceSettings? Settings { get; init; }
 
     /// <summary>
-    /// Gets the models answering <see cref="RemoteCommand.ListModels" />.
+    /// Gets the environment answering <see cref="RemoteCommand.GetAiEnvironment" /> or <see cref="RemoteCommand.SetAiEnvironment" />, without any API key.
     /// </summary>
-    public IReadOnlyList<ModelInfo>? Models { get; init; }
+    public AiEnvironment? AiEnvironment { get; init; }
+
+    /// <summary>
+    /// Gets the names answering <see cref="RemoteCommand.ListLocalModels" /> or <see cref="RemoteCommand.ListImageModels" />.
+    /// </summary>
+    public IReadOnlyList<string>? Names { get; init; }
 
     /// <summary>
     /// Gets the git state answering <see cref="RemoteCommand.GetGitStatus" />.

@@ -4,23 +4,25 @@ public sealed class SettingsViewModelTests
 {
     private readonly Mock<IServerConnection> connection = new();
 
-    private readonly WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+    private readonly WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", Service = AiService.Codex };
 
-    private readonly List<(AiService Service, string Model, Dictionary<string, string> Values)> saved = [];
+    private readonly List<WorkspaceSettings> saved = [];
 
-    private ModelSettingInfo Effort(params string[] choices) => new() { Id = "effort", Name = "Effort", Kind = ModelSettingKind.Choice, Choices = choices, Default = "medium" };
-
-    private ModelSettingInfo Thinking => new() { Id = "thinking", Name = "Thinking", Kind = ModelSettingKind.Toggle, Default = "false" };
-
-    private ModelSettingInfo Context => new() { Id = "context", Name = "Context window", Kind = ModelSettingKind.Number, Minimum = 1024, Maximum = 262144, Default = "4096" };
-
-    private ModelInfo Sonnet => new() { Id = "sonnet", Name = "Sonnet 5.5", Description = "Most efficient", Settings = [Effort("low", "medium", "high", "max")] };
-
-    private ModelInfo Opus => new() { Id = "opus", Name = "Opus 5.5", Settings = [Effort("low", "medium", "high", "xhigh", "max"), Thinking] };
+    private WorkspaceSettings Current => new()
+    {
+        Service = AiService.Codex,
+        Capability = AiCapability.Balanced,
+        Effort = AiEffort.High,
+        IsShellAllowed = true,
+        IsSystemAccessAllowed = true,
+        IsWebAllowed = true,
+        Instructions = "work in the foreground",
+        Descriptors = new Dictionary<string, string> { ["Provider"] = "Codex", ["Model"] = "GPT 5.6" }
+    };
 
     private async Task Until(Func<bool> condition)
     {
-        for (int attempt = 0; attempt < 150 && !condition(); attempt++)
+        for (int attempt = 0; attempt < 500 && !condition(); attempt++)
         {
             await Task.Delay(20);
         }
@@ -28,214 +30,178 @@ public sealed class SettingsViewModelTests
         Assert.True(condition());
     }
 
-    private void Offer(AiService service, params ModelInfo[] models) => connection.Setup(x => x.ListModels(service, It.IsAny<CancellationToken>())).ReturnsAsync(models);
+    private void Session(WorkspaceSettings settings) => connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(settings);
 
-    private void Session(string? model, params (string Id, string Value)[] values) => connection.Setup(x => x.GetWorkspaceAi(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceAi { Model = model, ModelSettings = values.ToDictionary(pair => pair.Id, pair => pair.Value) });
-
-    private void Accept() => connection.Setup(x => x.ConfigureWorkspace(workspace.Id, It.IsAny<AiService>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, AiService service, string model, IReadOnlyDictionary<string, string> values, CancellationToken _) =>
+    private void Accept() => connection.Setup(x => x.SetWorkspaceSettings(workspace.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, WorkspaceSettings given, CancellationToken _) =>
     {
-        saved.Add((service, model, new Dictionary<string, string>(values)));
-        return workspace with { Service = service };
+        saved.Add(given);
+        return given;
     });
 
     private SettingsViewModel Settings() => new(connection.Object, workspace);
 
     [Fact]
-    public async Task Opening_ListsTheModelsOfTheWorkspacesServiceSelectsTheModelOfItsAiSessionAndShowsItsSettingsWithTheSessionsValues()
+    public async Task Opening_ShowsTheProviderOfTheWorkspaceAndTheSettingsOfItsAiSession()
     {
-        Offer(AiService.ClaudeCode, Sonnet, Opus);
-        Session("sonnet", ("effort", "high"));
+        Session(Current);
 
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
+        await Until(() => settings.Instructions.Length > 0);
 
-        Assert.Equal(["Sonnet 5.5", "Opus 5.5"], settings.Models.Select(choice => choice.Name));
-        Assert.Equal("sonnet", settings.SelectedModel?.Id);
-        Assert.Equal("Most efficient", settings.ModelDescription);
-        Assert.True(settings.HasSettings);
-        ModelSettingViewModel effort = settings.Settings.Single();
-        Assert.Equal(("Effort", true, "high"), (effort.Name, effort.IsChoice, effort.ChoiceValue));
-        Assert.Equal(["low", "medium", "high", "max"], effort.Choices);
+        Assert.Equal("OpenAI Codex", settings.ProviderName);
+        Assert.Equal(AiCapability.Balanced, settings.SelectedCapability.Value);
+        Assert.Equal(AiEffort.High, settings.SelectedEffort.Value);
+        Assert.Equal((true, true, true, false), (settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.IsImageGenerationAllowed));
+        Assert.Equal("work in the foreground", settings.Instructions);
+        Assert.False(settings.HasPending);
+        Assert.Equal(["Provider", "Model"], settings.Details.Select(line => line.Name));
+        Assert.True(settings.HasDetails);
     }
 
     [Fact]
-    public async Task Reloading_ReadsTheModelAndSettingsOfTheSessionAgainSoAChangeFromAnotherClientShows()
+    public async Task Choices_ListEveryCapabilityAndEffort()
     {
-        Offer(AiService.ClaudeCode, Sonnet, Opus);
-        Session("sonnet", ("effort", "high"));
+        Session(Current);
+
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
-        Session("opus", ("effort", "max"), ("thinking", "true"));
+
+        Assert.Equal(["Fast", "Balanced", "Strong", "Max"], settings.Capabilities.Select(choice => choice.Name));
+        Assert.Equal(["Low", "Medium", "High", "Max"], settings.Efforts.Select(choice => choice.Name));
+        await Until(() => settings.HasDetails);
+    }
+
+    [Fact]
+    public async Task Reloading_ReadsTheSettingsAgainSoAChangeFromAnotherClientShows()
+    {
+        Session(Current);
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.SelectedEffort.Value == AiEffort.High);
+        Session(Current with { Effort = AiEffort.Low, Capability = AiCapability.Max });
 
         await settings.Reload();
 
-        Assert.Equal("opus", settings.SelectedModel?.Id);
-        Assert.Equal(["max", "true"], settings.Settings.Select(setting => setting.IsToggle ? setting.ToggleValue.ToString().ToLowerInvariant() : setting.ChoiceValue));
+        Assert.Equal((AiCapability.Max, AiEffort.Low), (settings.SelectedCapability.Value, settings.SelectedEffort.Value));
     }
 
     [Fact]
-    public async Task ChangingASetting_SavesTheModelWithAllItsValues()
+    public async Task Edits_ArePendingAndNothingIsSentUntilTheyAreApplied()
     {
-        Offer(AiService.ClaudeCode, Sonnet, Opus);
-        Session("sonnet", ("effort", "high"));
+        Session(Current);
         Accept();
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
+        await Until(() => settings.HasDetails);
 
-        settings.Settings.Single().ChoiceValue = "max";
-        await Until(() => saved.Count == 1);
+        settings.SelectedCapability = settings.Capabilities.Single(choice => choice.Value == AiCapability.Strong);
+        settings.SelectedEffort = settings.Efforts.Single(choice => choice.Value == AiEffort.Max);
+        settings.IsShellAllowed = false;
+        settings.IsSystemAccessAllowed = false;
+        settings.IsWebAllowed = false;
+        settings.IsImageGenerationAllowed = true;
+        settings.Instructions = "be brief";
 
-        Assert.Equal((AiService.ClaudeCode, "sonnet", "max"), (saved[0].Service, saved[0].Model, saved[0].Values["effort"]));
+        Assert.True(settings.HasPending);
+        Assert.Empty(saved);
+        Assert.Equal((AiCapability.Strong, AiEffort.Max, false, false, false, true, "be brief"), (settings.SelectedCapability.Value, settings.SelectedEffort.Value, settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.IsImageGenerationAllowed, settings.Instructions));
     }
 
     [Fact]
-    public async Task ChoosingAnotherModel_KeepsTheValuesOfSettingsBothModelsHaveGivesTheRestTheirDefaultsAndSaves()
+    public async Task Apply_SendsEveryEditTogetherOnceAndClearsWhatWasPending()
     {
-        Offer(AiService.ClaudeCode, Sonnet, Opus);
-        Session("sonnet", ("effort", "high"));
+        Session(Current);
         Accept();
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
+        await Until(() => settings.HasDetails);
+        settings.SelectedCapability = settings.Capabilities.Single(choice => choice.Value == AiCapability.Strong);
+        settings.IsShellAllowed = false;
+        settings.Instructions = "  be brief  ";
 
-        settings.SelectedModel = settings.Models.Single(choice => choice.Id == "opus");
-        await Until(() => saved.Count == 1);
+        bool applied = await settings.Apply();
 
-        Assert.Equal("opus", saved[0].Model);
-        Assert.Equal(new Dictionary<string, string> { ["effort"] = "high", ["thinking"] = "false" }, saved[0].Values);
-        Assert.Equal(["Effort", "Thinking"], settings.Settings.Select(setting => setting.Name));
-        Assert.True(settings.Settings[1].IsToggle);
+        Assert.True(applied);
+        WorkspaceSettings sent = Assert.Single(saved);
+        Assert.Equal((AiCapability.Strong, AiEffort.High, false, true, true, "be brief"), (sent.Capability, sent.Effort, sent.IsShellAllowed, sent.IsSystemAccessAllowed, sent.IsWebAllowed, sent.Instructions));
+        Assert.False(settings.HasPending);
+        Assert.Equal("be brief", settings.Instructions);
     }
 
     [Fact]
-    public async Task ChoosingAModelWhoseSettingDoesNotTakeTheCurrentValue_UsesTheDefaultInstead()
+    public async Task Apply_WithoutEditsOrWithEditsThatWereUndoneSendsNothing()
     {
-        ModelInfo old = new() { Id = "old", Settings = [Effort("low", "medium")] };
-        Offer(AiService.ClaudeCode, Sonnet, old);
-        Session("sonnet", ("effort", "max"));
+        Session(Current);
         Accept();
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
+        await Until(() => settings.HasDetails);
+        Assert.True(await settings.Apply());
 
-        settings.SelectedModel = settings.Models.Single(choice => choice.Id == "old");
-        await Until(() => saved.Count == 1);
+        settings.IsShellAllowed = false;
+        settings.IsShellAllowed = true;
+        settings.Instructions = "work in the foreground  ";
 
-        Assert.Equal("medium", saved[0].Values["effort"]);
-    }
-
-    [Fact]
-    public async Task SelectingAnotherService_ListsItsModelsPicksItsDefaultOrTheFirstAndSaves()
-    {
-        Offer(AiService.ClaudeCode, Sonnet);
-        Session("sonnet", ("effort", "high"));
-        Offer(AiService.Codex, new ModelInfo { Id = "gpt-5.6-luna", Settings = [Effort("low", "medium")] }, new ModelInfo { Id = "gpt-5.6-terra", Settings = [Effort("low", "medium", "high")] });
-        Accept();
-        SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
-
-        settings.SelectedService = settings.Services.Single(choice => choice.Service == AiService.Codex);
-        await Until(() => saved.Count == 1);
-
-        Assert.Equal(AiService.Codex, settings.SelectedService.Service);
-        Assert.Equal((AiService.Codex, "gpt-5.6-terra", "medium"), (saved[0].Service, saved[0].Model, saved[0].Values["effort"]));
-        Assert.Equal("gpt-5.6-terra", settings.SelectedModel?.Id);
-        Assert.Equal(["gpt-5.6-luna", "gpt-5.6-terra"], settings.Models.Select(choice => choice.Id));
-    }
-
-    [Fact]
-    public async Task SelectingAServiceWithoutModels_StaysOnTheCurrentServiceAndSaysWhy()
-    {
-        Offer(AiService.ClaudeCode, Sonnet);
-        Session("sonnet");
-        Offer(AiService.OpenCode);
-        SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
-
-        settings.SelectedService = settings.Services.Single(choice => choice.Service == AiService.OpenCode);
-        await Until(() => settings.HasError);
-
-        Assert.Equal(AiService.ClaudeCode, settings.SelectedService.Service);
-        Assert.Contains("OpenCode offers no models", settings.Error);
+        Assert.False(settings.HasPending);
+        Assert.True(await settings.Apply());
         Assert.Empty(saved);
     }
 
     [Fact]
-    public async Task ASessionWhoseModelTheServiceNoLongerOffers_StillShowsItAmongTheChoicesAndASessionWithoutOneShowsNoSelection()
+    public async Task Apply_WhenTheServerRefuses_ShowsTheReasonAndKeepsTheEditsPending()
     {
-        Offer(AiService.ClaudeCode, Opus);
-        Session("retired");
-        SettingsViewModel retired = Settings();
-        await Until(() => retired.Models.Count == 2);
-
-        Session(null);
-        SettingsViewModel none = Settings();
-        await Until(() => none.Models.Count == 1);
-
-        Assert.Equal(["retired", "opus"], retired.Models.Select(choice => choice.Id));
-        Assert.Equal("retired", retired.SelectedModel?.Id);
-        Assert.False(retired.HasSettings);
-        Assert.Null(none.SelectedModel);
-    }
-
-    [Fact]
-    public async Task AModelTheServerRefuses_GoesBackToTheSessionsModelAndKeepsTheReason()
-    {
-        Offer(AiService.ClaudeCode, Sonnet, Opus);
-        Session("sonnet", ("effort", "high"));
-        connection.Setup(x => x.ConfigureWorkspace(workspace.Id, It.IsAny<AiService>(), "opus", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("Claude Code does not offer the model opus."));
+        Session(Current);
+        connection.Setup(x => x.SetWorkspaceSettings(workspace.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("System access cannot be turned off with this provider."));
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Settings.Count == 1);
+        await Until(() => settings.HasDetails);
+        settings.IsSystemAccessAllowed = false;
 
-        settings.SelectedModel = settings.Models.Single(choice => choice.Id == "opus");
-        await Until(() => settings.HasError && settings.SelectedModel?.Id == "sonnet");
+        bool applied = await settings.Apply();
 
-        Assert.Contains("does not offer the model opus", settings.Error);
-        Assert.Equal("high", settings.Settings.Single().ChoiceValue);
+        Assert.False(applied);
+        Assert.Equal("System access cannot be turned off with this provider.", settings.Error);
+        Assert.True(settings.HasPending);
+        Assert.False(settings.IsSystemAccessAllowed);
     }
 
     [Fact]
-    public async Task RefreshingTheModels_ReadsThemFromTheServerAgain()
+    public async Task ALoadThatFinishesAfterAnEdit_KeepsTheEditAndOnlyBringsInWhatTheSessionSays()
     {
-        Offer(AiService.ClaudeCode, Sonnet);
-        Session("sonnet");
+        TaskCompletionSource<WorkspaceSettings> loading = new();
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).Returns(loading.Task);
         SettingsViewModel settings = Settings();
-        await Until(() => settings.Models.Count == 1);
-        Offer(AiService.ClaudeCode, Sonnet, Opus);
 
-        settings.RefreshModelsCommand.Execute(null);
-        await Until(() => settings.Models.Count == 2);
+        settings.IsShellAllowed = false;
+        loading.SetResult(Current);
+        await Until(() => settings.HasDetails);
 
-        Assert.Equal(["sonnet", "opus"], settings.Models.Select(choice => choice.Id));
+        Assert.False(settings.IsShellAllowed);
+        Assert.True(settings.HasPending);
+        Assert.Equal(["Provider", "Model"], settings.Details.Select(line => line.Name));
     }
 
     [Fact]
-    public void ASwitchSetting_IsOnlyOnForTrueAndWritesTrueOrFalse()
+    public async Task Reload_KeepsEditsThatWereNotAppliedAndOtherwiseReadsTheSessionAgain()
     {
-        List<(string Id, string Value)> changes = [];
-        ModelSettingViewModel setting = new(Thinking, "false", (id, value) => changes.Add((id, value)));
+        Session(Current);
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.HasDetails);
+        Session(Current with { Effort = AiEffort.Low });
 
-        setting.ToggleValue = true;
-        setting.ToggleValue = true;
-        setting.ToggleValue = false;
+        await settings.Reload();
+        Assert.Equal(AiEffort.Low, settings.SelectedEffort.Value);
 
-        Assert.True(setting.IsToggle);
-        Assert.False(setting.ToggleValue);
-        Assert.Equal([("thinking", "true"), ("thinking", "false")], changes);
+        settings.IsShellAllowed = false;
+        Session(Current with { Effort = AiEffort.Max });
+        await settings.Reload();
+
+        Assert.Equal((AiEffort.Low, false), (settings.SelectedEffort.Value, settings.IsShellAllowed));
     }
 
     [Fact]
-    public void ANumberSetting_WritesWholeNumbersInItsRangeAndIgnoresTheRest()
+    public async Task ASessionThatCannotBeRead_ShowsTheReason()
     {
-        List<(string Id, string Value)> changes = [];
-        ModelSettingViewModel setting = new(Context, "4096", (id, value) => changes.Add((id, value)));
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("Codex could not be started."));
 
-        setting.NumberValue = 16384.7m;
-        setting.NumberValue = 10;
-        setting.NumberValue = 999999999;
-        setting.NumberValue = null;
+        SettingsViewModel settings = Settings();
+        await Until(() => settings.HasError);
 
-        Assert.True(setting.IsNumber);
-        Assert.Equal((1024m, 262144m, 1024m), (setting.Minimum, setting.Maximum, setting.Increment));
-        Assert.Equal(16384m, setting.NumberValue);
-        Assert.Equal([("context", "16384")], changes);
+        Assert.Equal("Codex could not be started.", settings.Error);
+        Assert.False(settings.HasDetails);
     }
 }

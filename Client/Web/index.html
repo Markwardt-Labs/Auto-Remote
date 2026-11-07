@@ -393,13 +393,13 @@ const reviewPrompt = "review workspace, fix any problems or inconsistencies";
 const pausePrompt = "pause current work";
 const resumePrompt = "resume unfinished work";
 const services = {
-  ClaudeCode: { label: "Claude Code", defaultModel: "sonnet" },
-  Codex: { label: "OpenAI Codex", defaultModel: "gpt-5.6-terra" },
-  OpenCode: { label: "OpenCode", defaultModel: null }
+  ClaudeCode: { label: "Claude Code", takesKey: true },
+  Codex: { label: "OpenAI Codex", takesKey: true },
+  Local: { label: "Local models", takesKey: false }
 };
-const settingAccepts = (setting, value) => setting.kind === "Choice" ? setting.choices.includes(value)
-  : setting.kind === "Toggle" ? value === "true" || value === "false"
-  : /^-?\d+$/.test(value) && Number(value) >= (setting.minimum ?? -Infinity) && Number(value) <= (setting.maximum ?? Infinity);
+const capabilities = ["Fast", "Balanced", "Strong", "Max"];
+const efforts = ["Low", "Medium", "High", "Max"];
+const imageKinds = { None: "None", OpenAi: "OpenAI", Local: "Local Stable Diffusion server" };
 
 
 function h(tag, props = {}, ...children) {
@@ -1300,15 +1300,19 @@ class Connection {
   stopScript(workspaceId, path) { return this.request("StopScript", { workspaceId, path }); }
   sendScriptInput(workspaceId, path, text) { return this.request("SendScriptInput", { workspaceId, path, text }); }
   removeScript(workspaceId, path) { return this.request("RemoveScript", { workspaceId, path }); }
-  createWorkspace(path) { return this.request("CreateWorkspace", { path }).then(r => r.workspace); }
+  createWorkspace(path, service, apiKey) { return this.request("CreateWorkspace", { path, service, apiKey: apiKey || undefined }).then(r => r.workspace); }
   renameWorkspace(workspaceId, name) { return this.request("RenameWorkspace", { workspaceId, name }).then(r => r.workspace); }
+  moveWorkspaceToFolder(workspaceId, path) { return this.request("MoveWorkspaceToFolder", { workspaceId, path }).then(r => r.workspace); }
   getUsage(service) { return this.request("GetUsage", { service }).then(r => r.usage); }
-  configureWorkspace(workspaceId, service, model, modelSettings) { return this.request("ConfigureWorkspace", { workspaceId, service, model, modelSettings }).then(r => r.workspace); }
   startLoop(workspaceId, loop) { return this.request("StartLoop", { workspaceId, loop }); }
   cancelLoop(workspaceId) { return this.request("CancelLoop", { workspaceId }); }
   getLoop(workspaceId) { return this.request("GetLoop", { workspaceId }).then(r => r.loop ?? null); }
-  getWorkspaceAi(workspaceId) { return this.request("GetWorkspaceAi", { workspaceId }).then(r => r.ai); }
-  listModels(service) { return this.request("ListModels", { service }).then(r => r.models ?? []); }
+  getWorkspaceSettings(workspaceId) { return this.request("GetWorkspaceSettings", { workspaceId }).then(r => r.settings); }
+  setWorkspaceSettings(workspaceId, settings) { return this.request("SetWorkspaceSettings", { workspaceId, settings }).then(r => r.settings); }
+  getAiEnvironment() { return this.request("GetAiEnvironment", {}).then(r => r.aiEnvironment); }
+  setAiEnvironment(aiEnvironment) { return this.request("SetAiEnvironment", { aiEnvironment }).then(r => r.aiEnvironment); }
+  listLocalModels(url) { return this.request("ListLocalModels", { url: url || undefined }).then(r => r.names ?? []); }
+  listImageModels(url) { return this.request("ListImageModels", { url: url || undefined }).then(r => r.names ?? []); }
   moveWorkspace(workspaceId, groupId) { return this.request("MoveWorkspace", { workspaceId, groupId: groupId ?? undefined }).then(r => r.workspace); }
   deleteWorkspace(workspaceId, deleteFolder) { return this.request("DeleteWorkspace", { workspaceId, deleteFolder }); }
   createGroup(name, parentId) { return this.request("CreateGroup", { name, parentId: parentId ?? undefined }).then(r => r.group); }
@@ -1327,7 +1331,7 @@ class Connection {
   searchFiles(workspaceId, text, content, showHidden) { return this.request("SearchFiles", { workspaceId, text, searchContent: content, showHidden }).then(r => r.searchResults); }
   readFile(workspaceId, path) { return this.request("ReadFile", { workspaceId, path }).then(r => r.content); }
   watchWorkspace(workspaceId) { return this.request("WatchWorkspace", { workspaceId }); }
-  cloneWorkspace(url, path, name) { return this.request("CloneWorkspace", { url, path, name: name || undefined }).then(r => r.workspace); }
+  cloneWorkspace(url, path, name, service, apiKey) { return this.request("CloneWorkspace", { url, path, name: name || undefined, service, apiKey: apiKey || undefined }).then(r => r.workspace); }
   getGitStatus(workspaceId) { return this.request("GetGitStatus", { workspaceId }).then(r => r.git); }
   getGitChanges(workspaceId) { return this.request("GetGitChanges", { workspaceId }).then(r => r.gitChanges.changes); }
   getGitHistory(workspaceId, skip, limit) { return this.request("GetGitHistory", { workspaceId, skip, limit }).then(r => r.gitHistory); }
@@ -1846,26 +1850,45 @@ class WorkspaceView {
       this.separator(this.contentPane, null),
       this.chatPane);
 
-    this.serviceSelect = h("select", { onchange: () => this.changeService() }, Object.entries(services).map(([key, service]) => h("option", { value: key }, service.label)));
-    this.modelSelect = h("select", { onchange: () => this.changeModel() });
-    this.modelDescription = h("div", { class: "muted small", hidden: true });
-    this.modelSettingsBox = h("div", { class: "stack tight" });
-    this.refreshButton = h("button", { class: "block", style: "margin-top:8px", onclick: () => this.syncSettings() }, "Refresh models");
-    this.offered = [];
-    this.modelId = null;
-    this.values = {};
+    this.providerLabel = h("div", {});
+    this.capabilitySelect = h("select", {}, capabilities.map(name => h("option", { value: name }, name)));
+    this.effortSelect = h("select", {}, efforts.map(name => h("option", { value: name }, name)));
+    this.switches = {};
+    const switchRow = (key, label) => {
+      const box = h("input", { type: "checkbox" });
+      this.switches[key] = box;
+      return h("label", { class: "check", style: "margin-top:4px" }, box, label);
+    };
+    this.instructionsBox = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
+    this.detailsTitle = h("div", { class: "muted", style: "margin-top:8px", hidden: true }, "How it runs");
+    this.detailsBox = h("div", { class: "stack tight" });
+    this.current = null;
+    this.settingsEdits = 0;
     this.syncSettings();
     this.settingsPane = h("div", { class: "pane settings" },
       h("div", { class: "inner stack tight" },
-        h("div", { class: "muted" }, "AI service"), this.serviceSelect,
-        h("div", { class: "muted", style: "margin-top:8px" }, "Model"), this.modelSelect, this.modelDescription,
-        this.modelSettingsBox,
-        this.refreshButton,
+        h("div", { class: "muted small" }, "Changes apply when you close the settings."),
+        h("div", { class: "muted", style: "margin-top:8px" }, "AI provider"), this.providerLabel,
+        h("div", { class: "muted small" }, "Fixed when the workspace was created."),
+        h("div", { class: "muted", style: "margin-top:8px" }, "Capability"), this.capabilitySelect,
+        h("div", { class: "muted", style: "margin-top:8px" }, "Effort"), this.effortSelect,
+        switchRow("isShellAllowed", "Run shell commands"),
+        switchRow("isSystemAccessAllowed", "Allow files outside the workspace"),
+        switchRow("isWebAllowed", "Use the web"),
+        switchRow("isImageGenerationAllowed", "Generate images"),
+        h("div", { class: "muted", style: "margin-top:8px" }, "Instructions"), this.instructionsBox,
+        this.detailsTitle, this.detailsBox,
         this.settingsError.element,
         h("button", { class: "block", style: "margin-top:16px", onclick: () => this.home.beginRename() }, "Rename workspace"),
+        h("button", { class: "block", onclick: () => this.home.beginRelocate() }, "Move workspace to folder"),
         h("button", { class: "block danger", onclick: () => this.home.beginDelete() }, "Delete workspace")));
 
     this.settingsPane.hidden = true;
+
+    for (const name of ["input", "change"]) {
+      this.settingsPane.addEventListener(name, () => { this.settingsEdits++; });
+    }
+
     this.element = h("div", { class: "workspace" }, this.panels, this.settingsPane);
     this.keyListener = event => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f" && this.element.offsetParent !== null && this.preview) {
@@ -1909,129 +1932,82 @@ class WorkspaceView {
   }
 
   async syncSettings() {
-    this.serviceSelect.value = this.info.service;
-    const models = await this.loadModels(this.info.service);
-
-    if (models === null) {
-      return;
-    }
-
-    const ai = await attempt(() => this.connection.getWorkspaceAi(this.info.id), this.settingsError);
-
-    if (ai.ok && this.serviceSelect.value === this.info.service) {
-      this.modelId = ai.value.model ?? null;
-      this.values = { ...(ai.value.modelSettings ?? {}) };
-      this.renderModels();
-    }
-  }
-
-  async loadModels(service) {
-    const result = await attempt(() => this.connection.listModels(service), this.settingsError);
+    this.providerLabel.textContent = services[this.info.service]?.label ?? this.info.service;
+    const edits = this.settingsEdits;
+    const result = await attempt(() => this.connection.getWorkspaceSettings(this.info.id), this.settingsError);
 
     if (!result.ok) {
-      return null;
-    }
-
-    if (service === this.serviceSelect.value) {
-      this.offered = result.value;
-      this.renderModels();
-    }
-
-    return result.value;
-  }
-
-  selectedModel() {
-    return this.offered.find(model => model.id === this.modelId) ?? null;
-  }
-
-  renderModels() {
-    const choices = this.offered.map(model => [model.id, model.name ?? model.id]);
-
-    if (this.modelId && !choices.some(([id]) => id === this.modelId)) {
-      choices.unshift([this.modelId, this.modelId]);
-    }
-
-    this.modelSelect.replaceChildren(...choices.map(([id, name]) => h("option", { value: id }, name)));
-    this.modelSelect.value = this.modelId ?? "";
-    this.renderModelSettings();
-  }
-
-  renderModelSettings() {
-    const model = this.selectedModel();
-    this.modelDescription.textContent = model?.description ?? "";
-    this.modelDescription.hidden = !model?.description;
-    this.modelSettingsBox.replaceChildren(...(model?.settings ?? []).map(setting => this.settingControl(setting)));
-  }
-
-  settingControl(setting) {
-    const value = this.values[setting.id] ?? setting.default;
-    const change = next => {
-      this.values[setting.id] = next;
-      this.configure();
-    };
-    let control;
-
-    if (setting.kind === "Choice") {
-      control = h("select", { onchange: () => change(control.value) }, setting.choices.map(choice => h("option", { value: choice }, choice)));
-      control.value = value;
-    } else if (setting.kind === "Toggle") {
-      control = h("input", { type: "checkbox", onchange: () => change(control.checked ? "true" : "false") });
-      control.checked = value === "true";
-    } else {
-      const step = (setting.maximum ?? 0) - (setting.minimum ?? 0) > 4096 ? 1024 : 1;
-      control = h("input", { type: "number", min: String(setting.minimum ?? ""), max: String(setting.maximum ?? ""), step: String(step), onchange: () => {
-        const next = String(Math.trunc(Number(control.value)));
-
-        if (control.value !== "" && settingAccepts(setting, next)) {
-          change(next);
-        } else {
-          control.value = this.values[setting.id] ?? setting.default;
-        }
-      } });
-      control.value = value;
-    }
-
-    return h("div", { class: "stack tight", style: "margin-top:8px" },
-      h("div", { class: "muted" }, setting.name),
-      control,
-      ...(setting.description ? [h("div", { class: "muted small" }, setting.description)] : []));
-  }
-
-  carry(model) {
-    return Object.fromEntries((model?.settings ?? []).map(setting => [setting.id, setting.id in this.values && settingAccepts(setting, this.values[setting.id]) ? this.values[setting.id] : setting.default]));
-  }
-
-  changeModel() {
-    this.modelId = this.modelSelect.value;
-    this.values = this.carry(this.selectedModel());
-    this.renderModelSettings();
-    return this.configure();
-  }
-
-  async changeService() {
-    const key = this.serviceSelect.value;
-    const models = await this.loadModels(key);
-
-    if (models === null || models.length === 0) {
-      const message = models === null ? this.settingsError.element.textContent : `${services[key].label} offers no models. Is it installed and signed in on the server's machine?`;
-      this.serviceSelect.value = this.info.service;
-      await this.syncSettings();
-      this.settingsError.set(message);
       return;
     }
 
-    this.offered = models;
-    this.modelId = (models.find(model => model.id === services[key].defaultModel) ?? models[0]).id;
-    this.values = {};
-    this.values = this.carry(this.selectedModel());
-    this.renderModels();
-    await this.configure();
+    if (edits === this.settingsEdits) {
+      this.showSettings(result.value);
+    } else {
+      this.current = result.value;
+    }
   }
 
-  toggleSettings() {
+  showSettings(settings) {
+    this.current = settings;
+    this.capabilitySelect.value = settings.capability;
+    this.effortSelect.value = settings.effort;
+
+    for (const [key, box] of Object.entries(this.switches)) {
+      box.checked = !!settings[key];
+    }
+
+    this.instructionsBox.value = settings.instructions ?? "";
+    const details = Object.entries(settings.descriptors ?? {});
+    this.detailsTitle.hidden = details.length === 0;
+    this.detailsBox.replaceChildren(...details.map(([name, value]) => h("div", { class: "row small", style: "display:flex;gap:12px" }, h("span", { class: "muted" }, name), h("span", {}, value))));
+  }
+
+  editedSettings() {
+    return {
+      ...this.current,
+      capability: this.capabilitySelect.value,
+      effort: this.effortSelect.value,
+      ...Object.fromEntries(Object.entries(this.switches).map(([key, box]) => [key, box.checked])),
+      instructions: this.instructionsBox.value.trim()
+    };
+  }
+
+  hasPendingSettings() {
+    if (!this.current) {
+      return false;
+    }
+
+    const edited = this.editedSettings();
+    return edited.capability !== this.current.capability
+      || edited.effort !== this.current.effort
+      || ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed"].some(key => !!edited[key] !== !!this.current[key])
+      || edited.instructions !== (this.current.instructions ?? "").trim();
+  }
+
+  async applySettings() {
+    if (!this.hasPendingSettings()) {
+      return true;
+    }
+
+    const result = await attempt(() => this.connection.setWorkspaceSettings(this.info.id, this.editedSettings()), this.settingsError);
+
+    if (result.ok) {
+      this.showSettings(result.value);
+    }
+
+    return result.ok;
+  }
+
+  async toggleSettings() {
+    if (this.settingsOpen) {
+      if (!await this.applySettings()) {
+        return;
+      }
+    }
+
     this.settingsOpen = !this.settingsOpen;
 
-    if (this.settingsOpen) {
+    if (this.settingsOpen && !this.hasPendingSettings()) {
       this.syncSettings();
     }
 
@@ -4216,23 +4192,6 @@ class WorkspaceView {
       ref.isCurrent ? null : { label: "Delete", action: () => tag ? this.deleteTag(target) : this.deleteBranch(target) },
     ]);
   }
-
-  async configure() {
-    const service = this.serviceSelect.value;
-    const result = await attempt(() => this.connection.configureWorkspace(this.info.id, service, this.modelId, this.values), this.settingsError);
-
-    if (result.ok) {
-      this.info = result.value;
-      this.home.replace(result.value);
-    } else {
-      const message = this.settingsError.element.textContent;
-      await this.syncSettings();
-
-      if (!this.settingsError.element.textContent) {
-        this.settingsError.set(message);
-      }
-    }
-  }
 }
 
 class Home {
@@ -4292,7 +4251,9 @@ class Home {
         h("button", { class: "primary block", onclick: () => this.app.showNewWorkspace(this.connection, this) }, "New workspace"),
         h("button", { class: "block", onclick: () => this.app.showCloneWorkspace(this.connection, this) }, "Clone workspace"),
         h("button", { class: "block", onclick: () => this.beginNewGroup(null) }, "New group"),
-        h("button", { class: "block", onclick: () => this.app.changeServer() }, "Change server")));
+        h("div", { style: "display:flex;gap:8px" },
+          h("button", { class: "block", style: "flex:1", onclick: () => this.app.changeServer() }, "Change server"),
+          h("button", { class: "flat gear", title: "AI environment settings", onclick: () => this.app.showEnvironment(this.connection, this) }, "\u2699\uFE0E"))));
     this.scrim = h("div", { class: "overlay", hidden: true, onclick: () => this.setDrawer(false) });
     this.dialogHost = h("div", { class: "dialog-wrap", hidden: true });
     this.dialogKeyListener = event => this.dialogKey(event);
@@ -4540,6 +4501,10 @@ class Home {
   }
 
   select(workspace) {
+    if (this.selected?.id !== workspace?.id) {
+      this.active?.applySettings();
+    }
+
     this.selected = workspace;
     this.setDrawer(false);
     this.closeDialog();
@@ -4573,26 +4538,6 @@ class Home {
       this.updateLoop(view);
     }
 
-    this.renderDrawer();
-  }
-
-  replace(updated) {
-    const index = this.workspaces.findIndex(workspace => workspace.id === updated.id);
-
-    if (index >= 0) {
-      this.workspaces[index] = updated;
-    }
-
-    if (this.selected?.id === updated.id) {
-      const changed = this.selected.service !== updated.service;
-      this.selected = updated;
-
-      if (changed) {
-        this.showUsage(updated.service);
-      }
-    }
-
-    this.buildEntries();
     this.renderDrawer();
   }
 
@@ -4790,6 +4735,16 @@ class Home {
     }
   }
 
+  async beginRelocate() {
+    const workspace = this.selected;
+
+    if (!workspace || this.refuseEdit() || this.active && !await this.active.applySettings()) {
+      return;
+    }
+
+    this.app.showMoveWorkspace(this.connection, this, workspace);
+  }
+
   beginRename() {
     const workspace = this.selected;
 
@@ -4908,6 +4863,35 @@ class Home {
   }
 }
 
+function providerPicker(connection) {
+  const select = h("select", {}, Object.entries(services).map(([key, service]) => h("option", { value: key }, service.label)));
+  const key = h("input", { type: "password", placeholder: "API key for just this workspace (optional)", autocomplete: "off", autocapitalize: "off", spellcheck: false });
+  const sync = () => { key.hidden = !services[select.value].takesKey; };
+  select.onchange = sync;
+  sync();
+
+  return {
+    element: h("div", { class: "stack tight" },
+      h("div", { class: "muted" }, "AI provider"),
+      select,
+      key,
+      h("div", { class: "muted small" }, "The provider cannot be changed once the workspace exists.")),
+    service: () => select.value,
+    key: () => services[select.value].takesKey && key.value.trim() ? key.value.trim() : undefined,
+    async load() {
+      try {
+        const environment = await connection.getAiEnvironment();
+
+        if (environment?.defaultService in services) {
+          select.value = environment.defaultService;
+          sync();
+        }
+      } catch (exception) {
+      }
+    }
+  };
+}
+
 class NewWorkspace {
   constructor(app, connection, home) {
     this.app = app;
@@ -4916,7 +4900,9 @@ class NewWorkspace {
     this.listing = null;
     this.folderError = new ErrorLine();
     this.error = new ErrorLine();
+    this.provider = providerPicker(connection);
     this.build();
+    this.provider.load();
     this.open(null);
   }
 
@@ -4929,6 +4915,7 @@ class NewWorkspace {
     this.element = h("div", { class: "newws" },
       h("header", {}, h("h1", { class: "serif" }, "New workspace"), h("button", { class: "flat", onclick: () => this.app.showHome(this.home) }, "Cancel")),
       h("div", { class: "muted", style: "margin-top:4px" }, "Choose the folder on the server that will host the workspace. The workspace is named after it."),
+      h("div", { style: "margin-top:12px" }, this.provider.element),
       h("div", { class: "path" }, this.upButton, this.pathLabel),
       this.folders,
       h("div", { class: "create" }, this.nameBox, h("button", { onclick: () => this.createFolder() }, "Create")),
@@ -4984,7 +4971,98 @@ class NewWorkspace {
   }
 
   async start() {
-    const result = await attempt(() => this.connection.createWorkspace(this.listing.path), this.error);
+    const result = await attempt(() => this.connection.createWorkspace(this.listing.path, this.provider.service(), this.provider.key()), this.error);
+
+    if (result.ok) {
+      this.app.showHome(this.home, result.value.id);
+    }
+  }
+}
+
+class MoveWorkspace {
+  constructor(app, connection, home, workspace) {
+    this.app = app;
+    this.connection = connection;
+    this.home = home;
+    this.workspace = workspace;
+    this.listing = null;
+    this.folderError = new ErrorLine();
+    this.error = new ErrorLine();
+    this.build();
+    const trimmed = workspace.folder.replace(/[\\/]+$/, "");
+    const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+    this.open(cut > 0 ? trimmed.slice(0, cut) : cut === 0 ? "/" : null).then(() => {
+      if (!this.listing) {
+        return this.open(null);
+      }
+    });
+  }
+
+  build() {
+    this.upButton = h("button", { disabled: true, onclick: () => this.open(this.listing?.parent) }, "↑ Up");
+    this.pathLabel = h("span", {}, "Computer");
+    this.folders = h("div", { class: "folders" });
+    this.nameBox = h("input", { type: "text", placeholder: "New folder name", onkeydown: event => { if (event.key === "Enter") { this.createFolder(); } } });
+    this.moveButton = h("button", { class: "primary block", disabled: true, onclick: () => this.move() }, "Use this folder");
+    this.element = h("div", { class: "newws" },
+      h("header", {}, h("h1", { class: "serif" }, "Move workspace to folder"), h("button", { class: "flat", onclick: () => this.app.showHome(this.home) }, "Cancel")),
+      h("div", { class: "muted", style: "margin-top:4px" }, `Choose the folder on the server that '${folderName(this.workspace.folder)}' works in from now on. No files are moved: the folder has to exist, so move the project there first when it should go along.`),
+      h("div", { class: "path" }, this.upButton, this.pathLabel),
+      this.folders,
+      h("div", { class: "create" }, this.nameBox, h("button", { onclick: () => this.createFolder() }, "Create")),
+      h("div", { style: "margin-top:8px" }, this.folderError.element),
+      h("div", { class: "foot" }, this.error.element, this.moveButton));
+  }
+
+  get canChoose() {
+    return !!this.listing && this.listing.path.length > 0;
+  }
+
+  async open(path) {
+    if (path === undefined) {
+      return;
+    }
+
+    const result = await attempt(() => this.connection.listFolders(path), this.folderError);
+
+    if (result.ok) {
+      this.show(result.value);
+    }
+  }
+
+  show(listing) {
+    this.listing = listing;
+    this.pathLabel.textContent = listing.path || "Computer";
+    this.upButton.disabled = listing.parent === undefined || listing.parent === null;
+    this.moveButton.disabled = !this.canChoose;
+    this.folders.replaceChildren(...listing.folders.map(folder => h("div", { class: "row", onclick: () => this.open(folder.path) },
+      h("div", { class: "name" }, folder.name),
+      h("span", { class: "muted" }, "›"))));
+  }
+
+  async createFolder() {
+    const name = this.nameBox.value;
+
+    if (!name.trim()) {
+      this.folderError.set("Enter a name for the new folder.");
+      return;
+    }
+
+    if (!this.canChoose) {
+      this.folderError.set("Open a folder first.");
+      return;
+    }
+
+    const result = await attempt(() => this.connection.createFolder(this.listing.path, name), this.folderError);
+
+    if (result.ok) {
+      this.nameBox.value = "";
+      this.show(result.value);
+    }
+  }
+
+  async move() {
+    const result = await attempt(() => this.connection.moveWorkspaceToFolder(this.workspace.id, this.listing.path), this.error);
 
     if (result.ok) {
       this.app.showHome(this.home, result.value.id);
@@ -5000,7 +5078,9 @@ class CloneWorkspace {
     this.listing = null;
     this.folderError = new ErrorLine();
     this.error = new ErrorLine();
+    this.provider = providerPicker(connection);
     this.build();
+    this.provider.load();
     this.open(null);
   }
 
@@ -5016,6 +5096,7 @@ class CloneWorkspace {
     this.element = h("div", { class: "newws" },
       h("header", {}, h("h1", { class: "serif" }, "Clone workspace"), h("button", { class: "flat", onclick: () => this.app.showHome(this.home) }, "Cancel")),
       h("div", { class: "muted", style: "margin-top:4px" }, "The server clones the repository into a new folder inside the folder you pick, and a workspace is created in it."),
+      h("div", { style: "margin-top:12px" }, this.provider.element),
       h("div", { class: "fields" }, this.urlBox, this.folderBox),
       h("div", { class: "path" }, this.upButton, this.pathLabel),
       this.folders,
@@ -5078,12 +5159,246 @@ class CloneWorkspace {
   async start() {
     this.progress.hidden = false;
     this.startButton.disabled = true;
-    const result = await attempt(() => this.connection.cloneWorkspace(this.urlBox.value.trim(), this.listing.path, this.folderBox.value.trim()), this.error);
+    const result = await attempt(() => this.connection.cloneWorkspace(this.urlBox.value.trim(), this.listing.path, this.folderBox.value.trim(), this.provider.service(), this.provider.key()), this.error);
     this.progress.hidden = true;
     this.update();
 
     if (result.ok) {
       this.app.showHome(this.home, result.value.id);
+    }
+  }
+}
+
+class AiEnvironmentScreen {
+  constructor(app, connection, home) {
+    this.app = app;
+    this.connection = connection;
+    this.home = home;
+    this.error = new ErrorLine();
+    this.notice = h("div", { class: "muted", hidden: true });
+    this.baseline = null;
+    this.localNames = h("datalist", { id: "local-model-names" });
+    this.imageNames = h("datalist", { id: "image-model-names" });
+    this.build();
+    this.load();
+  }
+
+  text(placeholder = "", password = false) {
+    return h("input", { type: password ? "password" : "text", placeholder, autocomplete: "off", autocapitalize: "off", spellcheck: false });
+  }
+
+  field(label, control) {
+    return h("div", { class: "stack tight" }, h("div", { class: "muted" }, label), control);
+  }
+
+  keyField(label) {
+    const input = this.text("Enter a key to set or replace it", true);
+    const clear = h("input", { type: "checkbox" });
+    const clearRow = h("label", { class: "check", hidden: true }, clear, "A key is set, remove it");
+    return { input, clear, clearRow, element: this.field(label, h("div", { class: "stack tight" }, input, clearRow)) };
+  }
+
+  rows(listId, withContext) {
+    return capabilities.map(name => {
+      const model = h("input", { type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: false, style: "flex:1;min-width:0" });
+      model.setAttribute("list", listId);
+      const context = withContext ? h("input", { type: "number", min: "1", max: "2000000", step: "1024", placeholder: "Context", style: "width:120px" }) : null;
+      return { name, model, context, element: h("div", { style: "display:flex;gap:8px;align-items:center" }, h("div", { style: "width:72px" }, name), model, ...(context ? [context] : [])) };
+    });
+  }
+
+  build() {
+    this.defaultSelect = h("select", {}, Object.entries(services).map(([key, service]) => h("option", { value: key }, service.label)));
+    this.newCapability = h("select", {}, capabilities.map(name => h("option", { value: name }, name)));
+    this.newEffort = h("select", {}, efforts.map(name => h("option", { value: name }, name)));
+    this.newSwitches = {};
+    const newSwitch = (key, label) => {
+      const box = h("input", { type: "checkbox" });
+      this.newSwitches[key] = box;
+      return h("label", { class: "check" }, box, label);
+    };
+    this.newInstructions = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
+    this.claudeCommand = this.text();
+    this.claudeFolder = this.text();
+    this.claudeKey = this.keyField("API key");
+    this.codexCommand = this.text();
+    this.codexFolder = this.text();
+    this.codexKey = this.keyField("API key");
+    this.localCommand = this.text();
+    this.localServer = this.text();
+    this.localRows = this.rows("local-model-names", true);
+    this.imageSelect = h("select", { onchange: () => this.syncImage() }, Object.entries(imageKinds).map(([key, label]) => h("option", { value: key }, label)));
+    this.openAiKey = this.keyField("OpenAI API key");
+    this.imageServer = this.text();
+    this.imageRows = this.rows("image-model-names", false);
+    this.openAiBox = h("div", { class: "stack tight", hidden: true }, this.openAiKey.element);
+    this.imageBox = h("div", { class: "stack tight", hidden: true },
+      this.field("Stable Diffusion server address", this.imageServer),
+      h("button", { class: "block", onclick: () => this.refreshImage() }, "Refresh checkpoints"),
+      h("div", { class: "muted small" }, "A checkpoint for every capability."),
+      ...this.imageRows.map(row => row.element));
+    const heading = text => h("h3", { class: "serif", style: "margin-top:16px" }, text);
+    this.element = h("div", { class: "newws" },
+      h("header", {}, h("h1", { class: "serif" }, "AI environment"), h("button", { class: "flat", onclick: () => this.close() }, "Close")),
+      h("div", { class: "settings", style: "flex:1;min-height:0;overflow-y:auto" },
+        h("div", { class: "stack tight", style: "padding:8px 0 12px" },
+          h("div", { class: "muted" }, "Where the AI tools are, what they sign in with and which models the local provider runs. It applies to every workspace on the server. Changes apply when you close this screen."),
+          this.field("Default provider for new workspaces", this.defaultSelect),
+          heading("New workspaces"),
+          h("div", { class: "muted small" }, "What the AI session of a new workspace starts with. A workspace keeps its own settings afterwards."),
+          this.field("Capability", this.newCapability),
+          this.field("Effort", this.newEffort),
+          newSwitch("isShellAllowed", "Run shell commands"),
+          newSwitch("isSystemAccessAllowed", "Allow files outside the workspace"),
+          newSwitch("isWebAllowed", "Use the web"),
+          newSwitch("isImageGenerationAllowed", "Generate images"),
+          this.field("Instructions", this.newInstructions),
+          heading("Claude Code"),
+          this.field("Command", this.claudeCommand),
+          this.field("Configuration folder (optional)", this.claudeFolder),
+          this.claudeKey.element,
+          heading("OpenAI Codex"),
+          this.field("Command", this.codexCommand),
+          this.field("Configuration folder (optional)", this.codexFolder),
+          this.codexKey.element,
+          heading("Local models"),
+          this.field("OpenCode command", this.localCommand),
+          this.field("Model server address", this.localServer),
+          h("button", { class: "block", onclick: () => this.refreshLocal() }, "Refresh models"),
+          h("div", { class: "muted small" }, "A model for every capability, and optionally how many tokens of context it runs with."),
+          ...this.localRows.map(row => row.element),
+          heading("Image generation"),
+          this.imageSelect,
+          this.openAiBox,
+          this.imageBox,
+          this.localNames,
+          this.imageNames)),
+      h("div", { class: "foot" }, this.error.element, this.notice));
+  }
+
+  syncImage() {
+    this.openAiBox.hidden = this.imageSelect.value !== "OpenAi";
+    this.imageBox.hidden = this.imageSelect.value !== "Local";
+  }
+
+  show(environment) {
+    this.defaultSelect.value = environment.defaultService;
+    this.claudeCommand.value = environment.claudeCommand ?? "";
+    this.claudeFolder.value = environment.claudeConfigFolder ?? "";
+    this.codexCommand.value = environment.codexCommand ?? "";
+    this.codexFolder.value = environment.codexConfigFolder ?? "";
+    this.localCommand.value = environment.localCommand ?? "";
+    this.localServer.value = environment.localServer ?? "";
+    this.imageSelect.value = environment.imageGeneration ?? "None";
+    this.imageServer.value = environment.localImageServer ?? "";
+    const defaults = environment.newWorkspaces ?? {};
+    this.newCapability.value = defaults.capability ?? "Balanced";
+    this.newEffort.value = defaults.effort ?? "High";
+    this.newInstructions.value = defaults.instructions ?? "";
+
+    for (const [key, box] of Object.entries(this.newSwitches)) {
+      box.checked = !!defaults[key];
+    }
+
+    for (const [key, has] of [[this.claudeKey, environment.hasClaudeApiKey], [this.codexKey, environment.hasCodexApiKey], [this.openAiKey, environment.hasOpenAiApiKey]]) {
+      key.input.value = "";
+      key.clear.checked = false;
+      key.clearRow.hidden = !has;
+    }
+
+    this.localRows.forEach((row, index) => {
+      const name = capabilities[index].toLowerCase();
+      row.model.value = environment.localModels?.[name] ?? "";
+      row.context.value = environment.localContexts?.[name] ?? "";
+    });
+    this.imageRows.forEach((row, index) => { row.model.value = environment.localImageModels?.[capabilities[index].toLowerCase()] ?? ""; });
+    this.syncImage();
+    this.baseline = JSON.stringify(this.collect());
+  }
+
+  keyUpdate(key) {
+    return key.clear.checked ? "" : key.input.value.trim() || undefined;
+  }
+
+  names(rows) {
+    return Object.fromEntries(rows.map(row => [row.name.toLowerCase(), row.model.value.trim()]));
+  }
+
+  collect() {
+    const contexts = Object.fromEntries(this.localRows.filter(row => row.context.value !== "").map(row => [row.name.toLowerCase(), Math.trunc(Number(row.context.value))]));
+    return {
+      defaultService: this.defaultSelect.value,
+      claudeCommand: this.claudeCommand.value.trim(),
+      claudeConfigFolder: this.claudeFolder.value.trim() || undefined,
+      claudeApiKey: this.keyUpdate(this.claudeKey),
+      codexCommand: this.codexCommand.value.trim(),
+      codexConfigFolder: this.codexFolder.value.trim() || undefined,
+      codexApiKey: this.keyUpdate(this.codexKey),
+      localCommand: this.localCommand.value.trim(),
+      localServer: this.localServer.value.trim(),
+      localModels: this.names(this.localRows),
+      localContexts: Object.keys(contexts).length > 0 ? contexts : undefined,
+      imageGeneration: this.imageSelect.value,
+      openAiApiKey: this.keyUpdate(this.openAiKey),
+      localImageServer: this.imageServer.value.trim(),
+      localImageModels: this.names(this.imageRows),
+      newWorkspaces: {
+        capability: this.newCapability.value,
+        effort: this.newEffort.value,
+        ...Object.fromEntries(Object.entries(this.newSwitches).map(([key, box]) => [key, box.checked])),
+        instructions: this.newInstructions.value.trim()
+      }
+    };
+  }
+
+  async load() {
+    const result = await attempt(() => this.connection.getAiEnvironment(), this.error);
+
+    if (result.ok) {
+      this.show(result.value);
+    }
+  }
+
+  async close() {
+    this.notice.hidden = true;
+
+    if (this.baseline !== null && JSON.stringify(this.collect()) !== this.baseline) {
+      const result = await attempt(() => this.connection.setAiEnvironment(this.collect()), this.error);
+
+      if (!result.ok) {
+        return;
+      }
+    }
+
+    this.app.showHome(this.home);
+  }
+
+  say(text) {
+    this.notice.textContent = text;
+    this.notice.hidden = false;
+  }
+
+  fill(list, names) {
+    list.replaceChildren(...names.map(name => h("option", { value: name })));
+  }
+
+  async refreshLocal() {
+    this.notice.hidden = true;
+    const result = await attempt(() => this.connection.listLocalModels(this.localServer.value.trim()), this.error);
+
+    if (result.ok) {
+      this.fill(this.localNames, result.value);
+      this.say(result.value.length === 0 ? "The server offers no models." : `Found ${result.value.length} model${result.value.length === 1 ? "" : "s"}.`);
+    }
+  }
+
+  async refreshImage() {
+    this.notice.hidden = true;
+    const result = await attempt(() => this.connection.listImageModels(this.imageServer.value.trim()), this.error);
+
+    if (result.ok) {
+      this.fill(this.imageNames, result.value);
+      this.say(result.value.length === 0 ? "The server offers no checkpoints." : `Found ${result.value.length} checkpoint${result.value.length === 1 ? "" : "s"}.`);
     }
   }
 }
@@ -5273,6 +5588,14 @@ class App {
 
   showNewWorkspace(connection, home) {
     this.show(new NewWorkspace(this, connection, home).element);
+  }
+
+  showEnvironment(connection, home) {
+    this.show(new AiEnvironmentScreen(this, connection, home).element);
+  }
+
+  showMoveWorkspace(connection, home, workspace) {
+    this.show(new MoveWorkspace(this, connection, home, workspace).element);
   }
 
   showCloneWorkspace(connection, home) {

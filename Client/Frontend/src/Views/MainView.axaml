@@ -15,6 +15,12 @@
         <DataTemplate DataType="local:NewWorkspaceViewModel">
           <local:NewWorkspaceView />
         </DataTemplate>
+        <DataTemplate DataType="local:MoveWorkspaceViewModel">
+          <local:MoveWorkspaceView />
+        </DataTemplate>
+        <DataTemplate DataType="local:EnvironmentViewModel">
+          <local:EnvironmentView />
+        </DataTemplate>
         <DataTemplate DataType="local:CloneWorkspaceViewModel">
           <local:CloneWorkspaceView />
         </DataTemplate>

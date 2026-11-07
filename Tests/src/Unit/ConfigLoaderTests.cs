@@ -39,21 +39,6 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
-    public async Task Load_LocalModelServerDefaultsToOllamaAndMustBeAnHttpAddress()
-    {
-        await File.WriteAllTextAsync(path, """{ "port": 8123, "key": "abc" }""");
-        ServerConfig config = await new ConfigLoader().Load(path, CancellationToken.None);
-        Assert.Equal(("http://localhost:11434/v1", "opencode"), (config.LocalModelUrl, config.OpenCodeCommand));
-
-        await File.WriteAllTextAsync(path, """{ "port": 8123, "key": "abc", "localModelUrl": "http://localhost:1234/v1", "openCodeCommand": "/opt/opencode" }""");
-        config = await new ConfigLoader().Load(path, CancellationToken.None);
-        Assert.Equal(("http://localhost:1234/v1", "/opt/opencode"), (config.LocalModelUrl, config.OpenCodeCommand));
-
-        await File.WriteAllTextAsync(path, """{ "port": 8123, "key": "abc", "localModelUrl": "localhost:11434" }""");
-        await Assert.ThrowsAsync<InvalidDataException>(() => new ConfigLoader().Load(path, CancellationToken.None));
-    }
-
-    [Fact]
     public async Task Load_RejectsMissingDefaultFolder()
     {
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { port = 8123, key = "abc", defaultFolder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()) }));

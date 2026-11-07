@@ -56,11 +56,6 @@ internal sealed class ConfigLoader : IConfigLoader
             throw new InvalidDataException($"Config 'defaultFolder' '{config.DefaultFolder}' is not an existing folder.");
         }
 
-        if (!Uri.TryCreate(config.LocalModelUrl, UriKind.Absolute, out Uri? local) || local.Scheme is not ("http" or "https"))
-        {
-            throw new InvalidDataException($"Config 'localModelUrl' '{config.LocalModelUrl}' is not an http or https address.");
-        }
-
         return config;
     }
 }

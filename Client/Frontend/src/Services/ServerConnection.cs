@@ -38,10 +38,12 @@ internal interface IServerConnection : IAsyncDisposable
     /// Creates a workspace in an existing folder on the server.
     /// </summary>
     /// <param name="folder">The folder's absolute path on the server.</param>
+    /// <param name="service">The AI service the workspace runs on for good, or <see langword="null" /> for the default of the server's environment.</param>
+    /// <param name="apiKey">An API key for just this workspace's session, or <see langword="null" /> to sign in the way the tool is signed in on the server.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The new workspace.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<WorkspaceInfo> CreateWorkspace(string folder, CancellationToken cancellation);
+    Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, CancellationToken cancellation);
 
     /// <summary>
     /// Renames a workspace by renaming its folder.
@@ -54,16 +56,14 @@ internal interface IServerConnection : IAsyncDisposable
     Task<WorkspaceInfo> RenameWorkspace(Guid id, string name, CancellationToken cancellation);
 
     /// <summary>
-    /// Changes the AI service, model and effort a workspace's prompts run with.
+    /// Moves a workspace to another existing folder on the server: the AI session is told that the workspace is there now, and no file is moved.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="service">The AI service.</param>
-    /// <param name="model">The identifier of the model, one of those <see cref="ListModels" /> returns; it and its settings go to the workspace's AI session.</param>
-    /// <param name="modelSettings">The values of the model's settings by setting identifier.</param>
+    /// <param name="folder">The existing folder on the server the workspace works in from now on.</param>
     /// <param name="cancellation">Cancels the wait.</param>
-    /// <returns>The updated workspace.</returns>
+    /// <returns>The moved workspace.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<WorkspaceInfo> ConfigureWorkspace(Guid id, AiService service, string model, IReadOnlyDictionary<string, string> modelSettings, CancellationToken cancellation);
+    Task<WorkspaceInfo> MoveWorkspaceToFolder(Guid id, string folder, CancellationToken cancellation);
 
     /// <summary>
     /// Moves a workspace into a group, or out of any.
@@ -246,10 +246,12 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="url">The repository URL.</param>
     /// <param name="parent">The existing folder on the server to create the clone's folder in.</param>
     /// <param name="name">The new folder's name, or <see langword="null" /> to name it after the repository.</param>
+    /// <param name="service">The AI service the workspace runs on for good, or <see langword="null" /> for the default of the server's environment.</param>
+    /// <param name="apiKey">An API key for just this workspace's session, or <see langword="null" />.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The new workspace.</returns>
     /// <exception cref="RemoteException">The server refused or the clone failed.</exception>
-    Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, CancellationToken cancellation);
+    Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, AiService? service, string? apiKey, CancellationToken cancellation);
 
     /// <summary>
     /// Reads the git state of a workspace.
@@ -504,22 +506,58 @@ internal interface IServerConnection : IAsyncDisposable
     Task<LoopInfo?> GetLoop(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Reads the model and the values of its settings that a workspace's AI session runs with.
+    /// Reads how a workspace's AI session is run.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="cancellation">Cancels the wait.</param>
-    /// <returns>The model and settings.</returns>
+    /// <returns>The settings.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<WorkspaceAi> GetWorkspaceAi(Guid id, CancellationToken cancellation);
+    Task<WorkspaceSettings> GetWorkspaceSettings(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Lists the models an AI service can run, each with the settings it offers.
+    /// Changes how a workspace's AI session is run; the provider cannot be changed.
     /// </summary>
-    /// <param name="service">The AI service.</param>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="settings">The new settings.</param>
     /// <param name="cancellation">Cancels the wait.</param>
-    /// <returns>The models; empty when the service is not installed or has none.</returns>
+    /// <returns>The settings as they now are.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<IReadOnlyList<ModelInfo>> ListModels(AiService service, CancellationToken cancellation);
+    Task<WorkspaceSettings> SetWorkspaceSettings(Guid id, WorkspaceSettings settings, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads the environment of the server's AI: where the tools are, the keys they sign in with and the local models.
+    /// </summary>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The environment; API keys never come back, only whether they are set.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<AiEnvironment> GetAiEnvironment(CancellationToken cancellation);
+
+    /// <summary>
+    /// Changes the environment of the server's AI.
+    /// </summary>
+    /// <param name="environment">The new environment; an API key left <see langword="null" /> stays as it is and an empty one is removed.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The environment as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<AiEnvironment> SetAiEnvironment(AiEnvironment environment, CancellationToken cancellation);
+
+    /// <summary>
+    /// Asks the local model server which models it offers.
+    /// </summary>
+    /// <param name="server">The address to ask, or <see langword="null" /> for the one of the environment.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The names of the models.</returns>
+    /// <exception cref="RemoteException">The server refused or the model server could not be reached.</exception>
+    Task<IReadOnlyList<string>> ListLocalModels(string? server, CancellationToken cancellation);
+
+    /// <summary>
+    /// Asks the Stable Diffusion server which checkpoints it offers.
+    /// </summary>
+    /// <param name="server">The address to ask, or <see langword="null" /> for the one of the environment.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The names of the checkpoints.</returns>
+    /// <exception cref="RemoteException">The server refused or the image server could not be reached.</exception>
+    Task<IReadOnlyList<string>> ListImageModels(string? server, CancellationToken cancellation);
 
     /// <summary>
     /// Lists the script and task runs the server holds for a workspace.
@@ -746,13 +784,13 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<WorkspaceCatalog> ListWorkspaces(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListWorkspaces }, cancellation)).Catalog ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> CreateWorkspace(string folder, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateWorkspace, Path = folder }, cancellation)).Workspace ?? throw Malformed();
+    public async Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateWorkspace, Path = folder, Service = service, ApiKey = apiKey }, cancellation)).Workspace ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> MoveWorkspaceToFolder(Guid id, string folder, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = id, Path = folder }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> RenameWorkspace(Guid id, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenameWorkspace, WorkspaceId = id, Name = name }, cancellation)).Workspace ?? throw Malformed();
-
-    /// <inheritdoc />
-    public async Task<WorkspaceInfo> ConfigureWorkspace(Guid id, AiService service, string model, IReadOnlyDictionary<string, string> modelSettings, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ConfigureWorkspace, WorkspaceId = id, Service = service, Model = model, ModelSettings = modelSettings }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> MoveWorkspace(Guid id, Guid? groupId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.MoveWorkspace, WorkspaceId = id, GroupId = groupId }, cancellation)).Workspace ?? throw Malformed();
@@ -814,7 +852,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<FileContent> ReadFile(Guid id, string path, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ReadFile, WorkspaceId = id, Path = path }, cancellation)).Content ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CloneWorkspace, Url = url, Path = parent, Name = name }, cancellation)).Workspace ?? throw Malformed();
+    public async Task<WorkspaceInfo> CloneWorkspace(string url, string parent, string? name, AiService? service, string? apiKey, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CloneWorkspace, Url = url, Path = parent, Name = name, Service = service, ApiKey = apiKey }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<GitStatus> GetGitStatus(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetGitStatus, WorkspaceId = id }, cancellation)).Git ?? throw Malformed();
@@ -898,10 +936,22 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<LoopInfo?> GetLoop(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetLoop, WorkspaceId = id }, cancellation)).Loop;
 
     /// <inheritdoc />
-    public async Task<WorkspaceAi> GetWorkspaceAi(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetWorkspaceAi, WorkspaceId = id }, cancellation)).Ai ?? throw Malformed();
+    public async Task<WorkspaceSettings> GetWorkspaceSettings(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetWorkspaceSettings, WorkspaceId = id }, cancellation)).Settings ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<ModelInfo>> ListModels(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListModels, Service = service }, cancellation)).Models ?? throw Malformed();
+    public async Task<WorkspaceSettings> SetWorkspaceSettings(Guid id, WorkspaceSettings settings, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SetWorkspaceSettings, WorkspaceId = id, Settings = settings }, cancellation)).Settings ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<AiEnvironment> GetAiEnvironment(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetAiEnvironment }, cancellation)).AiEnvironment ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<AiEnvironment> SetAiEnvironment(AiEnvironment environment, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SetAiEnvironment, AiEnvironment = environment }, cancellation)).AiEnvironment ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListLocalModels(string? server, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListLocalModels, Url = server }, cancellation)).Names ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<string>> ListImageModels(string? server, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListImageModels, Url = server }, cancellation)).Names ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<ScriptRuns> GetScripts(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetScripts, WorkspaceId = id }, cancellation)).Scripts ?? throw Malformed();

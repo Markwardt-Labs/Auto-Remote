@@ -20,6 +20,58 @@ public sealed class HomeViewModelTests
     private WorkspaceCatalog Catalog(WorkspaceGroup[] groups, params WorkspaceInfo[] workspaces) => new() { Groups = groups, Workspaces = workspaces };
 
     [Fact]
+    public async Task SwitchingToAnotherWorkspace_AppliesTheSettingsEditsOfTheOneLeft()
+    {
+        connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        connection.Setup(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, WorkspaceSettings given, CancellationToken _) => given);
+        await model.Start();
+        model.Active!.Settings.IsShellAllowed = true;
+
+        model.Selected = second;
+
+        await Task.Delay(300);
+        connection.Verify(x => x.SetWorkspaceSettings(first.Id, It.Is<WorkspaceSettings>(sent => sent.IsShellAllowed), It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetWorkspaceSettings(second.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MovingTheWorkspaceToAFolder_AppliesTheSettingsEditsFirst()
+    {
+        connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        connection.Setup(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, WorkspaceSettings given, CancellationToken _) => given);
+        await model.Start();
+        model.Active!.Settings.IsShellAllowed = true;
+        WorkspaceInfo? requested = null;
+        model.MoveWorkspaceRequested += workspace => requested = workspace;
+
+        model.MoveWorkspaceToFolderCommand.Execute(null);
+        for (int attempt = 0; attempt < 500 && requested is null; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Equal(first, requested);
+        connection.Verify(x => x.SetWorkspaceSettings(first.Id, It.Is<WorkspaceSettings>(sent => sent.IsShellAllowed), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MovingTheWorkspaceToAFolder_WaitsForTheEditsToBeAcceptedAndDoesNotMoveWhenTheyAreNot()
+    {
+        connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        connection.Setup(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
+        await model.Start();
+        model.Active!.Settings.IsShellAllowed = true;
+        bool requested = false;
+        model.MoveWorkspaceRequested += _ => requested = true;
+
+        model.MoveWorkspaceToFolderCommand.Execute(null);
+        await Task.Delay(300);
+
+        Assert.False(requested);
+        Assert.Equal("refused", model.Active.Settings.Error);
+    }
+
+    [Fact]
     public async Task Start_ListsWorkspacesAndFocusesFirst()
     {
         await model.Start();
