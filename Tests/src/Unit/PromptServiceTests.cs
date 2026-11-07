@@ -382,7 +382,8 @@ public sealed class PromptServiceTests : IDisposable
         IPromptSessionConfiguration configuration = Session.Configuration;
         Assert.Equal((PromptCapability.Max, PromptEffort.Low), (configuration.Capability, configuration.Effort));
         Assert.Equal((false, false, false, true), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
-        Assert.Equal("  be brief  ", configuration.Instructions);
+        Assert.Equal(host.BuiltIn.Compose("be brief"), configuration.Instructions);
+        Assert.Equal("be brief", saved.Instructions);
         Assert.Equal((AiService.ClaudeCode, AiCapability.Max, AiEffort.Low), (saved.Service, saved.Capability, saved.Effort));
     }
 
@@ -409,7 +410,35 @@ public sealed class PromptServiceTests : IDisposable
         WorkspaceSettings saved = await service.SetSettings(workspace.Id, current with { Instructions = "   " }, CancellationToken.None);
 
         Assert.Null(saved.Instructions);
-        Assert.Null(Session.Configuration.Instructions);
+        Assert.Equal(host.BuiltIn.Text, Session.Configuration.Instructions);
+    }
+
+    [Fact]
+    public async Task TheBuiltInInstructionsGoWithEverySessionAndAreNeverShownToTheUser()
+    {
+        IPromptSession existing = Existing();
+        existing.Configuration.Instructions = "my own";
+        await existing.DisposeAsync();
+        Use(workspace with { SessionId = existing.Id });
+
+        WorkspaceSettings first = await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        Assert.Equal("my own", first.Instructions);
+        Assert.Equal(host.BuiltIn.Compose("my own"), prompter.Sessions[^1].Configuration.Instructions);
+    }
+
+    [Fact]
+    public async Task ASessionThatAlreadyHoldsOnlyTheBuiltInInstructionsShowsNoneAndIsLeftAsItIs()
+    {
+        IPromptSession existing = Existing();
+        existing.Configuration.Instructions = host.BuiltIn.Text;
+        await existing.DisposeAsync();
+        Use(workspace with { SessionId = existing.Id });
+
+        WorkspaceSettings settings = await service.GetSettings(workspace.Id, CancellationToken.None);
+
+        Assert.Null(settings.Instructions);
+        Assert.Equal(host.BuiltIn.Text, prompter.Sessions[^1].Configuration.Instructions);
     }
 
     [Fact]

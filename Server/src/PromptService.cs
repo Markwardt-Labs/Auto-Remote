@@ -610,7 +610,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         configuration.IsSystemAccessAllowed = settings.IsSystemAccessAllowed;
         configuration.IsWebAllowed = settings.IsWebAllowed;
         configuration.IsImageGenerationAllowed = settings.IsImageGenerationAllowed;
-        configuration.Instructions = string.IsNullOrWhiteSpace(settings.Instructions) ? null : settings.Instructions;
+        configuration.Instructions = host.ComposeInstructions(settings.Instructions);
     }
 
     private WorkspaceSettings Describe(WorkspaceInfo workspace, IPromptSession session)
@@ -625,7 +625,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             IsSystemAccessAllowed = session.Configuration.IsSystemAccessAllowed,
             IsWebAllowed = session.Configuration.IsWebAllowed,
             IsImageGenerationAllowed = session.Configuration.IsImageGenerationAllowed,
-            Instructions = session.Configuration.Instructions,
+            Instructions = host.UserInstructions(session.Configuration.Instructions),
             ReviewPrompt = workspace.ReviewPrompt,
             ExpandPrompt = workspace.ExpandPrompt,
             GlobalReviewPrompt = environment.ReviewPrompt,
@@ -667,6 +667,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         try
         {
             session = await Obtain(workspace, cancellation);
+            string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions));
+
+            if (session.Configuration.Instructions != wanted)
+            {
+                session.Configuration.Instructions = wanted;
+            }
         }
         catch (Exception exception) when (exception is PromptSessionException or DirectoryNotFoundException or ArgumentException)
         {

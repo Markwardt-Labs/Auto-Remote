@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
@@ -12,6 +12,10 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     private UpdateViewModel? update;
 
     private object? beforeUpdate;
+
+    private readonly TimeSpan retryEvery = retryInterval ?? TimeSpan.FromSeconds(3);
+
+    private readonly TimeSpan retryFor = TimeSpan.FromMinutes(2);
 
     private Guid? requested;
 
@@ -48,7 +52,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     public string WindowTitle => current is HomeViewModel home ? home.Title : "Auto Remote";
 
     /// <summary>
-    /// Opens the app: reconnects to the saved server, or asks for one when none is saved or it cannot be reached.
+    /// Opens the app: reconnects to the saved server, or asks for one when none is saved or it cannot be reached. A server that cannot be reached yet, such as one that is restarting after an update, is tried again in the background for a while, and the app opens by itself once it answers unless the user has begun to use the connect screen.
     /// </summary>
     /// <returns>A task that completes once the first screen is showing.</returns>
     public async Task Start()
@@ -67,7 +71,12 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
         catch (Exception exception) when (exception is IOException or SocketException or UnauthorizedAccessException)
         {
-            ShowConnect(saved, exception.Message);
+            ConnectViewModel connect = ShowConnect(saved, exception.Message);
+
+            if (exception is not UnauthorizedAccessException)
+            {
+                _ = Retry(connect, saved);
+            }
         }
     }
 
@@ -117,7 +126,48 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
     }
 
-    private void ShowConnect(ConnectionSettings? settings, string? error)
+    private async Task Retry(ConnectViewModel connect, ConnectionSettings saved)
+    {
+        DateTime end = DateTime.UtcNow + retryFor;
+
+        while (DateTime.UtcNow < end)
+        {
+            await Task.Delay(retryEvery);
+
+            if (!ReferenceEquals(current, connect) || connect.IsBusy || connect.Host != saved.Host || connect.Port != saved.Port.ToString() || connect.AccessKey != saved.AccessKey)
+            {
+                return;
+            }
+
+            IServerConnection opened;
+
+            try
+            {
+                opened = await factory.Connect(saved, CancellationToken.None);
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or SocketException)
+            {
+                continue;
+            }
+
+            if (ReferenceEquals(current, connect) && !connect.IsBusy)
+            {
+                await Open(opened, null);
+            }
+            else
+            {
+                await opened.DisposeAsync();
+            }
+
+            return;
+        }
+    }
+
+    private ConnectViewModel ShowConnect(ConnectionSettings? settings, string? error)
     {
         ConnectViewModel connect = new(factory, settings, $"{info.Name} {info.Version}");
         connect.Connected += async (opened, used) =>
@@ -132,6 +182,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
 
         Current = connect;
+        return connect;
     }
 
     private async Task Open(IServerConnection opened, Guid? focus)
@@ -182,7 +233,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         };
         opening.EnvironmentRequested += async () =>
         {
-            EnvironmentViewModel configuring = new(opened);
+            EnvironmentViewModel configuring = new(opened, update);
             configuring.Closed += () => Current = opening;
             Current = configuring;
             await configuring.Load();

@@ -16,7 +16,7 @@
           <StackPanel Grid.Column="0" Orientation="Horizontal" HorizontalAlignment="Left" VerticalAlignment="Center">
             <local:TouchButton Content="☰" Classes="flat" FontSize="20" Command="{Binding ToggleDrawerCommand}" />
             <local:TouchButton Classes="flat" ToolTip.Tip="Update available" Command="{Binding Update.BeginCommand}" IsVisible="{Binding Update.IsAvailable, FallbackValue=False}" VerticalAlignment="Center">
-              <Path Classes="usageIcon" Stroke="{DynamicResource Accent}" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" MaxWidth="18" MaxHeight="18" />
+              <Path Classes="usageIcon" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
             <local:TouchButton Classes="flat" ToolTip.Tip="Open a new window" Command="{Binding NewWindowCommand}" IsVisible="{Binding CanOpenNewWindow}" VerticalAlignment="Center">
               <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource NewWindowIconGeometry}" MaxWidth="18" MaxHeight="18" />
@@ -758,7 +758,7 @@
           <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="8,8,8,12">
             <TextBlock Grid.Column="0" Text="Workspaces" Classes="serif" FontSize="22" VerticalAlignment="Center" />
             <local:TouchButton Grid.Column="1" Classes="flat" ToolTip.Tip="Update available" Command="{Binding Update.BeginCommand}" IsVisible="{Binding Update.IsAvailable, FallbackValue=False}" VerticalAlignment="Center">
-              <Path Classes="usageIcon" Stroke="{DynamicResource Accent}" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" MaxWidth="18" MaxHeight="18" />
+              <Path Classes="usageIcon" StrokeThickness="1.6" Data="{StaticResource UpdateIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
           </Grid>
           <TextBox Grid.Row="1" Text="{Binding Filter}" PlaceholderText="Filter workspaces" Margin="0,0,0,8" />

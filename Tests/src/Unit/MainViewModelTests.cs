@@ -56,6 +56,66 @@ public sealed class MainViewModelTests
         Assert.Equal("timed out", connect.Error);
     }
 
+    private MainViewModel Retrying() => new(info.Object, factory.Object, store.Object, ClientLayout.Tabs, null, null, null, null, null, null, null, null, TimeSpan.FromMilliseconds(20));
+
+    [Fact]
+    public async Task Start_WhenTheSavedServerIsStillRestarting_OpensByItselfOnceItAnswers()
+    {
+        int attempts = 0;
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).Returns(() => ++attempts < 3 ? Task.FromException<IServerConnection>(new IOException("refused")) : Task.FromResult(connection.Object));
+        MainViewModel retrying = Retrying();
+
+        await retrying.Start();
+        Assert.IsType<ConnectViewModel>(retrying.Current);
+        await WaitFor(() => retrying.Current is HomeViewModel);
+
+        Assert.IsType<HomeViewModel>(retrying.Current);
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public async Task Start_StopsRetryingWhenTheKeyIsRejectedOrTheUserEditsTheConnectScreen()
+    {
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        int attempts = 0;
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).Returns(() => ++attempts == 1 ? Task.FromException<IServerConnection>(new IOException("refused")) : Task.FromException<IServerConnection>(new UnauthorizedAccessException("rejected")));
+        MainViewModel rejected = Retrying();
+
+        await rejected.Start();
+        await WaitFor(() => attempts >= 2);
+        await Task.Delay(150);
+
+        Assert.Equal(2, attempts);
+        Assert.IsType<ConnectViewModel>(rejected.Current);
+
+        attempts = 0;
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).Returns(() =>
+        {
+            attempts++;
+            return Task.FromException<IServerConnection>(new IOException("refused"));
+        });
+        MainViewModel editing = Retrying();
+
+        await editing.Start();
+        Assert.IsType<ConnectViewModel>(editing.Current).Host = "other";
+        await Task.Delay(150);
+
+        Assert.Equal(1, attempts);
+    }
+
+    [Fact]
+    public async Task Start_WhenUnauthorizedAtFirstDoesNotRetry()
+    {
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ThrowsAsync(new UnauthorizedAccessException("rejected"));
+
+        await Retrying().Start();
+        await Task.Delay(150);
+
+        factory.Verify(x => x.Connect(saved, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
     [Theory]
     [InlineData("2.0.0")]
     [InlineData(null)]

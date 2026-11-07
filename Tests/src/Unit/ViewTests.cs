@@ -401,7 +401,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             Button menu = window.GetVisualDescendants().OfType<Button>().First(button => button.Content?.ToString() == "\u2630");
             Button updating = window.GetVisualDescendants().OfType<Button>().Single(button => button.IsEffectivelyVisible && ToolTip.GetTip(button)?.ToString() == "Update available");
-            bool shown = updating.IsEffectivelyVisible;
+            bool shown = updating.IsEffectivelyVisible && updating.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single().Stroke is Avalonia.Media.ISolidColorBrush stroke && stroke.Color == Avalonia.Media.Color.Parse("#CCCCCC");
             Avalonia.Point menuPoint = Avalonia.VisualExtensions.TranslatePoint(menu, new Avalonia.Point(0, 0), window)!.Value;
             Avalonia.Point updatePoint = Avalonia.VisualExtensions.TranslatePoint(updating, new Avalonia.Point(0, 0), window)!.Value;
             bool besideMenu = updatePoint.X > menuPoint.X && updatePoint.X - menuPoint.X < 120 && Math.Abs(updatePoint.Y - menuPoint.Y) < 20;
@@ -1466,5 +1466,50 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         Assert.True(checkedIcons >= 3, $"only {checkedIcons} icon buttons were found");
         Assert.True(off.Count == 0, string.Join("\n", off));
+    }
+
+    [Fact]
+    public async Task EnvironmentView_OffersTheManualUpdateCheckOnlyWithAnUpdateSystemAndTheUpdateButtonWhenOneIsAvailable()
+    {
+        connection.SetupGet(x => x.ServerVersion).Returns("1.0.0");
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment());
+        Mock<IAppInfo> info = new();
+        info.SetupGet(x => x.Version).Returns("1.0.0");
+        Mock<IReleaseFeed> feed = new();
+        feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync(new ReleaseInfo { Version = new AppVersion { Major = 1, Minor = 4, Patch = 0 }, Assets = [] });
+
+        (string[] without, string[] before, string[] after, bool dialog) = await fixture.Run(() =>
+        {
+            string[] Buttons(Window window) => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty).Where(text => text is "Check for updates" or "Update")];
+            Window plain = new() { Width = 700, Height = 900, Content = new EnvironmentView { DataContext = new EnvironmentViewModel(connection.Object) } };
+            plain.Show();
+            string[] without = Buttons(plain);
+            plain.Close();
+
+            using UpdateViewModel update = new(info.Object, connection.Object, feed.Object, null);
+            Window window = new() { Width = 700, Height = 900, Content = new EnvironmentView { DataContext = new EnvironmentViewModel(connection.Object, update) } };
+            window.Show();
+            string[] before = Buttons(window);
+            update.CheckCommand.Execute(null);
+
+            for (int attempt = 0; attempt < 200 && update.CheckResult is null or "Checking..."; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string[] after = Buttons(window);
+            window.GetVisualDescendants().OfType<Button>().First(button => button.IsEffectivelyVisible && button.Content?.ToString() == "Update").Command!.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool dialog = window.GetVisualDescendants().OfType<UpdateDialogView>().Any(item => item.IsEffectivelyVisible);
+            window.Close();
+            return (without, before, after, dialog);
+        });
+
+        Assert.Empty(without);
+        Assert.Equal(["Check for updates"], before);
+        Assert.Equal(["Check for updates", "Update"], after);
+        Assert.True(dialog);
     }
 }

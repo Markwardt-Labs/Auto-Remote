@@ -31,6 +31,7 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
             Close();
             return Task.CompletedTask;
         });
+        CheckCommand = new AsyncCommand(_ => CheckNow());
         connection.Reconnected += Reconnected;
     }
 
@@ -56,6 +57,8 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
 
     private string? checkError;
 
+    private string? checkResult;
+
     /// <summary>
     /// Raised after the connection to the server was reopened, which is when the version of the server may have changed; the phase of the update has been settled by then.
     /// </summary>
@@ -75,6 +78,11 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
     /// Gets the command that closes the dialog.
     /// </summary>
     public AsyncCommand CloseCommand { get; }
+
+    /// <summary>
+    /// Gets the command that looks for a newer release right now and says what it found in <see cref="CheckResult" />.
+    /// </summary>
+    public AsyncCommand CheckCommand { get; }
 
     /// <summary>
     /// Gets how far the update has come.
@@ -180,6 +188,31 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Gets what the last manual check found, or <see langword="null" /> before the user asked for one.
+    /// </summary>
+    public string? CheckResult
+    {
+        get => checkResult;
+        private set
+        {
+            if (Set(ref checkResult, value))
+            {
+                Raise(nameof(HasCheckResult));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="CheckResult" /> is set.
+    /// </summary>
+    public bool HasCheckResult => checkResult is not null;
+
+    /// <summary>
+    /// Gets the versions of this app and its server, for the screen that offers the manual check.
+    /// </summary>
+    public string Versions => $"This app {info.Version}, server {connection.ServerVersion ?? "before versions were reported"}.";
 
     /// <summary>
     /// Gets a value indicating whether <see cref="CheckError" /> is set.
@@ -296,6 +329,14 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
         Raise(nameof(ServerNeedsUpdate));
         Raise(nameof(IsAvailable));
         Raise(nameof(Summary));
+        Raise(nameof(Versions));
+    }
+
+    private async Task CheckNow()
+    {
+        CheckResult = "Checking...";
+        await Check();
+        CheckResult = checkError is not null ? $"The newest release could not be looked up: {checkError}" : latest is null ? "No release was found on GitHub." : IsAvailable ? $"Version {latest.Version} is available." : $"Up to date. The newest release is {latest.Version}.";
     }
 
     private void Reconnected()

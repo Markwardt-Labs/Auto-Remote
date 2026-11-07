@@ -102,6 +102,17 @@ public sealed class EnvironmentViewModelTests
     }
 
     [Fact]
+    public void Update_IsOnlyThereWhenTheScreenWasGivenAnUpdateSystem()
+    {
+        Mock<IAppInfo> info = new();
+        info.SetupGet(x => x.Version).Returns("1.0.0");
+        using UpdateViewModel update = new(info.Object, connection.Object, null, null);
+
+        Assert.Null(new EnvironmentViewModel(connection.Object).Update);
+        Assert.Same(update, new EnvironmentViewModel(connection.Object, update).Update);
+    }
+
+    [Fact]
     public async Task Prompts_AreReadFromTheEnvironmentAndSentTrimmedWhenTheSettingsClose()
     {
         EnvironmentViewModel model = Open();

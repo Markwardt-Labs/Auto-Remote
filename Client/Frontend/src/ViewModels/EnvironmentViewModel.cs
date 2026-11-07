@@ -9,9 +9,11 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     /// Initializes a new instance of the <see cref="EnvironmentViewModel" /> class.
     /// </summary>
     /// <param name="connection">The server connection.</param>
-    public EnvironmentViewModel(IServerConnection connection)
+    /// <param name="update">Looks for newer releases, which shows the section with the manual check, or <see langword="null" /> when this screen has no update system.</param>
+    public EnvironmentViewModel(IServerConnection connection, UpdateViewModel? update = null)
     {
         this.connection = connection;
+        Update = update;
         selectedDefault = Services[0];
         selectedImage = ImageKinds[0];
         CloseCommand = new AsyncCommand(async _ =>
@@ -431,6 +433,16 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         get => localImageServer;
         set => Set(ref localImageServer, value ?? string.Empty);
     }
+
+    /// <summary>
+    /// Gets the update system whose manual check this screen offers, or <see langword="null" /> when there is none.
+    /// </summary>
+    public UpdateViewModel? Update { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether this screen offers the manual update check.
+    /// </summary>
+    public bool HasUpdate => Update is not null;
 
     /// <summary>
     /// Gets or sets the prompt the review button sends in every workspace that has none of its own; empty restores the default.

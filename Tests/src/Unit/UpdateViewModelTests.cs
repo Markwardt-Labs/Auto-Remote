@@ -332,6 +332,46 @@ public sealed class UpdateViewModelTests
         Assert.False(update.IsAvailable);
     }
 
+    [Theory]
+    [InlineData("1.1.0", "1.0.0", "Version 1.1.0 is available.")]
+    [InlineData("1.0.0", "1.0.0", "Up to date. The newest release is 1.0.0.")]
+    [InlineData(null, "1.0.0", "No release was found on GitHub.")]
+    public async Task CheckCommand_SaysWhatTheManualCheckFound(string? latest, string server, string expected)
+    {
+        serverVersion = server;
+        Latest(latest);
+        using UpdateViewModel update = Create();
+        Assert.False(update.HasCheckResult);
+
+        update.CheckCommand.Execute(null);
+        await WaitFor(() => update.CheckResult != "Checking..." && update.HasCheckResult);
+
+        Assert.Equal(expected, update.CheckResult);
+        Assert.Equal("This app 1.0.0, server " + server + ".", update.Versions);
+    }
+
+    [Fact]
+    public async Task CheckCommand_SaysWhyTheLookupFailedAndIsDisabledWhileItRuns()
+    {
+        TaskCompletionSource gate = new();
+        feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).Returns(async () =>
+        {
+            await gate.Task;
+            throw new IOException("offline");
+        });
+        using UpdateViewModel update = Create();
+
+        update.CheckCommand.Execute(null);
+        await WaitFor(() => update.CheckResult == "Checking...");
+        bool whileRunning = update.CheckCommand.CanExecute(null);
+        gate.SetResult();
+        await WaitFor(() => update.CheckResult != "Checking...");
+
+        Assert.False(whileRunning);
+        Assert.Equal("The newest release could not be looked up: offline", update.CheckResult);
+        Assert.True(update.CheckCommand.CanExecute(null));
+    }
+
     [Fact]
     public async Task Reconnecting_ReadsTheServerVersionAgain()
     {

@@ -39,7 +39,21 @@ internal interface IPrompterHost
     Task<AiEnvironment> Set(AiEnvironment environment, CancellationToken cancellation);
 
     /// <summary>
-    /// Makes the AI session of a new workspace: in the folder, on the provider, on an API key of its own when one is given (which Live AI stores with the session; the server keeps no copy), balanced and thinking hard, with the shell, the web and, when the environment has an image service, image generation on, no sandbox, and instructions that keep the AI working in the foreground. The session is closed again; it is loaded when it is first used.
+    /// Puts the instructions every AI gets in front of the user's own, which is what a session is configured with.
+    /// </summary>
+    /// <param name="user">The user's own instructions, or <see langword="null" /> for none.</param>
+    /// <returns>The instructions for the session.</returns>
+    string ComposeInstructions(string? user);
+
+    /// <summary>
+    /// Takes the instructions every AI gets off what a session is configured with, leaving what the user wrote.
+    /// </summary>
+    /// <param name="stored">The instructions of the session.</param>
+    /// <returns>The user's own instructions, or <see langword="null" /> when there are none.</returns>
+    string? UserInstructions(string? stored);
+
+    /// <summary>
+    /// Makes the AI session of a new workspace: in the folder, on the provider, on an API key of its own when one is given (which Live AI stores with the session; the server keeps no copy), balanced and thinking hard, with the shell, the web and, when the environment has an image service, image generation on, no sandbox, and the built-in instructions that keep the AI working in the foreground in front of the ones of the environment. The session is closed again; it is loaded when it is first used.
     /// </summary>
     /// <param name="folder">The folder of the workspace.</param>
     /// <param name="service">The provider.</param>
@@ -107,7 +121,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
 
     private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
-    private readonly string legacyInstructions = "Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished. While you work, write a short status update as a normal message, saying what you have done and what comes next, at least once every five minutes so the user can follow along; split the work so that no single step runs much longer than five minutes.";
+    private readonly IBuiltInInstructions builtIn = new BuiltInInstructions();
 
     private readonly IStoredFile stored = new StoredFile([], true);
 
@@ -142,6 +156,12 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
         prompter = create(folder);
         Apply(kept);
     }
+
+    /// <inheritdoc />
+    public string ComposeInstructions(string? user) => builtIn.Compose(user);
+
+    /// <inheritdoc />
+    public string? UserInstructions(string? stored) => builtIn.Visible(stored);
 
     /// <inheritdoc />
     public AiEnvironment Get() => kept with { ClaudeApiKey = null, CodexApiKey = null, OpenAiApiKey = null, HasClaudeApiKey = !string.IsNullOrEmpty(kept.ClaudeApiKey), HasCodexApiKey = !string.IsNullOrEmpty(kept.CodexApiKey), HasOpenAiApiKey = !string.IsNullOrEmpty(kept.OpenAiApiKey) };
@@ -232,7 +252,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
             configuration.IsWebAllowed = true;
             configuration.IsSystemAccessAllowed = true;
             configuration.IsImageGenerationAllowed = kept.ImageGeneration != ImageGenerationKind.None;
-            configuration.Instructions = legacyInstructions;
+            configuration.Instructions = builtIn.Compose(null);
         }
         catch (Exception exception) when (exception is PromptSessionException or ArgumentException or DirectoryNotFoundException or IOException)
         {
@@ -364,7 +384,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
             IsSystemAccessAllowed = environment.NewWorkspaces.IsSystemAccessAllowed,
             IsWebAllowed = environment.NewWorkspaces.IsWebAllowed,
             IsImageGenerationAllowed = environment.NewWorkspaces.IsImageGenerationAllowed,
-            Instructions = Blank(environment.NewWorkspaces.Instructions)
+            Instructions = builtIn.Compose(environment.NewWorkspaces.Instructions)
         };
     }
 
