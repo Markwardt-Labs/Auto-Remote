@@ -42,6 +42,10 @@ internal sealed class HomeViewModel : ViewModelBase
             {
                 _ = Refresh();
             }
+            else if (remoteEvent.Kind == RemoteEventKind.LoopChanged && (remoteEvent.Loop is not null ? looping.Add(remoteEvent.WorkspaceId) : looping.Remove(remoteEvent.WorkspaceId)))
+            {
+                BuildEntries();
+            }
         };
         Usage = new UsageViewModel(connection);
         ToggleUsageCommand = new AsyncCommand(_ =>
@@ -142,6 +146,8 @@ internal sealed class HomeViewModel : ViewModelBase
     private readonly List<WorkspaceGroup> groups = [];
 
     private readonly HashSet<Guid> expanded = [];
+
+    private readonly HashSet<Guid> looping = [];
 
     private readonly Dictionary<Guid, WorkspaceViewModel> opened = [];
 
@@ -805,6 +811,8 @@ internal sealed class HomeViewModel : ViewModelBase
         groups.Clear();
         groups.AddRange(catalog.Groups);
         expanded.IntersectWith(groups.Select(group => group.Id));
+        looping.Clear();
+        looping.UnionWith(catalog.Looping);
     }
 
     private WorkspaceViewModel Open(WorkspaceInfo workspace)
@@ -1024,9 +1032,9 @@ internal sealed class HomeViewModel : ViewModelBase
             }
         }
 
-        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => looping.Contains(workspace.Id)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
         {
-            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth });
+            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsLooping = looping.Contains(workspace.Id) });
         }
     }
 

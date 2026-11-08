@@ -841,4 +841,16 @@ public sealed class RequestHandlerTests
         Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 5, Command = RemoteCommand.TakeSavedInput, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
         Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 6, Command = RemoteCommand.GetSavedInputs }, owner, CancellationToken.None)).Error);
     }
+
+    [Fact]
+    public async Task Handle_ListWorkspaces_NamesTheWorkspacesWhereALoopRuns()
+    {
+        WorkspaceInfo other = new() { Id = Guid.NewGuid(), Folder = "/work/other" };
+        workspaces.Setup(x => x.List(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace, other] });
+        loops.Setup(x => x.Get(other.Id)).Returns(new LoopInfo { Settings = new LoopSettings { Prompt = "go", IntervalSeconds = 60 }, StartedAt = DateTimeOffset.UnixEpoch });
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ListWorkspaces }, owner, CancellationToken.None);
+
+        Assert.Equal([other.Id], response.Catalog?.Looping);
+    }
 }

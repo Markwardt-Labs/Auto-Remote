@@ -716,4 +716,32 @@ public sealed class HomeViewModelTests
         Assert.False(gone.IsAiWorking);
         Assert.NotSame(gone, model.Active);
     }
+
+    [Fact]
+    public async Task Entries_PutWorkspacesThatLoopFirstInTheirListWithTheLoopFlagAndFollowTheLoopEvents()
+    {
+        DateTimeOffset now = new(2026, 11, 7, 12, 0, 0, TimeSpan.Zero);
+        WorkspaceInfo newest = new() { Id = Guid.NewGuid(), Folder = "/work/aaa", LastUpdated = now };
+        WorkspaceInfo older = new() { Id = Guid.NewGuid(), Folder = "/work/mmm", LastUpdated = now.AddDays(-1) };
+        WorkspaceInfo oldest = new() { Id = Guid.NewGuid(), Folder = "/work/zzz", LastUpdated = now.AddDays(-2) };
+        WorkspaceGroup work = new() { Id = Guid.NewGuid(), Name = "Work" };
+        WorkspaceInfo inWork = new() { Id = Guid.NewGuid(), Folder = "/work/in", GroupId = work.Id, LastUpdated = now };
+        WorkspaceInfo inWorkLooping = new() { Id = Guid.NewGuid(), Folder = "/work/out", GroupId = work.Id, LastUpdated = now.AddDays(-5) };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([work], newest, older, oldest, inWork, inWorkLooping) with { Looping = [oldest.Id, inWorkLooping.Id] });
+        await model.Start();
+        model.SelectedEntry = model.Entries[0];
+
+        Assert.Equal([(object)work, inWorkLooping, inWork, oldest, newest, older], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.Equal([inWorkLooping, oldest], model.Entries.Where(entry => entry.IsLooping).Select(entry => entry.Workspace));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = older.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x", IntervalSeconds = 60 }, StartedAt = now } });
+
+        Assert.Equal([(object)work, inWorkLooping, inWork, older, oldest, newest], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = older.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x", IntervalSeconds = 60 }, StartedAt = now, Runs = 2 } });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = oldest.Id });
+
+        Assert.Equal([(object)work, inWorkLooping, inWork, older, newest, oldest], model.Entries.Select(entry => (object?)entry.Group ?? entry.Workspace));
+        Assert.Equal([older], model.Entries.Where(entry => entry.IsWorkspace && entry.IsLooping && entry.Depth == 0).Select(entry => entry.Workspace));
+    }
 }

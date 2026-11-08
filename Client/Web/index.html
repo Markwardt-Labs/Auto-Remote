@@ -320,6 +320,7 @@ button.refbtn .ref { margin: 0; }
 .drawer input[type=text] { margin-bottom: 8px; flex: none; }
 .drawer .list { margin-bottom: 8px; overscroll-behavior: contain; }
 .drawer .row { padding: 10px 8px 10px 14px; }
+.drawer .row .name .ws-loop { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--muted); }
 .drawer .row .name small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
 .drawer .row.group .name { font-weight: 600; }
 .drawer .row button { padding: 4px 8px; }
@@ -4372,9 +4373,23 @@ class Home {
     this.refreshAgain = false;
     this.error = new ErrorLine();
     this.dialogError = new ErrorLine();
+    this.looping = new Set();
     this.catalogListener = event => {
       if (event.kind === "WorkspacesChanged") {
         this.refreshCatalog();
+      } else if (event.kind === "LoopChanged") {
+        const had = this.looping.has(event.workspaceId);
+
+        if (event.loop) {
+          this.looping.add(event.workspaceId);
+        } else {
+          this.looping.delete(event.workspaceId);
+        }
+
+        if (had !== this.looping.has(event.workspaceId)) {
+          this.buildEntries();
+          this.renderDrawer();
+        }
       }
     };
     connection.listeners.add(this.catalogListener);
@@ -4460,6 +4475,7 @@ class Home {
     const before = this.selected;
     this.workspaces = catalog.workspaces;
     this.groups = catalog.groups;
+    this.looping = new Set(catalog.looping ?? []);
 
     for (const id of [...this.expanded]) {
       if (!this.groups.some(group => group.id === id)) {
@@ -4631,6 +4647,7 @@ class Home {
 
     this.workspaces = result.value.workspaces;
     this.groups = result.value.groups;
+    this.looping = new Set(result.value.looping ?? []);
 
     for (const id of [...this.expanded]) {
       if (!this.groups.some(group => group.id === id)) {
@@ -4758,7 +4775,7 @@ class Home {
       }
     }
 
-    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
+    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => this.looping.has(right.id) - this.looping.has(left.id) || (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
       this.entries.push({ workspace, depth });
     }
   }
@@ -4786,7 +4803,7 @@ class Home {
 
       const workspace = entry.workspace;
       return h("div", { class: `row${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
-        h("div", { class: "name" }, folderName(workspace.folder), h("small", {}, workspace.folder)),
+        h("div", { class: "name" }, folderName(workspace.folder), ...(this.looping.has(workspace.id) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, workspace.folder)),
         h("button", { class: "flat", title: "Move to a group", onclick: event => { event.stopPropagation(); this.beginMove(workspace, null); } }, "↪"));
     }));
   }
@@ -4889,6 +4906,7 @@ class Home {
     if (result.ok) {
       this.workspaces = result.value.workspaces;
       this.groups = result.value.groups;
+      this.looping = new Set(result.value.looping ?? []);
       this.buildEntries();
       this.renderDrawer();
     }

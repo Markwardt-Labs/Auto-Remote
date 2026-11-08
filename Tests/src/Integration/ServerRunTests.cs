@@ -134,7 +134,7 @@ public sealed class ServerRunTests : IAsyncLifetime
     {
         using ClientWebSocket socket = await OpenSocket();
         Assert.Equal("{\"accepted\":true,\"version\":\"1.2.3\"}", await Exchange(socket, "{\"accessKey\":\"secret\"}"));
-        Assert.Equal("{\"id\":1,\"catalog\":{\"groups\":[],\"workspaces\":[]}}", await Exchange(socket, "{\"id\":1,\"command\":\"ListWorkspaces\"}"));
+        Assert.Equal("{\"id\":1,\"catalog\":{\"groups\":[],\"workspaces\":[],\"looping\":[]}}", await Exchange(socket, "{\"id\":1,\"command\":\"ListWorkspaces\"}"));
 
         using ClientWebSocket denied = await OpenSocket();
         Assert.Equal("{\"accepted\":false}", await Exchange(denied, "{\"accessKey\":\"nope\"}"));

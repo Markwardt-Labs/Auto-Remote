@@ -26,6 +26,11 @@ internal sealed record DrawerEntry
     public int Depth { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether a loop of the AI runs in the workspace, which shows a loop icon next to its name.
+    /// </summary>
+    public bool IsLooping { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether this row is a group header.
     /// </summary>
     public bool IsGroup => Group is not null;

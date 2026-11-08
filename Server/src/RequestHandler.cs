@@ -68,7 +68,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         switch (request.Command)
         {
             case RemoteCommand.ListWorkspaces:
-                return new RemoteResponse { Id = 0, Catalog = await workspaces.List(cancellation) };
+                return new RemoteResponse { Id = 0, Catalog = await Catalog(cancellation) };
             case RemoteCommand.CreateWorkspace:
                 return new RemoteResponse { Id = 0, Workspace = await CreateWorkspace(Require(request.Path, "path"), request, cancellation) };
             case RemoteCommand.RenameWorkspace:
@@ -354,6 +354,12 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     private async Task<string> FolderOf(RemoteRequest request, CancellationToken cancellation) => (await workspaces.Get(RequireWorkspace(request), cancellation)).Folder;
 
     private Guid RequireGroup(RemoteRequest request) => request.GroupId ?? throw new RequestException("The request needs a group.");
+
+    private async Task<WorkspaceCatalog> Catalog(CancellationToken cancellation)
+    {
+        WorkspaceCatalog catalog = await workspaces.List(cancellation);
+        return catalog with { Looping = [.. catalog.Workspaces.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)] };
+    }
 
     private Guid RequireWorkspace(RemoteRequest request) => request.WorkspaceId ?? throw new RequestException("The request needs a workspace.");
 

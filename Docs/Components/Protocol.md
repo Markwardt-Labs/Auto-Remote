@@ -113,7 +113,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 
 | Command | Request properties | Response property | Notes |
 | --- | --- | --- | --- |
-| `ListWorkspaces` | none | `catalog` | The groups in their custom order and the workspaces, each with when its AI session was last loaded (`lastUpdated`), read from Live AI at each call. Clients order the workspaces of a group by it, latest first. |
+| `ListWorkspaces` | none | `catalog` | The groups in their custom order and the workspaces, each with when its AI session was last loaded (`lastUpdated`), read from Live AI at each call. Clients order the workspaces of a group by it, latest first, with the ones that run a loop (`looping`) before the others. |
 | `CreateWorkspace` | `path` (existing folder on the server), optional `service`, optional `apiKey`, optional `groupId` | `workspace` | The workspace runs on `service` (the environment's default provider when omitted) for good; the provider cannot be changed afterwards. The AI session is made together with the workspace, on `apiKey` when one is given. A workspace whose session cannot be made (a key for a provider that takes none, or local models without a model for every capability) refuses the request and nothing is created. |
 | `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused unless the workspace is Ready. |
 | `MoveWorkspaceToFolder` | `workspaceId`, `path` (existing folder the workspace works in from now on) | `workspace` | Tells the workspace's AI session that the workspace is in `path` now, which is what tracks the place of a workspace; no file is moved by the server, so the folder has to exist already (the project may have been moved on disk, even from a folder that is gone). The workspace keeps its identifier, session, group and place. Refused unless the workspace is Ready, when `path` does not exist, and when it already hosts another workspace. Moving it to the folder it is in changes nothing. |
@@ -192,7 +192,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `folder` | string | Absolute path of the workspace's folder on the server. The display name is not sent; clients take the last segment of this. |
 | `sessionId` | string, optional | The live AI session that holds the workspace's folder, provider and AI configuration (32 hexadecimal digits). Informational: the server manages it and replaces it, keeping the workspace, when the session can no longer be used. |
 | `groupId` | GUID, optional | The group the workspace is filed in; omitted when it is at the top level. |
-| `lastUpdated` | timestamp, optional | When the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first); refreshed whenever the workspaces are listed. |
+| `lastUpdated` | timestamp, optional | When the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first, after the ones a loop runs in); refreshed whenever the workspaces are listed. |
 | `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts of the workspace's own that its review and expand buttons send; omitted when it uses the environment's. |
 | `statusMinutes` | number, optional | The status interval the workspace has of its own; omitted when it uses the environment's. |
@@ -203,6 +203,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | --- | --- | --- |
 | `groups` | array of group | The groups in their custom order. |
 | `workspaces` | array of workspace | The workspaces in their custom order. |
+| `looping` | array of GUID | The workspaces a loop of the AI runs in right now; `LoopChanged` events keep it current. |
 
 **group** (also the items of `catalog.groups`)
 

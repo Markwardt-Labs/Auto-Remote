@@ -1660,4 +1660,34 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal([true, true, true, false], typed);
         Assert.Equal([true, false], closed);
     }
+
+    [Fact]
+    public async Task HomeView_ShowsALoopIconNextToTheNameOfEachWorkspaceWhereALoopRuns()
+    {
+        WorkspaceInfo quiet = new() { Id = Guid.NewGuid(), Folder = "/work/quiet", LastUpdated = DateTimeOffset.UtcNow };
+        WorkspaceInfo busy = new() { Id = Guid.NewGuid(), Folder = "/work/busy", LastUpdated = DateTimeOffset.UtcNow.AddDays(-1) };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [quiet, busy], Looping = [busy.Id] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+
+        (string[] names, int icons) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            model.IsDrawerOpen = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string[] names = [.. model.Entries.Select(entry => entry.Text)];
+            int icons = window.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Count(path => path.IsEffectivelyVisible && ToolTip.GetTip(path)?.ToString() == "A loop is running");
+            window.Close();
+            return (names, icons);
+        });
+
+        Assert.Equal(["busy", "quiet"], names);
+        Assert.Equal(1, icons);
+    }
 }

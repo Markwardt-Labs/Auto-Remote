@@ -807,7 +807,10 @@
                   </Grid>
                   <Grid IsVisible="{Binding IsWorkspace}" ColumnDefinitions="*,Auto" Margin="{Binding Indent}">
                     <StackPanel Grid.Column="0">
-                      <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" />
+                      <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                        <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="12" MaxHeight="12" VerticalAlignment="Center" IsVisible="{Binding IsLooping}" ToolTip.Tip="A loop is running" />
+                      </StackPanel>
                       <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <local:TouchButton Grid.Column="1" Content="↪" Classes="flat" Padding="8,4" ToolTip.Tip="Move to a group" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />

@@ -14,4 +14,9 @@ public sealed record WorkspaceCatalog
     /// Gets the workspaces in their custom order, which applies among the workspaces sharing a group.
     /// </summary>
     public required IReadOnlyList<WorkspaceInfo> Workspaces { get; init; }
+
+    /// <summary>
+    /// Gets the identifiers of the workspaces a loop of the AI runs in right now; later changes arrive as <see cref="RemoteEventKind.LoopChanged" /> events.
+    /// </summary>
+    public IReadOnlyList<Guid> Looping { get; init; } = [];
 }
