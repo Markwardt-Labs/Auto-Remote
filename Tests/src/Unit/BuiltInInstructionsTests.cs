@@ -49,16 +49,24 @@ public sealed class BuiltInInstructionsTests
     }
 
     [Theory]
-    [InlineData(1, "at least once every minute")]
-    [InlineData(5, "at least once every 5 minutes")]
-    [InlineData(30, "at least once every 30 minutes")]
-    public void Text_TellsTheAiToWriteAStatusUpdateAsANormalMessageOnTheInterval(int minutes, string interval)
+    [InlineData(1, "at least once every minute", 60)]
+    [InlineData(5, "at least once every 5 minutes", 300)]
+    [InlineData(30, "at least once every 30 minutes", 1800)]
+    [InlineData(120, "at least once every 120 minutes", 3600)]
+    public void Text_TellsTheAiToKeepItsTurnOpenRunLongWorkInTheBackgroundAndReportOnTheIntervalWhileWaiting(int minutes, string interval, int seconds)
     {
         string text = instructions.Text(minutes);
 
         Assert.Contains(interval, text);
         Assert.Contains("status update as a normal message", text);
         Assert.Contains("in the foreground", text);
-        Assert.DoesNotContain("tool", text);
+        Assert.Contains("your turn stays open until all of the work is finished", text);
+        Assert.Contains("may take more than about a minute in the background", text);
+        Assert.Contains("background option of the shell and delegate tools", text);
+        Assert.Contains("task_wait, task_output and task_stop", text);
+        Assert.Contains($"task_wait with timeout_seconds {seconds}", text);
+        Assert.Contains("wait for every background task and helper to end", text);
+        Assert.Contains("never leave anything running after your reply", text);
+        Assert.Contains("Never use scheduled or recurring work", text);
     }
 }

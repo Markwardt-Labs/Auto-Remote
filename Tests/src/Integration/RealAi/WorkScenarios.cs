@@ -194,4 +194,28 @@ public sealed class WorkScenarios
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
         Assert.Contains(server.Events().Skip(mark), item => item.Kind == RemoteEventKind.MessageAdded && item.Message!.Role == MessageRole.User && item.Message.Text.Contains("conflict", StringComparison.OrdinalIgnoreCase));
     }
+
+    [RealAiFact]
+    public async Task ALongJobRunsInTheBackgroundWhileTheAiReportsItsStatusOnTheIntervalAndTheTurnOnlyEndsWhenItIsDone()
+    {
+        await using RealServer server = await RealServer.Start();
+        await server.Environment(environment => environment with { StatusMinutes = 1 });
+        WorkspaceInfo workspace = await server.Workspace("background", AiService.ClaudeCode);
+        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsShellAllowed = true }, CancellationToken.None);
+        string folder = workspace.Folder;
+        int mark = server.Mark();
+
+        await server.Connection.Prompt(workspace.Id, "Build the project: run the shell command `sleep 170 && date +%s > built.txt` (it takes almost three minutes). When it has finished, reply with the single word FINISHED.", CancellationToken.None);
+        await server.Idle(workspace, mark, 420);
+
+        List<ChatMessage> replies = [.. server.Events().Skip(mark).Where(item => item.WorkspaceId == workspace.Id && item.Kind == RemoteEventKind.MessageAdded && item.Message!.Role == MessageRole.Assistant).Select(item => item.Message!)];
+        string built = Path.Combine(folder, "built.txt");
+        Console.Error.WriteLine("REPLIES: " + string.Join(" | ", replies.Select(reply => $"{reply.Time:HH:mm:ss} {reply.Text.ReplaceLineEndings(" ")}")));
+        Assert.True(File.Exists(built), "the job did not finish before the turn ended");
+        Assert.Contains("FINISHED", replies[^1].Text, StringComparison.Ordinal);
+        Assert.True(replies.Count >= 3, $"expected at least two status updates before the final reply, got {replies.Count - 1}");
+        Assert.True(replies.Take(replies.Count - 1).Count(reply => reply.Time < File.GetLastWriteTimeUtc(built)) >= 2, "the status updates did not come while the job ran");
+        Assert.Empty(server.Failures(workspace, mark));
+        Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
+    }
 }

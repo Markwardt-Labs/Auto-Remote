@@ -101,7 +101,7 @@ public sealed record AiEnvironment
     public WorkspaceDefaults NewWorkspaces { get; init; } = new();
 
     /// <summary>
-    /// Gets how often, in minutes, the AI is told to report its status with its status tool while it works, in every workspace that has no interval of its own. From 1 to 1440.
+    /// Gets how often, in minutes, the AI is told to report its status while it works, in every workspace that has no interval of its own. From 1 to 1440.
     /// </summary>
     public int StatusMinutes { get; init; } = 5;
 

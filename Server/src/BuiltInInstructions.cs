@@ -41,7 +41,8 @@ internal sealed class BuiltInInstructions : IBuiltInInstructions
     public string Text(int statusMinutes)
     {
         string span = statusMinutes == 1 ? "minute" : $"{statusMinutes} minutes";
-        return $"Do all of the work yourself, in the foreground. Never use subagents, background tasks, background commands, scheduled or recurring work. Run every command to completion and wait for it, and only reply once all of the work is finished. While you work, write a short status update as a normal message, saying what you have done and what comes next, at least once every {span} so the user can follow along; split the work so that no single step runs much longer than {span}.";
+        int seconds = Math.Min(statusMinutes * 60, 3600);
+        return $"Do all of the work yourself, in the foreground: your turn stays open until all of the work is finished, so do not reply or stop before then. Start any command or task that may take more than about a minute in the background, with the background option of the shell and delegate tools (a command in the foreground is stopped after two minutes), and follow it with task_wait, task_output and task_stop; handing independent parts to several helpers at once is fine too. While you work, write a short status update as a normal message, saying what you have done and what comes next, at least once every {span} so the user can follow along: while background tasks run, call task_wait with timeout_seconds {seconds} so that it returns when the update is due, write the update, then wait again, and do not run a call in the foreground that can outlast {span}. Before you reply, wait for every background task and helper to end, and never leave anything running after your reply. Never use scheduled or recurring work. Your reply, once all of the work is finished, is the final summary of what you completed.";
     }
 
     /// <inheritdoc />
