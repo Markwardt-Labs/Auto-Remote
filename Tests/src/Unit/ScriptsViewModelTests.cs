@@ -435,7 +435,8 @@ public sealed class ScriptsViewModelTests
         Assert.Equal((false, true, false), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
-        Assert.Equal((true, false, false), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+        Assert.Equal((true, true, false), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
+        Assert.True(model.ShowExpandButton);
 
         model.Chat.Input = "and also this";
         Assert.Equal((false, false, true), (model.ShowHaltButtons, model.ShowReviewButton, model.ShowSendButton));
@@ -490,7 +491,7 @@ public sealed class ScriptsViewModelTests
         WorkspaceViewModel model = await StartedWorkspace(true);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
-        Assert.Equal((true, true, false), (model.ShowHaltButtons, model.ShowLoopButton, model.ShowReviewButton));
+        Assert.Equal((true, true, true), (model.ShowHaltButtons, model.ShowLoopButton, model.ShowReviewButton));
 
         model.Chat.Input = "one more thing";
         Assert.Equal((false, false), (model.ShowHaltButtons, model.ShowLoopButton));

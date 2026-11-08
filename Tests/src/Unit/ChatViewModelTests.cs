@@ -89,6 +89,30 @@ public sealed class ChatViewModelTests
         connection.Verify(x => x.UploadAttachment(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ReviewAndExpand_AreAvailableWhileTheAiWorksAndSendTheirPromptToTheWorkInProgress(bool review)
+    {
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it", GlobalExpandPrompt = "expand it" });
+        string? sent = null;
+        connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => sent = text).Returns(Task.CompletedTask);
+        await chat.Start();
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspaceId, Working = true });
+        AsyncCommand command = review ? chat.ReviewCommand : chat.ExpandCommand;
+
+        Assert.True(chat.IsAiWorking);
+        Assert.True(command.CanExecute(null));
+        command.Execute(null);
+        for (int attempt = 0; attempt < 100 && sent is null; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(review ? "review it" : "expand it", sent);
+    }
+
     [Fact]
     public async Task Review_WhenTheServerRefusesReportsTheFailureAndDoesNotPutThePromptInTheMessageBox()
     {

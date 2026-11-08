@@ -889,7 +889,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal([true, true, true], fields);
         Assert.Equal([false, true, true, true], looping);
         Assert.True(tipHasRuns);
-        Assert.Equal([true, true, false, true, false, true], working);
+        Assert.Equal([true, true, true, true, false, true], working);
     }
 
     [Fact]
@@ -1341,7 +1341,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal(["review"], ready);
-        Assert.Equal(["stop"], working);
+        Assert.Equal(["review", "stop"], working);
         Assert.Equal([true], enabled);
         Assert.True(typing);
         Assert.True(asking);

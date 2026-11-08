@@ -35,7 +35,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowSendButton));
                 Raise(nameof(ShowReviewButton));
                 Raise(nameof(ShowExpandButton));
-                Raise(nameof(ShowPromptButtons));
                 Raise(nameof(ShowPauseButton));
                 Raise(nameof(ShowResumeButton));
                 Raise(nameof(ShowLoopButton));
@@ -213,7 +212,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing;
 
     /// <summary>
-    /// Gets a value indicating whether the message box offers the work buttons instead of sending: a script or git runs or work is being ended, or the AI works and nothing is typed, so more input could not be sent.
+    /// Gets a value indicating whether the message box offers the work buttons instead of sending: a script or git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand, pause and loop buttons.
     /// </summary>
     public bool ShowHaltButtons => State is WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
 
@@ -268,11 +267,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public string LoopNext => DescribeNext(DateTimeOffset.UtcNow);
 
     /// <summary>
-    /// Gets a value indicating whether nothing is typed and the AI is ready or working, which is when the message box offers the loop button.
-    /// </summary>
-    public bool ShowPromptButtons => ShowReviewButton || State == WorkspaceState.Working && !Chat.HasContent;
-
-    /// <summary>
     /// Gets a value indicating whether the message box shows the pause button: nothing is typed and the AI is working.
     /// </summary>
     public bool ShowPauseButton => State == WorkspaceState.Working && !Chat.HasContent;
@@ -285,7 +279,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether the message box shows the loop button next to the review or stop button: there is no loop yet and nothing is typed, while the AI is ready or working (a loop started during work waits for it to finish).
     /// </summary>
-    public bool ShowLoopButton => ShowPromptButtons && activeLoop is null;
+    public bool ShowLoopButton => ShowReviewButton && activeLoop is null;
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the button that cancels the loop, whatever else it shows.
@@ -298,9 +292,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowSendButton => !ShowHaltButtons && Chat.HasContent;
 
     /// <summary>
-    /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and the work buttons do not show.
+    /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and no script, git action or cancellation is running. It also shows while the AI works, next to the stop button, since its prompt can be sent to work in progress.
     /// </summary>
-    public bool ShowReviewButton => !ShowHaltButtons && !Chat.HasContent;
+    public bool ShowReviewButton => !Chat.HasContent && State is not (WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling);
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the expand button next to the review button, which is whenever the review button shows.
@@ -533,7 +527,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowSendButton));
         Raise(nameof(ShowReviewButton));
         Raise(nameof(ShowExpandButton));
-        Raise(nameof(ShowPromptButtons));
         Raise(nameof(ShowPauseButton));
         Raise(nameof(ShowResumeButton));
         Raise(nameof(ShowLoopButton));
