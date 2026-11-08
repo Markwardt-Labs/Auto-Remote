@@ -100,6 +100,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `gitChanges` | git changes | `GetGitChanges`, `GetGitCommitChanges` |
 | `gitHistory` | git history | `GetGitHistory` |
 | `gitDiff` | git diff | `GetGitDiff` |
+| `commitMessage` | string | `GenerateCommitMessage` |
 | `scripts` | script runs | `GetScripts` |
 | `event` | event | Pushed by the server, with `id` zero (see Events). |
 
@@ -148,6 +149,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GetGitCommitChanges` | `workspaceId`, `commit` | `gitChanges` | The paths a commit changed relative to its first parent. |
 | `GetGitDiff` | `workspaceId`, `path`, optional `commit` | `gitDiff` | The whole file with its changes marked: the commit against its first parent, or without `commit` the working tree against the head. |
 | `GitCommit` | `workspaceId`, `text` | none | Stages everything, commits, then pushes the branch to `origin` when there is one; a failing push is ignored. Refused unless the workspace is Ready, and when there is nothing to commit. |
+| `GenerateCommitMessage` | `workspaceId` | `commitMessage` | Asks the AI for a message of eight words or less for the pending changes (the changed paths and the diff of tracked files, cut at 30000 characters). Refused unless the workspace is Ready, and when there is nothing to commit. |
 | `GitReset` | `workspaceId` | none | Discards every change that is not committed, new files included. Refused unless the workspace is Ready. |
 | `GitCreateBranch` | `workspaceId`, `name` | none | Creates the branch at the head and checks it out. Refused unless the workspace is Ready, and for an invalid or taken name. |
 | `GitCreateTag` | `workspaceId`, `name` | none | Creates an annotated tag at the head; refused unless the workspace is Ready, for an invalid or taken name or before the first commit. |

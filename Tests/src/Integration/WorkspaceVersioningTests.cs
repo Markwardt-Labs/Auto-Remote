@@ -719,4 +719,27 @@ public sealed class WorkspaceVersioningTests : IDisposable
         Assert.Equal("v1", G(remote, "tag", "--list", "v1"));
         Assert.Equal("origin/feature", G(work, "rev-parse", "--abbrev-ref", "feature@{upstream}"));
     }
+
+    [Theory]
+    [InlineData("Fix the login timeout", "Fix the login timeout")]
+    [InlineData("\"Fix the login timeout.\"\nBecause it hung.", "Fix the login timeout")]
+    [InlineData("one two three four five six seven eight nine ten", "one two three four five six seven eight")]
+    public async Task CommitMessage_AsksTheAiAboutThePendingChangesAndKeepsEightWordsOfTheFirstLine(string answer, string expected)
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "one\nTWO\nthree\n");
+        prompts.Setup(x => x.Ask(workspace.Id, It.Is<string>(text => text.Contains("8 words or less") && text.Contains("+TWO")), It.IsAny<CancellationToken>())).ReturnsAsync(answer);
+
+        Assert.Equal(expected, await versioning.CommitMessage(workspace, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CommitMessage_FailsWhenThereIsNothingToCommitOrTheAiAnswersNothing()
+    {
+        await Assert.ThrowsAsync<RequestException>(() => versioning.CommitMessage(workspace, CancellationToken.None));
+
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("  \"\" ");
+
+        await Assert.ThrowsAsync<RequestException>(() => versioning.CommitMessage(workspace, CancellationToken.None));
+    }
 }

@@ -904,4 +904,29 @@ public sealed class PromptServiceTests : IDisposable
         gate.GetAwaiter().GetResult();
         return [new PromptMessageEvent { Text = text }];
     }
+
+    [Fact]
+    public async Task Ask_AnswersInAForkWithoutTouchingTheConversationOrTheWorkingState()
+    {
+        prompter.OnCreate = session => session.Reply("Fix the timeout");
+
+        string answer = await service.Ask(workspace.Id, "write a message", CancellationToken.None);
+
+        Assert.Equal("Fix the timeout", answer);
+        Assert.False(service.IsBusy(workspace.Id));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+        Assert.Empty(Session.Prompts);
+        Assert.Empty(Events(RemoteEventKind.MessageAdded));
+    }
+
+    [Fact]
+    public async Task Ask_RefusesAnEmptyQuestionAndReportsAFailingAi()
+    {
+        prompter.OnCreate = session => session.Fail(new PromptSessionException("no key"));
+
+        await Assert.ThrowsAsync<RequestException>(() => service.Ask(workspace.Id, " ", CancellationToken.None));
+
+        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.Ask(workspace.Id, "write a message", CancellationToken.None));
+        Assert.Contains("no key", exception.Message);
+    }
 }

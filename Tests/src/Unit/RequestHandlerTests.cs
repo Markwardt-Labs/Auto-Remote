@@ -808,4 +808,18 @@ public sealed class RequestHandlerTests
         scripts.Verify(x => x.SendInput(workspace.Id, "a.cs", "yes", It.IsAny<CancellationToken>()), Times.Once);
         scripts.Verify(x => x.Remove(workspace.Id, "a.cs"), Times.Once);
     }
+
+    [Fact]
+    public async Task Handle_GenerateCommitMessage_AnswersWhatVersioningAsksTheAiAndRefusesWhileTheAiWorks()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        versioning.Setup(x => x.CommitMessage(workspace, It.IsAny<CancellationToken>())).ReturnsAsync("Fix the login timeout");
+        RemoteRequest request = new() { Id = 1, Command = RemoteCommand.GenerateCommitMessage, WorkspaceId = workspace.Id };
+
+        Assert.Equal("Fix the login timeout", (await handler.Handle(request, owner, CancellationToken.None)).CommitMessage);
+
+        activity.TryEnter(workspace.Id, WorkspaceState.Working);
+
+        Assert.Contains("AI is working", (await handler.Handle(request, owner, CancellationToken.None)).Error);
+    }
 }

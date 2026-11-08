@@ -311,6 +311,15 @@ internal interface IServerConnection : IAsyncDisposable
     Task GitCommit(Guid id, string message, CancellationToken cancellation);
 
     /// <summary>
+    /// Asks the AI for a commit message of eight words or less for the changes that are not committed yet.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The message.</returns>
+    /// <exception cref="RemoteException">There is nothing to commit, or the AI could not answer.</exception>
+    Task<string> GenerateCommitMessage(Guid id, CancellationToken cancellation);
+
+    /// <summary>
     /// Discards every change of a workspace that is not committed.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -881,6 +890,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task GitCommit(Guid id, string message, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.GitCommit, WorkspaceId = id, Text = message }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<string> GenerateCommitMessage(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GenerateCommitMessage, WorkspaceId = id }, cancellation)).CommitMessage ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task GitReset(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.GitReset, WorkspaceId = id }, cancellation);

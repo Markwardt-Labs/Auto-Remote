@@ -362,4 +362,28 @@ public sealed class GitServiceTests
         await Assert.ThrowsAsync<RequestException>(() => git.Clone(parent.Path, source.Combine("missing"), "gone", CancellationToken.None));
         Assert.False(Directory.Exists(parent.Combine("gone")));
     }
+
+    [Fact]
+    public async Task Pending_DescribesTheChangedPathsAndTheDiffOfTrackedFiles()
+    {
+        using TempFolder temp = await Repo();
+        Write(temp, "a.txt", "one\nTWO\nthree\n");
+        Write(temp, "fresh.txt", "new\n");
+
+        string pending = await git.Pending(temp.Path, CancellationToken.None);
+
+        Assert.Contains("M a.txt", pending);
+        Assert.Contains("?? fresh.txt", pending);
+        Assert.Contains("+TWO", pending);
+    }
+
+    [Fact]
+    public async Task Pending_RefusesWhenThereIsNothingToCommit()
+    {
+        using TempFolder temp = await Repo();
+
+        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => git.Pending(temp.Path, CancellationToken.None));
+
+        Assert.Contains("nothing to commit", exception.Message);
+    }
 }

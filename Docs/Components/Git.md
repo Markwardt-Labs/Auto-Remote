@@ -20,6 +20,8 @@ Clients get the whole file with its changes marked rather than hunks, so the ser
 
 Commit stages everything (`add -A`), refuses when nothing is staged, commits and then pushes the branch to `origin` when one is set; the push is best effort so a failing remote never turns a made commit into an error. Reset is `reset --hard` plus `clean -fd`. Branch is `checkout -b`, tag is an annotated tag at the head. Failures return git's own message, for example the missing identity ("Please tell me who you are"), since the server runs as a user who is expected to have git set up.
 
+Auto Commit is two calls from the client: `GenerateCommitMessage`, then the ordinary `GitCommit` with the answer. The question goes to the workspace's AI as a fork request, so it runs in a throwaway copy of the conversation, which stays as it was and does not count as the AI working. The first line of the answer is kept, stripped of quotes and a trailing full stop, and cut to eight words.
+
 Commit, reset and branch are refused while the AI is working in the workspace so they cannot race its edits; tags and the remote are harmless then.
 
 ## Workflows

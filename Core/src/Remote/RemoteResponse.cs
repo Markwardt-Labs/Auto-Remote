@@ -129,4 +129,9 @@ public sealed record RemoteResponse
     /// Gets the text of the speech answering <see cref="RemoteCommand.Transcribe" />, empty when nothing was heard.
     /// </summary>
     public string? Transcript { get; init; }
+
+    /// <summary>
+    /// Gets the message answering <see cref="RemoteCommand.GenerateCommitMessage" />.
+    /// </summary>
+    public string? CommitMessage { get; init; }
 }

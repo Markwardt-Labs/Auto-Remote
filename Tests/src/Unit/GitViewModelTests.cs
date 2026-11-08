@@ -181,4 +181,57 @@ public sealed class GitViewModelTests
         Assert.False(git.IsPrompting);
         connection.Verify(x => x.GitCommit(id, "done", It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task AutoCommit_CommitsWithTheMessageTheAiWrote()
+    {
+        status = status with { HasIdentity = true };
+        connection.Setup(x => x.GenerateCommitMessage(id, It.IsAny<CancellationToken>())).ReturnsAsync("Fix the login timeout");
+        GitViewModel git = new(connection.Object, id);
+        await git.Start();
+
+        git.AutoCommitCommand.Execute(null);
+        await Until(() => connection.Invocations.Any(call => call.Method.Name == nameof(IServerConnection.GitCommit)));
+
+        Assert.False(git.IsPrompting);
+        connection.Verify(x => x.GitCommit(id, "Fix the login timeout", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AutoCommit_DoesNotCommitAndShowsTheErrorWhenTheAiCannotWriteAMessage()
+    {
+        status = status with { HasIdentity = true };
+        connection.Setup(x => x.GenerateCommitMessage(id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("There is nothing to commit."));
+        GitViewModel git = new(connection.Object, id);
+        await git.Start();
+
+        git.AutoCommitCommand.Execute(null);
+        await Until(() => git.Error is not null);
+
+        Assert.Equal("There is nothing to commit.", git.Error);
+        connection.Verify(x => x.GitCommit(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AutoCommit_AsksForTheGitIdentityFirstAndThenGoesOn()
+    {
+        status = status with { HasIdentity = false };
+        connection.Setup(x => x.GenerateCommitMessage(id, It.IsAny<CancellationToken>())).ReturnsAsync("Add tests");
+        GitViewModel git = new(connection.Object, id);
+        await git.Start();
+
+        git.AutoCommitCommand.Execute(null);
+        await Until(() => git.IsPrompting);
+
+        Assert.Equal(GitPrompt.Identity, git.Prompt);
+        connection.Verify(x => x.GenerateCommitMessage(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        git.PromptText = "Ann";
+        git.PromptEmail = "ann@example.com";
+
+        git.ConfirmCommand.Execute(null);
+        await Until(() => connection.Invocations.Any(call => call.Method.Name == nameof(IServerConnection.GitCommit)));
+
+        connection.Verify(x => x.GitSetIdentity(id, "Ann", "ann@example.com", It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.GitCommit(id, "Add tests", It.IsAny<CancellationToken>()), Times.Once);
+    }
 }

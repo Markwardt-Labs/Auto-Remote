@@ -1338,6 +1338,7 @@ class Connection {
   getGitCommitChanges(workspaceId, commit) { return this.request("GetGitCommitChanges", { workspaceId, commit }).then(r => r.gitChanges.changes); }
   getGitDiff(workspaceId, path, commit) { return this.request("GetGitDiff", { workspaceId, path, commit: commit ?? undefined }).then(r => r.gitDiff); }
   gitCommit(workspaceId, text) { return this.request("GitCommit", { workspaceId, text }); }
+  generateCommitMessage(workspaceId) { return this.request("GenerateCommitMessage", { workspaceId }).then(r => r.commitMessage); }
   gitReset(workspaceId) { return this.request("GitReset", { workspaceId }); }
   gitCreateBranch(workspaceId, name) { return this.request("GitCreateBranch", { workspaceId, name }); }
   gitCreateTag(workspaceId, name) { return this.request("GitCreateTag", { workspaceId, name }); }
@@ -1815,6 +1816,7 @@ class WorkspaceView {
     const choose = kind => () => { this.versionMenu.hidden = true; this.beginGit(kind); };
     this.versionMenu = h("div", { class: "menu-list", hidden: true },
       h("button", { onclick: choose("commit") }, "Commit"),
+      h("button", { onclick: choose("autocommit") }, "Auto Commit"),
       h("button", { onclick: choose("reset") }, "Reset"),
       h("hr"),
       h("button", { onclick: choose("branch") }, "Branch"),
@@ -4079,12 +4081,33 @@ class WorkspaceView {
       this.askGit({ title: "Reset", body: "Discard all changes that are not committed, new files included? This cannot be undone.", confirm: "Discard", destructive: true, action: () => this.connection.gitReset(id) });
     } else if (kind === "commit") {
       this.withIdentity(() => this.askGit({ title: "Commit", confirm: "Commit", input: "Message", empty: "Enter a commit message.", action: text => this.connection.gitCommit(id, text) }));
+    } else if (kind === "autocommit") {
+      this.withIdentity(() => this.autoCommit());
     } else if (kind === "branch") {
       this.askGit({ title: "New branch", confirm: "Create Branch", input: "Branch name", empty: "Enter a name.", action: text => this.connection.gitCreateBranch(id, text) });
     } else if (kind === "tag") {
       this.withIdentity(() => this.askGit({ title: "New tag", confirm: "Create Tag", input: "Tag name", empty: "Enter a name.", action: text => this.connection.gitCreateTag(id, text) }));
     } else {
       this.askGit({ title: "Git remote", confirm: "Set Remote", input: status.isRepo ? "Remote URL" : "Remote URL (makes the workspace a git repository)", text: status.remote ?? "", empty: "Enter the remote URL.", capitalize: false, action: text => this.connection.gitSetRemote(id, text) });
+    }
+  }
+
+  async autoCommit() {
+    if (this.refuseWork()) {
+      return;
+    }
+
+    this.localBusy = true;
+    this.renderGit();
+
+    try {
+      const id = this.info.id;
+      await this.connection.gitCommit(id, await this.connection.generateCommitMessage(id));
+    } catch (exception) {
+      this.home.notice("Git", exception.message);
+    } finally {
+      this.localBusy = false;
+      this.refreshGit(true);
     }
   }
 

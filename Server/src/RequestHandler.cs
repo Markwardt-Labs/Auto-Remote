@@ -170,6 +170,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 RequireReady(request);
                 await Act(request, true, (folder, token) => git.Commit(folder, Require(request.Text, "message").Trim() is { Length: > 0 } message ? message : throw new RequestException("Enter a commit message."), token), cancellation);
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GenerateCommitMessage:
+                RequireReady(request);
+                return new RemoteResponse { Id = 0, CommitMessage = await versioning.CommitMessage(await WorkspaceOf(request, cancellation), cancellation) };
             case RemoteCommand.GitReset:
                 RequireReady(request);
                 await Act(request, true, (folder, token) => git.Reset(folder, token), cancellation);

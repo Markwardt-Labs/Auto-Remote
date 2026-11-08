@@ -18,6 +18,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         this.syncInterval = syncInterval ?? TimeSpan.FromSeconds(60);
         History = new GitHistoryViewModel(connection, workspaceId, this);
         CommitCommand = new AsyncCommand(_ => AskCommit(), () => CanAct);
+        AutoCommitCommand = new AsyncCommand(_ => AutoCommit(), () => CanAct);
         ResetCommand = new AsyncCommand(_ => AskReset(), () => CanAct);
         BranchCommand = new AsyncCommand(_ => NewBranch(), () => CanAct);
         TagCommand = new AsyncCommand(_ => NewTag(), () => CanAct);
@@ -298,6 +299,11 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     public AsyncCommand CommitCommand { get; }
 
     /// <summary>
+    /// Gets the command that has the AI write the commit message and commits with it.
+    /// </summary>
+    public AsyncCommand AutoCommitCommand { get; }
+
+    /// <summary>
     /// Gets the command that asks whether to discard the changes.
     /// </summary>
     public AsyncCommand ResetCommand { get; }
@@ -518,6 +524,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     {
         Raise(nameof(CanAct));
         CommitCommand.Refresh();
+        AutoCommitCommand.Refresh();
         ResetCommand.Refresh();
         BranchCommand.Refresh();
         TagCommand.Refresh();
@@ -574,6 +581,17 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     {
         Ask(GitPrompt.Input, "Commit", "Message", "Commit", () => connection.GitCommit(workspaceId, promptText.Trim(), CancellationToken.None), empty: "Enter a commit message.");
         return Task.CompletedTask;
+    });
+
+    private Task AutoCommit() => WithIdentity(async () =>
+    {
+        string message = string.Empty;
+
+        if (await Attempt(async () => message = await connection.GenerateCommitMessage(workspaceId, CancellationToken.None)) && await Attempt(() => connection.GitCommit(workspaceId, message, CancellationToken.None)))
+        {
+            await Refresh();
+            await History.Changed();
+        }
     });
 
     private Task AskReset()

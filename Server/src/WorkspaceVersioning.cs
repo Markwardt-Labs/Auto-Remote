@@ -41,6 +41,15 @@ internal interface IWorkspaceVersioning
     Task Checkout(WorkspaceInfo workspace, string name, bool discard, CancellationToken cancellation);
 
     /// <summary>
+    /// Asks the AI for a commit message of eight words or less for the changes that are not committed yet.
+    /// </summary>
+    /// <param name="workspace">The workspace.</param>
+    /// <param name="cancellation">Cancels the action.</param>
+    /// <returns>The message.</returns>
+    /// <exception cref="RequestException">There is nothing to commit, or the AI gave no message.</exception>
+    Task<string> CommitMessage(WorkspaceInfo workspace, CancellationToken cancellation);
+
+    /// <summary>
     /// Deletes a branch locally and on the remote.
     /// </summary>
     /// <param name="workspace">The workspace.</param>
@@ -125,9 +134,27 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
 
     private readonly int attempts = 3;
 
+    private readonly int messageWords = 8;
+
     private readonly TimeSpan aiTimeout = TimeSpan.FromMinutes(20);
 
     private readonly TimeSpan aiPoll = TimeSpan.FromMilliseconds(200);
+
+    /// <inheritdoc />
+    public async Task<string> CommitMessage(WorkspaceInfo workspace, CancellationToken cancellation)
+    {
+        string pending = await git.Pending(workspace.Folder, cancellation);
+        string answer = await prompts.Ask(workspace.Id, $"Write a git commit message of {messageWords} words or less for the pending changes below. Answer with the message only, on one line, without quotes or a full stop.\n\n{pending}", cancellation);
+        string line = answer.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+        string[] words = line.Trim('"', '\'', '`', '.', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        if (words.Length == 0)
+        {
+            throw new RequestException("The AI gave no commit message.");
+        }
+
+        return string.Join(' ', words.Take(messageWords));
+    }
 
     /// <inheritdoc />
     public bool IsBusy(Guid id) => running.TryGetValue(id, out Running? current) && !current.Background;

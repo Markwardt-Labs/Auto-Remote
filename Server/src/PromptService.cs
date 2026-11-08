@@ -82,6 +82,16 @@ internal interface IPromptService
     Task Prompt(Guid id, string text, bool onlyWhenIdle, CancellationToken cancellation);
 
     /// <summary>
+    /// Asks the AI of a workspace a question in a fork of its conversation, which is thrown away afterwards, so neither the conversation nor the state of the AI changes and it may be asked while the AI works.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The question.</param>
+    /// <param name="cancellation">Cancels the question.</param>
+    /// <returns>The answer.</returns>
+    /// <exception cref="RequestException">The workspace is unknown, the question is empty, or the AI could not answer.</exception>
+    Task<string> Ask(Guid id, string text, CancellationToken cancellation);
+
+    /// <summary>
     /// Stores a file the user attached to a prompt, so the AI can read it by its path.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -348,6 +358,53 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         finally
         {
             live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<string> Ask(Guid id, string text, CancellationToken cancellation)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new RequestException("The question is empty.");
+        }
+
+        WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        await live.Gate.WaitAsync(cancellation);
+        IPromptSession session;
+
+        try
+        {
+            session = await Session(id, workspace, live, cancellation);
+
+            lock (live.Sync)
+            {
+                StopIdle(live);
+            }
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+
+        try
+        {
+            return await session.Request(text, new PromptRequestOptions { Mode = PromptRequestMode.Fork }, cancellation);
+        }
+        catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or IOException)
+        {
+            throw new RequestException(exception.Message);
+        }
+        finally
+        {
+            lock (live.Sync)
+            {
+                if (!live.Working)
+                {
+                    Expire(id, live);
+                }
+            }
         }
     }
 

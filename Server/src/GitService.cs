@@ -54,6 +54,15 @@ internal interface IGitService
     Task<GitDiff> Diff(string folder, string path, string? commit, CancellationToken cancellation);
 
     /// <summary>
+    /// Describes what a commit of everything would contain: the changed paths and the diff of the tracked files against the head, cut to a size an AI can read.
+    /// </summary>
+    /// <param name="folder">The workspace folder.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The description.</returns>
+    /// <exception cref="RequestException">The folder is not a repository, there is nothing to commit, or git refused.</exception>
+    Task<string> Pending(string folder, CancellationToken cancellation);
+
+    /// <summary>
     /// Stages every change and commits it, then pushes the branch when there is a remote; a failing push is ignored.
     /// </summary>
     /// <param name="folder">The workspace folder.</param>
@@ -145,6 +154,8 @@ internal interface IGitService
 /// <inheritdoc />
 internal sealed class GitService : IGitService
 {
+    private readonly int pendingLimit = 30000;
+
     private readonly TimeSpan timeout = TimeSpan.FromMinutes(2);
 
     private readonly TimeSpan cloneTimeout = TimeSpan.FromMinutes(30);
@@ -303,6 +314,22 @@ internal sealed class GitService : IGitService
         }
 
         return Parse(path, text);
+    }
+
+    /// <inheritdoc />
+    public async Task<string> Pending(string folder, CancellationToken cancellation)
+    {
+        await RequireRepo(folder, cancellation);
+        string status = Check(await Run(folder, ["status", "--short", "--untracked-files=all"], cancellation)).Output.Trim();
+
+        if (status.Length == 0)
+        {
+            throw new RequestException("There is nothing to commit.");
+        }
+
+        string diff = await HasCommits(folder, cancellation) ? Check(await Run(folder, ["diff", "HEAD", "--no-color", "--no-ext-diff"], cancellation)).Output : string.Empty;
+        string text = $"Changed paths:\n{status}\n\nDiff of tracked files:\n{diff}";
+        return text.Length > pendingLimit ? text[..pendingLimit] + "\n[cut]" : text;
     }
 
     /// <inheritdoc />

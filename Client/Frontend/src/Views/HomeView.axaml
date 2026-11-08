@@ -60,6 +60,7 @@
                 <Button.Flyout>
                   <MenuFlyout Placement="BottomEdgeAlignedLeft">
                     <MenuItem Header="Commit" Command="{Binding CommitCommand}" />
+                    <MenuItem Header="Auto Commit" Command="{Binding AutoCommitCommand}" />
                     <MenuItem Header="Reset" Command="{Binding ResetCommand}" />
                     <Separator />
                     <MenuItem Header="Branch" Command="{Binding BranchCommand}" />

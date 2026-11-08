@@ -202,6 +202,11 @@ public enum RemoteCommand
     GitCommit,
 
     /// <summary>
+    /// Asks the AI of <see cref="RemoteRequest.WorkspaceId" /> for a short commit message describing the changes that are not committed yet, without touching the conversation; answered in <see cref="RemoteResponse.CommitMessage" />.
+    /// </summary>
+    GenerateCommitMessage,
+
+    /// <summary>
     /// Discards every change of <see cref="RemoteRequest.WorkspaceId" /> that is not committed, new files included.
     /// </summary>
     GitReset,
