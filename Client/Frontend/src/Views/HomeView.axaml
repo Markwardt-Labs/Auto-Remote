@@ -633,67 +633,86 @@
           </Panel>
           <Panel Grid.Column="0" Grid.ColumnSpan="5" IsVisible="{Binding ShowSettings, FallbackValue=False}" Background="{DynamicResource Background}">
            <ScrollViewer VerticalScrollBarVisibility="Auto">
-            <StackPanel DataContext="{Binding Settings}" Margin="20,8,20,20" Spacing="8">
-              <TextBlock Text="AI provider" Classes="muted" Margin="0,8,0,0" />
-              <TextBlock Text="{Binding ProviderName}" />
-              <TextBlock Text="Capability" Classes="muted" Margin="0,8,0,0" />
-              <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding SelectedCapability}" HorizontalAlignment="Stretch">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding Name}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <TextBlock Text="Effort" Classes="muted" Margin="0,8,0,0" />
-              <ComboBox ItemsSource="{Binding Efforts}" SelectedItem="{Binding SelectedEffort}" HorizontalAlignment="Stretch">
-                <ComboBox.ItemTemplate>
-                  <DataTemplate>
-                    <TextBlock Text="{Binding Name}" />
-                  </DataTemplate>
-                </ComboBox.ItemTemplate>
-              </ComboBox>
-              <ToggleSwitch IsChecked="{Binding IsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" Margin="0,8,0,0" />
-              <ToggleSwitch IsChecked="{Binding IsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
-              <ToggleSwitch IsChecked="{Binding IsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
-              <ToggleSwitch IsChecked="{Binding IsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
-              <TextBlock Text="Instructions" Classes="muted" Margin="0,8,0,0" />
-              <TextBox Text="{Binding Instructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
-              <TextBlock Text="Status interval (minutes)" Classes="muted" Margin="0,8,0,0" />
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                <NumericUpDown Grid.Column="0" Value="{Binding StatusMinutes}" Minimum="1" Maximum="1440" Increment="1" FormatString="0" PlaceholderText="{Binding GlobalStatusMinutes}" HorizontalAlignment="Stretch" />
-                <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the status interval of the global settings" Command="{Binding ClearStatusMinutesCommand}" VerticalAlignment="Center">
-                  <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
-                </local:TouchButton>
-              </Grid>
-              <TextBlock Text="Review prompt" Classes="muted" Margin="0,8,0,0" />
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                <TextBox Grid.Column="0" Text="{Binding ReviewPrompt}" PlaceholderText="{Binding GlobalReviewPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
-                <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the review prompt of the global settings" Command="{Binding ClearReviewPromptCommand}" VerticalAlignment="Top" Margin="0,4,0,0">
-                  <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
-                </local:TouchButton>
-              </Grid>
-              <TextBlock Text="Expand prompt" Classes="muted" Margin="0,8,0,0" />
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
-                <TextBox Grid.Column="0" Text="{Binding ExpandPrompt}" PlaceholderText="{Binding GlobalExpandPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
-                <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the expand prompt of the global settings" Command="{Binding ClearExpandPromptCommand}" VerticalAlignment="Top" Margin="0,4,0,0">
-                  <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
-                </local:TouchButton>
-              </Grid>
-              <TextBlock Text="How it runs" Classes="muted" Margin="0,8,0,0" IsVisible="{Binding HasDetails}" />
-              <ItemsControl ItemsSource="{Binding Details}" IsVisible="{Binding HasDetails}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
-                      <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="muted" FontSize="12" />
-                      <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" TextWrapping="Wrap" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
+            <StackPanel DataContext="{Binding Settings}" Margin="20,8,20,20" Spacing="8" MaxWidth="640">
+              <Expander Classes="section" Header="AI" IsExpanded="False">
+                <StackPanel Spacing="8" Margin="0,4,0,8">
+                  <TextBlock Text="AI provider" Classes="muted" />
+                  <TextBlock Text="{Binding ProviderName}" />
+                  <TextBlock Text="Capability" Classes="muted" Margin="0,8,0,0" />
+                  <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding SelectedCapability}" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate>
+                        <TextBlock Text="{Binding Name}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                  <TextBlock Text="Effort" Classes="muted" Margin="0,8,0,0" />
+                  <ComboBox ItemsSource="{Binding Efforts}" SelectedItem="{Binding SelectedEffort}" HorizontalAlignment="Stretch">
+                    <ComboBox.ItemTemplate>
+                      <DataTemplate>
+                        <TextBlock Text="{Binding Name}" />
+                      </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                  </ComboBox>
+                </StackPanel>
+              </Expander>
+              <Expander Classes="section" Header="Access" IsExpanded="False">
+                <StackPanel Spacing="8" Margin="0,4,0,8">
+                  <ToggleSwitch IsChecked="{Binding IsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" />
+                  <ToggleSwitch IsChecked="{Binding IsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
+                  <ToggleSwitch IsChecked="{Binding IsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
+                  <ToggleSwitch IsChecked="{Binding IsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
+                </StackPanel>
+              </Expander>
+              <Expander Classes="section" Header="Instructions and prompts" IsExpanded="False">
+                <StackPanel Spacing="8" Margin="0,4,0,8">
+                  <TextBlock Text="Instructions" Classes="muted" />
+                  <TextBox Text="{Binding Instructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
+                  <TextBlock Text="Status interval (minutes)" Classes="muted" Margin="0,8,0,0" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <NumericUpDown Grid.Column="0" Value="{Binding StatusMinutes}" Minimum="1" Maximum="1440" Increment="1" FormatString="0" PlaceholderText="{Binding GlobalStatusMinutes}" HorizontalAlignment="Stretch" />
+                    <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the status interval of the global settings" Command="{Binding ClearStatusMinutesCommand}" VerticalAlignment="Center">
+                      <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
+                    </local:TouchButton>
+                  </Grid>
+                  <TextBlock Text="Review prompt" Classes="muted" Margin="0,8,0,0" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <TextBox Grid.Column="0" Text="{Binding ReviewPrompt}" PlaceholderText="{Binding GlobalReviewPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
+                    <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the review prompt of the global settings" Command="{Binding ClearReviewPromptCommand}" VerticalAlignment="Top" Margin="0,4,0,0">
+                      <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
+                    </local:TouchButton>
+                  </Grid>
+                  <TextBlock Text="Expand prompt" Classes="muted" Margin="0,8,0,0" />
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="6">
+                    <TextBox Grid.Column="0" Text="{Binding ExpandPrompt}" PlaceholderText="{Binding GlobalExpandPrompt}" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="44" MaxHeight="160" />
+                    <local:TouchButton Grid.Column="1" Classes="icon" ToolTip.Tip="Use the expand prompt of the global settings" Command="{Binding ClearExpandPromptCommand}" VerticalAlignment="Top" Margin="0,4,0,0">
+                      <Path Classes="lineIcon" MaxWidth="9" MaxHeight="9" Data="{StaticResource CloseIconGeometry}" />
+                    </local:TouchButton>
+                  </Grid>
+                </StackPanel>
+              </Expander>
+              <Expander Classes="section" Header="How it runs" IsExpanded="False" IsVisible="{Binding HasDetails}">
+                <StackPanel Spacing="8" Margin="0,4,0,8">
+                  <ItemsControl ItemsSource="{Binding Details}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid ColumnDefinitions="Auto,*" ColumnSpacing="12">
+                          <TextBlock Grid.Column="0" Text="{Binding Name}" Classes="muted" FontSize="12" />
+                          <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="12" TextWrapping="Wrap" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Expander>
               <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-              <local:TouchButton Content="Rename Workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,16,0,0" />
-              <local:TouchButton Content="Move Workspace to Folder" Command="{Binding $parent[UserControl].DataContext.MoveWorkspaceToFolderCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-              <local:TouchButton Content="Delete Workspace" Command="{Binding $parent[UserControl].DataContext.BeginDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+              <Expander Classes="section" Header="Workspace" IsExpanded="False">
+                <StackPanel Spacing="8" Margin="0,4,0,8">
+                  <local:TouchButton Content="Rename Workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                  <local:TouchButton Content="Move Workspace to Folder" Command="{Binding $parent[UserControl].DataContext.MoveWorkspaceToFolderCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                  <local:TouchButton Content="Delete Workspace" Command="{Binding $parent[UserControl].DataContext.BeginDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                </StackPanel>
+              </Expander>
             </StackPanel>
            </ScrollViewer>
           </Panel>

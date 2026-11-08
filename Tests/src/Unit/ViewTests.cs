@@ -49,6 +49,18 @@ public sealed class ViewTests(HeadlessFixture fixture)
         return (texts.Count, grids, text);
     });
 
+    private void Expand(Window window)
+    {
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+        foreach (Expander section in window.GetVisualDescendants().OfType<Expander>())
+        {
+            section.IsExpanded = true;
+        }
+
+        Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+    }
+
     [Fact]
     public async Task Matches_MarkTheFoundTextInTheRenderedBlocks()
     {
@@ -344,6 +356,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Window window = new() { Width = 900, Height = 900, Content = view };
             window.Show();
             model.Active!.ToggleSettingsCommand.Execute(null);
+            Expand(window);
 
             for (int attempt = 0; attempt < 100 && model.Active.Settings.Instructions.Length == 0; attempt++)
             {
@@ -549,6 +562,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Window window = new() { Width = 900, Height = 900, Content = view };
             window.Show();
             model.Active!.ToggleSettingsCommand.Execute(null);
+            Expand(window);
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             Button move = window.GetVisualDescendants().OfType<Button>().Single(button => button.Content?.ToString() == "Move Workspace to Folder");
             bool visible = move.IsEffectivelyVisible;
@@ -622,6 +636,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             EnvironmentView view = new() { DataContext = model };
             Window window = new() { Width = 700, Height = 1400, Content = view };
             window.Show();
+            Expand(window);
             int Refresh() => window.GetVisualDescendants().OfType<Button>().Count(button => button.IsEffectivelyVisible && button.Content?.ToString() is "Refresh Models" or "Refresh Checkpoints");
             int refreshButtons = Refresh();
             model.SelectedImage = model.ImageKinds.Single(choice => choice.Value == ImageGenerationKind.Local);
@@ -1504,12 +1519,14 @@ public sealed class ViewTests(HeadlessFixture fixture)
             string[] Buttons(Window window) => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty).Where(text => text is "Check for Updates" or "Update")];
             Window plain = new() { Width = 700, Height = 900, Content = new EnvironmentView { DataContext = new EnvironmentViewModel(connection.Object) } };
             plain.Show();
+            Expand(plain);
             string[] without = Buttons(plain);
             plain.Close();
 
             using UpdateViewModel update = new(info.Object, connection.Object, feed.Object, null);
             Window window = new() { Width = 700, Height = 900, Content = new EnvironmentView { DataContext = new EnvironmentViewModel(connection.Object, update) } };
             window.Show();
+            Expand(window);
             string[] before = Buttons(window);
             update.CheckCommand.Execute(null);
 
@@ -1689,5 +1706,63 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         Assert.Equal(["busy", "quiet"], names);
         Assert.Equal(1, icons);
+    }
+
+    [Fact]
+    public async Task Settings_AreSortedIntoSectionsThatStartCollapsedInAColumnOfLimitedWidth()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Descriptors = new Dictionary<string, string> { ["Model"] = "x" } });
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment());
+
+        (string[] workspaceSections, bool[] workspaceOpen, double workspaceWidth, string[] globalSections, bool[] globalOpen, double globalWidth, bool opens) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1600, Height = 1000, Content = view };
+            window.Show();
+            model.Active!.ToggleSettingsCommand.Execute(null);
+
+            for (int attempt = 0; attempt < 100 && model.Active.Settings.Details.Count == 0; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(20);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            List<Expander> sections = [.. window.GetVisualDescendants().OfType<Expander>().Where(section => section.IsEffectivelyVisible)];
+            string[] workspaceSections = [.. sections.Select(section => section.Header?.ToString() ?? string.Empty)];
+            bool[] workspaceOpen = [.. sections.Select(section => section.IsExpanded)];
+            double workspaceWidth = sections[0].Bounds.Width;
+            sections[0].IsExpanded = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool opens = window.GetVisualDescendants().OfType<ComboBox>().Any(box => box.IsEffectivelyVisible);
+            window.Close();
+
+            EnvironmentViewModel environment = new(connection.Object);
+            environment.Load().GetAwaiter().GetResult();
+            Window global = new() { Width = 1600, Height = 1000, Content = new EnvironmentView { DataContext = environment } };
+            global.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            List<Expander> globals = [.. global.GetVisualDescendants().OfType<Expander>().Where(section => section.IsEffectivelyVisible)];
+            string[] globalSections = [.. globals.Select(section => section.Header?.ToString() ?? string.Empty)];
+            bool[] globalOpen = [.. globals.Select(section => section.IsExpanded)];
+            double globalWidth = globals[0].Bounds.Width;
+            global.Close();
+            return (workspaceSections, workspaceOpen, workspaceWidth, globalSections, globalOpen, globalWidth, opens);
+        });
+
+        Assert.Equal(["AI", "Access", "Instructions and prompts", "How it runs", "Workspace"], workspaceSections);
+        Assert.All(workspaceOpen, open => Assert.False(open));
+        Assert.Equal(["New workspaces", "Status and prompts", "Claude Code", "OpenAI Codex", "Local models", "Image generation"], globalSections);
+        Assert.All(globalOpen, open => Assert.False(open));
+        Assert.InRange(workspaceWidth, 600, 640);
+        Assert.InRange(globalWidth, 600, 640);
+        Assert.True(opens);
     }
 }
