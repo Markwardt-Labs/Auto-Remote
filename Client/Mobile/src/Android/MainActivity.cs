@@ -1,10 +1,3 @@
-using Android;
-using Android.App;
-using Android.Content;
-using Android.Content.PM;
-using Android.OS;
-using Avalonia.Android;
-
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>

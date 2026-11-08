@@ -1,5 +1,3 @@
-using Android.Media;
-
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>

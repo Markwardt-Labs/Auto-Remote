@@ -1,8 +1,3 @@
-using Android.App;
-using Android.Content;
-using Android.Content.PM;
-using Android.OS;
-
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>

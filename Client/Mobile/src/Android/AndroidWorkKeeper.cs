@@ -1,5 +1,3 @@
-using Android.Content;
-
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>

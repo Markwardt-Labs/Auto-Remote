@@ -1,5 +1,3 @@
-using Avalonia.Controls.ApplicationLifetimes;
-
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>

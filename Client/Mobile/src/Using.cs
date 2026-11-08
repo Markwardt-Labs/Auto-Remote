@@ -1,1 +1,12 @@
 global using Avalonia.Controls;
+global using Android;
+global using Android.App;
+global using Android.Content;
+global using Android.Content.PM;
+global using Android.Media;
+global using Android.OS;
+global using Android.Provider;
+global using Android.Runtime;
+global using AndroidX.Core.Content;
+global using Avalonia.Android;
+global using Avalonia.Controls.ApplicationLifetimes;
