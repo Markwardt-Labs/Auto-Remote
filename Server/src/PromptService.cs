@@ -19,7 +19,7 @@ internal interface IPromptService
     bool IsBusy(Guid id);
 
     /// <summary>
-    /// Reads a chunk of a workspace's conversation from the AI service's stored session.
+    /// Reads a chunk of a workspace's chat, which Auto Remote keeps itself: what was sent to the AI and what it wrote, nothing the AI service keeps for its own use. A workspace that has no chat yet takes over its conversation from the AI service's stored session once.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="before">The cursor of <see cref="ChatHistory.Older" /> to read before, or <see langword="null" /> for the newest messages.</param>
@@ -140,6 +140,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly int maxChunk = 200;
 
+    private readonly int historyScan = 20000;
+
     private readonly int maxAttachment = 2 * 1024 * 1024;
 
     private readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(5);
@@ -155,6 +157,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     private readonly string interruptedMarker = "[Request interrupted by user";
 
     private readonly string reminderMarker = "<system-reminder>";
+
+    private readonly string compactionMarker = "This session is being continued from a previous conversation";
 
     private readonly string attachedPrefix = "Attached file: ";
 
@@ -191,28 +195,46 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     public async Task<ChatHistory> History(Guid id, string? before, int? limit, CancellationToken cancellation)
     {
         WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
-        PromptHistoryPoint? cursor = Decode(before);
+        int? cursor = Decode(before);
         Live live = lives.GetOrAdd(id, _ => new Live());
         await live.Gate.WaitAsync(cancellation);
 
         try
         {
-            if (live.Session is null && workspace.SessionId is null)
+            Task writing;
+
+            lock (live.Sync)
             {
-                return new ChatHistory { Messages = [], Working = live.Working };
+                writing = live.Writing;
             }
 
-            await Session(id, workspace, live, cancellation);
+            await writing.ContinueWith(static _ => { }, TaskScheduler.Default);
+            IReadOnlyList<ChatMessage>? stored = await store.LoadMessages(id, cancellation);
 
-            if (!live.Working)
+            if (stored is null)
             {
-                lock (live.Sync)
+                if (live.Session is null && workspace.SessionId is null)
                 {
-                    Expire(id, live);
+                    return new ChatHistory { Messages = [], Working = live.Working };
+                }
+
+                IPromptSession session = await Session(id, workspace, live, cancellation);
+                List<ChatMessage> imported = await Import(session, cancellation);
+                stored = [.. imported, .. await store.LoadMessages(id, cancellation) ?? []];
+                await store.SaveMessages(id, stored, cancellation);
+
+                if (!live.Working)
+                {
+                    lock (live.Sync)
+                    {
+                        Expire(id, live);
+                    }
                 }
             }
 
-            return await Read(live.Session!, cursor, Math.Clamp(limit ?? defaultChunk, 1, maxChunk), live.Working, cancellation);
+            int end = cursor is { } point ? Math.Min(point, stored.Count) : stored.Count;
+            int start = Math.Max(0, end - Math.Clamp(limit ?? defaultChunk, 1, maxChunk));
+            return new ChatHistory { Messages = [.. stored.Skip(start).Take(end - start)], Older = start > 0 ? start.ToString(CultureInfo.InvariantCulture) : null, Working = live.Working };
         }
         finally
         {
@@ -267,7 +289,13 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             IPromptSession session = await Session(id, workspace, live, cancellation);
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkspacesChanged, WorkspaceId = Guid.Empty });
             PromptSendOptions options = await Options(text, cancellation);
-            events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow } });
+
+            if (onlyWhenIdle && (live.Working || session.State != PromptSessionState.Waiting))
+            {
+                throw new RequestException("The AI is working.");
+            }
+
+            Say(id, live, new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow });
 
             bool queued = false;
             bool steering = false;
@@ -829,60 +857,67 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         return await host.Prompter.Load(sessionId, cancellation);
     }
 
-    private string Encode(PromptHistoryPoint point) => $"{point.Position.ToString(CultureInfo.InvariantCulture)}:{point.Index.ToString(CultureInfo.InvariantCulture)}";
-
-    private PromptHistoryPoint? Decode(string? cursor)
+    private int? Decode(string? cursor)
     {
         if (cursor is null)
         {
             return null;
         }
 
-        string[] parts = cursor.Split(':');
-
-        if (parts.Length != 2 || !long.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out long position) || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int index))
-        {
-            throw new RequestException("The history cursor is not valid.");
-        }
-
-        return new PromptHistoryPoint(position, index);
+        return int.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out int position) ? position : throw new RequestException("The history cursor is not valid.");
     }
 
-    private async Task<ChatHistory> Read(IPromptSession session, PromptHistoryPoint? before, int want, bool working, CancellationToken cancellation)
+    private void Say(Guid id, Live live, ChatMessage message)
     {
-        List<ChatMessage> newestFirst = [];
-        PromptHistoryPoint? last = null;
-        bool more = false;
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = message });
+
+        lock (live.Sync)
+        {
+            live.Writing = Write(live.Writing, id, message);
+        }
+    }
+
+    private async Task Write(Task previous, Guid id, ChatMessage message)
+    {
+        await previous.ContinueWith(static _ => { }, TaskScheduler.Default);
 
         try
         {
-            IAsyncEnumerable<PromptHistoryEntry> entries = session.GetHistory(cancellation);
+            await store.AppendMessage(id, message, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
 
-            if (before is { } point)
-            {
-                entries = entries.OlderThan(point);
-            }
+    private async Task<List<ChatMessage>> Import(IPromptSession session, CancellationToken cancellation)
+    {
+        List<ChatMessage> newestFirst = [];
+        bool afterUser = false;
 
-            await foreach (PromptHistoryEntry entry in entries.WithCancellation(cancellation))
+        try
+        {
+            await foreach (PromptHistoryEntry entry in session.GetHistory(cancellation).WithCancellation(cancellation))
             {
-                if (Message(entry) is not { } message)
+                if (entry.Event is PromptInputEvent && entry.Text.StartsWith(reminderMarker, StringComparison.Ordinal))
                 {
-                    if (newestFirst.Count < want)
+                    if (afterUser)
                     {
-                        last = entry.Point;
+                        newestFirst.RemoveAt(newestFirst.Count - 1);
                     }
 
+                    afterUser = false;
                     continue;
                 }
 
-                if (newestFirst.Count == want)
+                ChatMessage? message = Message(entry);
+
+                if (message is not null)
                 {
-                    more = true;
-                    break;
+                    newestFirst.Add(message);
                 }
 
-                newestFirst.Add(message);
-                last = entry.Point;
+                afterUser = message?.Role == MessageRole.User;
             }
         }
         catch (Exception exception) when (exception is PromptSessionException or IOException)
@@ -891,7 +926,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
 
         newestFirst.Reverse();
-        return new ChatHistory { Messages = newestFirst, Older = more && last is { } cursor ? Encode(cursor) : null, Working = working };
+        return newestFirst;
     }
 
     private ChatMessage? Message(PromptHistoryEntry entry)
@@ -903,7 +938,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             _ => null
         };
 
-        if (role is not { } found || string.IsNullOrWhiteSpace(entry.Text) || entry.Text.StartsWith(interruptedMarker, StringComparison.Ordinal) || entry.Text.StartsWith(reminderMarker, StringComparison.Ordinal))
+        if (role is not { } found || string.IsNullOrWhiteSpace(entry.Text) || entry.Text.StartsWith(interruptedMarker, StringComparison.Ordinal) || entry.Text.StartsWith(reminderMarker, StringComparison.Ordinal) || entry.Text.StartsWith(compactionMarker, StringComparison.Ordinal))
         {
             return null;
         }
@@ -916,7 +951,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         switch (output)
         {
             case PromptMessageEvent { Text: { Length: > 0 } reply }:
-                events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow } });
+                Say(id, live, new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow });
                 break;
             case PromptToolCallEvent { Name: "shell" } call:
                 live.Tally.Running[call.Id] = 0;
@@ -1042,38 +1077,59 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private async Task<List<(string Text, PromptSendOptions Options)>> Unanswered(IPromptSession session, List<(string Text, PromptSendOptions Options)> steered)
     {
-        List<string> inputs = [];
+        List<(string Text, PromptSendOptions Options)> open = [.. steered];
+        List<(string Text, PromptSendOptions Options)> missed = [];
+        bool acted = false;
+        int read = 0;
 
         try
         {
-            await foreach (PromptHistoryEntry entry in session.GetHistory().Take(60))
+            await foreach (PromptHistoryEntry entry in session.GetHistory())
             {
-                if (entry.Event is PromptInputEvent)
+                if (open.Count == 0)
                 {
-                    inputs.Add(entry.Text);
+                    break;
+                }
+
+                if (++read > historyScan)
+                {
+                    open.Clear();
+                    break;
+                }
+
+                if (entry.Event is PromptInputEvent input)
+                {
+                    if (input.Text.StartsWith(reminderMarker, StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    int found = open.FindIndex(item => input.Text.Contains(item.Text.Trim(), StringComparison.Ordinal));
+
+                    if (found < 0)
+                    {
+                        break;
+                    }
+
+                    if (!acted)
+                    {
+                        missed.Add(open[found]);
+                    }
+
+                    open.RemoveAt(found);
+                }
+                else if (entry.Event is PromptMessageEvent or PromptToolCallEvent)
+                {
+                    acted = true;
                 }
             }
         }
         catch (Exception exception) when (exception is PromptSessionException or IOException or ObjectDisposedException)
         {
+            open.Clear();
         }
 
-        List<(string Text, PromptSendOptions Options)> missed = [];
-
-        foreach ((string text, PromptSendOptions options) in steered)
-        {
-            int found = inputs.FindIndex(input => input.Contains(text.Trim(), StringComparison.Ordinal));
-
-            if (found >= 0)
-            {
-                inputs.RemoveAt(found);
-            }
-            else
-            {
-                missed.Add((text, options));
-            }
-        }
-
+        missed.AddRange(open);
         return missed;
     }
 
@@ -1198,6 +1254,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public IDisposable? Watch { get; set; }
 
         public bool Held { get; set; }
+
+        public Task Writing { get; set; } = Task.CompletedTask;
 
         public Queue<(string Text, PromptSendOptions Options)> Pending { get; } = new();
 

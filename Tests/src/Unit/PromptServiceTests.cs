@@ -22,6 +22,8 @@ public sealed class PromptServiceTests : IDisposable
 
     private readonly CancellationTokenSource stopping = new();
 
+    private readonly Dictionary<Guid, List<ChatMessage>> chats = [];
+
     private WorkspaceInfo workspace;
 
     private PromptService service;
@@ -35,6 +37,32 @@ public sealed class PromptServiceTests : IDisposable
             {
                 events.Add(remoteEvent);
             }
+        });
+        store.Setup(x => x.LoadMessages(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid id, CancellationToken _) =>
+        {
+            lock (chats)
+            {
+                return chats.TryGetValue(id, out List<ChatMessage>? list) ? [.. list] : null;
+            }
+        });
+        store.Setup(x => x.AppendMessage(It.IsAny<Guid>(), It.IsAny<ChatMessage>(), It.IsAny<CancellationToken>())).Returns((Guid id, ChatMessage message, CancellationToken _) =>
+        {
+            lock (chats)
+            {
+                chats.TryAdd(id, []);
+                chats[id].Add(message);
+            }
+
+            return Task.CompletedTask;
+        });
+        store.Setup(x => x.SaveMessages(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChatMessage>>(), It.IsAny<CancellationToken>())).Returns((Guid id, IReadOnlyList<ChatMessage> messages, CancellationToken _) =>
+        {
+            lock (chats)
+            {
+                chats[id] = [.. messages];
+            }
+
+            return Task.CompletedTask;
         });
         activity = new WorkspaceActivity(hub.Object);
         host = new HostMock(prompter);
@@ -223,6 +251,21 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Prompt_ThatIsOnlyForAnIdleAiLeavesNothingInTheChatWhenRefused()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one", true, CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+
+        await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "two", true, CancellationToken.None));
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Equal(["one", "first reply"], (await service.History(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text).ToList());
+    }
+
+    [Fact]
     public async Task Prompt_SentRightAsTheWorkFinishesIsNeverLostWhateverTheTiming()
     {
         prompter.OnCreate = session => session.ReplyWith(prompt => [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
@@ -250,7 +293,7 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Prompt_SentWhileTheAiWorksIsNotFollowedUpWhenTheConversationShowsItAsInputTheAiGot()
+    public async Task Prompt_SentWhileTheAiWorksIsNotFollowedUpWhenTheConversationShowsItAsInputTheAiWroteAfter()
     {
         TaskCompletionSource release = new();
         prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one and two" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
@@ -265,6 +308,40 @@ public sealed class PromptServiceTests : IDisposable
 
         Assert.Single(Session.Prompts);
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Prompt_SentWhileTheAiWorksIsFollowedUpWhenTheConversationShowsItButTheAiWroteNothingAfter()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one and two" ? Silent(release.Task) : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one and two", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+        await Until(() => Session.Prompts[0].Steered.Count == 1);
+
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Equal(["one and two", "two"], Session.Prompts.Select(prompt => prompt.Text).ToList());
+        Assert.Contains("may have been missed", Session.Prompts[1].Notes.Single());
+    }
+
+    [Fact]
+    public async Task Prompt_SentWhileLongWorkRunsIsNotFollowedUpHoweverManyEntriesTheAiWroteSince()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one and two" ? Busy(release.Task, 300) : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one and two", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+        await Until(() => Session.Prompts[0].Steered.Count == 1);
+
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+        await Task.Delay(300);
+
+        Assert.Single(Session.Prompts);
     }
 
     [Fact]
@@ -863,7 +940,7 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task History_ReportsWhetherTheAiWorksAndSkipsToolsInterruptNotesAndRemindersOfTheHost()
+    public async Task History_HoldsOnlyWhatWasSaidSoNothingTheToolsDidAppearsAndTheAiStaysIdle()
     {
         prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text.StartsWith("tools", StringComparison.Ordinal)
             ? [new PromptToolCallEvent { Id = "1", Name = "shell", Input = "{}" }, new PromptToolResultEvent { Id = "1", Output = "done" }, new PromptMessageEvent { Text = "used tools" }]
@@ -872,14 +949,66 @@ public sealed class PromptServiceTests : IDisposable
         await Until(() => !service.IsBusy(workspace.Id));
         await service.Prompt(workspace.Id, "[Request interrupted by user]", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
-        await service.Prompt(workspace.Id, "<system-reminder>\nNote from the host application: x\n</system-reminder>", CancellationToken.None);
-        await Until(() => !service.IsBusy(workspace.Id));
 
         ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
 
-        Assert.Equal(["tools please", "used tools", "ok", "ok"], history.Messages.Select(message => message.Text).ToList());
+        Assert.Equal(["tools please", "used tools", "[Request interrupted by user]", "ok"], history.Messages.Select(message => message.Text).ToList());
         Assert.False(history.Working);
         Assert.Null(history.Older);
+    }
+
+    [Fact]
+    public async Task History_IsKeptByTheServerAcrossARestartWithoutReadingTheAiServiceAgain()
+    {
+        prompter.OnCreate = session => session.ReplyWith(prompt => [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "q1", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+        int sessions = prompter.Sessions.Count;
+
+        ChatHistory history = await Restart().History(workspace.Id, null, null, CancellationToken.None);
+
+        Assert.Equal(["q1", "reply to q1"], history.Messages.Select(message => message.Text).ToList());
+        Assert.Equal(sessions, prompter.Sessions.Count);
+        store.Verify(x => x.SaveMessages(It.IsAny<Guid>(), It.IsAny<IReadOnlyList<ChatMessage>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task History_TakesOverTheAiServicesConversationOnceWithoutSummariesNotesOrReplays()
+    {
+        FakePromptSession seeded = (FakePromptSession)Existing();
+        seeded.ReplyWith(prompt => prompt.Text.StartsWith("<system-reminder>", StringComparison.Ordinal) ? [] : [new PromptMessageEvent { Text = "reply to " + prompt.Text[..Math.Min(prompt.Text.Length, 12)] }]);
+
+        foreach (string text in new[] { "first question", "This session is being continued from a previous conversation that ran out of context. Summary: x", "<system-reminder>\nNote from the host application: may have been missed\n</system-reminder>", "steered text", "last question" })
+        {
+            await seeded.Send(text);
+            await Until(() => seeded.State == PromptSessionState.Waiting);
+        }
+
+        await seeded.DisposeAsync();
+        Use(workspace with { SessionId = seeded.Id });
+
+        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+
+        Assert.Equal(["first question", "reply to first questi", "reply to This session", "reply to steered text", "last question", "reply to last questio"], history.Messages.Select(message => message.Text).ToList());
+        await service.History(workspace.Id, null, null, CancellationToken.None);
+        store.Verify(x => x.SaveMessages(workspace.Id, It.IsAny<IReadOnlyList<ChatMessage>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task History_DoesNotKeepWhatTheServerSendsAgainAsAFollowUpOrAsksTheAiInAFork()
+    {
+        TaskCompletionSource release = new();
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "one" ? Slow(release.Task, "first reply") : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+        await service.Prompt(workspace.Id, "one", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+        await service.Prompt(workspace.Id, "two", CancellationToken.None);
+        release.SetResult();
+        await Until(() => !service.IsBusy(workspace.Id));
+        await service.Ask(workspace.Id, "write a message", CancellationToken.None);
+
+        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+
+        Assert.Equal(["one", "two", "first reply", "reply to two"], history.Messages.Select(message => message.Text).ToList());
     }
 
     [Fact]
@@ -897,6 +1026,18 @@ public sealed class PromptServiceTests : IDisposable
     {
         gate.GetAwaiter().GetResult();
         return [new PromptFailureEvent { Message = "boom" }];
+    }
+
+    private IEnumerable<PromptEvent> Silent(Task gate)
+    {
+        gate.GetAwaiter().GetResult();
+        return [];
+    }
+
+    private IEnumerable<PromptEvent> Busy(Task gate, int messages)
+    {
+        gate.GetAwaiter().GetResult();
+        return [.. Enumerable.Range(0, messages).Select(number => new PromptMessageEvent { Text = "step " + number })];
     }
 
     private IEnumerable<PromptEvent> Slow(Task gate, string text)

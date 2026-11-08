@@ -101,6 +101,7 @@ public sealed class ConversationScenarios
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("steer", service);
+        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsShellAllowed = true }, CancellationToken.None);
         int mark = server.Mark();
 
         await server.Connection.Prompt(workspace.Id, "Run the shell command `sleep 8`, and only after it finished create a file named note.txt containing exactly the word RED. Then reply with the word DONE.", CancellationToken.None);
@@ -131,6 +132,33 @@ public sealed class ConversationScenarios
 
         Assert.Equal("ONE", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "first.txt"))).Trim());
         Assert.Equal("TWO", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "second.txt"))).Trim());
+        Assert.Empty(server.Failures(workspace));
+    }
+
+    [RealAiTheory]
+    [InlineData(AiService.ClaudeCode)]
+    [InlineData(AiService.Codex)]
+    public async Task Prompt_SteeredIntoWorkIsWorkedOnOnceAndNeverReplayedAfterTheWorkEnds(AiService service)
+    {
+        await using RealServer server = await RealServer.Start();
+        WorkspaceInfo workspace = await server.Workspace("replay", service);
+        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsShellAllowed = true }, CancellationToken.None);
+        int mark = server.Mark();
+
+        await server.Connection.Prompt(workspace.Id, "Run the shell command `sleep 20` and wait for it to finish. Then reply with the word DONE.", CancellationToken.None);
+        await server.Until(() => server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None).Result == WorkspaceState.Working, 30, "the work to start");
+        await Task.Delay(4000);
+        await server.Connection.Prompt(workspace.Id, "Also create a file named steered.txt containing the word ONE.", CancellationToken.None);
+        await Task.Delay(1500);
+        await server.Connection.Prompt(workspace.Id, "Also create a file named second.txt containing the word TWO.", CancellationToken.None);
+        await server.Idle(workspace, mark);
+        await Task.Delay(3000);
+
+        Assert.Equal("ONE", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "steered.txt"))).Trim());
+        Assert.Equal("TWO", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "second.txt"))).Trim());
+        Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
+        Assert.Equal([true, false], server.Events().Skip(mark).Where(item => item.Kind == RemoteEventKind.WorkingChanged).Select(item => item.Working == true).ToList());
+        Assert.DoesNotContain(server.Events().Skip(mark), item => item.Kind == RemoteEventKind.MessageAdded && item.Message!.Role == MessageRole.Assistant && item.Message.Text.Contains("already", StringComparison.OrdinalIgnoreCase));
         Assert.Empty(server.Failures(workspace));
     }
 }

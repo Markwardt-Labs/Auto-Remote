@@ -72,7 +72,7 @@ Properties a command does not use are omitted.
 ### Response
 
 ```json
-{"id": 7, "history": {"messages": [{"role": "Assistant", "text": "Done."}], "older": "48213:0"}}
+{"id": 7, "history": {"messages": [{"role": "Assistant", "text": "Done."}], "older": "48"}}
 ```
 
 Exactly one payload property is set on success (none for `DeleteWorkspace`, `DeleteGroup`, `Prompt`, `WatchWorkspace` and the git actions: every `Git...` command except the `GetGit...` reads); on failure only `error` is set (see Errors). A response with `id` zero answers no request and carries `event` instead (see Events).
@@ -123,7 +123,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused unless the workspace is Ready. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
-| `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first, read from the AI service's stored conversation: the user's prompts and the AI's messages. |
+| `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
 | `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes; does nothing when no loop runs. |
@@ -312,7 +312,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | --- | --- | --- |
 | `role` | string | Author: `User` (the person using the client) or `Assistant` (the AI). |
 | `text` | string | The message text. |
-| `time` | string, optional | When the message was written, ISO 8601 UTC; a message read from the history has the time the conversation tool stored (absent when it stored none), a live one the time the server published it. |
+| `time` | string, optional | When the message was written, ISO 8601 UTC; the time the server published it (a message taken over from an older server's conversation has the time the conversation tool stored, absent when it stored none). |
 
 **files** (`ListFiles`)
 

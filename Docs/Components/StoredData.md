@@ -12,6 +12,8 @@ Writing always stamps the current version.
 
 ## The files
 
+The chat of each workspace is a `chats/<id>.jsonl` file beside it, one JSON message per line (`role`, `text`, `time`), appended as messages are published; it carries no version and a line that cannot be read is skipped. The oldest messages are purged so a chat never grows without bound: it keeps at most 5000 messages and 16 MB, and is rewritten to the newest ones that fit once it passes the message limit by a fifth (so the file is not rewritten on every message), or when a chat is taken over from the AI service.
+
 `workspaces.json` (workspaces and groups) is at version 3. Its steps: from 1, drop the model and effort an older release stored per workspace (they belong to the AI session now) and rename the `OpenCode` service to `Local`; from 2, keep only `id`, `sessionId` (renamed from `aiSessionId`) and `groupId` of a workspace, since the folder and provider are read from its session, and mark it `adopt` (below). A workspace that has no usable session (none yet, or the tool's own hyphenated identifier of an older release) keeps its `folder` and `service` instead, and the server gives it a session when it starts and drops them then. `environment.json` (the AI environment, readable by the server user only since it can hold API keys) is at version 1. A workspace may also carry `reviewPrompt`, `expandPrompt` and `statusMinutes`, the prompts and status interval of its own that replace the environment's; they are written only when set, so they add nothing to the version.
 
 ## Sessions stored by Live AI 1.x

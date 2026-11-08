@@ -109,6 +109,108 @@ public sealed class WorkspaceStoreTests
     }
 
     [Fact]
+    public async Task Messages_AreAppendedInOrderReplacedWholeAndDeletedWithTheWorkspace()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new();
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        DateTimeOffset time = DateTimeOffset.UtcNow;
+
+        Assert.Null(await store.LoadMessages(id, CancellationToken.None));
+
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.User, Text = "multi\nline \"quoted\"", Time = time }, CancellationToken.None);
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.Assistant, Text = "answer" }, CancellationToken.None);
+
+        WorkspaceStore reopened = new();
+        reopened.Open(temp.Combine("workspaces.json"));
+        IReadOnlyList<ChatMessage> loaded = (await reopened.LoadMessages(id, CancellationToken.None))!;
+        Assert.Equal([("multi\nline \"quoted\"", MessageRole.User, (DateTimeOffset?)time), ("answer", MessageRole.Assistant, null)], loaded.Select(message => (message.Text, message.Role, message.Time)).ToList());
+
+        await store.SaveMessages(id, [new ChatMessage { Role = MessageRole.User, Text = "only" }], CancellationToken.None);
+        Assert.Equal(["only"], (await store.LoadMessages(id, CancellationToken.None))!.Select(message => message.Text).ToList());
+
+        store.DeleteMessages(id);
+        Assert.Null(await store.LoadMessages(id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AppendMessage_PurgesTheOldestMessagesOnceTheChatGrowsPastItsLimit()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new(10);
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+
+        for (int number = 1; number <= 12; number++)
+        {
+            await store.AppendMessage(id, new ChatMessage { Role = MessageRole.User, Text = $"m{number}" }, CancellationToken.None);
+        }
+
+        Assert.Equal(12, (await store.LoadMessages(id, CancellationToken.None))!.Count);
+
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.User, Text = "m13" }, CancellationToken.None);
+
+        Assert.Equal(Enumerable.Range(4, 10).Select(number => $"m{number}").ToList(), (await store.LoadMessages(id, CancellationToken.None))!.Select(message => message.Text).ToList());
+    }
+
+    [Fact]
+    public async Task AppendMessage_PurgesAnAlreadyOversizedChatAfterARestartOfTheServer()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore big = new(1000);
+        big.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        await big.SaveMessages(id, [.. Enumerable.Range(1, 30).Select(number => new ChatMessage { Role = MessageRole.User, Text = $"m{number}" })], CancellationToken.None);
+        WorkspaceStore small = new(10);
+        small.Open(temp.Combine("workspaces.json"));
+
+        await small.AppendMessage(id, new ChatMessage { Role = MessageRole.Assistant, Text = "m31" }, CancellationToken.None);
+
+        Assert.Equal(Enumerable.Range(22, 10).Select(number => $"m{number}").ToList(), (await small.LoadMessages(id, CancellationToken.None))!.Select(message => message.Text).ToList());
+    }
+
+    [Fact]
+    public async Task SaveMessages_KeepsOnlyTheNewestMessagesThatFitTheLimits()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore counted = new(5);
+        counted.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        List<ChatMessage> all = [.. Enumerable.Range(1, 8).Select(number => new ChatMessage { Role = MessageRole.User, Text = $"m{number}" })];
+
+        await counted.SaveMessages(id, all, CancellationToken.None);
+
+        Assert.Equal(["m4", "m5", "m6", "m7", "m8"], (await counted.LoadMessages(id, CancellationToken.None))!.Select(message => message.Text).ToList());
+
+        WorkspaceStore sized = new(100, 150);
+        sized.Open(temp.Combine("workspaces.json"));
+        await sized.SaveMessages(id, all, CancellationToken.None);
+
+        IReadOnlyList<ChatMessage> kept = (await sized.LoadMessages(id, CancellationToken.None))!;
+        Assert.InRange(kept.Count, 1, 7);
+        Assert.Equal("m8", kept[^1].Text);
+        Assert.True(new FileInfo(temp.Combine($"chats/{id:N}.jsonl")).Length <= 150);
+
+        await sized.SaveMessages(id, [new ChatMessage { Role = MessageRole.Assistant, Text = new string('x', 500) }], CancellationToken.None);
+        Assert.Single((await sized.LoadMessages(id, CancellationToken.None))!);
+    }
+
+    [Fact]
+    public async Task LoadMessages_SkipsALineThatIsNotAMessage()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new();
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.User, Text = "kept" }, CancellationToken.None);
+        File.AppendAllText(temp.Combine($"chats/{id:N}.jsonl"), "{broken\n");
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.Assistant, Text = "also kept" }, CancellationToken.None);
+
+        Assert.Equal(["kept", "also kept"], (await store.LoadMessages(id, CancellationToken.None))!.Select(message => message.Text).ToList());
+    }
+
+    [Fact]
     public async Task Load_UpgradesAFileAnEarlierReleaseWroteAndKeepsTheOriginal()
     {
         using TempFolder temp = new();
