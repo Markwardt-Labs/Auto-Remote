@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -170,6 +170,12 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 RequireReady(request);
                 await Act(request, true, (folder, token) => git.Commit(folder, Require(request.Text, "message").Trim() is { Length: > 0 } message ? message : throw new RequestException("Enter a commit message."), token), cancellation);
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GetSavedInputs:
+                return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.List(RequireWorkspace(request), cancellation) };
+            case RemoteCommand.SaveInput:
+                return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.Save(RequireWorkspace(request), request.Text ?? string.Empty, cancellation) };
+            case RemoteCommand.TakeSavedInput:
+                return new RemoteResponse { Id = 0, SavedInput = await savedInputs.Take(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), cancellation) };
             case RemoteCommand.GenerateCommitMessage:
                 RequireReady(request);
                 return new RemoteResponse { Id = 0, CommitMessage = await versioning.CommitMessage(await WorkspaceOf(request, cancellation), cancellation) };

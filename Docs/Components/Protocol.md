@@ -44,6 +44,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `workspaceId` | GUID | per command | The workspace targeted. |
 | `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group; for `CreateWorkspace` and `CloneWorkspace`, the group the new workspace is filed in (omitted: the top level), refused when it no longer exists. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
+| `inputId` | GUID | `TakeSavedInput` | The saved input to take. |
 | `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
 | `offset` | number | `ShiftGroup` | How many places to move: negative is up, positive is down. |
@@ -62,7 +63,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
-| `text` | string | `Prompt`, `GitCommit`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the line written to a script, or the text to search for. |
+| `text` | string | `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the chat input to save, the line written to a script, or the text to search for. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
 | `showHidden` | bool | no | `ListFiles` and `SearchFiles`; includes the entries a `.filehide` file hides. |
 | `searchContent` | bool | no | `SearchFiles` only; searches the contents of the files instead of their names. |
@@ -101,6 +102,8 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `gitHistory` | git history | `GetGitHistory` |
 | `gitDiff` | git diff | `GetGitDiff` |
 | `commitMessage` | string | `GenerateCommitMessage` |
+| `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput` |
+| `savedInput` | saved input | `TakeSavedInput` |
 | `scripts` | script runs | `GetScripts` |
 | `event` | event | Pushed by the server, with `id` zero (see Events). |
 
@@ -137,6 +140,9 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
+| `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
+| `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; the oldest entries beyond 200 are dropped. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |
+| `TakeSavedInput` | `workspaceId`, `inputId` | `savedInput` | Removes the saved input and answers it, so only one client gets it; refused once it is gone. Every client gets a `SavedInputsChanged` event. |
 | `UpdateServer` | none | none | Makes the server look for the newest release on GitHub, download its server executable and restart with it, which closes every connection. Answers once the download is complete, a second before the restart. Refused when there is no newer release, GitHub cannot be reached, the server does not run from an installed executable or the folder is not writable. Not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
@@ -306,6 +312,14 @@ Nested objects are shown after the table of the object that contains them. Optio
 
 The client lists every window and colors each one, and the usage icon by the shortest one, by its pace: percent used minus the percent of the window already passed. Within 5 points is even (normal color), 5 to 15 under is low (blue) and beyond that very low (green), 5 to 15 over is high (orange) and beyond that very high (red); a used up limit is always very high, and an unknown or passed reset time is even.
 
+**saved input** (items of `savedInputs`, and the `savedInput` of `TakeSavedInput`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `id` | GUID | What `TakeSavedInput` takes it by. |
+| `text` | string | The text that was in the chat input. |
+| `time` | string | When it was saved, ISO 8601 UTC. |
+
 **message** (items of `history.messages`, and carried by `MessageAdded` events)
 
 | Property | Type | Meaning |
@@ -453,7 +467,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged` or `LoopChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged` or `SavedInputsChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
@@ -461,6 +475,7 @@ The server pushes events to every authenticated connection, as responses with `i
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Running`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
+| `savedInputs` | array of saved input | `SavedInputsChanged`: the saved inputs of the workspace now, the last saved first. |
 | `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 

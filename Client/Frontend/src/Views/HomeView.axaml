@@ -249,6 +249,26 @@
             <Grid Grid.Row="2" Margin="20,4,12,12" RowDefinitions="Auto,Auto,*">
             <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,6">
               <TextBlock Text="{Binding Notice}" IsVisible="{Binding HasNotice}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              <Border Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="4" IsVisible="{Binding IsSavedInputsOpen}">
+                <Grid RowDefinitions="Auto,*">
+                  <TextBlock Grid.Row="0" Text="Saved inputs" Classes="muted" FontSize="12" Margin="6,2,6,4" />
+                  <TextBlock Grid.Row="1" Text="No saved inputs." Classes="muted" FontSize="12" Margin="6,2,6,4" IsVisible="{Binding HasNoSavedInputs}" />
+                  <ScrollViewer Grid.Row="1" MaxHeight="220" IsVisible="{Binding !HasNoSavedInputs}">
+                    <ItemsControl ItemsSource="{Binding SavedInputs}">
+                      <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                          <local:TouchButton Command="{Binding $parent[ItemsControl].DataContext.LoadSavedInputCommand}" CommandParameter="{Binding}" Background="Transparent" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,4">
+                            <StackPanel Spacing="2">
+                              <TextBlock Text="{Binding Text}" MaxLines="3" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                              <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
+                            </StackPanel>
+                          </local:TouchButton>
+                        </DataTemplate>
+                      </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                  </ScrollViewer>
+                </Grid>
+              </Border>
               <Border Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0"
                     IsVisible="{Binding $parent[local:HomeView].DataContext.Active.Git.IsWorking, FallbackValue=False}">
               <Grid ColumnDefinitions="*,Auto" DataContext="{Binding $parent[local:HomeView].DataContext.Active.Git}">
@@ -323,6 +343,18 @@
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowResumeButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource ResumeIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                </local:TouchButton>
+                <local:TouchButton Classes="action" Command="{Binding ToggleSavedInputsCommand}" ToolTip.Tip="Load a saved input" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding !HasText}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource LoadInputIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                </local:TouchButton>
+                <local:TouchButton Classes="action" Command="{Binding SaveInputCommand}" ToolTip.Tip="Save the input for later and clear it" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding HasText}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource SaveInputIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
                 <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowSendButton, FallbackValue=False}"

@@ -24,6 +24,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, []), () => blockReason is null && !HasContent);
         ResumeCommand = new AsyncCommand(_ => Deliver(ResumePrompt, []), () => blockReason is null && !HasContent);
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
+        SaveInputCommand = new AsyncCommand(_ => SaveInput(), () => HasText);
+        ToggleSavedInputsCommand = new AsyncCommand(_ =>
+        {
+            IsSavedInputsOpen = !IsSavedInputsOpen;
+            return Task.CompletedTask;
+        });
+        LoadSavedInputCommand = new AsyncCommand(parameter => LoadSavedInput(parameter));
         DictateCommand = new AsyncCommand(_ => recording ? StopDictation() : StartDictation(), () => !transcribing && (recording || blockReason is null));
         Attachments.CollectionChanged += (_, _) =>
         {
@@ -90,6 +97,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private bool subscribed;
 
     private bool loadingOlder;
+
+    private bool isSavedInputsOpen;
 
     /// <summary>
     /// Raised once the stored conversation is shown, so the view can start at its end.
@@ -174,12 +183,59 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             if (Set(ref input, value))
             {
                 Raise(nameof(HasContent));
+                Raise(nameof(HasText));
+                SaveInputCommand.Refresh();
+
+                if (HasText)
+                {
+                    IsSavedInputsOpen = false;
+                }
+
                 SendCommand.Refresh();
                 RefreshQuick();
                 SaveDraft();
             }
         }
     }
+
+    /// <summary>
+    /// Gets a value indicating whether anything but white space is typed in the message box, which offers saving it; without text the message box offers loading a saved input instead.
+    /// </summary>
+    public bool HasText => !string.IsNullOrWhiteSpace(input);
+
+    /// <summary>
+    /// Gets the chat inputs saved in the workspace, the last saved first, which every client of the server sees.
+    /// </summary>
+    public ObservableCollection<SavedInput> SavedInputs { get; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether the list of saved inputs is shown.
+    /// </summary>
+    public bool IsSavedInputsOpen
+    {
+        get => isSavedInputsOpen;
+        private set => Set(ref isSavedInputsOpen, value);
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether no input is saved, which the list says in place of its entries.
+    /// </summary>
+    public bool HasNoSavedInputs => SavedInputs.Count == 0;
+
+    /// <summary>
+    /// Gets the command that saves <see cref="Input" /> as a saved input on the server and clears it; it is available while text is typed.
+    /// </summary>
+    public AsyncCommand SaveInputCommand { get; }
+
+    /// <summary>
+    /// Gets the command that shows or hides the list of saved inputs.
+    /// </summary>
+    public AsyncCommand ToggleSavedInputsCommand { get; }
+
+    /// <summary>
+    /// Gets the command that takes the <see cref="SavedInput" /> given as its parameter off the server's list and puts its text into <see cref="Input" />.
+    /// </summary>
+    public AsyncCommand LoadSavedInputCommand { get; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the conversation scrolls to the bottom whenever it gets new content.
@@ -428,6 +484,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private async Task Load()
     {
         ChatHistory? history = null;
+        IReadOnlyList<SavedInput>? saved = null;
+
+        if (await Attempt(async () => saved = await connection.GetSavedInputs(workspaceId, CancellationToken.None)))
+        {
+            ShowSavedInputs(saved!);
+        }
 
         if (await Attempt(async () => history = await connection.GetHistory(workspaceId, null, chunk, CancellationToken.None)))
         {
@@ -475,6 +537,67 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             case RemoteEventKind.Failed:
                 Error = remoteEvent.Error;
                 break;
+            case RemoteEventKind.SavedInputsChanged when remoteEvent.SavedInputs is { } saved:
+                ShowSavedInputs(saved);
+                break;
+        }
+    }
+
+    private void ShowSavedInputs(IReadOnlyList<SavedInput> saved)
+    {
+        SavedInputs.Clear();
+
+        foreach (SavedInput entry in saved)
+        {
+            SavedInputs.Add(entry);
+        }
+
+        Raise(nameof(HasNoSavedInputs));
+    }
+
+    private async Task SaveInput()
+    {
+        string text = input;
+        IReadOnlyList<SavedInput>? saved = null;
+
+        if (!await Attempt(async () => saved = await connection.SaveInput(workspaceId, text, CancellationToken.None)))
+        {
+            return;
+        }
+
+        ShowSavedInputs(saved!);
+
+        if (input == text)
+        {
+            Input = string.Empty;
+        }
+    }
+
+    private async Task LoadSavedInput(object? parameter)
+    {
+        if (parameter is not SavedInput chosen)
+        {
+            return;
+        }
+
+        SavedInput? taken = null;
+        bool worked = await Attempt(async () => taken = await connection.TakeSavedInput(workspaceId, chosen.Id, CancellationToken.None));
+        IsSavedInputsOpen = false;
+
+        if (worked)
+        {
+            Input = HasText ? taken!.Text + "\n" + input : taken!.Text;
+        }
+        else
+        {
+            IReadOnlyList<SavedInput>? saved = null;
+            string? failure = Error;
+
+            if (await Attempt(async () => saved = await connection.GetSavedInputs(workspaceId, CancellationToken.None)))
+            {
+                ShowSavedInputs(saved!);
+                Error = failure;
+            }
         }
     }
 

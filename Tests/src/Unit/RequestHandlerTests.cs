@@ -14,6 +14,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IPromptService> prompts = new();
 
+    private readonly Mock<ISavedInputs> savedInputs = new();
+
     private readonly Mock<IScriptRunner> scripts = new();
 
     private readonly Mock<IUsageService> usage = new();
@@ -44,7 +46,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object);
     }
 
     [Fact]
@@ -821,5 +823,22 @@ public sealed class RequestHandlerTests
         activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
         Assert.Contains("AI is working", (await handler.Handle(request, owner, CancellationToken.None)).Error);
+    }
+
+    [Fact]
+    public async Task Handle_SavedInputCommands_UseTheSavedInputsOfTheWorkspace()
+    {
+        SavedInput entry = new() { Id = Guid.NewGuid(), Text = "later", Time = DateTimeOffset.UnixEpoch };
+        savedInputs.Setup(x => x.List(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
+        savedInputs.Setup(x => x.Save(workspace.Id, "later", It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
+        savedInputs.Setup(x => x.Save(workspace.Id, "", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("There is nothing to save."));
+        savedInputs.Setup(x => x.Take(workspace.Id, entry.Id, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
+
+        Assert.Equal([entry], (await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetSavedInputs, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).SavedInputs);
+        Assert.Equal([entry], (await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.SaveInput, WorkspaceId = workspace.Id, Text = "later" }, owner, CancellationToken.None)).SavedInputs);
+        Assert.Equal(entry, (await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.TakeSavedInput, WorkspaceId = workspace.Id, InputId = entry.Id }, owner, CancellationToken.None)).SavedInput);
+        Assert.Equal("There is nothing to save.", (await handler.Handle(new RemoteRequest { Id = 4, Command = RemoteCommand.SaveInput, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 5, Command = RemoteCommand.TakeSavedInput, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
+        Assert.NotNull((await handler.Handle(new RemoteRequest { Id = 6, Command = RemoteCommand.GetSavedInputs }, owner, CancellationToken.None)).Error);
     }
 }

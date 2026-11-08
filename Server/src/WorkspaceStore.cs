@@ -71,6 +71,28 @@ internal interface IWorkspaceStore
     /// </summary>
     /// <param name="id">The workspace.</param>
     void DeleteMessages(Guid id);
+
+    /// <summary>
+    /// Reads the chat inputs saved in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The saved inputs in the order they were stored, empty when there are none.</returns>
+    Task<IReadOnlyList<SavedInput>> LoadInputs(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Replaces the chat inputs saved in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="inputs">The saved inputs.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    Task SaveInputs(Guid id, IReadOnlyList<SavedInput> inputs, CancellationToken cancellation);
+
+    /// <summary>
+    /// Deletes the chat inputs saved in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    void DeleteInputs(Guid id);
 }
 
 /// <inheritdoc />
@@ -95,6 +117,8 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     private readonly SemaphoreSlim gate = new(1, 1);
 
     private readonly SemaphoreSlim chats = new(1, 1);
+
+    private readonly SemaphoreSlim inputGate = new(1, 1);
 
     private readonly ConcurrentDictionary<Guid, int> counts = new();
 
@@ -272,6 +296,68 @@ internal sealed class WorkspaceStore : IWorkspaceStore
         File.Move(temporary, ChatPath(id), true);
         counts[id] = all.Count - first;
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> LoadInputs(Guid id, CancellationToken cancellation)
+    {
+        await inputGate.WaitAsync(cancellation);
+
+        try
+        {
+            if (!File.Exists(InputsPath(id)))
+            {
+                return [];
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<List<SavedInput>>(await File.ReadAllTextAsync(InputsPath(id), cancellation), lines) ?? [];
+            }
+            catch (JsonException)
+            {
+                return [];
+            }
+        }
+        finally
+        {
+            inputGate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SaveInputs(Guid id, IReadOnlyList<SavedInput> inputs, CancellationToken cancellation)
+    {
+        await inputGate.WaitAsync(cancellation);
+
+        try
+        {
+            if (inputs.Count == 0)
+            {
+                File.Delete(InputsPath(id));
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(InputsPath(id))!);
+            string temporary = InputsPath(id) + ".tmp";
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(inputs, lines), cancellation);
+            File.Move(temporary, InputsPath(id), true);
+        }
+        finally
+        {
+            inputGate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public void DeleteInputs(Guid id)
+    {
+        if (File.Exists(InputsPath(id)))
+        {
+            File.Delete(InputsPath(id));
+        }
+    }
+
+    private string InputsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "inputs", id.ToString("N") + ".json");
 
     private string ChatPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "chats", id.ToString("N") + ".jsonl");
 

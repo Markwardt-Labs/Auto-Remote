@@ -31,6 +31,11 @@ public sealed record RemoteRequest
     public Guid? ParentId { get; init; }
 
     /// <summary>
+    /// Gets the saved input <see cref="RemoteCommand.TakeSavedInput" /> takes.
+    /// </summary>
+    public Guid? InputId { get; init; }
+
+    /// <summary>
     /// Gets the settings of the loop for <see cref="RemoteCommand.StartLoop" />.
     /// </summary>
     public LoopSettings? Loop { get; init; }
@@ -81,7 +86,7 @@ public sealed record RemoteRequest
     public int? Limit { get; init; }
 
     /// <summary>
-    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" /> or the input line for <see cref="RemoteCommand.SendScriptInput" />.
+    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" />, the input for <see cref="RemoteCommand.SaveInput" /> or the input line for <see cref="RemoteCommand.SendScriptInput" />.
     /// </summary>
     public string? Text { get; init; }
 

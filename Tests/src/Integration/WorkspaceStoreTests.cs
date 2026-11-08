@@ -285,4 +285,43 @@ public sealed class WorkspaceStoreTests
 
         await Assert.ThrowsAsync<NewerFileException>(() => store.Load(CancellationToken.None));
     }
+
+    [Fact]
+    public async Task Inputs_AreSavedPerWorkspaceReadBackAndDeletedWithIt()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new();
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        SavedInput first = new() { Id = Guid.NewGuid(), Text = "multi\nline \"quoted\" 日本語", Time = DateTimeOffset.UtcNow };
+
+        Assert.Empty(await store.LoadInputs(id, CancellationToken.None));
+
+        await store.SaveInputs(id, [first], CancellationToken.None);
+
+        WorkspaceStore reopened = new();
+        reopened.Open(temp.Combine("workspaces.json"));
+        Assert.Equal([first], await reopened.LoadInputs(id, CancellationToken.None));
+        Assert.Empty(await reopened.LoadInputs(Guid.NewGuid(), CancellationToken.None));
+
+        await store.SaveInputs(id, [], CancellationToken.None);
+        Assert.False(File.Exists(temp.Combine($"inputs/{id:N}.json")));
+
+        await store.SaveInputs(id, [first], CancellationToken.None);
+        store.DeleteInputs(id);
+        Assert.Empty(await store.LoadInputs(id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task LoadInputs_IsEmptyForAFileThatCannotBeRead()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new();
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        Directory.CreateDirectory(temp.Combine("inputs"));
+        File.WriteAllText(temp.Combine($"inputs/{id:N}.json"), "{broken");
+
+        Assert.Empty(await store.LoadInputs(id, CancellationToken.None));
+    }
 }

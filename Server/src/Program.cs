@@ -45,7 +45,7 @@ internal static class Program
         IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity);
         IScriptRunner scripts = new ScriptRunner(events, activity);
         IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), host, loops, new WorkspaceWatcher(events, log), updater);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, events), prompts, scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(new WhisperEngine()), host, loops, new WorkspaceWatcher(events, log), updater);
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(info), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log), Console.Out);
         int code;
 

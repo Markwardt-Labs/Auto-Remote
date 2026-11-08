@@ -134,4 +134,14 @@ public sealed record RemoteResponse
     /// Gets the message answering <see cref="RemoteCommand.GenerateCommitMessage" />.
     /// </summary>
     public string? CommitMessage { get; init; }
+
+    /// <summary>
+    /// Gets the saved inputs, the last saved first, answering <see cref="RemoteCommand.GetSavedInputs" /> or <see cref="RemoteCommand.SaveInput" />.
+    /// </summary>
+    public IReadOnlyList<SavedInput>? SavedInputs { get; init; }
+
+    /// <summary>
+    /// Gets the saved input that was taken, answering <see cref="RemoteCommand.TakeSavedInput" />.
+    /// </summary>
+    public SavedInput? SavedInput { get; init; }
 }

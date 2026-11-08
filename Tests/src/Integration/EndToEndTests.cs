@@ -43,7 +43,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -163,6 +163,53 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal("hello", (await connection.ReadFile(cloned.Id, "a.txt", CancellationToken.None)).Text);
         Assert.Equal("first", (await connection.GetGitStatus(cloned.Id, CancellationToken.None)).Message);
         await Assert.ThrowsAsync<RemoteException>(() => connection.CloneWorkspace(source.Path, parent.Path, "copy", null, null, null, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SavedInputs_AreSharedByEveryClientOfTheServerAndTakenByOnlyOne()
+    {
+        FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "saved", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
+        await using IServerConnection other = await new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>()).Connect(settings, CancellationToken.None);
+        List<RemoteEvent> seen = [];
+        other.EventReceived += remoteEvent =>
+        {
+            lock (seen)
+            {
+                seen.Add(remoteEvent);
+            }
+        };
+
+        await connection.SaveInput(workspace.Id, "first", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await connection.SaveInput(workspace.Id, "second\nline", CancellationToken.None);
+
+        Assert.Equal(["second\nline", "first"], saved.Select(input => input.Text).ToList());
+        Assert.Equal(["second\nline", "first"], (await other.GetSavedInputs(workspace.Id, CancellationToken.None)).Select(input => input.Text).ToList());
+        SavedInput taken = await other.TakeSavedInput(workspace.Id, saved[0].Id, CancellationToken.None);
+        Assert.Equal("second\nline", taken.Text);
+        await Assert.ThrowsAsync<RemoteException>(() => connection.TakeSavedInput(workspace.Id, saved[0].Id, CancellationToken.None));
+        Assert.Equal(["first"], (await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).Select(input => input.Text).ToList());
+        await Assert.ThrowsAsync<RemoteException>(() => connection.SaveInput(workspace.Id, "  ", CancellationToken.None));
+
+        for (int attempt = 0; attempt < 100; attempt++)
+        {
+            lock (seen)
+            {
+                if (seen.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.SavedInputsChanged) >= 3)
+                {
+                    break;
+                }
+            }
+
+            await Task.Delay(20);
+        }
+
+        lock (seen)
+        {
+            Assert.Equal(["second\nline,first", "first"], seen.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.SavedInputsChanged).Skip(1).Select(remoteEvent => string.Join(',', remoteEvent.SavedInputs!.Select(input => input.Text))).ToList());
+        }
+
+        await connection.DeleteWorkspace(workspace.Id, true, CancellationToken.None);
     }
 
     [Fact]

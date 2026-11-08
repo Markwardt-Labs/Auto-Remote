@@ -558,6 +558,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             await Save(cancellation);
             store.DeleteAttachments(id);
             store.DeleteMessages(id);
+            store.DeleteInputs(id);
         }
     }
 

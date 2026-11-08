@@ -431,6 +431,7 @@ public sealed class WorkspaceManagerTests
         folders.Verify(x => x.Delete("/work/app", It.IsAny<CancellationToken>()), Times.Once);
         store.Verify(x => x.DeleteAttachments(workspace.Id), Times.Once);
         store.Verify(x => x.DeleteMessages(workspace.Id), Times.Once);
+        store.Verify(x => x.DeleteInputs(workspace.Id), Times.Once);
         Assert.Empty((await manager.List(CancellationToken.None)).Workspaces);
     }
 

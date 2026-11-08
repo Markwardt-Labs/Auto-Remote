@@ -320,6 +320,35 @@ internal interface IServerConnection : IAsyncDisposable
     Task<string> GenerateCommitMessage(Guid id, CancellationToken cancellation);
 
     /// <summary>
+    /// Lists the chat inputs saved in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The saved inputs, the last saved first.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<IReadOnlyList<SavedInput>> GetSavedInputs(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Saves a chat input in a workspace as its newest saved input.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The chat input.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The saved inputs now, the last saved first.</returns>
+    /// <exception cref="RemoteException">The text is empty or too long, or the server refused.</exception>
+    Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation);
+
+    /// <summary>
+    /// Removes a saved input from a workspace and returns it, so the caller can put it into the chat input.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="inputId">The saved input.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The saved input that was removed.</returns>
+    /// <exception cref="RemoteException">The saved input was already taken, or the server refused.</exception>
+    Task<SavedInput> TakeSavedInput(Guid id, Guid inputId, CancellationToken cancellation);
+
+    /// <summary>
     /// Discards every change of a workspace that is not committed.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -893,6 +922,15 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<string> GenerateCommitMessage(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GenerateCommitMessage, WorkspaceId = id }, cancellation)).CommitMessage ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> GetSavedInputs(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetSavedInputs, WorkspaceId = id }, cancellation)).SavedInputs ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SaveInput, WorkspaceId = id, Text = text }, cancellation)).SavedInputs ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<SavedInput> TakeSavedInput(Guid id, Guid inputId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.TakeSavedInput, WorkspaceId = id, InputId = inputId }, cancellation)).SavedInput ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task GitReset(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.GitReset, WorkspaceId = id }, cancellation);

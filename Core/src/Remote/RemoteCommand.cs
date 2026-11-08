@@ -319,5 +319,20 @@ public enum RemoteCommand
     /// <summary>
     /// Makes the server look on GitHub for a newer release than its own, download it and restart with it, which ends every connection; answered once the download is complete and before the restart. Fails when there is no newer release, GitHub cannot be reached or the server does not run from an installed release.
     /// </summary>
-    UpdateServer
+    UpdateServer,
+
+    /// <summary>
+    /// Lists the chat inputs saved in <see cref="RemoteRequest.WorkspaceId" />, the last saved first; answered in <see cref="RemoteResponse.SavedInputs" />.
+    /// </summary>
+    GetSavedInputs,
+
+    /// <summary>
+    /// Saves the chat input <see cref="RemoteRequest.Text" /> in <see cref="RemoteRequest.WorkspaceId" /> as the newest saved input and answers the list in <see cref="RemoteResponse.SavedInputs" />; every client is told with a <see cref="RemoteEventKind.SavedInputsChanged" /> event. Fails for an empty or too long text.
+    /// </summary>
+    SaveInput,
+
+    /// <summary>
+    /// Removes the saved input <see cref="RemoteRequest.InputId" /> from <see cref="RemoteRequest.WorkspaceId" /> and answers it in <see cref="RemoteResponse.SavedInput" />, so one client alone gets it; every client is told with a <see cref="RemoteEventKind.SavedInputsChanged" /> event. Fails when it was already taken.
+    /// </summary>
+    TakeSavedInput
 }

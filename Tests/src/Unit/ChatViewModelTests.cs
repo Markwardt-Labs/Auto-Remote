@@ -94,6 +94,7 @@ public sealed class ChatViewModelTests
     [InlineData(false)]
     public async Task ReviewAndExpand_AreAvailableWhileTheAiWorksAndSendTheirPromptToTheWorkInProgress(bool review)
     {
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it", GlobalExpandPrompt = "expand it" });
         string? sent = null;
@@ -169,6 +170,7 @@ public sealed class ChatViewModelTests
     [Fact]
     public async Task Start_RaisesLoadedOnceTheConversationIsShown()
     {
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }] });
         int shown = -1;
         chat.Loaded += () => shown = chat.Messages.Count;
@@ -183,6 +185,7 @@ public sealed class ChatViewModelTests
     {
         Mock<IDraftStore> drafts = new();
         drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("half written");
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object);
 
@@ -197,6 +200,7 @@ public sealed class ChatViewModelTests
     {
         Mock<IDraftStore> drafts = new();
         drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("old draft");
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object) { Input = "typed already" };
 
@@ -230,6 +234,7 @@ public sealed class ChatViewModelTests
     {
         ChatMessage one = new() { Role = MessageRole.User, Text = "one" };
         ChatMessage two = new() { Role = MessageRole.Assistant, Text = "two" };
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.SetupSequence(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatHistory { Messages = [one], Working = true })
             .ReturnsAsync(new ChatHistory { Messages = [one, two], Working = false });
@@ -307,5 +312,117 @@ public sealed class ChatViewModelTests
         }
 
         Assert.True(condition());
+    }
+
+    private SavedInput Saved(string text, int minutes = 0) => new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UnixEpoch.AddMinutes(minutes) };
+
+    [Fact]
+    public void HasText_OffersSavingWhileTextIsTypedAndOtherwiseLoading()
+    {
+        Assert.Equal((false, false), (chat.HasText, chat.SaveInputCommand.CanExecute(null)));
+
+        chat.Input = "  ";
+        Assert.Equal((false, false), (chat.HasText, chat.SaveInputCommand.CanExecute(null)));
+
+        chat.Input = "later";
+        Assert.Equal((true, true), (chat.HasText, chat.SaveInputCommand.CanExecute(null)));
+    }
+
+    [Fact]
+    public async Task SaveInput_SavesTheTextOnTheServerShowsTheListAndClearsTheMessageBox()
+    {
+        SavedInput entry = Saved("later");
+        connection.Setup(x => x.SaveInput(workspaceId, "later", It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
+        chat.Input = "later";
+
+        chat.SaveInputCommand.Execute(null);
+        await Until(() => chat.Input.Length == 0);
+
+        Assert.Equal([entry], chat.SavedInputs);
+        Assert.False(chat.HasNoSavedInputs);
+    }
+
+    [Fact]
+    public async Task SaveInput_KeepsTheTextAndShowsTheErrorWhenTheServerRefuses()
+    {
+        connection.Setup(x => x.SaveInput(workspaceId, "later", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The input is too long."));
+        chat.Input = "later";
+
+        chat.SaveInputCommand.Execute(null);
+        await Until(() => chat.Error is not null);
+
+        Assert.Equal(("later", "The input is too long."), (chat.Input, chat.Error));
+        Assert.Empty(chat.SavedInputs);
+    }
+
+    [Fact]
+    public async Task LoadSavedInput_TakesTheEntryOffTheServerAndPutsItIntoTheMessageBoxAndClosesTheList()
+    {
+        SavedInput entry = Saved("later");
+        connection.Setup(x => x.TakeSavedInput(workspaceId, entry.Id, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
+        chat.ToggleSavedInputsCommand.Execute(null);
+        Assert.True(chat.IsSavedInputsOpen);
+
+        chat.LoadSavedInputCommand.Execute(entry);
+        await Until(() => chat.Input == "later");
+
+        Assert.False(chat.IsSavedInputsOpen);
+    }
+
+    [Fact]
+    public async Task LoadSavedInput_ReadsTheListAgainAndKeepsTheErrorWhenAnotherClientTookTheEntryFirst()
+    {
+        SavedInput gone = Saved("gone");
+        SavedInput left = Saved("left");
+        connection.Setup(x => x.TakeSavedInput(workspaceId, gone.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("That saved input is gone."));
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([left]);
+
+        chat.LoadSavedInputCommand.Execute(gone);
+        await Until(() => chat.SavedInputs.Count == 1);
+
+        Assert.Equal(("", "That saved input is gone."), (chat.Input, chat.Error));
+        Assert.Equal([left], chat.SavedInputs);
+    }
+
+    [Fact]
+    public async Task LoadSavedInput_KeepsWhatWasTypedMeanwhileBehindTheLoadedText()
+    {
+        SavedInput entry = Saved("saved");
+        connection.Setup(x => x.TakeSavedInput(workspaceId, entry.Id, It.IsAny<CancellationToken>())).ReturnsAsync(entry);
+        chat.Input = "typed";
+
+        chat.LoadSavedInputCommand.Execute(entry);
+        await Until(() => chat.Input == "saved\ntyped");
+    }
+
+    [Fact]
+    public async Task SavedInputs_AreReadWithTheConversationAndFollowTheEventsOfEveryClient()
+    {
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        SavedInput first = Saved("first", 1);
+        SavedInput second = Saved("second", 2);
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([first]);
+        await chat.Start();
+        Assert.Equal([first], chat.SavedInputs);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspaceId, SavedInputs = [second, first] });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = Guid.NewGuid(), SavedInputs = [] });
+
+        Assert.Equal([second, first], chat.SavedInputs);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspaceId, SavedInputs = [] });
+
+        Assert.True(chat.HasNoSavedInputs);
+    }
+
+    [Fact]
+    public void Typing_ClosesTheListOfSavedInputs()
+    {
+        chat.ToggleSavedInputsCommand.Execute(null);
+
+        chat.Input = "typing";
+
+        Assert.False(chat.IsSavedInputsOpen);
     }
 }
