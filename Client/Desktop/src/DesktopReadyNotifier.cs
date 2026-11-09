@@ -1,13 +1,20 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// Shows a desktop notification saying a workspace is ready: a Windows toast through PowerShell on Windows, otherwise <c>notify-send</c>. Activating it, by clicking the notification, raises <see cref="Opened" />. Where neither tool is available the notification is dropped, and a notification server that has no actions can only show it.
+/// Shows a desktop notification saying a workspace is ready: a Windows toast through PowerShell on Windows, otherwise <c>notify-send</c>. Activating it, by clicking the notification, raises <see cref="Opened" />. Where neither tool is available the notification is dropped, and a notification server that has no actions can only show it. The tool waits for the user to act on the notification and a notification server may never tell it that the notification went away, so every process is ended after the notification's lifetime, when a newer notification of the same workspace replaces it, and when the app exits, which keeps unanswered notifications from piling up as processes.
 /// </summary>
 internal sealed class DesktopReadyNotifier : IReadyNotifier
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DesktopReadyNotifier" /> class, which ends the notification processes that are still running when the app exits.
+    /// </summary>
+    public DesktopReadyNotifier() => AppDomain.CurrentDomain.ProcessExit += (_, _) => Stop();
+
     private readonly string toast = "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null; $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText01); $template.GetElementsByTagName('text').Item(0).AppendChild($template.CreateTextNode($env:AUTO_REMOTE_TOAST)) | Out-Null; $note = [Windows.UI.Notifications.ToastNotification]::new($template); Register-ObjectEvent -InputObject $note -EventName Activated -SourceIdentifier activated | Out-Null; Register-ObjectEvent -InputObject $note -EventName Dismissed -SourceIdentifier dismissed | Out-Null; Register-ObjectEvent -InputObject $note -EventName Failed -SourceIdentifier failed | Out-Null; [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe').Show($note); $event = Wait-Event -Timeout 600; if ($event -and $event.SourceIdentifier -eq 'activated') { 'activated' }";
 
     private readonly TimeSpan lifetime = TimeSpan.FromMinutes(10);
+
+    private readonly Dictionary<Guid, Process> running = [];
 
     /// <summary>
     /// Raised with the workspace when the user activates its notification, from a background thread.
@@ -28,6 +35,8 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
         start.UseShellExecute = false;
         start.Environment["AUTO_REMOTE_TOAST"] = text;
 
+        string output;
+
         try
         {
             using Process? process = Process.Start(start);
@@ -37,10 +46,31 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
                 return;
             }
 
-            Task<string> errors = process.StandardError.ReadToEndAsync();
-            string output = await process.StandardOutput.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            await errors;
+            Replace(workspaceId, process);
+
+            try
+            {
+                using CancellationTokenSource limit = new(lifetime);
+                Task<string> errors = process.StandardError.ReadToEndAsync();
+                Task<string> reading = process.StandardOutput.ReadToEndAsync();
+
+                try
+                {
+                    await process.WaitForExitAsync(limit.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    Kill(process);
+                }
+
+                await process.WaitForExitAsync();
+                await errors;
+                output = await reading;
+            }
+            finally
+            {
+                Forget(workspaceId, process);
+            }
 
             if (output.Trim() is "default" or "activated")
             {
@@ -48,6 +78,63 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
             }
         }
         catch (Win32Exception)
+        {
+        }
+    }
+
+    private void Replace(Guid workspaceId, Process process)
+    {
+        Process? older;
+
+        lock (running)
+        {
+            running.Remove(workspaceId, out older);
+            running[workspaceId] = process;
+        }
+
+        if (older is not null)
+        {
+            Kill(older);
+        }
+    }
+
+    private void Forget(Guid workspaceId, Process process)
+    {
+        lock (running)
+        {
+            if (running.TryGetValue(workspaceId, out Process? current) && ReferenceEquals(current, process))
+            {
+                running.Remove(workspaceId);
+            }
+        }
+    }
+
+    private void Stop()
+    {
+        List<Process> all;
+
+        lock (running)
+        {
+            all = [.. running.Values];
+            running.Clear();
+        }
+
+        foreach (Process process in all)
+        {
+            Kill(process);
+        }
+    }
+
+    private void Kill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(true);
+            }
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or Win32Exception)
         {
         }
     }
