@@ -1,11 +1,15 @@
 namespace Markwardt.AutoRemote;
 
 /// <summary>
-/// Presents a connected WebSocket as a byte stream of newline-delimited lines: every received message becomes one line and every write is sent as one text message.
+/// Presents a connected WebSocket as a byte stream of newline-delimited lines: every received message becomes one line and every write is sent as one text message. A message may be up to 40 MB, enough for the largest attachment in base64, except that the first one may be shorter, so a peer that has not been let in yet cannot make the server buffer that much.
 /// </summary>
-public sealed class WebSocketLineStream(WebSocket socket) : Stream
+/// <param name="socket">The connected WebSocket.</param>
+/// <param name="firstMessageLength">The most bytes the first message may have; it is the key handshake on the server's side.</param>
+public sealed class WebSocketLineStream(WebSocket socket, int firstMessageLength = 40 * 1024 * 1024) : Stream
 {
-    private readonly int maxMessageLength = 4 * 1024 * 1024;
+    private readonly int maxMessageLength = 40 * 1024 * 1024;
+
+    private int limit = firstMessageLength;
 
     private readonly List<byte> pending = [];
 
@@ -118,7 +122,7 @@ public sealed class WebSocketLineStream(WebSocket socket) : Stream
 
             pending.AddRange(chunk.AsSpan(0, result.Count));
 
-            if (pending.Count > maxMessageLength)
+            if (pending.Count > limit)
             {
                 throw new InvalidDataException("The message is too long.");
             }
@@ -130,6 +134,7 @@ public sealed class WebSocketLineStream(WebSocket socket) : Stream
                     pending.Add((byte)'\n');
                 }
 
+                limit = maxMessageLength;
                 return true;
             }
         }

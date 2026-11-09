@@ -249,7 +249,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets the largest file, in bytes, that the server accepts as an attachment.
     /// </summary>
-    public int MaxAttachment { get; } = 2 * 1024 * 1024;
+    public int MaxAttachment { get; } = 20 * 1024 * 1024;
 
     /// <summary>
     /// Gets the prompt the pause command sends.

@@ -142,7 +142,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly int historyScan = 20000;
 
-    private readonly int maxAttachment = 2 * 1024 * 1024;
+    private readonly int maxAttachment = 20 * 1024 * 1024;
 
     private readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(5);
 
@@ -341,7 +341,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             {
                 await session.Send(text, options, cancellation);
             }
-            catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or IOException)
+            catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or ArgumentException or IOException)
             {
                 lock (live.Sync)
                 {

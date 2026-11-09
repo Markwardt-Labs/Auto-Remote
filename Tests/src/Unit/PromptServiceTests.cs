@@ -126,7 +126,7 @@ public sealed class PromptServiceTests : IDisposable
     public async Task Attach_RefusesInvalidAndOversizedData()
     {
         await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", "not base64!", CancellationToken.None));
-        await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", Convert.ToBase64String(new byte[2 * 1024 * 1024 + 1]), CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => service.Attach(workspace.Id, "a.txt", Convert.ToBase64String(new byte[20 * 1024 * 1024 + 1]), CancellationToken.None));
     }
 
     [Fact]

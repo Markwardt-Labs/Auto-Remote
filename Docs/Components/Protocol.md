@@ -14,7 +14,7 @@ Every line in both directions, including the handshake, is one JSON object, came
 
 ## Handshake
 
-The client opens the WebSocket connection and sends one JSON line (at most 1024 bytes, within 5 seconds), then the server replies with one JSON line. On acceptance the connection carries requests and responses; on rejection the server closes it. The key is compared in constant time. A line that is not valid JSON, or has no key, is a rejection.
+The client opens the WebSocket connection and sends one JSON line (at most 1024 bytes, within 5 seconds), then the server replies with one JSON line. On acceptance the connection carries requests and responses; on rejection the server closes it. The key is compared in constant time. A line that is not valid JSON, or has no key, is a rejection. After that a message (one line) may be up to 40 MB, which holds the largest attachment in base64; a longer one ends the connection.
 
 | Direction | Property | Type | Meaning |
 | --- | --- | --- | --- |
@@ -138,7 +138,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `ListLocalModels` | optional `url` | `names` | The models the local model server offers (Ollama by default). Refused when the server cannot be reached. |
 | `ListImageModels` | optional `url` | `names` | The checkpoints the Stable Diffusion server offers. Refused when the server cannot be reached. |
 | `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a script or a git action runs). |
-| `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 2 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
+| `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 20 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
 | `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; the oldest entries beyond 200 are dropped. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |

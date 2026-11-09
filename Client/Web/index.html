@@ -354,7 +354,7 @@ details.section > .stack { padding: 4px 0 12px; }
 const storageKey = "autoRemote.connection";
 const draftKey = "autoRemote.draft.";
 const historyChunk = 30;
-const maxAttachment = 2 * 1024 * 1024;
+const maxAttachment = 20 * 1024 * 1024;
 const paceOf = (period, now = Date.now()) => {
   if (period.percentUsed >= 100) {
     return "VeryHigh";

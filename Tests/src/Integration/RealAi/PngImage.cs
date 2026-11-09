@@ -2,6 +2,33 @@ namespace Markwardt.AutoRemote.Tests.Integration.RealAi;
 
 public static class PngImage
 {
+    public static byte[] Banded(int width, int height, int bandHeight, byte red, byte green, byte blue)
+    {
+        Random random = new(7);
+        byte[] row = new byte[width * 3];
+        using MemoryStream raw = new();
+
+        for (int y = 0; y < height; y++)
+        {
+            raw.WriteByte(0);
+
+            if (y < bandHeight)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    raw.Write([red, green, blue]);
+                }
+            }
+            else
+            {
+                random.NextBytes(row);
+                raw.Write(row);
+            }
+        }
+
+        return Encode(width, height, raw.ToArray());
+    }
+
     public static byte[] Solid(int width, int height, byte red, byte green, byte blue)
     {
         using MemoryStream raw = new();
@@ -18,11 +45,16 @@ public static class PngImage
             }
         }
 
+        return Encode(width, height, raw.ToArray());
+    }
+
+    private static byte[] Encode(int width, int height, byte[] raw)
+    {
         using MemoryStream compressed = new();
 
         using (ZLibStream zlib = new(compressed, CompressionLevel.Optimal, true))
         {
-            zlib.Write(raw.ToArray());
+            zlib.Write(raw);
         }
 
         using MemoryStream png = new();

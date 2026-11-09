@@ -46,4 +46,29 @@ public sealed class WebSocketLineStreamTests
 
         Assert.Equal(["{}\n"], sent);
     }
+
+    private (string text, bool end)[] Frames(string text) => [.. Enumerable.Range(0, (text.Length + 3999) / 4000).Select(index => (text.Substring(index * 4000, Math.Min(4000, text.Length - index * 4000)), (index + 1) * 4000 >= text.Length))];
+
+    [Fact]
+    public async Task Read_AcceptsALargeMessageAfterTheFirstOneAndRefusesALongFirstOne()
+    {
+        string large = new('a', 30 * 1024 * 1024);
+        using StreamReader reader = new(new WebSocketLineStream(Socket([("{}", true), .. Frames(large)]).Object, 4096));
+
+        Assert.Equal("{}", await reader.ReadLineAsync());
+        Assert.Equal(large.Length, (await reader.ReadLineAsync())!.Length);
+
+        using StreamReader refused = new(new WebSocketLineStream(Socket(Frames(new string('b', 5000))).Object, 4096));
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => refused.ReadLineAsync());
+    }
+
+    [Fact]
+    public async Task Read_RefusesAMessageLongerThanTheLimit()
+    {
+        using StreamReader reader = new(new WebSocketLineStream(Socket([("{}", true), .. Frames(new string('c', 41 * 1024 * 1024))]).Object, 4096));
+
+        Assert.Equal("{}", await reader.ReadLineAsync());
+        await Assert.ThrowsAsync<InvalidDataException>(() => reader.ReadLineAsync());
+    }
 }

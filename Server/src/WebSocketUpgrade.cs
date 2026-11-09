@@ -43,7 +43,7 @@ internal sealed class WebSocketUpgrade : IWebSocketUpgrade
 
             string accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + magic)));
             await stream.WriteAsync(Encoding.ASCII.GetBytes($"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n"), limit.Token);
-            return new WebSocketLineStream(WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) }));
+            return new WebSocketLineStream(WebSocket.CreateFromStream(stream, new WebSocketCreationOptions { IsServer = true, KeepAliveInterval = TimeSpan.FromSeconds(30) }), 4096);
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
