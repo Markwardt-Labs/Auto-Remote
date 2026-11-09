@@ -309,9 +309,8 @@ button.refbtn .ref { margin: 0; }
 .saved-inputs .when { color: var(--muted); font-size: 11px; line-height: 1.3; margin-top: 2px; }
 .git-working span { flex: 1; color: var(--muted); }
 .settings { overflow-y: auto; }
-details.section { border-bottom: 1px solid var(--border); }
 details.section[hidden] { display: none; }
-details.section > summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 12px 4px; font-size: 16px; font-weight: 600; list-style: none; }
+details.section > summary { display: flex; align-items: center; justify-content: space-between; cursor: pointer; padding: 12px 4px; border-bottom: 1px solid var(--border); font-size: 16px; font-weight: 600; list-style: none; }
 details.section > summary::-webkit-details-marker { display: none; }
 details.section > summary::after { content: ""; width: 7px; height: 7px; margin-right: 6px; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
 details.section[open] > summary::after { transform: rotate(-135deg); }
