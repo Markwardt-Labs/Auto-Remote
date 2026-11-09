@@ -154,7 +154,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GetGitHistory` | `workspaceId`, optional `skip`, `limit` | `gitHistory` | Commits of every branch and tag, newest first; empty before the first commit. |
 | `GetGitCommitChanges` | `workspaceId`, `commit` | `gitChanges` | The paths a commit changed relative to its first parent. |
 | `GetGitDiff` | `workspaceId`, `path`, optional `commit` | `gitDiff` | The whole file with its changes marked: the commit against its first parent, or without `commit` the working tree against the head. |
-| `GitCommit` | `workspaceId`, `text` | none | Stages everything, commits, then pushes the branch to `origin` when there is one; a failing push is ignored. Refused unless the workspace is Ready, and when there is nothing to commit. |
+| `GitCommit` | `workspaceId`, `text` | none | Stages everything, commits, then pushes the branch to `origin` when there is one; a failing push is ignored. Refused unless the workspace is Ready, when there is nothing to commit, when the AI gives no message and when the message it ends with has twelve words or more. |
 | `GenerateCommitMessage` | `workspaceId` | `commitMessage` | Asks the AI for a message of eight words or less for the pending changes (the changed paths and the diff of tracked files, cut at 30000 characters). Refused unless the workspace is Ready, and when there is nothing to commit. |
 | `GitReset` | `workspaceId` | none | Discards every change that is not committed, new files included. Refused unless the workspace is Ready. |
 | `GitCreateBranch` | `workspaceId`, `name` | none | Creates the branch at the head and checks it out. Refused unless the workspace is Ready, and for an invalid or taken name. |

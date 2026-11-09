@@ -723,13 +723,101 @@ public sealed class WorkspaceVersioningTests : IDisposable
     [Theory]
     [InlineData("Fix the login timeout", "Fix the login timeout")]
     [InlineData("\"Fix the login timeout.\"\nBecause it hung.", "Fix the login timeout")]
-    [InlineData("one two three four five six seven eight nine ten", "one two three four five six seven eight")]
-    public async Task CommitMessage_AsksTheAiAboutThePendingChangesAndKeepsEightWordsOfTheFirstLine(string answer, string expected)
+    [InlineData("one two three four five six seven eight", "one two three four five six seven eight")]
+    public async Task CommitMessage_AsksTheAiAboutThePendingChangesAndUsesTheFirstLineWhenItIsShortEnough(string answer, string expected)
     {
         File.WriteAllText(Path.Combine(work, "a.txt"), "one\nTWO\nthree\n");
         prompts.Setup(x => x.Ask(workspace.Id, It.Is<string>(text => text.Contains("8 words or less") && text.Contains("+TWO")), It.IsAny<CancellationToken>())).ReturnsAsync(answer);
 
         Assert.Equal(expected, await versioning.CommitMessage(workspace, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CommitMessage_AsksAgainWithTheTooLongAnswerAndNeverCutsAMessageOff()
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        List<string> asked = [];
+        Queue<string> answers = new(["Raise attachment limit to 20 MB with larger message limit", "Raise attachment limit to 20 MB"]);
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string text, CancellationToken _) =>
+        {
+            asked.Add(text);
+            return answers.Dequeue();
+        });
+
+        Assert.Equal("Raise attachment limit to 20 MB", await versioning.CommitMessage(workspace, CancellationToken.None));
+        Assert.Equal(2, asked.Count);
+        Assert.DoesNotContain("which is too long", asked[0]);
+        Assert.Contains("which is too long", asked[1]);
+        Assert.Contains("had 10 words", asked[1]);
+        Assert.Contains("Raise attachment limit to 20 MB with larger message limit", asked[1]);
+    }
+
+    [Theory]
+    [InlineData(9, 9, 9)]
+    [InlineData(11, 10, 10)]
+    [InlineData(10, 8, 8)]
+    [InlineData(12, 11, 11)]
+    public async Task CommitMessage_AsksOnceMoreFromNineWordsAndUsesTheSecondAnswerWholeWhateverItsLengthBelowTwelve(int first, int second, int expected)
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        string Words(int count) => string.Join(' ', Enumerable.Range(1, count).Select(number => $"w{number}"));
+        Queue<string> answers = new([Words(first), Words(second)]);
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => answers.Dequeue());
+
+        Assert.Equal(Words(expected), await versioning.CommitMessage(workspace, CancellationToken.None));
+        prompts.Verify(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CommitMessage_DoesNotAskAgainForAnAnswerOfEightWordsOrLess()
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("one two three four five six seven eight");
+
+        Assert.Equal("one two three four five six seven eight", await versioning.CommitMessage(workspace, CancellationToken.None));
+        prompts.Verify(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CommitMessage_FailsWhenTheFinalAnswerHasTwelveWordsOrMore()
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        string twelve = string.Join(' ', Enumerable.Range(1, 12).Select(number => $"w{number}"));
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(twelve);
+
+        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => versioning.CommitMessage(workspace, CancellationToken.None));
+
+        Assert.Contains("12 words", exception.Message);
+        prompts.Verify(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task CommitMessage_KeepsTheFirstAnswerWhenTheSecondIsEmptyUnlessTheFirstWasTwelveWordsOrMore()
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        Queue<string> answers = new(["one two three four five six seven eight nine ten", " \"\" ", string.Join(' ', Enumerable.Range(1, 12).Select(number => $"w{number}")), ""]);
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => answers.Dequeue());
+
+        Assert.Equal("one two three four five six seven eight nine ten", await versioning.CommitMessage(workspace, CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => versioning.CommitMessage(workspace, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task CommitMessage_AsksAgainWithTheTooLongAnswerAndItsWordCount()
+    {
+        File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
+        List<string> asked = [];
+        Queue<string> answers = new(["Raise attachment limit to 20 MB with larger message", "Raise attachment limit to 20 MB"]);
+        prompts.Setup(x => x.Ask(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string text, CancellationToken _) =>
+        {
+            asked.Add(text);
+            return answers.Dequeue();
+        });
+
+        Assert.Equal("Raise attachment limit to 20 MB", await versioning.CommitMessage(workspace, CancellationToken.None));
+        Assert.DoesNotContain("which is too long", asked[0]);
+        Assert.Contains("had 9 words", asked[1]);
+        Assert.Contains("Raise attachment limit to 20 MB with larger message", asked[1]);
     }
 
     [Fact]

@@ -136,6 +136,12 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
 
     private readonly int messageWords = 8;
 
+    private readonly int aimWords = 6;
+
+    private readonly int rejectWords = 12;
+
+    private readonly int messageAttempts = 2;
+
     private readonly TimeSpan aiTimeout = TimeSpan.FromMinutes(20);
 
     private readonly TimeSpan aiPoll = TimeSpan.FromMilliseconds(200);
@@ -144,16 +150,29 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     public async Task<string> CommitMessage(WorkspaceInfo workspace, CancellationToken cancellation)
     {
         string pending = await git.Pending(workspace.Folder, cancellation);
-        string answer = await prompts.Ask(workspace.Id, $"Write a git commit message of {messageWords} words or less for the pending changes below. Answer with the message only, on one line, without quotes or a full stop.\n\n{pending}", cancellation);
-        string line = answer.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
-        string[] words = line.Trim('"', '\'', '`', '.', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string request = $"Write a git commit message of {messageWords} words or less for the pending changes below. It must be one complete phrase that stands on its own, so aim for about {aimWords} words, count them, and rephrase it shorter rather than letting it run on. Answer with the message only, on one line, without quotes or a full stop.\n\n{pending}";
+        string? message = null;
+        int count = 0;
 
-        if (words.Length == 0)
+        for (int attempt = 0; attempt < messageAttempts && (message is null || count > messageWords); attempt++)
+        {
+            string answer = await prompts.Ask(workspace.Id, message is null ? request : $"{request}\n\nThis answer had {count} words, which is too long: {message}\nWrite another that is complete and has {aimWords} words or less.", cancellation);
+            string line = answer.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? string.Empty;
+            string[] words = line.Trim('"', '\'', '`', '.', ' ').Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            if (words.Length > 0)
+            {
+                message = string.Join(' ', words);
+                count = words.Length;
+            }
+        }
+
+        if (message is null)
         {
             throw new RequestException("The AI gave no commit message.");
         }
 
-        return string.Join(' ', words.Take(messageWords));
+        return count >= rejectWords ? throw new RequestException($"The AI wrote a commit message of {count} words, which is too long.") : message;
     }
 
     /// <inheritdoc />
