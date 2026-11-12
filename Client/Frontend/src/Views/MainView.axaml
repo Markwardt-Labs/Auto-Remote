@@ -27,6 +27,9 @@
         <DataTemplate DataType="local:UpdateViewModel">
           <local:UpdatingView />
         </DataTemplate>
+        <DataTemplate DataType="local:UpdateWaitViewModel">
+          <local:UpdatingView />
+        </DataTemplate>
         <DataTemplate DataType="local:VersionMismatchViewModel">
           <local:VersionMismatchView />
         </DataTemplate>

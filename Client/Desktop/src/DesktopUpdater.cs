@@ -24,9 +24,10 @@ internal sealed class DesktopUpdater(IExecutableInstaller installer, INewWindow 
     }
 
     /// <inheritdoc />
-    public async Task Install(ReleaseInfo release, IProgress<double> progress, CancellationToken cancellation)
+    public async Task Install(ReleaseInfo release, IProgress<double> progress, Func<Task> downloaded, CancellationToken cancellation)
     {
         await installer.Stage(release, Asset ?? throw new IOException("There is no release build of the client for this platform."), progress, cancellation);
+        await downloaded();
         Warm();
         installer.Apply();
         restart.Open();

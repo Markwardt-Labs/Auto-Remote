@@ -13,13 +13,15 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
     /// <param name="feed">Finds the newest release, or <see langword="null" /> when the client does not look for one.</param>
     /// <param name="updater">Installs the release over this client, or <see langword="null" /> when this client cannot update itself and only updates its server.</param>
     /// <param name="interval">How often to look again, or <see langword="null" /> for every hour.</param>
-    public UpdateViewModel(IAppInfo info, IServerConnection connection, IReleaseFeed? feed, IClientUpdater? updater, TimeSpan? interval = null)
+    /// <param name="store">Remembers when the downloads were completed, so that a client the update restarts keeps showing the updating screen while its server is still restarting, or <see langword="null" /> to remember nothing.</param>
+    public UpdateViewModel(IAppInfo info, IServerConnection connection, IReleaseFeed? feed, IClientUpdater? updater, TimeSpan? interval = null, ISettingsStore? store = null)
     {
         this.info = info;
         this.connection = connection;
         this.feed = feed;
         this.updater = updater;
         this.interval = interval ?? TimeSpan.FromHours(1);
+        this.store = store;
         BeginCommand = new AsyncCommand(_ =>
         {
             Begin();
@@ -44,6 +46,8 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
     private readonly IClientUpdater? updater;
 
     private readonly TimeSpan interval;
+
+    private readonly ISettingsStore? store;
 
     private readonly CancellationTokenSource stopping = new();
 
@@ -318,7 +322,13 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
     {
         if (CanClose)
         {
+            bool leaving = phase is UpdatePhase.Waiting or UpdatePhase.Finished;
             Phase = UpdatePhase.Idle;
+
+            if (leaving)
+            {
+                _ = Mark(null);
+            }
         }
     }
 
@@ -344,11 +354,28 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
         if (phase == UpdatePhase.Waiting)
         {
             Phase = UpdatePhase.Idle;
+            _ = Mark(null);
         }
 
         Refresh();
         ServerReconnected?.Invoke();
         _ = Check();
+    }
+
+    private async Task Mark(DateTime? start)
+    {
+        if (store is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await store.SaveUpdateStart(start, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     private async Task Run()
@@ -377,12 +404,14 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
                 {
                     throw new InvalidOperationException($"The server is too old to update itself ({exception.Message}). Install its newest release by hand.");
                 }
+
+                await Mark(DateTime.UtcNow);
             }
 
             if (client && updater is not null)
             {
                 Status = $"Downloading version {release.Version}";
-                await updater.Install(release, new Progress<double>(fraction => Progress = fraction), CancellationToken.None);
+                await updater.Install(release, new Progress<double>(fraction => Progress = fraction), () => Mark(DateTime.UtcNow), CancellationToken.None);
                 Status = "The installer of the system finishes the update.";
                 Phase = UpdatePhase.Finished;
             }
@@ -396,6 +425,7 @@ internal sealed class UpdateViewModel : ViewModelBase, IDisposable
         {
             Error = exception.Message;
             Phase = UpdatePhase.Confirming;
+            await Mark(null);
         }
     }
 }

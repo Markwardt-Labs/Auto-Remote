@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null, TimeSpan? updateWait = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
@@ -16,6 +16,10 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     private readonly TimeSpan retryEvery = retryInterval ?? TimeSpan.FromSeconds(3);
 
     private readonly TimeSpan retryFor = TimeSpan.FromMinutes(2);
+
+    private readonly TimeSpan updateWaitFor = updateWait ?? TimeSpan.FromMinutes(10);
+
+    private int waitingRun;
 
     private Guid? requested;
 
@@ -65,12 +69,32 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             return;
         }
 
+        DateTime? updateStart = await store.LoadUpdateStart(CancellationToken.None);
+
         try
         {
-            await Open(await factory.Connect(saved, CancellationToken.None), null);
+            IServerConnection opened = await factory.Connect(saved, CancellationToken.None);
+
+            if (updateStart is not null)
+            {
+                await store.SaveUpdateStart(null, CancellationToken.None);
+            }
+
+            await Open(opened, null);
         }
         catch (Exception exception) when (exception is IOException or SocketException or UnauthorizedAccessException)
         {
+            if (updateStart is { } started && exception is not UnauthorizedAccessException && DateTime.UtcNow - started < updateWaitFor)
+            {
+                _ = WaitForUpdate(saved, exception.Message, started + updateWaitFor);
+                return;
+            }
+
+            if (updateStart is not null)
+            {
+                await store.SaveUpdateStart(null, CancellationToken.None);
+            }
+
             ConnectViewModel connect = ShowConnect(saved, exception.Message);
 
             if (exception is not UnauthorizedAccessException)
@@ -123,6 +147,92 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         if (e.PropertyName == nameof(HomeViewModel.Title))
         {
             Raise(nameof(WindowTitle));
+        }
+    }
+
+    private async Task WaitForUpdate(ConnectionSettings saved, string error, DateTime end)
+    {
+        UpdateWaitViewModel waiting = new();
+        string last = error;
+        waiting.Closed += async () => await GiveUp(waiting, saved, last);
+        Current = waiting;
+
+        while (ReferenceEquals(current, waiting) && DateTime.UtcNow < end)
+        {
+            await Task.Delay(retryEvery);
+
+            if (!ReferenceEquals(current, waiting))
+            {
+                return;
+            }
+
+            IServerConnection opened;
+
+            try
+            {
+                opened = await factory.Connect(saved, CancellationToken.None);
+            }
+            catch (UnauthorizedAccessException exception)
+            {
+                await GiveUp(waiting, saved, exception.Message, false);
+                return;
+            }
+            catch (Exception exception) when (exception is IOException or SocketException)
+            {
+                last = exception.Message;
+                continue;
+            }
+
+            if (ReferenceEquals(current, waiting))
+            {
+                await store.SaveUpdateStart(null, CancellationToken.None);
+                await Open(opened, null);
+            }
+            else
+            {
+                await opened.DisposeAsync();
+            }
+
+            return;
+        }
+
+        await GiveUp(waiting, saved, last);
+    }
+
+    private async Task GiveUp(UpdateWaitViewModel waiting, ConnectionSettings saved, string error, bool retry = true)
+    {
+        if (!ReferenceEquals(current, waiting))
+        {
+            return;
+        }
+
+        await store.SaveUpdateStart(null, CancellationToken.None);
+        ConnectViewModel connect = ShowConnect(saved, error);
+
+        if (retry)
+        {
+            _ = Retry(connect, saved);
+        }
+    }
+
+    private async Task WaitForServer(UpdateViewModel updating)
+    {
+        int run = ++waitingRun;
+        await Task.Delay(updateWaitFor);
+
+        if (run != waitingRun || !ReferenceEquals(update, updating) || updating.Phase != UpdatePhase.Waiting)
+        {
+            return;
+        }
+
+        ConnectionSettings? saved = await store.Load(CancellationToken.None);
+        await store.SaveUpdateStart(null, CancellationToken.None);
+        await Close();
+        ConnectViewModel connect = ShowConnect(saved, "The server did not come back after the update.");
+
+        if (saved is not null)
+        {
+            _ = Retry(connect, saved);
         }
     }
 
@@ -246,7 +356,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
 
     private UpdateViewModel Track(IServerConnection opened)
     {
-        UpdateViewModel tracking = new(info, opened, feed, updater);
+        UpdateViewModel tracking = new(info, opened, feed, updater, null, store);
         tracking.ServerReconnected += () => _ = Recheck();
         tracking.PropertyChanged += (_, args) =>
         {
@@ -270,6 +380,11 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
 
     private void ShowUpdate(UpdateViewModel updating)
     {
+        if (updating.Phase == UpdatePhase.Waiting)
+        {
+            _ = WaitForServer(updating);
+        }
+
         if (updating.IsUpdating && current is not UpdateViewModel)
         {
             beforeUpdate = current;

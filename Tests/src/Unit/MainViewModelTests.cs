@@ -104,6 +104,79 @@ public sealed class MainViewModelTests
         Assert.Equal(1, attempts);
     }
 
+    private MainViewModel Restarted(DateTime updateStart, TimeSpan wait)
+    {
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        store.Setup(x => x.LoadUpdateStart(It.IsAny<CancellationToken>())).ReturnsAsync(updateStart);
+        return new MainViewModel(info.Object, factory.Object, store.Object, ClientLayout.Tabs, null, null, null, null, null, null, null, null, TimeSpan.FromMilliseconds(20), wait);
+    }
+
+    [Fact]
+    public async Task Start_AfterAnUpdateRestartedTheClient_StaysOnTheUpdatingScreenUntilTheServerAnswers()
+    {
+        int attempts = 0;
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).Returns(() => ++attempts < 4 ? Task.FromException<IServerConnection>(new IOException("refused")) : Task.FromResult(connection.Object));
+        MainViewModel restarted = Restarted(DateTime.UtcNow, TimeSpan.FromMinutes(10));
+
+        await restarted.Start();
+
+        Assert.IsType<UpdateWaitViewModel>(restarted.Current);
+        await Task.Delay(30);
+        Assert.IsType<UpdateWaitViewModel>(restarted.Current);
+        await WaitFor(() => restarted.Current is HomeViewModel);
+
+        Assert.Equal(4, attempts);
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_AfterAnUpdateRestartedTheClient_ShowsTheConnectScreenWithTheErrorOnceTheWaitIsOver()
+    {
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("refused"));
+        MainViewModel restarted = Restarted(DateTime.UtcNow, TimeSpan.FromMilliseconds(150));
+
+        await restarted.Start();
+        await WaitFor(() => restarted.Current is ConnectViewModel);
+
+        Assert.Equal("refused", Assert.IsType<ConnectViewModel>(restarted.Current).Error);
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_WhenTheUpdateWasMoreThanTheWaitAgo_ShowsTheConnectScreenAtOnce()
+    {
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("refused"));
+        MainViewModel restarted = Restarted(DateTime.UtcNow - TimeSpan.FromMinutes(11), TimeSpan.FromMinutes(10));
+
+        await restarted.Start();
+
+        Assert.IsType<ConnectViewModel>(restarted.Current);
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_AfterAnUpdateRestartedTheClient_LeavesTheUpdatingScreenWhenTheKeyIsRejectedOrTheUserClosesIt()
+    {
+        int attempts = 0;
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).Returns(() => ++attempts == 1 ? Task.FromException<IServerConnection>(new IOException("refused")) : Task.FromException<IServerConnection>(new UnauthorizedAccessException("rejected")));
+        MainViewModel rejected = Restarted(DateTime.UtcNow, TimeSpan.FromMinutes(10));
+
+        await rejected.Start();
+        await WaitFor(() => rejected.Current is ConnectViewModel);
+
+        Assert.Equal("rejected", Assert.IsType<ConnectViewModel>(rejected.Current).Error);
+
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("refused"));
+        MainViewModel closing = Restarted(DateTime.UtcNow, TimeSpan.FromMinutes(10));
+        await closing.Start();
+        UpdateWaitViewModel waiting = Assert.IsType<UpdateWaitViewModel>(closing.Current);
+
+        waiting.CloseCommand.Execute(null);
+        await WaitFor(() => closing.Current is ConnectViewModel);
+
+        Assert.Equal("refused", Assert.IsType<ConnectViewModel>(closing.Current).Error);
+    }
+
     [Fact]
     public async Task Start_WhenUnauthorizedAtFirstDoesNotRetry()
     {
@@ -219,7 +292,7 @@ public sealed class MainViewModelTests
     {
         MainViewModel updating = Updating("1.0.0", "1.0.0");
         TaskCompletionSource gate = new();
-        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).Returns(gate.Task);
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).Returns(gate.Task);
         await updating.Start();
         HomeViewModel home = Assert.IsType<HomeViewModel>(updating.Current);
         await WaitFor(() => home.Update!.IsAvailable);
@@ -247,7 +320,7 @@ public sealed class MainViewModelTests
     {
         MainViewModel updating = Updating("1.0.0", "1.0.0");
         TaskCompletionSource gate = new();
-        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).Returns(gate.Task);
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).Returns(gate.Task);
         await updating.Start();
         HomeViewModel home = Assert.IsType<HomeViewModel>(updating.Current);
         await WaitFor(() => home.Update!.IsAvailable);
@@ -265,7 +338,7 @@ public sealed class MainViewModelTests
     public async Task AFailedUpdate_LeavesTheUpdatingScreenAndShowsTheErrorInTheConfirmation()
     {
         MainViewModel updating = Updating("1.0.0", "1.0.0");
-        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
         await updating.Start();
         HomeViewModel home = Assert.IsType<HomeViewModel>(updating.Current);
         await WaitFor(() => home.Update!.IsAvailable);
@@ -299,6 +372,26 @@ public sealed class MainViewModelTests
         await WaitFor(() => updating.Current is HomeViewModel);
 
         Assert.IsType<HomeViewModel>(updating.Current);
+    }
+
+    [Fact]
+    public async Task AServerUpdate_ThatTheServerDoesNotComeBackFrom_EndsOnTheConnectScreenWithTheFailureAfterTheWait()
+    {
+        MainViewModel unused = Updating("1.1.0", "1.0.0");
+        MainViewModel updating = new(info.Object, factory.Object, store.Object, ClientLayout.Tabs, null, null, null, null, null, null, feed.Object, updater.Object, TimeSpan.FromMilliseconds(20), TimeSpan.FromMilliseconds(200));
+        await updating.Start();
+        VersionMismatchViewModel mismatch = Assert.IsType<VersionMismatchViewModel>(updating.Current);
+        await WaitFor(() => mismatch.Update.IsAvailable);
+        mismatch.Update.BeginCommand.Execute(null);
+
+        mismatch.Update.ConfirmCommand.Execute(null);
+        await WaitFor(() => updating.Current is UpdateViewModel);
+        await Task.Delay(100);
+
+        Assert.IsType<UpdateViewModel>(updating.Current);
+        await WaitFor(() => updating.Current is ConnectViewModel);
+
+        Assert.Equal("The server did not come back after the update.", Assert.IsType<ConnectViewModel>(updating.Current).Error);
     }
 
     private static async Task WaitFor(Func<bool> condition)

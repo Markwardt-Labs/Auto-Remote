@@ -14,7 +14,7 @@ internal sealed class AndroidUpdater(IReleaseFeed feed) : IClientUpdater
     public bool IsSupported => true;
 
     /// <inheritdoc />
-    public async Task Install(ReleaseInfo release, IProgress<double> progress, CancellationToken cancellation)
+    public async Task Install(ReleaseInfo release, IProgress<double> progress, Func<Task> downloaded, CancellationToken cancellation)
     {
         ReleaseAsset asset = release.Assets.FirstOrDefault(candidate => candidate.Name == assetName) ?? throw new IOException($"Release {release.Version} has no {assetName} file.");
 
@@ -29,6 +29,7 @@ internal sealed class AndroidUpdater(IReleaseFeed feed) : IClientUpdater
         Directory.CreateDirectory(folder);
         string path = Path.Combine(folder, assetName);
         await feed.Download(asset, path, progress, cancellation);
+        await downloaded();
         global::Android.Net.Uri uri = FileProvider.GetUriForFile(context, $"{context.PackageName}.updates", new Java.IO.File(path))!;
         Intent install = new Intent(Intent.ActionView).SetDataAndType(uri, "application/vnd.android.package-archive")!.AddFlags(ActivityFlags.GrantReadUriPermission | ActivityFlags.NewTask)!;
         context.StartActivity(install);

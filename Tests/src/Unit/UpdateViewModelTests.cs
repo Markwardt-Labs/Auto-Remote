@@ -30,7 +30,7 @@ public sealed class UpdateViewModelTests
 
     private void Latest(string? version) => feed.Setup(x => x.Latest(It.IsAny<CancellationToken>())).ReturnsAsync(version is null ? null : new ReleaseInfo { Version = AppVersion.TryParse(version, out AppVersion? parsed) ? parsed : throw new ArgumentException(version), Assets = [] });
 
-    private UpdateViewModel Create(IReleaseFeed? source = null, IClientUpdater? installer = null) => new(info.Object, connection.Object, source ?? feed.Object, installer ?? updater.Object, TimeSpan.FromMilliseconds(30));
+    private UpdateViewModel Create(IReleaseFeed? source = null, IClientUpdater? installer = null, ISettingsStore? settings = null) => new(info.Object, connection.Object, source ?? feed.Object, installer ?? updater.Object, TimeSpan.FromMilliseconds(30), settings);
 
     [Fact]
     public async Task Check_OffersAnUpdateWhenTheClientAndTheServerAreOlder()
@@ -152,7 +152,7 @@ public sealed class UpdateViewModelTests
         update.CloseCommand.Execute(null);
 
         Assert.False(update.IsOpen);
-        updater.Verify(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Never);
+        updater.Verify(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()), Times.Never);
         connection.Verify(x => x.UpdateServer(It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -165,7 +165,7 @@ public sealed class UpdateViewModelTests
             order.Add("server");
             return Task.CompletedTask;
         });
-        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).Returns(() =>
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).Returns(() =>
         {
             order.Add("client");
             return Task.CompletedTask;
@@ -181,7 +181,87 @@ public sealed class UpdateViewModelTests
         Assert.Equal(UpdatePhase.Finished, update.Phase);
         Assert.True(update.CanClose);
         Assert.Equal("Close", update.CloseText);
-        updater.Verify(x => x.Install(It.Is<ReleaseInfo>(release => release.Version.ToString() == "1.1.0"), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Once);
+        updater.Verify(x => x.Install(It.Is<ReleaseInfo>(release => release.Version.ToString() == "1.1.0"), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Confirm_WritesDownWhenTheServerWasDownloadedAndAgainWhenTheClientWasAndForgetsItOnceTheServerIsBack()
+    {
+        List<string> order = [];
+        Mock<ISettingsStore> store = new();
+        store.Setup(x => x.SaveUpdateStart(It.IsAny<DateTime?>(), It.IsAny<CancellationToken>())).Returns((DateTime? start, CancellationToken _) =>
+        {
+            order.Add(start is null ? "forget" : "mark");
+            return Task.CompletedTask;
+        });
+        connection.Setup(x => x.UpdateServer(It.IsAny<CancellationToken>())).Returns(() =>
+        {
+            order.Add("server");
+            return Task.CompletedTask;
+        });
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).Returns(async (ReleaseInfo _, IProgress<double> _, Func<Task> downloaded, CancellationToken _) =>
+        {
+            order.Add("download");
+            await downloaded();
+            order.Add("apply");
+        });
+        using UpdateViewModel update = Create(settings: store.Object);
+        await update.Check();
+        update.Begin();
+
+        update.ConfirmCommand.Execute(null);
+        await WaitFor(() => update.Phase == UpdatePhase.Finished);
+
+        Assert.Equal(["server", "mark", "download", "mark", "apply"], order);
+    }
+
+    [Fact]
+    public async Task Confirm_ForTheServerOnlyForgetsTheWrittenDownTimeWhenTheServerComesBack()
+    {
+        info.SetupGet(x => x.Version).Returns("1.1.0");
+        Mock<ISettingsStore> store = new();
+        using UpdateViewModel update = Create(settings: store.Object);
+        await update.Check();
+        update.Begin();
+        update.ConfirmCommand.Execute(null);
+        await WaitFor(() => update.Phase == UpdatePhase.Waiting);
+        store.Verify(x => x.SaveUpdateStart(It.Is<DateTime?>(start => start != null), It.IsAny<CancellationToken>()), Times.Once);
+
+        serverVersion = "1.1.0";
+        connection.Raise(x => x.Reconnected += null);
+
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Close_AfterTheClientWasHandedToTheInstallerForgetsTheWrittenDownTime()
+    {
+        Mock<ISettingsStore> store = new();
+        using UpdateViewModel update = Create(settings: store.Object);
+        await update.Check();
+        update.Begin();
+        update.ConfirmCommand.Execute(null);
+        await WaitFor(() => update.Phase == UpdatePhase.Finished);
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Never);
+
+        update.CloseCommand.Execute(null);
+
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Confirm_WhenTheClientCannotBeInstalledForgetsTheWrittenDownTime()
+    {
+        Mock<ISettingsStore> store = new();
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("broken"));
+        using UpdateViewModel update = Create(settings: store.Object);
+        await update.Check();
+        update.Begin();
+
+        update.ConfirmCommand.Execute(null);
+        await WaitFor(() => update.Phase == UpdatePhase.Confirming && update.HasError);
+
+        store.Verify(x => x.SaveUpdateStart(null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -199,7 +279,7 @@ public sealed class UpdateViewModelTests
         Assert.True(update.IsUpdating);
         Assert.False(update.IsInstalling);
         Assert.True(update.CanClose);
-        updater.Verify(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Never);
+        updater.Verify(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()), Times.Never);
 
         int reconnected = 0;
         update.ServerReconnected += () => reconnected++;
@@ -225,7 +305,7 @@ public sealed class UpdateViewModelTests
 
         Assert.Equal("The server is up to date.", update.Error);
         Assert.Equal(UpdatePhase.Confirming, update.Phase);
-        updater.Verify(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>()), Times.Never);
+        updater.Verify(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -254,7 +334,7 @@ public sealed class UpdateViewModelTests
     public async Task Confirm_ShowsAFailedInstallationAndAllowsTryingAgain(Type failure)
     {
         serverVersion = "1.1.0";
-        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).ThrowsAsync((Exception)Activator.CreateInstance(failure, "broken")!);
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).ThrowsAsync((Exception)Activator.CreateInstance(failure, "broken")!);
         using UpdateViewModel update = Create();
         await update.Check();
         update.Begin();
@@ -272,7 +352,7 @@ public sealed class UpdateViewModelTests
     {
         serverVersion = "1.1.0";
         TaskCompletionSource gate = new();
-        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<CancellationToken>())).Returns(async (ReleaseInfo _, IProgress<double> progress, CancellationToken _) =>
+        updater.Setup(x => x.Install(It.IsAny<ReleaseInfo>(), It.IsAny<IProgress<double>>(), It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>())).Returns(async (ReleaseInfo _, IProgress<double> progress, Func<Task> _, CancellationToken _) =>
         {
             progress.Report(0.5);
             await gate.Task;
