@@ -117,7 +117,7 @@ internal interface IPromptService
     Task Interrupt(Guid id);
 
     /// <summary>
-    /// Ends every workspace's AI work and closes every session, including the commands the AI started, as the server stopping needs. Waits a few seconds for the work to end first.
+    /// Ends every workspace's AI work and closes every session, including the commands the AI started, as the server stopping needs. Waits a few seconds for the work to end and for each session to finish closing, which is when it saves its configuration, so what was changed in the settings since the last prompt is not lost.
     /// </summary>
     /// <returns>A task that completes once the sessions are closed.</returns>
     Task Close();
@@ -173,14 +173,21 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     public async Task Close()
     {
         List<Tally> tallies = [];
+        List<Task> closing = [];
 
         foreach (Live live in lives.Values)
         {
             tallies.Add(live.Tally);
-            Detach(live)?.Dispose();
+
+            if (Detach(live) is { } session)
+            {
+                session.Dispose();
+                closing.Add(session.DisposeAsync().AsTask().ContinueWith(static _ => { }, TaskScheduler.Default));
+            }
         }
 
         DateTime deadline = DateTime.UtcNow + shutdownWait;
+        await Task.WhenAny(Task.WhenAll(closing), Task.Delay(shutdownWait));
 
         while (tallies.Any(tally => tally.Count > 0) && DateTime.UtcNow < deadline)
         {

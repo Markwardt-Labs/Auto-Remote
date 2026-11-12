@@ -43,7 +43,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();

@@ -24,6 +24,8 @@ Auto Commit is two calls from the client: `GenerateCommitMessage`, then the ordi
 
 Commit, auto commit, reset and branch are refused while the AI is working in the workspace so they cannot race its edits; tags and the remote are harmless then.
 
+Auto Commit has no dialog of its own to show an error in, so when any step fails (a refusal, nothing to commit, the AI failing or answering with twelve words or more) every client shows the reason in an "Auto Commit" notice; the notice is allowed even while git or AI work locks the other prompts.
+
 ## Workflows
 
 Everything beyond a single command runs through `WorkspaceVersioning`, a port of Auto Dev's versioning service. `Perform` is the gate: one action per workspace at a time (a second is refused), and only while the workspace is Ready (a git action puts it in the Managing state), a `GitChanged` event when it starts and ends, and a snapshot taken first (checked out branch, head, whether changes were pending, every local branch tip). When the action is cancelled (`GitCancel`, `StopWorkspace`, `CancelWorkspace`, or the server shutting down; a client disconnecting does not cancel it, since mobile clients drop and reconnect) or fails unexpectedly, the snapshot is restored: an in-progress rebase or merge is aborted, the original branch is checked out again, the head is moved back (a hard reset only when nothing was pending, so uncommitted work is never discarded) and branches that were rewritten or deleted are put back. A refusal with a message (`RequestException`) is a normal answer and restores nothing by itself; the workflows clean up after their own failures.

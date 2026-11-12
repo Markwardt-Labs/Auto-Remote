@@ -281,4 +281,53 @@ public sealed class SettingsViewModelTests
         Assert.Equal("Codex could not be started.", settings.Error);
         Assert.False(settings.HasDetails);
     }
+
+    [Fact]
+    public async Task Apply_SendsNothingWhenTheSettingsWereNeverReadFromTheServerEvenAfterAnEdit()
+    {
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("down"));
+        Accept();
+        SettingsViewModel settings = new(connection.Object, workspace);
+        await Task.Delay(100);
+
+        settings.IsWebAllowed = true;
+        settings.Instructions = "typed on top of defaults";
+
+        Assert.True(await settings.Apply());
+        Assert.Empty(saved);
+    }
+
+    [Fact]
+    public async Task Load_PutsAnEditMadeBeforeTheFirstReadFinishedOnTopOfTheServersSettingsAndNeverOnTopOfDefaults()
+    {
+        TaskCompletionSource<WorkspaceSettings> read = new();
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).Returns(read.Task);
+        Accept();
+        SettingsViewModel settings = new(connection.Object, workspace);
+
+        settings.SelectedEffort = settings.Efforts.Single(choice => choice.Value == AiEffort.Low);
+        read.SetResult(Current);
+        await Until(() => settings.IsShellAllowed);
+
+        Assert.True(settings.HasPending);
+        Assert.Equal((AiEffort.Low, true, true, true, "work in the foreground"), (settings.SelectedEffort.Value, settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.Instructions));
+        Assert.True(await settings.Apply());
+        WorkspaceSettings sent = Assert.Single(saved);
+        Assert.Equal((AiEffort.Low, true, true, true, "work in the foreground"), (sent.Effort, sent.IsShellAllowed, sent.IsSystemAccessAllowed, sent.IsWebAllowed, sent.Instructions));
+    }
+
+    [Fact]
+    public async Task Apply_AfterTheFirstReadSendsTheServersSettingsWithOnlyTheEditChanged()
+    {
+        Session(Current);
+        Accept();
+        SettingsViewModel settings = new(connection.Object, workspace);
+        await Until(() => settings.IsShellAllowed);
+
+        settings.IsImageGenerationAllowed = true;
+
+        Assert.True(await settings.Apply());
+        WorkspaceSettings sent = Assert.Single(saved);
+        Assert.Equal((AiEffort.High, true, true, true, true), (sent.Effort, sent.IsShellAllowed, sent.IsSystemAccessAllowed, sent.IsWebAllowed, sent.IsImageGenerationAllowed));
+    }
 }

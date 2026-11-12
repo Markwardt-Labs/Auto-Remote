@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -91,7 +91,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.GetWorkspaceSettings:
                 return new RemoteResponse { Id = 0, Settings = await prompts.GetSettings(RequireWorkspace(request), cancellation) };
             case RemoteCommand.SetWorkspaceSettings:
-                return new RemoteResponse { Id = 0, Settings = await prompts.SetSettings(RequireWorkspace(request), request.Settings ?? throw new RequestException("The request needs settings."), cancellation) };
+                return new RemoteResponse { Id = 0, Settings = await SetSettings(request, owner, cancellation) };
             case RemoteCommand.GetAiEnvironment:
                 return new RemoteResponse { Id = 0, AiEnvironment = host.Get() };
             case RemoteCommand.SetAiEnvironment:
@@ -354,6 +354,42 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     private async Task<string> FolderOf(RemoteRequest request, CancellationToken cancellation) => (await workspaces.Get(RequireWorkspace(request), cancellation)).Folder;
 
     private Guid RequireGroup(RemoteRequest request) => request.GroupId ?? throw new RequestException("The request needs a group.");
+
+    private async Task<WorkspaceSettings> SetSettings(RemoteRequest request, object owner, CancellationToken cancellation)
+    {
+        Guid id = RequireWorkspace(request);
+        WorkspaceSettings wanted = request.Settings ?? throw new RequestException("The request needs settings.");
+        WorkspaceSettings before = await prompts.GetSettings(id, cancellation);
+        WorkspaceSettings after = await prompts.SetSettings(id, wanted, cancellation);
+        List<string> changes = [];
+
+        void Note<T>(string name, T was, T now)
+        {
+            if (!EqualityComparer<T>.Default.Equals(was, now))
+            {
+                changes.Add($"{name} {was} -> {now}");
+            }
+        }
+
+        Note("capability", before.Capability, after.Capability);
+        Note("effort", before.Effort, after.Effort);
+        Note("shell", before.IsShellAllowed, after.IsShellAllowed);
+        Note("files outside the workspace", before.IsSystemAccessAllowed, after.IsSystemAccessAllowed);
+        Note("web", before.IsWebAllowed, after.IsWebAllowed);
+        Note("images", before.IsImageGenerationAllowed, after.IsImageGenerationAllowed);
+        Note("instructions", before.Instructions ?? string.Empty, after.Instructions ?? string.Empty);
+        Note("status interval", before.StatusMinutes, after.StatusMinutes);
+        Note("review prompt", before.ReviewPrompt ?? string.Empty, after.ReviewPrompt ?? string.Empty);
+        Note("expand prompt", before.ExpandPrompt ?? string.Empty, after.ExpandPrompt ?? string.Empty);
+
+        if (changes.Count > 0)
+        {
+            string from = owner is TcpClient { Client.RemoteEndPoint: { } endpoint } ? endpoint.ToString()! : "a client";
+            log.Write($"Settings of {(await workspaces.Get(id, cancellation)).Name} changed by {from}: {string.Join(", ", changes)}");
+        }
+
+        return after;
+    }
 
     private async Task<WorkspaceCatalog> Catalog(CancellationToken cancellation)
     {

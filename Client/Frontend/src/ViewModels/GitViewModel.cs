@@ -587,11 +587,14 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     {
         string message = string.Empty;
 
-        if (await Attempt(async () => message = await connection.GenerateCommitMessage(workspaceId, CancellationToken.None)) && await Attempt(() => connection.GitCommit(workspaceId, message, CancellationToken.None)))
+        if (!await Attempt(async () => message = await connection.GenerateCommitMessage(workspaceId, CancellationToken.None)) || !await Attempt(() => connection.GitCommit(workspaceId, message, CancellationToken.None)))
         {
-            await Refresh();
-            await History.Changed();
+            await Notice("Auto Commit", Error ?? "Auto Commit failed.");
+            return;
         }
+
+        await Refresh();
+        await History.Changed();
     });
 
     private Task AskReset()

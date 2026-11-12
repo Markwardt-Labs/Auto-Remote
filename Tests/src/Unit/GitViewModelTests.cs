@@ -198,7 +198,7 @@ public sealed class GitViewModelTests
     }
 
     [Fact]
-    public async Task AutoCommit_DoesNotCommitAndShowsTheErrorWhenTheAiCannotWriteAMessage()
+    public async Task AutoCommit_DoesNotCommitAndTellsTheUserWhyWhenTheAiCannotWriteAMessage()
     {
         status = status with { HasIdentity = true };
         connection.Setup(x => x.GenerateCommitMessage(id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("There is nothing to commit."));
@@ -206,10 +206,25 @@ public sealed class GitViewModelTests
         await git.Start();
 
         git.AutoCommitCommand.Execute(null);
-        await Until(() => git.Error is not null);
+        await Until(() => git.Prompt == GitPrompt.Notice);
 
-        Assert.Equal("There is nothing to commit.", git.Error);
+        Assert.Equal(("Auto Commit", "There is nothing to commit."), (git.PromptTitle, git.PromptHint));
         connection.Verify(x => x.GitCommit(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AutoCommit_TellsTheUserWhyWhenTheCommitItselfIsRefusedAndShowsTheNoticeEvenWhileTheAiWorks()
+    {
+        status = status with { HasIdentity = true };
+        connection.Setup(x => x.GenerateCommitMessage(id, It.IsAny<CancellationToken>())).ReturnsAsync("Fix it");
+        connection.Setup(x => x.GitCommit(id, "Fix it", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The AI is working."));
+        GitViewModel git = new(connection.Object, id);
+        await git.Start();
+
+        git.AutoCommitCommand.Execute(null);
+        await Until(() => git.Prompt == GitPrompt.Notice);
+
+        Assert.Equal(("Auto Commit", "The AI is working."), (git.PromptTitle, git.PromptHint));
     }
 
     [Fact]

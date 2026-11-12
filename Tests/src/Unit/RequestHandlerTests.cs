@@ -36,6 +36,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IServerUpdater> updater = new();
 
+    private readonly Mock<ILog> log = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -46,7 +48,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
     }
 
     [Fact]
@@ -416,6 +418,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_GetAndSetWorkspaceSettings_ReadAndChangeHowTheAiSessionRuns()
     {
         WorkspaceSettings settings = new() { Capability = AiCapability.Strong, Effort = AiEffort.Max, IsShellAllowed = true };
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         prompts.Setup(x => x.GetSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(settings);
         prompts.Setup(x => x.SetSettings(workspace.Id, settings, It.IsAny<CancellationToken>())).ReturnsAsync(settings with { Instructions = "kept" });
 
@@ -852,5 +855,33 @@ public sealed class RequestHandlerTests
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ListWorkspaces }, owner, CancellationToken.None);
 
         Assert.Equal([other.Id], response.Catalog?.Looping);
+    }
+
+    [Fact]
+    public async Task Handle_SetWorkspaceSettings_LogsWhatChangedAndWhoChangedItButNothingWhenNothingChanged()
+    {
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+        WorkspaceSettings before = new() { Effort = AiEffort.High, IsShellAllowed = true, IsWebAllowed = true, IsImageGenerationAllowed = true, ExpandPrompt = "mine" };
+        WorkspaceSettings defaults = new();
+        List<string> written = [];
+        log.Setup(x => x.Write(It.IsAny<string>())).Callback<string>(written.Add);
+        prompts.Setup(x => x.GetSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(before);
+        prompts.Setup(x => x.SetSettings(workspace.Id, defaults, It.IsAny<CancellationToken>())).ReturnsAsync(defaults);
+        prompts.Setup(x => x.SetSettings(workspace.Id, before, It.IsAny<CancellationToken>())).ReturnsAsync(before);
+
+        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.SetWorkspaceSettings, WorkspaceId = workspace.Id, Settings = before }, owner, CancellationToken.None);
+
+        Assert.Empty(written);
+
+        await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.SetWorkspaceSettings, WorkspaceId = workspace.Id, Settings = defaults }, owner, CancellationToken.None);
+
+        string line = Assert.Single(written);
+        Assert.StartsWith("Settings of app changed by a client: ", line);
+        Assert.Contains("effort High -> Medium", line);
+        Assert.Contains("shell True -> False", line);
+        Assert.Contains("web True -> False", line);
+        Assert.Contains("images True -> False", line);
+        Assert.Contains("expand prompt mine -> ", line);
+        Assert.DoesNotContain("capability", line);
     }
 }

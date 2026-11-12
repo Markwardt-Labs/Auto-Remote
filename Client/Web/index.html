@@ -1908,6 +1908,7 @@ class WorkspaceView {
     this.detailsSection = section("How it runs", this.detailsBox);
     this.detailsSection.hidden = true;
     this.current = null;
+    this.formShown = false;
     this.settingsEdits = 0;
     this.syncSettings();
     this.settingsPane = h("div", { class: "pane settings" },
@@ -1991,7 +1992,7 @@ class WorkspaceView {
       return;
     }
 
-    if (edits === this.settingsEdits) {
+    if (edits === this.settingsEdits || !this.formShown) {
       this.showSettings(result.value);
     } else {
       this.current = result.value;
@@ -1999,6 +2000,7 @@ class WorkspaceView {
   }
 
   showSettings(settings) {
+    this.formShown = true;
     this.current = settings;
     this.capabilitySelect.value = settings.capability;
     this.effortSelect.value = settings.effort;
@@ -2033,7 +2035,7 @@ class WorkspaceView {
   }
 
   hasPendingSettings() {
-    if (!this.current) {
+    if (!this.current || !this.formShown) {
       return false;
     }
 
@@ -4213,7 +4215,7 @@ class WorkspaceView {
       const id = this.info.id;
       await this.connection.gitCommit(id, await this.connection.generateCommitMessage(id));
     } catch (exception) {
-      this.home.notice("Git", exception.message);
+      this.home.notice("Auto Commit", exception.message);
     } finally {
       this.localBusy = false;
       this.refreshGit(true);

@@ -43,7 +43,11 @@ internal sealed class SettingsViewModel : ViewModelBase
 
     private IReadOnlyList<DetailLine> details = [];
 
+    private readonly List<Func<WorkspaceSettings, WorkspaceSettings>> changes = [];
+
     private int edits;
+
+    private bool loaded;
 
     /// <summary>
     /// Gets the name of the provider the workspace runs on, which never changes.
@@ -85,7 +89,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         {
             if (value is not null)
             {
-                Edit(pending with { Capability = value.Value });
+                Edit(settings => settings with { Capability = value.Value });
             }
         }
     }
@@ -100,7 +104,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         {
             if (value is not null)
             {
-                Edit(pending with { Effort = value.Value });
+                Edit(settings => settings with { Effort = value.Value });
             }
         }
     }
@@ -111,7 +115,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     public bool IsShellAllowed
     {
         get => pending.IsShellAllowed;
-        set => Edit(pending with { IsShellAllowed = value });
+        set => Edit(settings => settings with { IsShellAllowed = value });
     }
 
     /// <summary>
@@ -120,7 +124,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     public bool IsSystemAccessAllowed
     {
         get => pending.IsSystemAccessAllowed;
-        set => Edit(pending with { IsSystemAccessAllowed = value });
+        set => Edit(settings => settings with { IsSystemAccessAllowed = value });
     }
 
     /// <summary>
@@ -129,7 +133,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     public bool IsWebAllowed
     {
         get => pending.IsWebAllowed;
-        set => Edit(pending with { IsWebAllowed = value });
+        set => Edit(settings => settings with { IsWebAllowed = value });
     }
 
     /// <summary>
@@ -138,7 +142,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     public bool IsImageGenerationAllowed
     {
         get => pending.IsImageGenerationAllowed;
-        set => Edit(pending with { IsImageGenerationAllowed = value });
+        set => Edit(settings => settings with { IsImageGenerationAllowed = value });
     }
 
     /// <summary>
@@ -147,7 +151,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     public string Instructions
     {
         get => pending.Instructions ?? string.Empty;
-        set => Edit(pending with { Instructions = value });
+        set => Edit(settings => settings with { Instructions = value });
     }
 
     /// <summary>
@@ -158,7 +162,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         get => pending.ReviewPrompt ?? string.Empty;
         set
         {
-            Edit(pending with { ReviewPrompt = value });
+            Edit(settings => settings with { ReviewPrompt = value });
             Raise(nameof(ReviewPrompt));
         }
     }
@@ -171,7 +175,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         get => pending.ExpandPrompt ?? string.Empty;
         set
         {
-            Edit(pending with { ExpandPrompt = value });
+            Edit(settings => settings with { ExpandPrompt = value });
             Raise(nameof(ExpandPrompt));
         }
     }
@@ -184,7 +188,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         get => pending.StatusMinutes;
         set
         {
-            Edit(pending with { StatusMinutes = value is { } minutes ? (int)Math.Clamp(Math.Round(minutes), 1, 1440) : null });
+            Edit(settings => settings with { StatusMinutes = value is { } minutes ? (int)Math.Clamp(Math.Round(minutes), 1, 1440) : null });
             Raise(nameof(StatusMinutes));
         }
     }
@@ -226,12 +230,12 @@ internal sealed class SettingsViewModel : ViewModelBase
     public Task Reload() => HasPending ? Task.CompletedTask : Load();
 
     /// <summary>
-    /// Sends the edits to the server, which gives them to the session from its next prompt on.
+    /// Sends the edits to the server, which gives them to the session from its next prompt on. Nothing is sent before the settings were read from the server once, since an edit made before that sits on top of default values that would turn off what the workspace is allowed to do.
     /// </summary>
     /// <returns><see langword="true" /> when there was nothing to send or the server took the edits; <see langword="false" /> when it refused, which <see cref="ViewModelBase.Error" /> says, and the edits stay pending.</returns>
     public async Task<bool> Apply()
     {
-        if (!HasPending)
+        if (!loaded || !HasPending)
         {
             return true;
         }
@@ -253,10 +257,11 @@ internal sealed class SettingsViewModel : ViewModelBase
 
     private string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
-    private void Edit(WorkspaceSettings edited)
+    private void Edit(Func<WorkspaceSettings, WorkspaceSettings> change)
     {
         edits++;
-        pending = edited;
+        changes.Add(change);
+        pending = change(pending);
         Raise(nameof(HasPending));
     }
 
@@ -273,22 +278,32 @@ internal sealed class SettingsViewModel : ViewModelBase
                 return;
             }
 
+            loaded = true;
             current = read;
+            pending = changes.Aggregate(read, (settings, change) => change(settings));
             details = [.. read.Descriptors.Select(pair => new DetailLine(pair.Key, pair.Value))];
             Raise(nameof(Details));
             Raise(nameof(HasDetails));
             Raise(nameof(HasPending));
+            RaiseValues();
         }
     }
 
     private void Show(WorkspaceSettings settings)
     {
+        loaded = true;
+        changes.Clear();
         current = settings;
         pending = settings;
         details = [.. settings.Descriptors.Select(pair => new DetailLine(pair.Key, pair.Value))];
         Raise(nameof(Details));
         Raise(nameof(HasDetails));
         Raise(nameof(HasPending));
+        RaiseValues();
+    }
+
+    private void RaiseValues()
+    {
         Raise(nameof(SelectedCapability));
         Raise(nameof(SelectedEffort));
         Raise(nameof(IsShellAllowed));
