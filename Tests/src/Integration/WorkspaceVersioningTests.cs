@@ -727,7 +727,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
     public async Task CommitMessage_AsksTheAiAboutThePendingChangesAndUsesTheFirstLineWhenItIsShortEnough(string answer, string expected)
     {
         File.WriteAllText(Path.Combine(work, "a.txt"), "one\nTWO\nthree\n");
-        prompts.Setup(x => x.Ask(workspace.Id, It.Is<string>(text => text.Contains("8 words or less") && text.Contains("+TWO")), It.IsAny<CancellationToken>())).ReturnsAsync(answer);
+        prompts.Setup(x => x.Ask(workspace.Id, It.Is<string>(text => text.Contains("8 words or less") && text.Contains("ignore the conversation") && text.Contains("+TWO")), It.IsAny<CancellationToken>())).ReturnsAsync(answer);
 
         Assert.Equal(expected, await versioning.CommitMessage(workspace, CancellationToken.None));
     }

@@ -150,7 +150,7 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     public async Task<string> CommitMessage(WorkspaceInfo workspace, CancellationToken cancellation)
     {
         string pending = await git.Pending(workspace.Folder, cancellation);
-        string request = $"Write a git commit message of {messageWords} words or less for the pending changes below. It must be one complete phrase that stands on its own, so aim for about {aimWords} words, count them, and rephrase it shorter rather than letting it run on. Answer with the message only, on one line, without quotes or a full stop.\n\n{pending}";
+        string request = $"Write a git commit message of {messageWords} words or less for the pending changes below. Describe only what those changes themselves do to the files, as someone who sees nothing but the diff would: ignore the conversation, the tasks or requests that led to them and any reason that is not visible in the changes. It must be one complete phrase that stands on its own, so aim for about {aimWords} words, count them, and rephrase it shorter rather than letting it run on. Answer with the message only, on one line, without quotes or a full stop.\n\n{pending}";
         string? message = null;
         int count = 0;
 
