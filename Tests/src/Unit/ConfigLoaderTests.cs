@@ -39,6 +39,29 @@ public sealed class ConfigLoaderTests : IDisposable
     }
 
     [Fact]
+    public async Task Load_LocalUsersAreNotSetEmptyOrAListAsWritten()
+    {
+        await File.WriteAllTextAsync(path, """{ "key": "abc" }""");
+        Assert.Null((await new ConfigLoader().Load(path, CancellationToken.None)).LocalUsers);
+
+        await File.WriteAllTextAsync(path, """{ "key": "abc", "localUsers": [] }""");
+        Assert.Empty((await new ConfigLoader().Load(path, CancellationToken.None)).LocalUsers!);
+
+        await File.WriteAllTextAsync(path, """{ "key": "abc", "localUsers": ["alice", "bob"] }""");
+        Assert.Equal(["alice", "bob"], (await new ConfigLoader().Load(path, CancellationToken.None)).LocalUsers);
+    }
+
+    [Theory]
+    [InlineData("""{ "key": "abc", "localUsers": [""] }""")]
+    [InlineData("""{ "key": "abc", "localUsers": ["alice", "  "] }""")]
+    public async Task Load_RejectsAnEmptyLocalUserName(string json)
+    {
+        await File.WriteAllTextAsync(path, json);
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => new ConfigLoader().Load(path, CancellationToken.None));
+    }
+
+    [Fact]
     public async Task Load_RejectsMissingDefaultFolder()
     {
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(new { port = 8123, key = "abc", defaultFolder = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString()) }));

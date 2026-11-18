@@ -22,3 +22,7 @@ global using System.Security.Cryptography.X509Certificates;
 global using Markwardt.LiveAi;
 global using Whisper.net;
 global using System.Reflection;
+global using System.IO.Pipes;
+global using System.Runtime.Versioning;
+global using System.Security.AccessControl;
+global using System.Security.Principal;

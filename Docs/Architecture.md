@@ -24,7 +24,7 @@ The protocol is not versioned beyond the release, so the server tells its versio
 
 ## Access key handshake before any traffic
 
-Clients authenticate with a single shared access key sent as the first line on the connection, before the server accepts anything else. A per-user account system was rejected as unneeded for a single-owner server.
+Clients authenticate with a single shared access key sent as the first line on the connection, before the server accepts anything else. A per-user account system was rejected as unneeded for a single-owner server. A desktop client on the server's own machine can get the key from a channel that only the allowed operating system accounts can use, never from the fact that it connects from localhost.
 
 ## Always `wss`, on one port
 

@@ -178,6 +178,81 @@ public sealed class MainViewModelTests
     }
 
     [Fact]
+    public async Task ThePressedLocalButton_SavesALocalConnectionWithoutTheKeyAndOpensTheWorkspaces()
+    {
+        ConnectionSettings local = new() { Host = "127.0.0.1", Port = 5000, AccessKey = string.Empty, Local = true };
+        Mock<ILocalServers> locals = new();
+        locals.Setup(x => x.Find(It.IsAny<CancellationToken>())).ReturnsAsync([new LocalServer { Port = 5000, Version = "1.0.0" }]);
+        factory.Setup(x => x.Connect(local, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        MainViewModel main = new(info.Object, factory.Object, store.Object, ClientLayout.Tabs, null, null, null, null, null, null, null, null, null, null, locals.Object);
+
+        await main.Start();
+        ConnectViewModel connect = Assert.IsType<ConnectViewModel>(main.Current);
+        await WaitFor(() => connect.HasLocalServers);
+        connect.LocalServers[0].Command.Execute(null);
+        await WaitFor(() => main.Current is HomeViewModel);
+
+        Assert.IsType<HomeViewModel>(main.Current);
+        store.Verify(x => x.Save(local, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Start_WithASavedLocalConnectionConnectsWithItAgainAndKeepsRetryingWhileTheServerIsNotThere()
+    {
+        ConnectionSettings local = new() { Host = "127.0.0.1", Port = 5000, AccessKey = string.Empty, Local = true };
+        int attempts = 0;
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(local);
+        factory.Setup(x => x.Connect(local, It.IsAny<CancellationToken>())).Returns(() => ++attempts < 3 ? Task.FromException<IServerConnection>(new IOException("No local server on port 5000 was found.")) : Task.FromResult(connection.Object));
+        MainViewModel retrying = Retrying();
+
+        await retrying.Start();
+        ConnectViewModel connect = Assert.IsType<ConnectViewModel>(retrying.Current);
+        await WaitFor(() => retrying.Current is HomeViewModel);
+
+        Assert.Equal("127.0.0.1", connect.Host);
+        Assert.Equal("5000", connect.Port);
+        Assert.Equal(string.Empty, connect.AccessKey);
+        Assert.IsType<HomeViewModel>(retrying.Current);
+        Assert.Equal(3, attempts);
+    }
+
+    [Fact]
+    public async Task Start_WithASavedLocalConnectionTheAccountIsNoLongerAllowedToUseDoesNotRetry()
+    {
+        ConnectionSettings local = new() { Host = "127.0.0.1", Port = 5000, AccessKey = string.Empty, Local = true };
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(local);
+        factory.Setup(x => x.Connect(local, It.IsAny<CancellationToken>())).ThrowsAsync(new UnauthorizedAccessException("not in localUsers"));
+
+        MainViewModel denied = Retrying();
+        await denied.Start();
+        await Task.Delay(150);
+
+        Assert.Equal("not in localUsers", Assert.IsType<ConnectViewModel>(denied.Current).Error);
+        factory.Verify(x => x.Connect(local, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ReplacingTheConnectScreen_StopsItsSearchForLocalServers()
+    {
+        Mock<ILocalServers> locals = new();
+        locals.Setup(x => x.Find(It.IsAny<CancellationToken>())).ReturnsAsync([new LocalServer { Port = 5000, Version = "1.0.0" }]);
+        ConnectionSettings local = new() { Host = "127.0.0.1", Port = 5000, AccessKey = string.Empty, Local = true };
+        factory.Setup(x => x.Connect(local, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        MainViewModel main = new(info.Object, factory.Object, store.Object, ClientLayout.Tabs, null, null, null, null, null, null, null, null, TimeSpan.FromMilliseconds(20), null, locals.Object);
+        await main.Start();
+        ConnectViewModel connect = Assert.IsType<ConnectViewModel>(main.Current);
+        await WaitFor(() => locals.Invocations.Count > 2 && connect.HasLocalServers);
+
+        connect.LocalServers[0].Command.Execute(null);
+        await WaitFor(() => main.Current is HomeViewModel);
+        await Task.Delay(100);
+        int searches = locals.Invocations.Count;
+        await Task.Delay(150);
+
+        Assert.Equal(searches, locals.Invocations.Count);
+    }
+
+    [Fact]
     public async Task Start_WhenUnauthorizedAtFirstDoesNotRetry()
     {
         store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);

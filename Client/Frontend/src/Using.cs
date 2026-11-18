@@ -1,10 +1,13 @@
 global using System.Collections.Concurrent;
 global using System.Collections.ObjectModel;
 global using System.ComponentModel;
+global using System.Net;
+global using System.IO.Pipes;
 global using System.Net.Sockets;
 global using System.Security.Cryptography;
 global using System.Runtime.CompilerServices;
 global using System.Text.Json;
+global using System.Text.Json.Serialization;
 global using System.Windows.Input;
 global using Avalonia;
 global using Avalonia.Controls;

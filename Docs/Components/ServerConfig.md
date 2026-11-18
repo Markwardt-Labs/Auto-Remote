@@ -14,6 +14,7 @@ The server reads one JSON file at startup (the path passed as the first argument
 | `dotnetCommand` | `dotnet` | .NET executable that runs scripts and tasks with `run --file`; only needed for scripts. |
 | `certificateFile` | none | PFX certificate presented to clients. |
 | `certificatePassword` | none | Password of the PFX certificate, if it has one. |
+| `localUsers` | not set | Accounts a desktop client on the same machine may get the port and key from, for its local connect button: not set allows every regular user account, `[]` turns it off, a list of account names allows exactly those. |
 
 ## Voice input
 

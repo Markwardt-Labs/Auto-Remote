@@ -56,6 +56,11 @@ internal sealed record ServerConfig
     public IReadOnlyList<string> SpeechArguments { get; init; } = [];
 
     /// <summary>
+    /// Gets the accounts of this machine that a desktop client running as them may ask for the port and access key, so that its connect screen can offer one button for this server. Not set (the default) allows every regular user account, which leaves out the accounts of the system and its services; an empty list turns the local channel off; otherwise exactly the named accounts are allowed.
+    /// </summary>
+    public IReadOnlyList<string>? LocalUsers { get; init; }
+
+    /// <summary>
     /// Gets the settings the file holds that this release does not read, by name as written. Only used to take the AI settings of an older release over once (see <see cref="IPrompterHost.Configure" />).
     /// </summary>
     [JsonExtensionData]

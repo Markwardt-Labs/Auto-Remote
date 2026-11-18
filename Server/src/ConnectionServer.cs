@@ -25,7 +25,7 @@ internal interface IConnectionServer
 }
 
 /// <inheritdoc />
-internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFactory channels, IWebSocketUpgrade upgrade, ICertificateProvider certificates, IRequestHandler handler, IEventHub events, ILog log) : IConnectionServer
+internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFactory channels, IWebSocketUpgrade upgrade, ICertificateProvider certificates, IRequestHandler handler, IEventHub events, ILog log, ILocalListener? local = null) : IConnectionServer
 {
     private readonly TimeSpan timeout = TimeSpan.FromSeconds(5);
 
@@ -39,13 +39,18 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
     public async Task Run(ServerConfig config, CancellationToken cancellation)
     {
         using X509Certificate2 certificate = await certificates.Load(config, cancellation);
-        Certified?.Invoke(Convert.ToHexString(certificate.GetCertHash(HashAlgorithmName.SHA256)));
+        string fingerprint = Convert.ToHexString(certificate.GetCertHash(HashAlgorithmName.SHA256));
+        Certified?.Invoke(fingerprint);
         TcpListener listener = new(IPAddress.Any, config.Port);
+        using CancellationTokenSource closing = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
+        Task channel = Task.CompletedTask;
 
         try
         {
             listener.Start();
-            Listening?.Invoke(((IPEndPoint)listener.LocalEndpoint).Port);
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            channel = local?.Run(config, port, fingerprint, closing.Token) ?? channel;
+            Listening?.Invoke(port);
             await Accept(listener, config.Key, certificate, cancellation);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -54,6 +59,8 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
         finally
         {
             listener.Stop();
+            await closing.CancelAsync();
+            await channel;
         }
     }
 

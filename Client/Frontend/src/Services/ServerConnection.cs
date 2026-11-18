@@ -666,15 +666,27 @@ internal interface IServerConnection : IAsyncDisposable
     }
 
     /// <inheritdoc />
-    public sealed class Factory(IMessageChannel.IFactory channels, ILog log, Func<string, string?>? environment = null) : IFactory
+    public sealed class Factory(IMessageChannel.IFactory channels, ILog log, Func<string, string?>? environment = null, ILocalServers? locals = null) : IFactory
     {
         private readonly TimeSpan timeout = TimeSpan.FromSeconds(10);
 
         /// <inheritdoc />
         public async Task<IServerConnection> Connect(ConnectionSettings settings, CancellationToken cancellation)
         {
-            (ClientWebSocket socket, IMessageChannel channel, string? version) = await Open(settings, cancellation);
-            return new ServerConnection(socket, channel, version, token => Open(settings, token), log, $"{settings.Host}:{settings.Port}", environment);
+            ConnectionSettings resolved = await Resolve(settings, cancellation);
+            (ClientWebSocket socket, IMessageChannel channel, string? version) = await Open(resolved, cancellation);
+            return new ServerConnection(socket, channel, version, async token => await Open(await Resolve(settings, token), token), log, $"{resolved.Host}:{resolved.Port}", environment);
+        }
+
+        private async Task<ConnectionSettings> Resolve(ConnectionSettings settings, CancellationToken cancellation)
+        {
+            if (!settings.Local)
+            {
+                return settings;
+            }
+
+            LocalHandover handover = await (locals ?? throw new IOException("This app cannot connect to a server on this machine without asking for the key.")).Open(settings.Port, cancellation);
+            return settings with { Host = handover.Host, Port = handover.Port, AccessKey = handover.Key, Fingerprint = handover.Fingerprint };
         }
 
         private async Task<(ClientWebSocket socket, IMessageChannel channel, string? version)> Open(ConnectionSettings settings, CancellationToken cancellation)
@@ -698,7 +710,7 @@ internal interface IServerConnection : IAsyncDisposable
                     }
 
                     fingerprint = Convert.ToHexString(SHA256.HashData(certificate.GetRawCertData()));
-                    return true;
+                    return settings.Fingerprint is null || string.Equals(fingerprint, settings.Fingerprint, StringComparison.OrdinalIgnoreCase);
                 };
 
                 Uri address = new UriBuilder("wss", settings.Host, settings.Port).Uri;

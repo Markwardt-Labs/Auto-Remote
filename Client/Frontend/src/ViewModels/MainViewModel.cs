@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null, TimeSpan? updateWait = null) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null, TimeSpan? updateWait = null, ILocalServers? locals = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
@@ -36,6 +36,11 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             if (current is HomeViewModel previous)
             {
                 previous.PropertyChanged -= HomeChanged;
+            }
+
+            if (current is ConnectViewModel leaving && !ReferenceEquals(current, value))
+            {
+                leaving.Stop();
             }
 
             if (Set(ref current, value))
@@ -279,7 +284,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
 
     private ConnectViewModel ShowConnect(ConnectionSettings? settings, string? error)
     {
-        ConnectViewModel connect = new(factory, settings, $"{info.Name} {info.Version}");
+        ConnectViewModel connect = new(factory, settings, $"{info.Name} {info.Version}", locals, retryEvery);
         connect.Connected += async (opened, used) =>
         {
             await store.Save(used, CancellationToken.None);
@@ -292,6 +297,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         }
 
         Current = connect;
+        _ = connect.Watch();
         return connect;
     }
 

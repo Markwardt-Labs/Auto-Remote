@@ -51,4 +51,21 @@ public sealed class SettingsStoreTests : IDisposable
 
         Assert.Null(await new SettingsStore(path).LoadUpdateStart(CancellationToken.None));
     }
+
+    [Fact]
+    public async Task Save_WritesAnOrdinaryConnectionWithoutTheLocalFieldsAndKeepsALocalOneWithoutAKey()
+    {
+        string path = temp.Combine("settings.json");
+        SettingsStore store = new(path);
+
+        await store.Save(new ConnectionSettings { Host = "box", Port = 5, AccessKey = "k" }, CancellationToken.None);
+        string ordinary = await File.ReadAllTextAsync(path);
+        await store.Save(new ConnectionSettings { Host = "127.0.0.1", Port = 6, AccessKey = string.Empty, Local = true }, CancellationToken.None);
+        ConnectionSettings? local = await store.Load(CancellationToken.None);
+
+        Assert.DoesNotContain("local", ordinary);
+        Assert.DoesNotContain("fingerprint", ordinary);
+        Assert.Equal(new ConnectionSettings { Host = "127.0.0.1", Port = 6, AccessKey = string.Empty, Local = true }, local);
+        Assert.DoesNotContain("fingerprint", await File.ReadAllTextAsync(path));
+    }
 }

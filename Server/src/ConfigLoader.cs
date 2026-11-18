@@ -51,6 +51,11 @@ internal sealed class ConfigLoader : IConfigLoader
             throw new InvalidDataException("Config 'key' must not be empty.");
         }
 
+        if (config.LocalUsers is { } users && users.Any(string.IsNullOrWhiteSpace))
+        {
+            throw new InvalidDataException("Config 'localUsers' must not contain an empty name.");
+        }
+
         if (!Directory.Exists(config.DefaultFolder))
         {
             throw new InvalidDataException($"Config 'defaultFolder' '{config.DefaultFolder}' is not an existing folder.");

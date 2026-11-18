@@ -14,7 +14,7 @@ public sealed class App : ClientApp
             IExecutableInstaller installer = new IExecutableInstaller.Factory().Create(new IReleaseFeed.Factory().Create());
             installer.Clean();
             DesktopNewWindow newWindow = new();
-            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()), notifier, null, new DesktopVoiceRecorder(), newWindow, new DesktopUpdater(installer, newWindow));
+            MainView view = CreateMainView(typeof(App).Assembly, ClientLayout.Panels, DataFolder(desktop.Args), new DesktopChime(new ChimeSound()), notifier, null, new DesktopVoiceRecorder(), newWindow, new DesktopUpdater(installer, newWindow), true);
             Window window = new()
             {
                 Title = "Auto Remote",

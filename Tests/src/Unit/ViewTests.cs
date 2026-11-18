@@ -262,6 +262,38 @@ public sealed class ViewTests(HeadlessFixture fixture)
     public async Task ConnectView_Builds() => Assert.True(await fixture.Run(() => Shows<ConnectView>(new ConnectView(), new ConnectViewModel(new Mock<IServerConnection.IFactory>().Object, null, "v"))));
 
     [Fact]
+    public async Task ConnectView_ShowsAButtonForTheLocalServerAndNoneWithoutOne()
+    {
+        Mock<ILocalServers> locals = new();
+        locals.Setup(x => x.Find(It.IsAny<CancellationToken>())).ReturnsAsync([new LocalServer { Port = 5000, Version = "1.0.0" }]);
+        ConnectViewModel model = new(new Mock<IServerConnection.IFactory>().Object, null, "v", locals.Object);
+        Task watching = model.Watch();
+
+        for (int attempt = 0; attempt < 250 && !model.HasLocalServers; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        string[] withLocal = await fixture.Run(() => ConnectButtons(model));
+        string[] without = await fixture.Run(() => ConnectButtons(new ConnectViewModel(new Mock<IServerConnection.IFactory>().Object, null, "v")));
+        model.Stop();
+        await watching;
+
+        Assert.Equal(["Connect to Local Server", "Connect"], withLocal);
+        Assert.Equal(["Connect"], without);
+    }
+
+    private string[] ConnectButtons(ConnectViewModel model)
+    {
+        ConnectView view = new() { DataContext = model };
+        Window window = new() { Width = 390, Height = 800, Content = view };
+        window.Show();
+        string[] buttons = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsVisible).Select(button => $"{button.Content}")];
+        window.Close();
+        return buttons;
+    }
+
+    [Fact]
     public async Task NewWorkspaceView_Builds() => Assert.True(await fixture.Run(() => Shows<NewWorkspaceView>(new NewWorkspaceView(), new NewWorkspaceViewModel(connection.Object))));
 
     [Fact]
