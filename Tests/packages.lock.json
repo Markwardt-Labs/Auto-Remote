@@ -146,8 +146,8 @@
       },
       "Markwardt.LiveAi": {
         "type": "Transitive",
-        "resolved": "2.2.1",
-        "contentHash": "b6y7B5dpgqroOVjkWJEo2SLSS75cicZIB4jZRF2skg8i/C83h+1fRTQPSdqCsGI7djf5n53cvtVy5OlGCqpxKg==",
+        "resolved": "2.2.2",
+        "contentHash": "yDPr2HlWxLjTxSh+qwe0i+uiq3aSYqkJgLQDCdeRd1C2QGKaiEeYRhWtJOkLS22ynyCqnE24Qop9pSUPJA/6Cw==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
@@ -273,7 +273,7 @@
         "type": "Project",
         "dependencies": {
           "Markwardt.AutoRemote": "[1.0.0, )",
-          "Markwardt.LiveAi": "[2.2.1, )",
+          "Markwardt.LiveAi": "[2.2.2, )",
           "Whisper.net": "[1.9.2-preview1, )",
           "Whisper.net.Runtime.Vulkan": "[1.9.2-preview1, )"
         }

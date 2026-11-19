@@ -66,7 +66,7 @@ internal sealed class ScriptsViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets a value indicating whether a script or task is running, which keeps the AI and other scripts from starting.
+    /// Gets a value indicating whether any script or task is running, which locks nothing: the AI, git and other scripts carry on beside it.
     /// </summary>
     public bool IsRunning
     {

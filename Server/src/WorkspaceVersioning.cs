@@ -142,8 +142,6 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
 
     private readonly int messageAttempts = 2;
 
-    private readonly TimeSpan aiTimeout = TimeSpan.FromMinutes(20);
-
     private readonly TimeSpan aiPoll = TimeSpan.FromMilliseconds(200);
 
     /// <inheritdoc />
@@ -681,9 +679,7 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
 
     private async Task Idle(Guid id, CancellationToken cancellation)
     {
-        DateTime limit = DateTime.UtcNow + aiTimeout;
-
-        while (prompts.IsBusy(id) && DateTime.UtcNow < limit)
+        while (prompts.IsBusy(id))
         {
             await Task.Delay(aiPoll, cancellation);
         }

@@ -16,7 +16,7 @@ The Android and desktop clients draw the same UI with Avalonia, so everything vi
 
 ## The web client is one static file
 
-`Client/Web/index.html` is the whole browser frontend: HTML, CSS and JavaScript with no build step, no dependencies and no serving code, so it can be dropped on any static host (or opened from disk). It mirrors the Avalonia clients' screens and behavior and connects straight to the server, over secure WebSocket (`wss`), the same transport the Avalonia clients use (see the protocol document). It is hand-written JavaScript rather than a second Avalonia target because a single file with nothing to build is what lets it be hosted anywhere; the trade-off is that it is not covered by the .NET tests and has to be kept in step with the Avalonia clients by hand.
+`Client/Web/index.html` is the whole browser frontend: HTML, CSS and JavaScript with no build step, no dependencies and no serving code, so it can be dropped on any static host (or opened from disk). It mirrors the Avalonia clients' screens and behavior and connects straight to the server, over secure WebSocket (`wss`), the same transport the Avalonia clients use. It is hand-written JavaScript rather than a second Avalonia target because a single file with nothing to build is what lets it be hosted anywhere; the trade-off is that it is not covered by the .NET tests and has to be kept in step with the Avalonia clients by hand.
 
 ## Client and server must run the same version
 
