@@ -120,7 +120,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets or sets why the AI cannot be given work now, such as a script or git running in the workspace, or <see langword="null" /> when it can; it is shown as the hint of the message box.
+    /// Gets or sets why the AI cannot be given work now, such as git running in the workspace, or <see langword="null" /> when it can; it is shown as the hint of the message box.
     /// </summary>
     public string? BlockReason
     {
@@ -282,7 +282,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public AsyncCommand RemoveAttachmentCommand { get; }
 
     /// <summary>
-    /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work, but not while a script or git runs.
+    /// Gets the command that sends <see cref="Input" /> to the AI; it stays available while the AI works, and the prompt then joins that work, but not while git runs.
     /// </summary>
     public AsyncCommand SendCommand { get; }
 

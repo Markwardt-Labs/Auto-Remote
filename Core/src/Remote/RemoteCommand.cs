@@ -287,7 +287,7 @@ public enum RemoteCommand
     GetScripts,
 
     /// <summary>
-    /// Runs the <c>.cs</c> script or <c>.task</c> file <see cref="RemoteRequest.Path" /> (relative to the workspace folder) with <c>dotnet run --file</c> in the workspace folder and answers once it started. Fails while the AI, a git action or another script is running. Progress arrives as <see cref="RemoteEvent" /> pushes.
+    /// Runs the <c>.cs</c> script or <c>.task</c> file <see cref="RemoteRequest.Path" /> (relative to the workspace folder) with <c>dotnet run --file</c> in the workspace folder and answers once it started. Runs beside the AI, git actions and other scripts, and fails only when the file, or a script the task lists, is already running. Progress arrives as <see cref="RemoteEvent" /> pushes.
     /// </summary>
     RunScript,
 

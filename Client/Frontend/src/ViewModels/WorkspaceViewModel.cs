@@ -57,11 +57,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         };
         Scripts.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(ScriptsViewModel.IsRunning))
-            {
-                UpdateState();
-            }
-            else if (args.PropertyName == nameof(ScriptsViewModel.ActivePaths))
+            if (args.PropertyName == nameof(ScriptsViewModel.ActivePaths))
             {
                 Files.ShowRunning(Scripts.ActivePaths);
             }
@@ -202,19 +198,19 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool IsAiWorking => Chat.IsAiWorking;
 
     /// <summary>
-    /// Gets what the workspace is doing: only one kind of work runs at a time, and more work only starts once it is <see cref="WorkspaceState.Ready" />, except AI input, which is also accepted while <see cref="WorkspaceState.Working" />.
+    /// Gets what the workspace is doing: only one kind of work runs at a time, and more work only starts once it is <see cref="WorkspaceState.Ready" />, except AI input, which is also accepted while <see cref="WorkspaceState.Working" />. Scripts are not work in this sense: they run beside any state.
     /// </summary>
-    public WorkspaceState State => forced ?? (Scripts.IsRunning ? WorkspaceState.Running : Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
+    public WorkspaceState State => forced ?? (Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
 
     /// <summary>
-    /// Gets a value indicating whether the work in the workspace can be stopped: the AI works, a script runs or git works.
+    /// Gets a value indicating whether the work in the workspace can be stopped: the AI works or git works.
     /// </summary>
-    public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing;
+    public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Managing;
 
     /// <summary>
-    /// Gets a value indicating whether the message box offers the work buttons instead of sending: a script or git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand, pause and loop buttons.
+    /// Gets a value indicating whether the message box offers the work buttons instead of sending: git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand, pause and loop buttons.
     /// </summary>
-    public bool ShowHaltButtons => State is WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
+    public bool ShowHaltButtons => State is WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
 
     /// <summary>
     /// Gets the panel in which a loop of the AI is set up.
@@ -292,9 +288,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowSendButton => !ShowHaltButtons && Chat.HasContent;
 
     /// <summary>
-    /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and no script, git action or cancellation is running. It also shows while the AI works, next to the stop button, since its prompt can be sent to work in progress.
+    /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and no git action or cancellation is running. It also shows while the AI works, next to the stop button, since its prompt can be sent to work in progress.
     /// </summary>
-    public bool ShowReviewButton => !Chat.HasContent && State is not (WorkspaceState.Running or WorkspaceState.Managing or WorkspaceState.Canceling);
+    public bool ShowReviewButton => !Chat.HasContent && State is not (WorkspaceState.Managing or WorkspaceState.Canceling);
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the expand button next to the review button, which is whenever the review button shows.
@@ -514,13 +510,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         WorkspaceState state = State;
         Chat.BlockReason = state switch
         {
-            WorkspaceState.Running => "A script is running, wait for it to finish",
             WorkspaceState.Managing => "Git is working, wait for it to finish",
             WorkspaceState.Stopping => "Stopping, wait for it to finish",
             WorkspaceState.Canceling => "Cancelling and reverting, wait for it to finish",
             _ => null
         };
-        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Stopping or WorkspaceState.Canceling;
+        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Stopping or WorkspaceState.Canceling;
         Raise(nameof(State));
         Raise(nameof(CanHalt));
         Raise(nameof(ShowHaltButtons));
@@ -689,20 +684,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     private async Task RunScript(string path)
     {
         Tab = WorkspaceTab.Script;
-
-        if (State != WorkspaceState.Ready)
-        {
-            Scripts.Reject(State switch
-            {
-                WorkspaceState.Running => "A script is already running.",
-                WorkspaceState.Managing => "Wait for git to finish before running a script.",
-                WorkspaceState.Stopping => "Wait for the work to finish stopping before running a script.",
-                WorkspaceState.Canceling => "Wait for the work to finish being cancelled before running a script.",
-                _ => "Wait for the AI to finish before running a script."
-            });
-            return;
-        }
-
         await Scripts.Run(path);
     }
 

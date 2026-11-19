@@ -362,19 +362,6 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal(["long", "again"], Session.Prompts.Select(prompt => prompt.Text).ToList());
     }
 
-    [Theory]
-    [InlineData(WorkspaceState.Running)]
-    public async Task Prompt_IsRefusedWhileOtherWorkHoldsTheWorkspace(WorkspaceState busy)
-    {
-        activity.TryEnter(workspace.Id, busy);
-
-        await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "hello", CancellationToken.None));
-
-        Assert.Empty(prompter.Sessions);
-        Assert.False(service.IsBusy(workspace.Id));
-        Assert.Equal(busy, activity.Get(workspace.Id));
-    }
-
     [Fact]
     public async Task Prompt_IsRefusedWhileTheWorkIsBeingStopped()
     {

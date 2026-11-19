@@ -611,7 +611,7 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="path">The file, relative to the workspace folder.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <remarks>The display of this machine (X11 or Wayland) is sent along so that a graphical script can open its window here; the server uses it only when this machine is its own.</remarks>
-    /// <exception cref="RemoteException">The server refused, for example while the AI or another script is running.</exception>
+    /// <exception cref="RemoteException">The server refused, for example because the file is already running.</exception>
     Task RunScript(Guid id, string path, CancellationToken cancellation);
 
     /// <summary>

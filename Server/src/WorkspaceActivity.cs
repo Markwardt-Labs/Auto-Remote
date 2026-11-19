@@ -28,7 +28,7 @@ internal interface IWorkspaceActivity
     void Leave(Guid id, WorkspaceState state);
 
     /// <summary>
-    /// Moves a workspace that is working, running or managing into <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />, which no other work can leave until it calls <see cref="Leave" />.
+    /// Moves a workspace that is working or managing into <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />, which no other work can leave until it calls <see cref="Leave" />.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="halting">The state to enter: <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />.</param>
@@ -100,7 +100,7 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
         {
             WorkspaceState current = states.GetValueOrDefault(id);
 
-            if (current is not (WorkspaceState.Working or WorkspaceState.Running or WorkspaceState.Managing))
+            if (current is not (WorkspaceState.Working or WorkspaceState.Managing))
             {
                 return null;
             }
@@ -115,7 +115,6 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
     public string Describe(Guid id) => Get(id) switch
     {
         WorkspaceState.Working => "The AI is working in this workspace right now.",
-        WorkspaceState.Running => "A script is running in this workspace right now.",
         WorkspaceState.Managing => "A git action is running in this workspace right now.",
         WorkspaceState.Stopping => "The work in this workspace is being stopped right now.",
         WorkspaceState.Canceling => "The work in this workspace is being cancelled and reverted right now.",

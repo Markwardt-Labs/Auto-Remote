@@ -352,7 +352,7 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool IsAiWorking => active?.IsAiWorking ?? false;
 
     /// <summary>
-    /// Gets a value indicating whether the AI is working or a script is running in the focused workspace, which turns the header blue.
+    /// Gets a value indicating whether the focused workspace is busy (the AI works or git runs), which turns the header blue.
     /// </summary>
     public bool IsWorking => active?.IsWorking ?? false;
 

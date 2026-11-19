@@ -13,7 +13,7 @@ internal interface IScriptRunner
     void Configure(ServerConfig config, CancellationToken stopping);
 
     /// <summary>
-    /// Checks whether a script or task is running in a workspace.
+    /// Checks whether any script or task is running in a workspace.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <returns><see langword="true" /> if a run is in progress.</returns>
@@ -27,13 +27,13 @@ internal interface IScriptRunner
     ScriptRuns List(Guid id);
 
     /// <summary>
-    /// Starts a script or task and returns once it started; progress is published as events. A run of the same file that was kept is replaced.
+    /// Starts a script or task and returns once it started; progress is published as events. Runs of other files go on beside it, whatever else the workspace is doing. A run of the same file that was kept is replaced.
     /// </summary>
     /// <param name="workspace">The workspace, whose folder is the working folder of the run.</param>
     /// <param name="path">The <c>.cs</c> or <c>.task</c> file, relative to the workspace folder.</param>
     /// <param name="environment">Environment variables added to the environment of every script the run starts.</param>
     /// <param name="cancellation">Cancels reading the task file.</param>
-    /// <exception cref="RequestException">A run is in progress, or the path leaves the workspace folder, is missing, or is not a script or task, or a script the task lists is not usable.</exception>
+    /// <exception cref="RequestException">The file, or a script the task lists, is already running, or the path leaves the workspace folder, is missing, or is not a script or task, or a script the task lists is not usable.</exception>
     Task Run(WorkspaceInfo workspace, string path, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation);
 
     /// <summary>
@@ -44,7 +44,7 @@ internal interface IScriptRunner
     void Stop(Guid id, string path);
 
     /// <summary>
-    /// Stops whatever script or task is running in a workspace and waits until its processes have ended; does nothing when none runs.
+    /// Stops every script and task running in a workspace and waits until their processes have ended; does nothing when none runs.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <returns>A task that completes once nothing runs in the workspace.</returns>
@@ -70,7 +70,7 @@ internal interface IScriptRunner
 }
 
 /// <inheritdoc />
-internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity) : IScriptRunner
+internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
 {
     private readonly ConcurrentDictionary<Guid, Workspace> workspaces = new();
 
@@ -90,7 +90,18 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
     }
 
     /// <inheritdoc />
-    public bool IsRunning(Guid id) => workspaces.TryGetValue(id, out Workspace? workspace) && workspace.Active;
+    public bool IsRunning(Guid id)
+    {
+        if (!workspaces.TryGetValue(id, out Workspace? workspace))
+        {
+            return false;
+        }
+
+        lock (workspace.Lock)
+        {
+            return workspace.Entries.Any(entry => entry.TaskPath is null && entry.State is ScriptState.Running or ScriptState.Pending);
+        }
+    }
 
     /// <inheritdoc />
     public ScriptRuns List(Guid id)
@@ -125,14 +136,12 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
 
         lock (state.Lock)
         {
-            if (state.Active)
-            {
-                throw new RequestException("A script is already running in this workspace.");
-            }
+            string[] claimed = [.. state.Entries.Where(entry => entry.TaskPath is null && entry.State is ScriptState.Running or ScriptState.Pending).SelectMany(entry => entry.Scripts.Prepend(entry.Path))];
+            string? busy = batches.SelectMany(batch => batch).Prepend(relative).FirstOrDefault(claimed.Contains);
 
-            if (!activity.TryEnter(workspace.Id, WorkspaceState.Running))
+            if (busy is not null)
             {
-                throw new RequestException(activity.Describe(workspace.Id));
+                throw new RequestException($"'{busy}' is already running in this workspace.");
             }
 
             Forget(workspace.Id, state, relative);
@@ -150,8 +159,6 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
                     Publish(workspace.Id, child);
                 }
             }
-
-            state.Active = true;
         }
 
         _ = Task.Run(() => Execute(workspace, root, state, main, batches, environment), CancellationToken.None);
@@ -387,12 +394,6 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
         }
         finally
         {
-            lock (state.Lock)
-            {
-                state.Active = false;
-            }
-
-            activity.Leave(workspace.Id, WorkspaceState.Running);
             Finish(workspace.Id, state, main, result);
         }
     }
@@ -533,8 +534,6 @@ internal sealed class ScriptRunner(IEventHub events, IWorkspaceActivity activity
         public Lock Lock { get; } = new();
 
         public List<Entry> Entries { get; } = [];
-
-        public bool Active { get; set; }
     }
 
     private sealed class Entry(string path, bool isTask, string? taskPath, ScriptState state, IReadOnlyList<string> scripts)

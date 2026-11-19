@@ -19,7 +19,6 @@ public sealed class WorkspaceActivityTests
 
     [Theory]
     [InlineData(WorkspaceState.Working)]
-    [InlineData(WorkspaceState.Running)]
     [InlineData(WorkspaceState.Managing)]
     public void TryEnter_FromReady_TakesTheWorkspaceUntilItLeaves(WorkspaceState state)
     {
@@ -32,12 +31,7 @@ public sealed class WorkspaceActivityTests
     }
 
     [Theory]
-    [InlineData(WorkspaceState.Working, WorkspaceState.Running)]
     [InlineData(WorkspaceState.Working, WorkspaceState.Managing)]
-    [InlineData(WorkspaceState.Running, WorkspaceState.Working)]
-    [InlineData(WorkspaceState.Running, WorkspaceState.Managing)]
-    [InlineData(WorkspaceState.Running, WorkspaceState.Running)]
-    [InlineData(WorkspaceState.Managing, WorkspaceState.Running)]
     [InlineData(WorkspaceState.Managing, WorkspaceState.Managing)]
     public void TryEnter_FromAnotherState_IsRefusedAndKeepsTheState(WorkspaceState held, WorkspaceState wanted)
     {
@@ -65,16 +59,15 @@ public sealed class WorkspaceActivityTests
     [Fact]
     public void Leave_OfAnotherState_ChangesNothing()
     {
-        activity.TryEnter(id, WorkspaceState.Running);
+        activity.TryEnter(id, WorkspaceState.Managing);
 
         activity.Leave(id, WorkspaceState.Working);
 
-        Assert.Equal(WorkspaceState.Running, activity.Get(id));
+        Assert.Equal(WorkspaceState.Managing, activity.Get(id));
     }
 
     [Theory]
     [InlineData(WorkspaceState.Working, "AI is working")]
-    [InlineData(WorkspaceState.Running, "script is running")]
     [InlineData(WorkspaceState.Managing, "git action is running")]
     public void Describe_NamesTheWorkInProgress(WorkspaceState state, string text)
     {
@@ -85,7 +78,6 @@ public sealed class WorkspaceActivityTests
 
     [Theory]
     [InlineData(WorkspaceState.Working)]
-    [InlineData(WorkspaceState.Running)]
     [InlineData(WorkspaceState.Managing)]
     public void Halt_MovesWorkIntoAStateNothingElseCanEnterUntilItLeaves(WorkspaceState held)
     {
@@ -95,7 +87,7 @@ public sealed class WorkspaceActivityTests
 
         Assert.Equal(WorkspaceState.Canceling, activity.Get(id));
         Assert.False(activity.TryEnter(id, WorkspaceState.Working));
-        Assert.False(activity.TryEnter(id, WorkspaceState.Running));
+        Assert.False(activity.TryEnter(id, WorkspaceState.Managing));
         Assert.Null(activity.Halt(id, WorkspaceState.Stopping));
         activity.Leave(id, held);
         Assert.Equal(WorkspaceState.Canceling, activity.Get(id));

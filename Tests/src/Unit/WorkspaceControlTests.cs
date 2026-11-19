@@ -6,8 +6,6 @@ public sealed class WorkspaceControlTests
 
     private readonly Mock<IWorkspaceLoops> loops = new();
 
-    private readonly Mock<IScriptRunner> scripts = new();
-
     private readonly Mock<IWorkspaceVersioning> versioning = new();
 
     private readonly Mock<IWorkspaceSnapshots> snapshots = new();
@@ -23,13 +21,12 @@ public sealed class WorkspaceControlTests
     public WorkspaceControlTests()
     {
         activity = new WorkspaceActivity(hub);
-        control = new WorkspaceControl(activity, prompts.Object, loops.Object, scripts.Object, versioning.Object, snapshots.Object);
+        control = new WorkspaceControl(activity, prompts.Object, loops.Object, versioning.Object, snapshots.Object);
         snapshots.Setup(x => x.Has(id)).Returns(true);
     }
 
     [Theory]
     [InlineData(WorkspaceState.Working)]
-    [InlineData(WorkspaceState.Running)]
     [InlineData(WorkspaceState.Managing)]
     public async Task Stop_CancelsTheLoopOfTheWorkspaceWhateverWorkItEnds(WorkspaceState work)
     {
@@ -65,18 +62,6 @@ public sealed class WorkspaceControlTests
         prompts.Verify(x => x.Interrupt(id), Times.Once);
         snapshots.Verify(x => x.Revert(It.IsAny<Guid>()), Times.Never);
         snapshots.Verify(x => x.Discard(id), Times.Once);
-        Assert.Equal(WorkspaceState.Ready, activity.Get(id));
-    }
-
-    [Fact]
-    public async Task Stop_StopsEveryRunningScript()
-    {
-        activity.TryEnter(id, WorkspaceState.Running);
-
-        await control.Stop(id);
-
-        scripts.Verify(x => x.StopAll(id), Times.Once);
-        snapshots.Verify(x => x.Revert(It.IsAny<Guid>()), Times.Never);
         Assert.Equal(WorkspaceState.Ready, activity.Get(id));
     }
 
@@ -149,16 +134,14 @@ public sealed class WorkspaceControlTests
         Assert.Equal(WorkspaceState.Stopping, activity.Get(id));
     }
 
-    [Theory]
-    [InlineData(WorkspaceState.Running)]
-    [InlineData(WorkspaceState.Managing)]
-    public async Task Cancel_IsRefusedForScriptsAndGitActionsWhichOnlyStop(WorkspaceState held)
+    [Fact]
+    public async Task Cancel_IsRefusedForAGitActionWhichOnlyStops()
     {
-        activity.TryEnter(id, held);
+        activity.TryEnter(id, WorkspaceState.Managing);
 
         RequestException refused = await Assert.ThrowsAsync<RequestException>(() => control.Cancel(id));
 
         Assert.Contains("Stop it instead", refused.Message);
-        Assert.Equal(held, activity.Get(id));
+        Assert.Equal(WorkspaceState.Managing, activity.Get(id));
     }
 }

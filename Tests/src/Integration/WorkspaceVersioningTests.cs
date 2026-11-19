@@ -541,11 +541,11 @@ public sealed class WorkspaceVersioningTests : IDisposable
         Assert.False(File.Exists(Path.Combine(work, "n.txt")));
 
         activity.Leave(workspace.Id, WorkspaceState.Working);
-        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
         await versioning.Sync(workspace, CancellationToken.None);
         Assert.False(File.Exists(Path.Combine(work, "n.txt")));
 
-        activity.Leave(workspace.Id, WorkspaceState.Running);
+        activity.Leave(workspace.Id, WorkspaceState.Managing);
         Commit(work, "local.txt", "l", "local commit");
         await versioning.Sync(workspace, CancellationToken.None);
         Assert.False(File.Exists(Path.Combine(work, "n.txt")));
@@ -558,7 +558,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
 
     [Theory]
     [InlineData(WorkspaceState.Working)]
-    [InlineData(WorkspaceState.Running)]
+    [InlineData(WorkspaceState.Managing)]
     public async Task Perform_IsRefusedUnlessTheWorkspaceIsReady(WorkspaceState busy)
     {
         activity.TryEnter(workspace.Id, busy);

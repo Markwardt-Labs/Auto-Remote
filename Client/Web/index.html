@@ -2171,7 +2171,7 @@ class WorkspaceView {
   }
 
   workState() {
-    return this.scriptsRunning() ? "Running" : this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
+    return this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
   }
 
   refuseWork() {
@@ -2181,7 +2181,7 @@ class WorkspaceView {
       return false;
     }
 
-    this.home.notice("Git", state === "Managing" ? "A git action is already running." : state === "Stopping" || state === "Canceling" ? "Wait for the work to finish being stopped." : "Wait for the AI or the script to finish before running git actions.");
+    this.home.notice("Git", state === "Managing" ? "A git action is already running." : state === "Stopping" || state === "Canceling" ? "Wait for the work to finish being stopped." : "Wait for the AI to finish before running git actions.");
     return true;
   }
 
@@ -2387,10 +2387,6 @@ class WorkspaceView {
     return entry.state === "Running" || entry.state === "Pending";
   }
 
-  scriptsRunning() {
-    return this.scripts.entries.some(entry => this.scriptActive(entry));
-  }
-
   scriptDisplayed() {
     const selected = this.scriptFind(this.scripts.selected);
     return selected?.isTask ? selected.children.find(entry => entry.path === this.scripts.child) ?? null : selected;
@@ -2516,7 +2512,6 @@ class WorkspaceView {
   scriptsChanged() {
     this.renderScripts();
     this.renderTree();
-    this.applyState();
   }
 
   shownScript(entry) {
@@ -2584,13 +2579,6 @@ class WorkspaceView {
 
   async runScript(path) {
     this.showSide("script");
-    const state = this.state();
-
-    if (state !== "Ready") {
-      this.scriptError.set({ Running: "A script is already running.", Managing: "Wait for git to finish before running a script.", Stopping: "Wait for the work to finish stopping before running a script.", Canceling: "Wait for the work to finish being cancelled before running a script." }[state] ?? "Wait for the AI to finish before running a script.");
-      return;
-    }
-
     this.scripts.wanted = path;
 
     if (!(await attempt(() => this.connection.runScript(this.info.id, path), this.scriptError)).ok) {
@@ -2673,7 +2661,7 @@ class WorkspaceView {
     }
 
     this.gitBar.hidden = state !== "Managing";
-    this.input.placeholder = { Running: "A script is running, wait for it to finish", Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
+    this.input.placeholder = { Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
     this.updateSend();
     this.home.updateWorking(this);
   }
@@ -3019,11 +3007,11 @@ class WorkspaceView {
   updateSend() {
     const state = this.state();
     const empty = this.input.value.trim().length === 0 && this.attachments.length === 0;
-    const halt = (state === "Working" && empty) || state === "Running" || state === "Managing" || state === "Canceling";
+    const halt = (state === "Working" && empty) || state === "Managing" || state === "Canceling";
     this.sendButton.disabled = !this.takesAiInput();
     this.sendButton.hidden = halt || empty;
     this.reviewButton.disabled = !this.takesAiInput();
-    const prompting = empty && state !== "Running" && state !== "Managing" && state !== "Canceling";
+    const prompting = empty && state !== "Managing" && state !== "Canceling";
     this.reviewButton.hidden = !prompting;
     this.expandButton.disabled = !this.takesAiInput();
     this.expandButton.hidden = !prompting;
@@ -4861,7 +4849,7 @@ class Home {
   }
 
   closeHaltDialogUnlessRunning(state) {
-    if (this.haltDialog && this.dialogHost.firstChild === this.haltDialog && state !== "Working" && state !== "Running" && state !== "Managing") {
+    if (this.haltDialog && this.dialogHost.firstChild === this.haltDialog && state !== "Working" && state !== "Managing") {
       this.closeDialog();
     }
   }

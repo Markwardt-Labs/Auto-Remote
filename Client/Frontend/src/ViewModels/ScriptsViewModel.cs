@@ -259,12 +259,6 @@ internal sealed class ScriptsViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Shows why a script could not be run.
-    /// </summary>
-    /// <param name="message">The reason.</param>
-    public void Reject(string message) => Error = message;
-
-    /// <summary>
     /// Stops following the runs.
     /// </summary>
     public void Dispose()

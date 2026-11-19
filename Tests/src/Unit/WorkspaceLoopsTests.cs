@@ -180,13 +180,11 @@ public sealed class WorkspaceLoopsTests : IDisposable
         await loops.Cancel(workspace.Id);
     }
 
-    [Theory]
-    [InlineData(WorkspaceState.Running)]
-    [InlineData(WorkspaceState.Managing)]
-    public async Task Start_RefusesAWorkspaceThatIsBusyWithSomethingOtherThanTheAi(WorkspaceState busy)
+    [Fact]
+    public async Task Start_RefusesAWorkspaceThatIsBusyWithSomethingOtherThanTheAi()
     {
         WorkspaceLoops loops = Create();
-        activity.TryEnter(workspace.Id, busy);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
 
         await Assert.ThrowsAsync<RequestException>(() => loops.Start(workspace.Id, new LoopSettings { Prompt = "go" }, CancellationToken.None));
 
@@ -371,18 +369,18 @@ public sealed class WorkspaceLoopsTests : IDisposable
     }
 
     [Fact]
-    public async Task Start_WaitsBetweenRunsWhileAScriptHoldsTheWorkspace()
+    public async Task Start_WaitsBetweenRunsWhileAGitActionHoldsTheWorkspace()
     {
         WorkspaceLoops loops = Create();
         await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", IntervalSeconds = 1, Condition = LoopCondition.Runs, Runs = 2 }, CancellationToken.None);
         await Until(() => Session.Prompts.Count == 1 && !prompts.IsBusy(workspace.Id) && activity.Get(workspace.Id) == WorkspaceState.Ready);
-        Assert.True(activity.TryEnter(workspace.Id, WorkspaceState.Running));
+        Assert.True(activity.TryEnter(workspace.Id, WorkspaceState.Managing));
 
         await Task.Delay(1400);
 
         Assert.Single(Session.Prompts);
 
-        activity.Leave(workspace.Id, WorkspaceState.Running);
+        activity.Leave(workspace.Id, WorkspaceState.Managing);
         await Until(() => loops.Get(workspace.Id) is null);
 
         Assert.Equal(2, Session.Prompts.Count);

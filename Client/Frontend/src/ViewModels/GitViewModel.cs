@@ -536,7 +536,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     {
         if (isLocked && kind != GitPrompt.Notice)
         {
-            Ask(GitPrompt.Notice, "Git", "Wait for the AI or the script to finish before running git actions.", "OK", null);
+            Ask(GitPrompt.Notice, "Git", "Wait for the AI to finish before running git actions.", "OK", null);
             return;
         }
 

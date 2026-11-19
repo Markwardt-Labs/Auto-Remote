@@ -42,8 +42,8 @@ public sealed class EndToEndTests : IAsyncLifetime
         WorkspaceVersioning versioning = new(git, prompts, hub, activity);
         Mock<IUsageService> usage = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
-        ScriptRunner scripts = new(hub, activity);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, scripts, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
+        ScriptRunner scripts = new(hub);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -337,6 +337,26 @@ public sealed class EndToEndTests : IAsyncLifetime
         List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptOutput && remoteEvent.Text!.Contains("display=", StringComparison.Ordinal)));
 
         Assert.Equal("display=:7 wayland=wayland-9 other=", string.Concat(events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptOutput).Select(remoteEvent => remoteEvent.Text)).Trim());
+    }
+
+    [Fact]
+    public async Task RunScript_WhileTheAiWorksRunsBesideItAndNeverChangesTheStateOfTheWorkspace()
+    {
+        FolderListing folder = await connection.CreateFolder(temp.Path, "beside", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "a.cs"), "// not run by the fake");
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "b.cs"), "// not run by the fake");
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+
+        await connection.Prompt(workspace.Id, "long", CancellationToken.None);
+        await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
+        await connection.RunScript(workspace.Id, "a.cs", CancellationToken.None);
+        await connection.RunScript(workspace.Id, "b.cs", CancellationToken.None);
+        WorkspaceState during = await connection.GetWorkspaceState(workspace.Id, CancellationToken.None);
+        List<RemoteEvent> events = await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptChanged && remoteEvent.Script?.State == ScriptState.Succeeded) == 2 && items.Last().Working == false);
+
+        Assert.Equal(WorkspaceState.Working, during);
+        Assert.DoesNotContain(events, remoteEvent => remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is not (WorkspaceState.Ready or WorkspaceState.Working));
+        Assert.Equal(WorkspaceState.Ready, await connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
     }
 
     [Fact]

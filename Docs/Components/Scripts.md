@@ -8,9 +8,13 @@ A workspace's `.cs` files can be run as single-file C# scripts and `.task` files
 
 A `.task` file lists one script path per line. A line with only `-` is a wait: the scripts before it must all succeed before the ones after it start, and the scripts between waits run together. Blank lines are ignored, and a path listed twice runs once, at its first place. The whole task is validated before it starts, so a missing or non-`.cs` entry refuses the run instead of failing halfway. A failing or stopped batch ends the task, and the scripts that never ran are marked skipped.
 
-## One thing at a time
+## Beside everything else
 
-The AI, a git action and scripts must never change the same working tree at once, so the server allows one script or task per workspace at a time and, as for every kind of work, only starts it when the workspace is Ready: `RunScript` is refused while the AI works or a git action runs, and `Prompt` (and rename and delete) while a script runs. The checks live in the server, so every client gets them whatever it shows; every client also disables sending and refuses to start scripts using the state it follows. Clients show a running script like a working AI: the header turns blue.
+A script is a process of its own, so running one never locks the workspace: scripts are not a workspace state and need none. Any number of scripts and tasks run at once, beside each other, beside AI work (the AI can be prompted while scripts run and scripts can start while it works) and beside git actions, and the header stays as it is for the AI and git alone. A running script does not stop loops from sending their next prompt either, and the Stop button of a workspace ends the AI's work or the git action, never a script: a script is stopped from the Script tab.
+
+Runs are told apart by the path of their file, and a script's path is also the name of its entry in a task, so a file can only be in one run at a time. `RunScript` is refused when the file, or a script a task lists, is already running or is still waiting its turn in a task that runs, with a message naming the file; once a run ended, running its file again replaces the kept run. Concurrent runs can of course change the same files, which is for the person starting them to weigh, and the server leaves it alone.
+
+Changing the folder of a workspace under a running script would break the script, so renaming, moving or deleting a workspace first stops its scripts and waits for their processes to end; every other request ignores them.
 
 ## Runs are kept in memory
 

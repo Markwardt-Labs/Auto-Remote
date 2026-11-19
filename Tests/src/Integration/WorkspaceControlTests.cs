@@ -46,7 +46,7 @@ public sealed class WorkspaceControlTests : IDisposable
         prompts = new PromptService(workspaces.Object, store.Object, host.Object, hub, activity, snapshots);
         prompts.Configure(CancellationToken.None);
         loops = new WorkspaceLoops(workspaces.Object, prompts, activity, Mock.Of<IUsageService>(), hub, TimeSpan.FromMilliseconds(20));
-        control = new WorkspaceControl(activity, prompts, loops, Mock.Of<IScriptRunner>(), Mock.Of<IWorkspaceVersioning>(), snapshots);
+        control = new WorkspaceControl(activity, prompts, loops, Mock.Of<IWorkspaceVersioning>(), snapshots);
     }
 
     public void Dispose() => temp.Dispose();

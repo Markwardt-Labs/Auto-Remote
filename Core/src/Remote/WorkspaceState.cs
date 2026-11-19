@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote;
 
 /// <summary>
-/// What a workspace is doing. A workspace is in exactly one state. It only leaves <see cref="Ready" /> for another state, and only returns to <see cref="Ready" /> before entering a different one, except that work in <see cref="Working" />, <see cref="Running" /> or <see cref="Managing" /> can be moved to <see cref="Stopping" /> (and AI work to <see cref="Canceling" />), which end in <see cref="Ready" />.
+/// What a workspace is doing. A workspace is in exactly one state. It only leaves <see cref="Ready" /> for another state, and only returns to <see cref="Ready" /> before entering a different one, except that work in <see cref="Working" /> or <see cref="Managing" /> can be moved to <see cref="Stopping" /> (and AI work to <see cref="Canceling" />), which end in <see cref="Ready" />. Scripts and tasks are not a state: any number of them run beside whatever the workspace is doing.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum WorkspaceState
@@ -15,11 +15,6 @@ public enum WorkspaceState
     /// The AI is working on a prompt. More AI input can still be given and joins that work.
     /// </summary>
     Working,
-
-    /// <summary>
-    /// A script or task is running.
-    /// </summary>
-    Running,
 
     /// <summary>
     /// A git action is running, possibly with the AI resolving conflicts for it.

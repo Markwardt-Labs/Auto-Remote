@@ -347,7 +347,7 @@ public sealed class RequestHandlerTests
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.StartLoop, WorkspaceId = workspace.Id, Loop = settings }, owner, CancellationToken.None);
         RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.StartLoop, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
-        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
         RemoteResponse busy = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.StartLoop, WorkspaceId = workspace.Id, Loop = settings }, owner, CancellationToken.None);
 
         Assert.Null(response.Error);
@@ -669,19 +669,14 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_Prompt_IsRefusedWhileAScriptRunsOrGitActs()
+    public async Task Handle_Prompt_IsRefusedWhileGitActs()
     {
-        activity.TryEnter(workspace.Id, WorkspaceState.Running);
-        RemoteResponse running = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
+        RemoteResponse managing = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
         RemoteResponse attaching = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.UploadAttachment, WorkspaceId = workspace.Id, Name = "a.txt", Data = "AAAA" }, owner, CancellationToken.None);
 
-        activity.Leave(workspace.Id, WorkspaceState.Running);
-        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
-        RemoteResponse managing = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
-
-        Assert.Equal("A script is running in this workspace right now.", running.Error);
-        Assert.Equal("A script is running in this workspace right now.", attaching.Error);
         Assert.Equal("A git action is running in this workspace right now.", managing.Error);
+        Assert.Equal("A git action is running in this workspace right now.", attaching.Error);
         prompts.Verify(x => x.Prompt(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         prompts.Verify(x => x.Attach(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -702,7 +697,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_StopAndCancelWorkspace_GoToTheControlAndGetStateReadsTheTracker()
     {
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
 
         Assert.Null((await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.StopWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
         Assert.Null((await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.CancelWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None)).Error);
@@ -710,7 +705,7 @@ public sealed class RequestHandlerTests
 
         control.Verify(x => x.Stop(workspace.Id), Times.Once);
         control.Verify(x => x.Cancel(workspace.Id), Times.Once);
-        Assert.Equal(WorkspaceState.Running, state.State);
+        Assert.Equal(WorkspaceState.Managing, state.State);
     }
 
     [Fact]
@@ -767,33 +762,60 @@ public sealed class RequestHandlerTests
         scripts.Verify(x => x.Run(workspace, "a.cs", It.Is<IReadOnlyDictionary<string, string>>(environment => environment.Count == 0), It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [Fact]
-    public async Task Handle_RunScript_IsRefusedWhileTheAiWorksOrGitActs()
+    [Theory]
+    [InlineData(WorkspaceState.Working)]
+    [InlineData(WorkspaceState.Managing)]
+    [InlineData(WorkspaceState.Stopping)]
+    public async Task Handle_RunScript_IsAcceptedWhateverTheWorkspaceIsDoing(WorkspaceState busy)
     {
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
-        RemoteResponse working = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+        if (busy != WorkspaceState.Working)
+        {
+            activity.Leave(workspace.Id, WorkspaceState.Working);
+            activity.TryEnter(workspace.Id, WorkspaceState.Managing);
 
-        activity.Leave(workspace.Id, WorkspaceState.Working);
-        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
-        RemoteResponse acting = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+            if (busy == WorkspaceState.Stopping)
+            {
+                activity.Halt(workspace.Id, WorkspaceState.Stopping);
+            }
+        }
 
-        Assert.Equal("The AI is working in this workspace right now.", working.Error);
-        Assert.Equal("A git action is running in this workspace right now.", acting.Error);
-        scripts.Verify(x => x.Run(It.IsAny<WorkspaceInfo>(), It.IsAny<string>(), It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Never);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RunScript, WorkspaceId = workspace.Id, Path = "a.cs" }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        scripts.Verify(x => x.Run(workspace, "a.cs", It.IsAny<IReadOnlyDictionary<string, string>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task Handle_RenameAndDelete_AreRefusedWhileAScriptRuns()
+    public async Task Handle_RenameMoveAndDelete_StopTheScriptsOfTheWorkspaceFirstButAreNotRefusedForThem()
     {
-        activity.TryEnter(workspace.Id, WorkspaceState.Running);
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+
+        RemoteResponse rename = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RenameWorkspace, WorkspaceId = workspace.Id, Name = "x" }, owner, CancellationToken.None);
+        RemoteResponse move = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = workspace.Id, Path = "/elsewhere" }, owner, CancellationToken.None);
+        RemoteResponse delete = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Null(rename.Error);
+        Assert.Null(move.Error);
+        Assert.Null(delete.Error);
+        scripts.Verify(x => x.StopAll(workspace.Id), Times.Exactly(3));
+    }
+
+    [Theory]
+    [InlineData(WorkspaceState.Working)]
+    [InlineData(WorkspaceState.Managing)]
+    public async Task Handle_RenameAndDelete_AreStillRefusedWhileTheAiOrGitWorks(WorkspaceState busy)
+    {
+        activity.TryEnter(workspace.Id, busy);
 
         RemoteResponse rename = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RenameWorkspace, WorkspaceId = workspace.Id, Name = "x" }, owner, CancellationToken.None);
         RemoteResponse delete = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.DeleteWorkspace, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
 
-        Assert.Equal("A script is running in this workspace right now.", rename.Error);
-        Assert.Equal("A script is running in this workspace right now.", delete.Error);
+        Assert.NotNull(rename.Error);
+        Assert.NotNull(delete.Error);
+        scripts.Verify(x => x.StopAll(It.IsAny<Guid>()), Times.Never);
     }
 
     [Fact]

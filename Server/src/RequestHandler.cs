@@ -245,7 +245,6 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await workspaces.Get(RequireWorkspace(request), cancellation);
                 return new RemoteResponse { Id = 0, Scripts = scripts.List(RequireWorkspace(request)) };
             case RemoteCommand.RunScript:
-                RequireReady(request);
                 await scripts.Run(await WorkspaceOf(request, cancellation), Require(request.Path, "path"), DisplayOf(request, owner), cancellation);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.StopScript:
@@ -316,6 +315,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             RequireReady(request);
             await loops.Cancel(id);
             await prompts.Release(id);
+            await scripts.StopAll(id);
         }
     }
 

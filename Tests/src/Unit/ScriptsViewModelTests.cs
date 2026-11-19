@@ -196,7 +196,7 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_WhileTheAiWorksTakesMoreAiInputButNoGitActionsOrScripts()
+    public async Task Workspace_WhileTheAiWorksTakesMoreAiInputButNoGitActions()
     {
         GitStatus status = new() { IsRepo = true, Branch = "main", Commit = "abc1234", Message = "second" };
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
@@ -226,7 +226,7 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_BlocksThePromptWhileAScriptRunsAndMarksItsFile()
+    public async Task Workspace_AScriptRunningLocksNothingAndMarksItsFile()
     {
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
@@ -242,21 +242,24 @@ public sealed class ScriptsViewModelTests
 
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
 
-        Assert.True(model.IsWorking);
+        Assert.True(model.Scripts.IsRunning);
+        Assert.False(model.IsWorking);
+        Assert.Equal(WorkspaceState.Ready, model.State);
         Assert.False(model.IsAiWorking);
-        Assert.False(model.Chat.SendCommand.CanExecute(null));
-        Assert.Equal("A script is running, wait for it to finish", model.Chat.Placeholder);
+        Assert.True(model.Chat.SendCommand.CanExecute(null));
+        Assert.Null(model.Chat.BlockReason);
+        Assert.False(model.CanHalt);
         Assert.True(model.Files.Nodes[0].IsScriptRunning);
 
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Succeeded)));
 
-        Assert.False(model.IsWorking);
+        Assert.False(model.Scripts.IsRunning);
         Assert.True(model.Chat.SendCommand.CanExecute(null));
         Assert.False(model.Files.Nodes[0].IsScriptRunning);
     }
 
     [Fact]
-    public async Task Workspace_RunsADoubleTappedScriptAndRefusesWhileTheAiWorks()
+    public async Task Workspace_RunsADoubleTappedScriptEvenWhileTheAiWorks()
     {
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = true });
@@ -269,15 +272,10 @@ public sealed class ScriptsViewModelTests
         model.Files.Run(model.Files.Nodes[0]);
         await Task.Delay(50);
 
-        connection.Verify(x => x.RunScript(workspace.Id, "a.cs", It.IsAny<CancellationToken>()), Times.Never);
-        Assert.Equal("Wait for the AI to finish before running a script.", model.Scripts.Error);
-        Assert.True(model.ShowScriptView);
-
-        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
-        model.Files.Run(model.Files.Nodes[0]);
-        await Task.Delay(50);
-
         connection.Verify(x => x.RunScript(workspace.Id, "a.cs", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Null(model.Scripts.Error);
+        Assert.True(model.ShowScriptView);
+        Assert.True(model.IsAiWorking);
     }
 
     [Fact]
@@ -370,12 +368,12 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_StopsAnyWorkTheAiOrAScriptDoes()
+    public async Task Workspace_StopsTheWorkOfTheAiButAScriptIsNoneOfItsConcern()
     {
         WorkspaceViewModel model = await StartedWorkspace(false);
         Assert.False(model.CanHalt);
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-        Assert.True(model.CanHalt);
+        Assert.False(model.CanHalt);
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Succeeded)));
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
 
@@ -427,7 +425,7 @@ public sealed class ScriptsViewModelTests
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
         Server(WorkspaceState.Ready);
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-        Assert.Equal((true, true), (model.ShowHaltButtons, model.CanHalt));
+        Assert.Equal((false, false), (model.ShowHaltButtons, model.CanHalt));
     }
 
     [Fact]
@@ -465,10 +463,10 @@ public sealed class ScriptsViewModelTests
         model.Chat.Input = string.Empty;
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-        Assert.Equal((false, false), (model.ShowPauseButton, model.ShowResumeButton));
-
-        connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Succeeded)));
         Assert.Equal((false, true), (model.ShowPauseButton, model.ShowResumeButton));
+
+        Server(WorkspaceState.Canceling);
+        Assert.Equal((false, false), (model.ShowPauseButton, model.ShowResumeButton));
     }
 
     [Fact]
@@ -494,7 +492,7 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_KeepsTheLoopButtonWhileTheAiWorksAndNothingIsTypedButNotForOtherWork()
+    public async Task Workspace_KeepsTheLoopButtonWhileTheAiWorksAndNothingIsTypedButNotWhileWorkIsEnded()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);
 
@@ -507,6 +505,9 @@ public sealed class ScriptsViewModelTests
         model.Chat.Input = string.Empty;
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
+        Assert.Equal((false, true), (model.ShowHaltButtons, model.ShowLoopButton));
+
+        Server(WorkspaceState.Canceling);
         Assert.Equal((true, false), (model.ShowHaltButtons, model.ShowLoopButton));
     }
 

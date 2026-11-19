@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// Ends the work running in a workspace on request: the AI's work can be stopped (keeping what it did) or cancelled (reverting it), while a script or a git action can only be stopped.
+/// Ends the work running in a workspace on request: the AI's work can be stopped (keeping what it did) or cancelled (reverting it), while a git action can only be stopped.
 /// </summary>
 internal interface IWorkspaceControl
 {
@@ -23,7 +23,7 @@ internal interface IWorkspaceControl
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptService prompts, IWorkspaceLoops loops, IScriptRunner scripts, IWorkspaceVersioning versioning, IWorkspaceSnapshots snapshots) : IWorkspaceControl
+internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptService prompts, IWorkspaceLoops loops, IWorkspaceVersioning versioning, IWorkspaceSnapshots snapshots) : IWorkspaceControl
 {
     /// <inheritdoc />
     public Task Stop(Guid id) => Halt(id, WorkspaceState.Stopping);
@@ -35,7 +35,7 @@ internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptServi
 
         if (state != WorkspaceState.Working)
         {
-            throw new RequestException(state == WorkspaceState.Ready ? "Nothing is running in this workspace." : state is WorkspaceState.Running or WorkspaceState.Managing ? "Only the AI's work can be cancelled. Stop it instead." : activity.Describe(id));
+            throw new RequestException(state == WorkspaceState.Ready ? "Nothing is running in this workspace." : state == WorkspaceState.Managing ? "Only the AI's work can be cancelled. Stop it instead." : activity.Describe(id));
         }
 
         if (!snapshots.Has(id))
@@ -58,9 +58,6 @@ internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptServi
             {
                 case WorkspaceState.Working:
                     await prompts.Interrupt(id);
-                    break;
-                case WorkspaceState.Running:
-                    await scripts.StopAll(id);
                     break;
                 case WorkspaceState.Managing:
                     Task cancelling = versioning.Cancel(id);
