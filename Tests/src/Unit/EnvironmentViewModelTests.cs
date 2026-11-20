@@ -102,6 +102,20 @@ public sealed class EnvironmentViewModelTests
     }
 
     [Fact]
+    public async Task TheChoiceToShowTheWorkOfTheAiInNewWorkspacesIsLoadedEditedAndSent()
+    {
+        EnvironmentViewModel model = Open();
+        await model.Load();
+        Assert.False(model.NewShowWork);
+
+        model.NewShowWork = true;
+        model.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 1);
+
+        Assert.True(saved[0].NewWorkspaces.ShowWork);
+    }
+
+    [Fact]
     public void Update_IsOnlyThereWhenTheScreenWasGivenAnUpdateSystem()
     {
         Mock<IAppInfo> info = new();

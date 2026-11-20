@@ -39,6 +39,12 @@ internal sealed record StoredWorkspace
     public int? StatusMinutes { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the chat of the workspace shows the AI's work; a workspace stored by a release before it existed does not.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool ShowWork { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the session was stored by an older release, before sessions kept the settings the server runs them with, and still has to be given them (<see cref="IPrompterHost.Adopt" />), which the server does when it starts and then clears this.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

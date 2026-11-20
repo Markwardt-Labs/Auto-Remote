@@ -69,12 +69,33 @@ public sealed class EndToEndTests : IAsyncLifetime
             return [new PromptFailureEvent { Message = "boom: " + prompt.Text }];
         }
 
+        if (prompt.Text.StartsWith("stream", StringComparison.Ordinal))
+        {
+            return Writing();
+        }
+
+        if (prompt.Text.StartsWith("work", StringComparison.Ordinal))
+        {
+            return [new PromptToolCallEvent { Id = "t1", Name = "shell", Input = "{\"command\":\"ls\"}" }, new PromptToolResultEvent { Id = "t1", Output = "a.txt" }, new PromptMessageEvent { Text = "reply to " + prompt.Text }];
+        }
+
         if (prompt.Text == "long")
         {
             Thread.Sleep(600);
         }
 
         return [new PromptMessageEvent { Text = "reply to " + prompt.Text }];
+    }
+
+    private IEnumerable<PromptEvent> Writing()
+    {
+        foreach (string piece in (string[])["The ", "answer ", "is ", "streamed."])
+        {
+            yield return new PromptDeltaEvent { Text = piece };
+            Thread.Sleep(150);
+        }
+
+        yield return new PromptMessageEvent { Text = "The answer is streamed." };
     }
 
     private async Task<List<RemoteEvent>> Received(Func<List<RemoteEvent>, bool> done)
@@ -393,6 +414,74 @@ public sealed class EndToEndTests : IAsyncLifetime
         await connection.DeleteWorkspace(failing.Id, false, CancellationToken.None);
 
         Assert.False(File.Exists(Path.Combine(temp.Combine("data"), "errors", $"{failing.Id:N}.json")));
+    }
+
+    [Fact]
+    public async Task TheWorkOfTheAi_IsKeptAlwaysShownInTheHistoryOnlyWhenTheWorkspaceShowsItAndChangesForEveryClientAtOnce()
+    {
+        FolderListing folder = await connection.CreateFolder(temp.Path, "working", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+        await using IServerConnection other = await new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>()).Connect(settings, CancellationToken.None);
+        TaskCompletionSource changed = new();
+        other.EventReceived += remoteEvent =>
+        {
+            if (remoteEvent.Kind == RemoteEventKind.ShowWorkChanged && remoteEvent.WorkspaceId == workspace.Id)
+            {
+                changed.TrySetResult();
+            }
+        };
+
+        await connection.Prompt(workspace.Id, "work please", CancellationToken.None);
+        await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Working == false);
+        ChatHistory hidden = await connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+
+        await connection.SetShowWork(workspace.Id, true, CancellationToken.None);
+        await changed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        ChatHistory shown = await other.GetHistory(workspace.Id, null, null, CancellationToken.None);
+
+        Assert.False(hidden.ShowWork);
+        Assert.Equal(["work please", "reply to work please"], hidden.Messages.Select(message => message.Text));
+        Assert.True(shown.ShowWork);
+        Assert.Equal(["work please", "shell: ls", "a.txt", "reply to work please"], shown.Messages.Select(message => message.Text));
+        Assert.Equal([false, true, true, false], shown.Messages.Select(message => message.IsWork));
+        Assert.Contains(workspace.Id, (await connection.ListWorkspaces(CancellationToken.None)).Workspaces.Where(item => item.ShowWork).Select(item => item.Id));
+
+        await connection.SetShowWork(workspace.Id, false, CancellationToken.None);
+
+        Assert.Equal(["work please", "reply to work please"], (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task TheAnswerOfTheAi_IsStreamedOnlyWhileTheWorkspaceShowsTheWorkAndEndsAsTheFinishedMessage()
+    {
+        FolderListing folder = await connection.CreateFolder(temp.Path, "streaming", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+
+        await connection.Prompt(workspace.Id, "stream quietly", CancellationToken.None);
+        List<RemoteEvent> quiet = await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && items.Last().Working == false);
+
+        Assert.DoesNotContain(quiet, remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta);
+
+        await connection.SetShowWork(workspace.Id, true, CancellationToken.None);
+        await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.ShowWorkChanged));
+        int before;
+
+        lock (received)
+        {
+            before = received.Count;
+        }
+
+        await connection.Prompt(workspace.Id, "stream aloud", CancellationToken.None);
+        List<RemoteEvent> loud = await Received(items => items.Skip(before).Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && items.Last().Working == false);
+        List<RemoteEvent> events = [.. loud.Skip(before)];
+        string[] pieces = [.. events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text!)];
+        int final = events.FindIndex(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message!.Role == MessageRole.Assistant);
+
+        Assert.True(pieces.Length >= 2);
+        Assert.StartsWith(string.Concat(pieces), "The answer is streamed.", StringComparison.Ordinal);
+        Assert.DoesNotContain(events.Skip(final + 1), remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta);
+        Assert.Equal("The answer is streamed.", events[final].Message!.Text);
+        Assert.Equal(["stream quietly", "The answer is streamed.", "stream aloud", "The answer is streamed."], (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
     }
 
     [Fact]

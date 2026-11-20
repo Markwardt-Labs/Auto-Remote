@@ -144,6 +144,10 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly int maxAttachment = 20 * 1024 * 1024;
 
+    private readonly int workLimit = 2000;
+
+    private IDisposable? subscription;
+
     private readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(5);
 
     private readonly TimeSpan stopWait = TimeSpan.FromSeconds(15);
@@ -166,8 +170,18 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private CancellationToken stopping;
 
+    /// <summary>
+    /// Gets how long the pieces of a message the AI is writing are gathered before they are sent to the clients as one, so that a client lays out its text far less often than the AI writes.
+    /// </summary>
+    internal TimeSpan StreamInterval { get; init; } = TimeSpan.FromMilliseconds(100);
+
     /// <inheritdoc />
-    public void Configure(CancellationToken stopping) => this.stopping = stopping;
+    public void Configure(CancellationToken stopping)
+    {
+        this.stopping = stopping;
+        subscription?.Dispose();
+        subscription = events.Subscribe(Follow);
+    }
 
     /// <inheritdoc />
     public async Task Close()
@@ -222,7 +236,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             {
                 if (live.Session is null && workspace.SessionId is null)
                 {
-                    return new ChatHistory { Messages = [], Working = live.Working };
+                    return new ChatHistory { Messages = [], Working = live.Working, ShowWork = workspace.ShowWork };
                 }
 
                 IPromptSession session = await Session(id, workspace, live, cancellation);
@@ -239,9 +253,10 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 }
             }
 
-            int end = cursor is { } point ? Math.Min(point, stored.Count) : stored.Count;
+            IReadOnlyList<ChatMessage> shown = workspace.ShowWork ? stored : [.. stored.Where(message => !message.IsWork)];
+            int end = cursor is { } point ? Math.Min(point, shown.Count) : shown.Count;
             int start = Math.Max(0, end - Math.Clamp(limit ?? defaultChunk, 1, maxChunk));
-            return new ChatHistory { Messages = [.. stored.Skip(start).Take(end - start)], Older = start > 0 ? start.ToString(CultureInfo.InvariantCulture) : null, Working = live.Working };
+            return new ChatHistory { Messages = [.. shown.Skip(start).Take(end - start)], Older = start > 0 ? start.ToString(CultureInfo.InvariantCulture) : null, Working = live.Working, ShowWork = workspace.ShowWork };
         }
         finally
         {
@@ -266,6 +281,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
+            live.ShowWork = workspace.ShowWork;
             bool started = !live.Working;
 
             if (!started && onlyWhenIdle)
@@ -874,9 +890,55 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         return int.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out int position) ? position : throw new RequestException("The history cursor is not valid.");
     }
 
+    private void Follow(RemoteEvent remoteEvent)
+    {
+        if (remoteEvent.Kind == RemoteEventKind.ShowWorkChanged && lives.TryGetValue(remoteEvent.WorkspaceId, out Live? live))
+        {
+            live.ShowWork = remoteEvent.ShowWork == true;
+        }
+    }
+
+    private void Stream(Guid id, Live live, string piece)
+    {
+        lock (live.Stream)
+        {
+            live.Partial.Append(piece);
+
+            if (live.Streaming)
+            {
+                return;
+            }
+
+            live.Streaming = true;
+        }
+
+        _ = Flush(id, live);
+    }
+
+    private async Task Flush(Guid id, Live live)
+    {
+        await Task.Delay(StreamInterval, CancellationToken.None);
+
+        lock (live.Stream)
+        {
+            live.Streaming = false;
+            string text = live.Partial.ToString();
+            live.Partial.Clear();
+
+            if (text.Length > 0)
+            {
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = id, Text = text });
+            }
+        }
+    }
+
     private void Say(Guid id, Live live, ChatMessage message)
     {
-        events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = message });
+        lock (live.Stream)
+        {
+            live.Partial.Clear();
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = message });
+        }
 
         lock (live.Sync)
         {
@@ -936,6 +998,38 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         return newestFirst;
     }
 
+    private ChatMessage Work(string text) => new() { Role = MessageRole.Assistant, Text = text.Length > workLimit ? $"{text[..workLimit]}... ({text.Length - workLimit} more characters)" : text, Time = DateTimeOffset.UtcNow, IsWork = true };
+
+    private string Summarize(string input)
+    {
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(input);
+            JsonElement root = document.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Object)
+            {
+                JsonProperty[] properties = [.. root.EnumerateObject()];
+
+                if (properties.Length == 1 && properties[0].Value.ValueKind == JsonValueKind.String)
+                {
+                    return properties[0].Value.GetString() ?? string.Empty;
+                }
+
+                if (root.TryGetProperty("command", out JsonElement command) && command.ValueKind == JsonValueKind.String)
+                {
+                    return command.GetString() ?? string.Empty;
+                }
+            }
+
+            return JsonSerializer.Serialize(root);
+        }
+        catch (JsonException)
+        {
+            return input;
+        }
+    }
+
     private ChatMessage? Message(PromptHistoryEntry entry)
     {
         MessageRole? role = entry.Event switch
@@ -960,11 +1054,20 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             case PromptMessageEvent { Text: { Length: > 0 } reply }:
                 Say(id, live, new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow });
                 break;
-            case PromptToolCallEvent { Name: "shell" } call:
-                live.Tally.Running[call.Id] = 0;
+            case PromptDeltaEvent { Text: { Length: > 0 } piece } when live.ShowWork:
+                Stream(id, live, piece);
+                break;
+            case PromptToolCallEvent call:
+                if (call.Name == "shell")
+                {
+                    live.Tally.Running[call.Id] = 0;
+                }
+
+                Say(id, live, Work($"{(call.Server is { Length: > 0 } server ? $"{server}/{call.Name}" : call.Name)}: {Summarize(call.Input)}"));
                 break;
             case PromptToolResultEvent result:
                 live.Tally.Running.TryRemove(result.Id, out _);
+                Say(id, live, Work($"{(result.IsError ? "Error: " : string.Empty)}{(string.IsNullOrWhiteSpace(result.Output) ? "(no output)" : result.Output)}"));
                 break;
             case PromptWindowsEvent windows:
                 usage?.Note(service, windows.Windows);
@@ -1261,6 +1364,14 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public IDisposable? Watch { get; set; }
 
         public bool Held { get; set; }
+
+        public bool ShowWork { get; set; }
+
+        public Lock Stream { get; } = new();
+
+        public StringBuilder Partial { get; } = new();
+
+        public bool Streaming { get; set; }
 
         public Task Writing { get; set; } = Task.CompletedTask;
 

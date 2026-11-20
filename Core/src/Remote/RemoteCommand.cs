@@ -339,5 +339,10 @@ public enum RemoteCommand
     /// <summary>
     /// Lists the errors the AI of <see cref="RemoteRequest.WorkspaceId" /> ended with in the last 30 days, the newest first; answered in <see cref="RemoteResponse.Errors" />.
     /// </summary>
-    GetErrors
+    GetErrors,
+
+    /// <summary>
+    /// Sets whether the chat of <see cref="RemoteRequest.WorkspaceId" /> shows the AI's work, <see cref="RemoteRequest.ShowWork" />, for every client, and announces it with <see cref="RemoteEventKind.ShowWorkChanged" />.
+    /// </summary>
+    SetShowWork
 }

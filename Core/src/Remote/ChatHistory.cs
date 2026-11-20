@@ -19,4 +19,9 @@ public sealed record ChatHistory
     /// Gets a value indicating whether the AI is working in the workspace.
     /// </summary>
     public bool Working { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the workspace is set to show the AI's work: when it is, the messages include the tool calls and results; when it is not, they leave them out.
+    /// </summary>
+    public bool ShowWork { get; init; }
 }

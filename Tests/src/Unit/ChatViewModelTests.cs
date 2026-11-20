@@ -425,4 +425,236 @@ public sealed class ChatViewModelTests
 
         Assert.False(chat.IsSavedInputsOpen);
     }
+
+    private static ChatMessage Said(string text) => new() { Role = MessageRole.Assistant, Text = text };
+
+    private static ChatMessage Did(string text) => new() { Role = MessageRole.Assistant, Text = text, IsWork = true };
+
+    private RemoteEvent Added(ChatMessage message) => new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspaceId, Message = message };
+
+    private void History(bool show, params ChatMessage[] messages) => connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = messages, ShowWork = show });
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Start_TakesWhetherTheWorkShowsFromTheServerWithoutSendingItBack(bool show)
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(show, Said("hello"));
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        await chat.Start();
+
+        Assert.Equal(show, chat.ShowWork);
+        Assert.Equal(show, changed.Contains(nameof(ChatViewModel.ShowWork)));
+        connection.Verify(x => x.SetShowWork(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ShowWork_IsOffUntilTurnedOnAndTellsTheServerEachTimeItChanges()
+    {
+        Assert.False(chat.ShowWork);
+
+        chat.ShowWork = true;
+        chat.ShowWork = true;
+        chat.ShowWork = false;
+        await Task.Delay(100);
+
+        Assert.False(chat.ShowWork);
+        connection.Verify(x => x.SetShowWork(workspaceId, true, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetShowWork(workspaceId, false, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ShowWork_GoesBackAndSaysWhyWhenTheServerRefuses()
+    {
+        connection.Setup(x => x.SetShowWork(workspaceId, true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The workspace is gone."));
+
+        chat.ShowWork = true;
+        for (int attempt = 0; attempt < 100 && chat.ShowWork; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.False(chat.ShowWork);
+        Assert.Equal("The workspace is gone.", chat.Error);
+    }
+
+    [Fact]
+    public async Task TheWorkOfTheAiOnlyAppearsInTheConversationWhileTheWorkShows()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(false);
+        await chat.Start();
+
+        connection.Raise(x => x.EventReceived += null, Added(Did("shell: ls")));
+        connection.Raise(x => x.EventReceived += null, Added(Said("done")));
+
+        Assert.Equal(["done"], chat.Messages.Select(message => message.Text));
+
+        History(true);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId });
+        for (int attempt = 0; attempt < 100 && !chat.ShowWork; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        connection.Raise(x => x.EventReceived += null, Added(Did("shell: cat a.txt")));
+        connection.Raise(x => x.EventReceived += null, Added(Said("more")));
+
+        Assert.True(chat.ShowWork);
+        Assert.Equal(["shell: cat a.txt", "more"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task ShowWorkChanged_ReadsTheConversationAgainWithOrWithoutTheWorkAndFollowsTheFlag()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(false, Said("one"), Said("two"));
+        await chat.Start();
+        History(true, Said("one"), Did("shell: ls"), Said("two"));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId });
+        for (int attempt = 0; attempt < 100 && chat.Messages.Count != 3; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.True(chat.ShowWork);
+        Assert.Equal([false, true, false], chat.Messages.Select(message => message.IsWork));
+
+        History(false, Said("one"), Said("two"));
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId });
+        for (int attempt = 0; attempt < 100 && chat.Messages.Count != 2; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.False(chat.ShowWork);
+        Assert.Equal(["one", "two"], chat.Messages.Select(message => message.Text));
+        connection.Verify(x => x.SetShowWork(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ShowWorkChanged_OfAnotherWorkspaceChangesNothing()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(false, Said("one"));
+        await chat.Start();
+        History(true, Said("one"), Did("shell: ls"));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = Guid.NewGuid() });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = Guid.NewGuid(), Message = Did("not ours") });
+        await Task.Delay(150);
+
+        Assert.False(chat.ShowWork);
+        Assert.Equal(["one"], chat.Messages.Select(message => message.Text));
+    }
+
+    private RemoteEvent Piece(string text) => new() { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspaceId, Text = text };
+
+    private async Task Showing(params ChatMessage[] history)
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(true, history);
+        await chat.Start();
+    }
+
+    [Fact]
+    public async Task TheMessageTheAiIsWritingGrowsInPlaceAndIsReplacedByItsFinishedForm()
+    {
+        await Showing(new ChatMessage { Role = MessageRole.User, Text = "hi" });
+
+        connection.Raise(x => x.EventReceived += null, Piece("Hel"));
+        Assert.Equal(["hi", "Hel"], chat.Messages.Select(message => message.Text));
+
+        connection.Raise(x => x.EventReceived += null, Piece("lo "));
+        connection.Raise(x => x.EventReceived += null, Piece("wor"));
+        Assert.Equal(["hi", "Hello wor"], chat.Messages.Select(message => message.Text));
+        Assert.Equal(MessageRole.Assistant, chat.Messages[1].Role);
+
+        connection.Raise(x => x.EventReceived += null, Added(Said("Hello world")));
+
+        Assert.Equal(["hi", "Hello world"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task TheFinishedMessageTakesTheSpotOfTheOneBeingWrittenEvenWhenWorkCameInBetween()
+    {
+        await Showing();
+
+        connection.Raise(x => x.EventReceived += null, Piece("Let me "));
+        connection.Raise(x => x.EventReceived += null, Added(Did("shell: ls")));
+        connection.Raise(x => x.EventReceived += null, Added(Said("Let me look")));
+        connection.Raise(x => x.EventReceived += null, Piece("Found it"));
+        connection.Raise(x => x.EventReceived += null, Added(Said("Found it all")));
+
+        Assert.Equal(["Let me look", "shell: ls", "Found it all"], chat.Messages.Select(message => message.Text));
+        Assert.Equal([false, true, false], chat.Messages.Select(message => message.IsWork));
+    }
+
+    [Fact]
+    public async Task AMessageThatIsNeverFinishedIsDroppedWhenTheAiStopsOrFails()
+    {
+        await Showing(Said("earlier"));
+        connection.Raise(x => x.EventReceived += null, Piece("half a thou"));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspaceId, Working = false });
+
+        Assert.Equal(["earlier"], chat.Messages.Select(message => message.Text));
+
+        connection.Raise(x => x.EventReceived += null, Piece("another half"));
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = workspaceId, Error = "broke" });
+
+        Assert.Equal(["earlier"], chat.Messages.Select(message => message.Text));
+        Assert.Equal("broke", chat.Error);
+
+        connection.Raise(x => x.EventReceived += null, Piece("a fresh one"));
+        connection.Raise(x => x.EventReceived += null, Added(Said("a fresh one, done")));
+
+        Assert.Equal(["earlier", "a fresh one, done"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task PiecesAreIgnoredWhileTheWorkIsNotShownAndForOtherWorkspaces()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(false);
+        await chat.Start();
+
+        connection.Raise(x => x.EventReceived += null, Piece("not shown"));
+        connection.Raise(x => x.EventReceived += null, Added(Said("whole")));
+
+        Assert.Equal(["whole"], chat.Messages.Select(message => message.Text));
+
+        History(true, Said("whole"));
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId, ShowWork = true });
+        for (int attempt = 0; attempt < 100 && !chat.ShowWork; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = Guid.NewGuid(), Text = "of another workspace" });
+
+        Assert.Equal(["whole"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task ReadingTheConversationAgainDropsTheMessageThatWasBeingWritten()
+    {
+        await Showing(Said("one"));
+        connection.Raise(x => x.EventReceived += null, Piece("partial"));
+        History(false, Said("one"));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId, ShowWork = false });
+        for (int attempt = 0; attempt < 100 && chat.ShowWork; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        connection.Raise(x => x.EventReceived += null, Piece("ignored now"));
+
+        Assert.Equal(["one"], chat.Messages.Select(message => message.Text));
+    }
 }

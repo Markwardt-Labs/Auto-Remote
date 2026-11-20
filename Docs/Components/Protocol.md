@@ -65,6 +65,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
 | `text` | string | `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the chat input to save, the line written to a script, or the text to search for. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
+| `showWork` | bool | `SetShowWork` | Whether the chat of the workspace shows the AI's work (required for that command). |
 | `showHidden` | bool | no | `ListFiles` and `SearchFiles`; includes the entries a `.filehide` file hides. |
 | `searchContent` | bool | no | `SearchFiles` only; searches the contents of the files instead of their names. |
 
@@ -143,6 +144,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
 | `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; the oldest entries beyond 200 are dropped. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |
+| `SetShowWork` | `workspaceId`, `showWork` | `workspace` | Sets whether the chat of the workspace shows the AI's work, for every client: the server keeps it with the workspace (it starts as the `showWork` of `newWorkspaces`) and sends a `ShowWorkChanged` event when it changed. Nothing happens when it already is so. |
 | `GetErrors` | `workspaceId` | `errors` | The errors the AI of the workspace ended with in the last 30 days, the newest first. Entries older than that are removed by the server, when it starts, every 12 hours and whenever the list is read or an error is added. Only the errors of the workspace named are listed. |
 | `TakeSavedInput` | `workspaceId`, `inputId` | `savedInput` | Removes the saved input and answers it, so only one client gets it; refused once it is gone. Every client gets a `SavedInputsChanged` event. |
 | `UpdateServer` | none | none | Makes the server look for the newest release on GitHub, download its server executable and restart with it, which closes every connection. Answers once the download is complete, a second before the restart. Refused when there is no newer release, GitHub cannot be reached, the server does not run from an installed executable or the folder is not writable. Not tied to a workspace and allowed in any state. |
@@ -197,6 +199,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `lastUpdated` | timestamp, optional | When the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first, after the ones a loop runs in); refreshed whenever the workspaces are listed. |
 | `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts of the workspace's own that its review and expand buttons send; omitted when it uses the environment's. |
+| `showWork` | bool, optional | `true` when the chat of the workspace shows the AI's work (see `SetShowWork`); omitted for `false`. |
 | `statusMinutes` | number, optional | The status interval the workspace has of its own; omitted when it uses the environment's. |
 
 **catalog** (`ListWorkspaces`)
@@ -237,6 +240,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `messages` | array of message | The chunk, oldest first. |
 | `older` | string, optional | The cursor to send as `before` to read the messages before this chunk; omitted when there are none. |
 | `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
+| `showWork` | bool, optional | `true` when the workspace shows the AI's work: then `messages` include the work messages (`isWork`) and the chunks count them; otherwise they leave them out and the chunks count only what was said. Also the way a client learns the state, after it opens the workspace, reconnects or reads the history again on `ShowWorkChanged` or `MessageDelta`. |
 
 **loop settings** (`loop` of `StartLoop`)
 
@@ -295,7 +299,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `localImageModels` | capability names | The checkpoint for each capability; all four when `imageGeneration` is `Local`. |
 | `statusMinutes` | number | How often, in minutes (1 to 1440, default 5), the AI is told to report its status in every workspace that has no interval of its own. |
 | `reviewPrompt`, `expandPrompt` | string | The prompts the review and expand buttons send in every workspace that has none of its own; trimmed, and a blank one is replaced by the default (`review workspace and fix any problems or inconsistencies`, `expand upon content in workspace in areas that make sense`). |
-| `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. A workspace keeps the values it was created with whatever this says later. |
+| `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. `showWork` says whether the chat of a new workspace shows the AI's work (tool calls and results, dimmed), off by default. A workspace keeps the values it was created with whatever this says later. |
 
 **usage** (`GetUsage`)
 
@@ -336,6 +340,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | --- | --- | --- |
 | `role` | string | Author: `User` (the person using the client) or `Assistant` (the AI). |
 | `text` | string | The message text. |
+| `isWork` | bool, optional | `true` for work the AI did on the way, a tool call (`name: what it was asked`, a single string argument or the `command` shown as it is, anything else as compact JSON) or its result (`Error: ` first when it failed, `(no output)` when empty); both are cut at 2000 characters. Omitted for what the user or the AI said. Always `Assistant`. Published as `MessageAdded` events whatever the workspace shows; a client that does not show the work ignores them. |
 | `time` | string, optional | When the message was written, ISO 8601 UTC; the time the server published it (a message taken over from an older server's conversation has the time the conversation tool stored, absent when it stored none). |
 
 **files** (`ListFiles`)
@@ -477,7 +482,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged` or `ErrorsChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged` or `ShowWorkChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
@@ -486,8 +491,10 @@ The server pushes events to every authenticated connection, as responses with `i
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
 | `savedInputs` | array of saved input | `SavedInputsChanged`: the saved inputs of the workspace now, the last saved first. |
+| `showWork` | bool | `ShowWorkChanged`: whether the workspace shows the AI's work now. |
+| (no property) | | `ShowWorkChanged`: the workspace was set to show or hide the AI's work; a client reads the history again, which now includes or leaves out the work messages, and takes `showWork` from it. |
 | `errors` | array of error | `ErrorsChanged`: the errors of the workspace now, the newest first; sent right after the `Failed` event of the same workspace, and only for that workspace. |
-| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. |
+| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded`, and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 
 `ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.

@@ -108,7 +108,7 @@ public sealed class PromptServiceTests : IDisposable
         }
     }
 
-    private List<string> Messages(MessageRole role) => [.. Events(RemoteEventKind.MessageAdded).Where(remoteEvent => remoteEvent.Message!.Role == role).Select(remoteEvent => remoteEvent.Message!.Text)];
+    private List<string> Messages(MessageRole role) => [.. Events(RemoteEventKind.MessageAdded).Where(remoteEvent => remoteEvent.Message!.Role == role && !remoteEvent.Message.IsWork).Select(remoteEvent => remoteEvent.Message!.Text)];
 
     [Fact]
     public async Task Attach_StoresTheDecodedFileAndAnswersItsPath()
@@ -120,6 +120,167 @@ public sealed class PromptServiceTests : IDisposable
 
         Assert.Equal("/srv/a.txt", path);
         Assert.Equal(new byte[] { 1, 2, 3 }, saved);
+    }
+
+    [Fact]
+    public async Task Prompt_RecordsTheToolCallsAndResultsAsWorkMessagesBesideWhatTheAiSaidAndPublishesThem()
+    {
+        string longOutput = new('x', 2500);
+        prompter.OnCreate = session => session.ReplyWith(_ =>
+        [
+            new PromptToolCallEvent { Id = "1", Name = "shell", Input = "{\"command\":\"ls -la\"}" },
+            new PromptToolResultEvent { Id = "1", Output = "a.txt" },
+            new PromptToolCallEvent { Id = "2", Server = "liveai", Name = "fetch_url", Input = "{\"url\":\"https://x.test\",\"max\":5}" },
+            new PromptToolResultEvent { Id = "2", Output = "no such host", IsError = true },
+            new PromptToolCallEvent { Id = "3", Name = "idle", Input = "not json" },
+            new PromptToolResultEvent { Id = "3", Output = "  " },
+            new PromptToolResultEvent { Id = "4", Output = longOutput },
+            new PromptMessageEvent { Text = "done" }
+        ]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        List<ChatMessage> published = [.. Events(RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message!)];
+        ChatMessage[] work = [.. published.Where(message => message.IsWork)];
+
+        Assert.Equal(["go", "done"], published.Where(message => !message.IsWork).Select(message => message.Text));
+        Assert.Equal(["shell: ls -la", "a.txt", "liveai/fetch_url: {\"url\":\"https://x.test\",\"max\":5}", "Error: no such host", "idle: not json", "(no output)", $"{new string('x', 2000)}... (500 more characters)"], work.Select(message => message.Text));
+        Assert.All(work, message => Assert.Equal(MessageRole.Assistant, message.Role));
+        Assert.All(work, message => Assert.InRange(message.Time!.Value, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddSeconds(1)));
+        Assert.Equal([MessageRole.User, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant], chats[workspace.Id].Select(message => message.Role));
+        Assert.Equal([false, true, true, true, true, true, true, true, false], chats[workspace.Id].Select(message => message.IsWork));
+    }
+
+    [Theory]
+    [InlineData(false, new[] { "first", "answer one", "second", "answer two" })]
+    [InlineData(true, new[] { "first", "ls", "answer one", "second", "cat", "answer two" })]
+    public async Task History_LeavesTheWorkOutUnlessTheWorkspaceShowsItAndCountsOnlyWhatItReturns(bool show, string[] expected)
+    {
+        Use(workspace with { ShowWork = show });
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        chats[workspace.Id] =
+        [
+            new ChatMessage { Role = MessageRole.User, Text = "first", Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "ls", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "answer one", Time = now },
+            new ChatMessage { Role = MessageRole.User, Text = "second", Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "cat", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "answer two", Time = now }
+        ];
+
+        ChatHistory all = await service.History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory newest = await service.History(workspace.Id, null, 2, CancellationToken.None);
+        ChatHistory older = await service.History(workspace.Id, newest.Older, 2, CancellationToken.None);
+
+        Assert.Equal(expected, all.Messages.Select(message => message.Text));
+        Assert.Equal(show, all.ShowWork);
+        Assert.Equal(expected.TakeLast(2), newest.Messages.Select(message => message.Text));
+        Assert.Equal((expected.Length - 2).ToString(), newest.Older);
+        Assert.Equal(expected.Skip(expected.Length - 4).Take(2), older.Messages.Select(message => message.Text));
+        Assert.Equal(show, older.ShowWork);
+    }
+
+    private IEnumerable<PromptEvent> Writing(ManualResetEventSlim? gate = null)
+    {
+        yield return new PromptDeltaEvent { Text = "Hel" };
+        Thread.Sleep(80);
+        gate?.Wait(TimeSpan.FromSeconds(10));
+        yield return new PromptDeltaEvent { Text = "lo " };
+        Thread.Sleep(80);
+        yield return new PromptDeltaEvent { Text = "world" };
+        Thread.Sleep(80);
+        yield return new PromptMessageEvent { Text = "Hello world" };
+    }
+
+    private PromptService Streaming(out Action<RemoteEvent> deliver)
+    {
+        Action<RemoteEvent>? handler = null;
+        hub.Setup(x => x.Subscribe(It.IsAny<Action<RemoteEvent>>())).Callback<Action<RemoteEvent>>(registered => handler = registered).Returns(Mock.Of<IDisposable>());
+        PromptService streaming = new(workspaces.Object, store.Object, host.Object, hub.Object, activity, snapshots.Object) { StreamInterval = TimeSpan.FromMilliseconds(20) };
+        streaming.Configure(stopping.Token);
+        deliver = remoteEvent => handler!(remoteEvent);
+        return streaming;
+    }
+
+    [Fact]
+    public async Task Prompt_StreamsTheMessageTheAiIsWritingInOrderBeforeItsFinishedFormOnlyWhileTheWorkspaceShowsTheWork()
+    {
+        Use(workspace with { ShowWork = true });
+        PromptService streaming = Streaming(out _);
+        prompter.OnCreate = session => session.ReplyWith(_ => Writing());
+
+        await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !streaming.IsBusy(workspace.Id));
+
+        List<RemoteEvent> published = [.. Events(RemoteEventKind.MessageAdded).Concat(Events(RemoteEventKind.MessageDelta))];
+        int final = events.FindIndex(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message!.Role == MessageRole.Assistant);
+        string[] pieces = [.. Events(RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text!)];
+
+        Assert.NotEmpty(pieces);
+        Assert.Equal("Hello world", string.Concat(pieces));
+        Assert.All(published.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta), remoteEvent => Assert.Equal(workspace.Id, remoteEvent.WorkspaceId));
+        Assert.DoesNotContain(events.Skip(final + 1), remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta);
+        Assert.Equal(["Hello world"], Messages(MessageRole.Assistant));
+        Assert.Equal(["Hello world"], chats[workspace.Id].Where(message => message.Role == MessageRole.Assistant).Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task Prompt_SendsNoPiecesWhileTheWorkspaceDoesNotShowTheWork()
+    {
+        PromptService streaming = Streaming(out _);
+        prompter.OnCreate = session => session.ReplyWith(_ => Writing());
+
+        await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !streaming.IsBusy(workspace.Id));
+
+        Assert.Empty(Events(RemoteEventKind.MessageDelta));
+        Assert.Equal(["Hello world"], Messages(MessageRole.Assistant));
+    }
+
+    [Fact]
+    public async Task ShowWorkChanged_StartsAndStopsTheStreamingOfAPromptThatIsAlreadyRunning()
+    {
+        PromptService streaming = Streaming(out Action<RemoteEvent> deliver);
+        using ManualResetEventSlim gate = new();
+        prompter.OnCreate = session => session.ReplyWith(_ => Writing(gate));
+
+        await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Task.Delay(200);
+        Assert.Empty(Events(RemoteEventKind.MessageDelta));
+
+        deliver(new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspace.Id, ShowWork = true });
+        gate.Set();
+        await Until(() => !streaming.IsBusy(workspace.Id));
+
+        Assert.Equal("lo world", string.Concat(Events(RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text)));
+        Assert.Equal(["Hello world"], Messages(MessageRole.Assistant));
+    }
+
+    [Fact]
+    public async Task Prompt_DropsThePiecesThatWereNotSentYetWhenTheMessageIsFinished()
+    {
+        Use(workspace with { ShowWork = true });
+        PromptService streaming = Streaming(out _);
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptDeltaEvent { Text = "never sent" }, new PromptMessageEvent { Text = "done" }]);
+
+        await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !streaming.IsBusy(workspace.Id));
+        await Task.Delay(120);
+
+        Assert.Empty(Events(RemoteEventKind.MessageDelta));
+        Assert.Equal(["done"], Messages(MessageRole.Assistant));
+    }
+
+    [Fact]
+    public async Task History_OfAWorkspaceWithoutAConversationStillSaysWhetherItShowsTheWork()
+    {
+        Use(workspace with { ShowWork = true, SessionId = null });
+
+        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+
+        Assert.Empty(history.Messages);
+        Assert.True(history.ShowWork);
     }
 
     [Fact]

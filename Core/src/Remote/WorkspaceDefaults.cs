@@ -39,4 +39,9 @@ public sealed record WorkspaceDefaults
     /// Gets the standing instructions of a new session, empty for none (a missing value would not survive the wire, which leaves out what is <see langword="null" />).
     /// </summary>
     public string Instructions { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether the chat of a new workspace shows the AI's work (tool calls and their results, dimmed); each workspace can change it afterwards.
+    /// </summary>
+    public bool ShowWork { get; init; }
 }

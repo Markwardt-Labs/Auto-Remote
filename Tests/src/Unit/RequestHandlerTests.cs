@@ -853,6 +853,21 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
+    public async Task Handle_SetShowWork_SetsItForTheWorkspaceItNamesAndNeedsTheChoice()
+    {
+        workspaces.Setup(x => x.SetShowWork(workspace.Id, true, It.IsAny<CancellationToken>())).ReturnsAsync(workspace with { ShowWork = true });
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.SetShowWork, WorkspaceId = workspace.Id, ShowWork = true }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.SetShowWork, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        RemoteResponse unnamed = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.SetShowWork, ShowWork = true }, owner, CancellationToken.None);
+
+        Assert.True(response.Workspace!.ShowWork);
+        Assert.NotNull(missing.Error);
+        Assert.NotNull(unnamed.Error);
+        workspaces.Verify(x => x.SetShowWork(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Handle_GetErrors_ListsTheErrorsOfTheWorkspaceItNamesAndOpenStartsTheHistory()
     {
         ErrorEntry entry = new() { Time = DateTimeOffset.UtcNow, Message = "boom" };

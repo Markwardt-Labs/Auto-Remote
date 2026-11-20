@@ -43,6 +43,7 @@
             <ToggleSwitch IsChecked="{Binding NewIsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
             <ToggleSwitch IsChecked="{Binding NewIsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
             <ToggleSwitch IsChecked="{Binding NewIsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
+            <ToggleSwitch IsChecked="{Binding NewShowWork}" Content="Show the work of the AI in the chat" OnContent="" OffContent="" />
             <TextBlock Text="Instructions" Classes="muted" />
             <TextBox Text="{Binding NewInstructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
           </StackPanel>

@@ -98,6 +98,10 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool loadingOlder;
 
+    private bool showWork;
+
+    private ChatMessage? streaming;
+
     private bool isSavedInputsOpen;
 
     /// <summary>
@@ -244,6 +248,23 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     {
         get => autoScroll;
         set => Set(ref autoScroll, value);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the conversation also shows the work the AI does on the way, its tool calls and their results, dimmed. The server keeps it for the workspace and tells every client, so setting it changes it for all of them.
+    /// </summary>
+    public bool ShowWork
+    {
+        get => showWork;
+        set
+        {
+            if (showWork != value)
+            {
+                showWork = value;
+                Raise(nameof(ShowWork));
+                _ = Store(value);
+            }
+        }
     }
 
     /// <summary>
@@ -451,11 +472,78 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private void Stream(string piece)
+    {
+        if (streaming is null)
+        {
+            streaming = new ChatMessage { Role = MessageRole.Assistant, Text = piece };
+            Messages.Add(streaming);
+            return;
+        }
+
+        ChatMessage updated = streaming with { Text = streaming.Text + piece };
+        Replace(streaming, updated);
+        streaming = updated;
+    }
+
+    private void Unstream()
+    {
+        if (streaming is not null)
+        {
+            int index = IndexOf(streaming);
+
+            if (index >= 0)
+            {
+                Messages.RemoveAt(index);
+            }
+
+            streaming = null;
+        }
+    }
+
+    private void Replace(ChatMessage old, ChatMessage replacement)
+    {
+        int index = IndexOf(old);
+
+        if (index >= 0)
+        {
+            Messages[index] = replacement;
+        }
+        else
+        {
+            Messages.Add(replacement);
+        }
+    }
+
+    private int IndexOf(ChatMessage message)
+    {
+        for (int index = Messages.Count - 1; index >= 0; index--)
+        {
+            if (ReferenceEquals(Messages[index], message))
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    private bool IsHidden(RemoteEvent remoteEvent) => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message is { IsWork: true } && !showWork;
+
+    private async Task Store(bool value)
+    {
+        if (!await Attempt(() => connection.SetShowWork(workspaceId, value, CancellationToken.None)))
+        {
+            showWork = !value;
+            Raise(nameof(ShowWork));
+        }
+    }
+
     private void Flush()
     {
         List<RemoteEvent> pending = [.. early];
         early.Clear();
-        List<ChatMessage> added = [.. pending.Where(item => item.Kind == RemoteEventKind.MessageAdded && item.Message is not null).Select(item => item.Message!)];
+        List<ChatMessage> added = [.. pending.Where(item => item.Kind == RemoteEventKind.MessageAdded && item.Message is not null && !IsHidden(item)).Select(item => item.Message!)];
         int overlap = Math.Min(added.Count, Messages.Count);
 
         while (overlap > 0 && !Enumerable.Range(0, overlap).All(index => Same(Messages[Messages.Count - overlap + index], added[index])))
@@ -468,7 +556,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         foreach (RemoteEvent remoteEvent in pending)
         {
-            if (remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message is not null && skipped < overlap)
+            if (remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message is not null && !IsHidden(remoteEvent) && skipped < overlap)
             {
                 skipped++;
             }
@@ -493,6 +581,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         if (await Attempt(async () => history = await connection.GetHistory(workspaceId, null, chunk, CancellationToken.None)))
         {
+            streaming = null;
             Messages.Clear();
 
             foreach (ChatMessage message in history!.Messages)
@@ -503,6 +592,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             older = history.Older;
             Raise(nameof(HasMore));
             IsAiWorking = history.Working;
+
+            if (showWork != history.ShowWork)
+            {
+                showWork = history.ShowWork;
+                Raise(nameof(ShowWork));
+            }
         }
     }
 
@@ -528,14 +623,40 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         switch (remoteEvent.Kind)
         {
             case RemoteEventKind.MessageAdded when remoteEvent.Message is { } message:
-                Messages.Add(message);
+                if (IsHidden(remoteEvent))
+                {
+                    break;
+                }
+
+                if (streaming is not null && message is { Role: MessageRole.Assistant, IsWork: false })
+                {
+                    Replace(streaming, message);
+                    streaming = null;
+                }
+                else
+                {
+                    Messages.Add(message);
+                }
+
+                break;
+            case RemoteEventKind.MessageDelta when showWork && remoteEvent.Text is { Length: > 0 } piece:
+                Stream(piece);
+                break;
+            case RemoteEventKind.ShowWorkChanged:
+                _ = Reload();
                 break;
             case RemoteEventKind.WorkingChanged:
                 IsAiWorking = remoteEvent.Working == true;
 
+                if (!IsAiWorking)
+                {
+                    Unstream();
+                }
+
                 break;
             case RemoteEventKind.Failed:
                 Error = remoteEvent.Error;
+                Unstream();
                 break;
             case RemoteEventKind.SavedInputsChanged when remoteEvent.SavedInputs is { } saved:
                 ShowSavedInputs(saved);

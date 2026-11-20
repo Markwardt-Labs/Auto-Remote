@@ -141,6 +141,11 @@ public sealed record RemoteRequest
     public bool? SearchContent { get; init; }
 
     /// <summary>
+    /// Gets whether the chat of the workspace shows the AI's work, for <see cref="RemoteCommand.SetShowWork" />.
+    /// </summary>
+    public bool? ShowWork { get; init; }
+
+    /// <summary>
     /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" /> and the base64 WAV audio for <see cref="RemoteCommand.Transcribe" />.
     /// </summary>
     public string? Data { get; init; }

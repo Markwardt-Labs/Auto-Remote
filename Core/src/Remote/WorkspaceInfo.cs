@@ -51,6 +51,11 @@ public sealed record WorkspaceInfo
     public string? ExpandPrompt { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the chat of the workspace shows the AI's work (tool calls and their results, dimmed) besides what it says; it starts as <see cref="WorkspaceDefaults.ShowWork" /> and every client of the server shares it.
+    /// </summary>
+    public bool ShowWork { get; init; }
+
+    /// <summary>
     /// Gets the workspace's display name, which is the name of <see cref="Folder" />.
     /// </summary>
     [JsonIgnore]

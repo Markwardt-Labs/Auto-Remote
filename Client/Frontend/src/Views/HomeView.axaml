@@ -226,7 +226,12 @@
                                      ToolTip.Tip="{Binding Time, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding Time, Converter={x:Static local:MessageConverters.HasTime}}" />
                         </StackPanel>
                       </Border>
-                      <StackPanel Spacing="2" IsVisible="{Binding Role, Converter={x:Static ObjectConverters.Equal}, ConverterParameter={x:Static core:MessageRole.Assistant}}">
+                      <StackPanel Spacing="2" IsVisible="{Binding IsWork}">
+                        <local:ScrollSafeTextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource Muted}" Opacity="0.8" />
+                        <TextBlock Classes="muted" FontSize="11" Opacity="0.8" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}"
+                                   ToolTip.Tip="{Binding Time, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding Time, Converter={x:Static local:MessageConverters.HasTime}}" />
+                      </StackPanel>
+                      <StackPanel Spacing="2" IsVisible="{Binding, Converter={x:Static local:MessageConverters.IsAnswer}}">
                         <local:MarkdownView Source="{Binding Text}" />
                         <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}"
                                    ToolTip.Tip="{Binding Time, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding Time, Converter={x:Static local:MessageConverters.HasTime}}" />
@@ -236,6 +241,10 @@
                 </ItemsControl.ItemTemplate>
               </ItemsControl>
             </ScrollViewer>
+            <ToggleButton Classes="icon" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,64,8" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
+                          ToolTip.Tip="Show the work of the AI (tool calls and results, dimmed) and stream its answer as it is written" IsChecked="{Binding ShowWork, Mode=TwoWay}">
+              <Path Classes="lineIcon" Data="{StaticResource WorkIconGeometry}" MaxWidth="12" MaxHeight="12" />
+            </ToggleButton>
             <ToggleButton Classes="icon" HorizontalAlignment="Right" VerticalAlignment="Bottom" Margin="0,0,24,8" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1"
                           ToolTip.Tip="Auto scroll to new messages" IsChecked="{Binding AutoScroll, Mode=TwoWay}" Click="OnChatAutoScrollToggled">
               <Path Classes="lineIcon" Data="{StaticResource AutoScrollIconGeometry}" MaxWidth="12" MaxHeight="12" />

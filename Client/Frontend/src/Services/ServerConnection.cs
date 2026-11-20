@@ -348,6 +348,15 @@ internal interface IServerConnection : IAsyncDisposable
     Task<IReadOnlyList<ErrorEntry>> GetErrors(Guid id, CancellationToken cancellation);
 
     /// <summary>
+    /// Sets whether the chat of a workspace shows the AI's work, for every client of the server.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="show">Whether the chat shows the tool calls and results of the AI, dimmed.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task SetShowWork(Guid id, bool show, CancellationToken cancellation);
+
+    /// <summary>
     /// Removes a saved input from a workspace and returns it, so the caller can put it into the chat input.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -949,6 +958,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<ErrorEntry>> GetErrors(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetErrors, WorkspaceId = id }, cancellation)).Errors ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task SetShowWork(Guid id, bool show, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SetShowWork, WorkspaceId = id, ShowWork = show }, cancellation);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SaveInput, WorkspaceId = id, Text = text }, cancellation)).SavedInputs ?? throw Malformed();

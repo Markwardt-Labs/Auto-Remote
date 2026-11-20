@@ -26,6 +26,11 @@ public static class MessageConverters
     public static readonly IValueConverter HasFiles = new FuncValueConverter<string?, bool>(text => MessageParts.Parse(text ?? string.Empty).Files.Count > 0);
 
     /// <summary>
+    /// Gets the converter from a message to whether it is something the AI said, which shows as formatted text, rather than work it did on the way.
+    /// </summary>
+    public static readonly IValueConverter IsAnswer = new FuncValueConverter<ChatMessage?, bool>(message => message is { Role: MessageRole.Assistant, IsWork: false });
+
+    /// <summary>
     /// Gets the converter from the time of a message to the short text shown under it, in the local time zone.
     /// </summary>
     public static readonly IValueConverter Time = new FuncValueConverter<DateTimeOffset?, string>(time => time?.ToStamp(DateTimeOffset.UtcNow) ?? string.Empty);

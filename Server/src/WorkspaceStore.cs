@@ -299,26 +299,28 @@ internal sealed class WorkspaceStore : IWorkspaceStore
 
     private async Task Rewrite(Guid id, IReadOnlyList<string> all, CancellationToken cancellation)
     {
-        int first = all.Count;
-        long size = 0;
+        bool[] dropped = new bool[all.Count];
+        int count = all.Count;
+        long size = all.Sum(line => Encoding.UTF8.GetByteCount(line) + 1L);
 
-        while (first > 0 && all.Count - first < maxMessages)
+        foreach (bool work in (bool[])[true, false])
         {
-            size += Encoding.UTF8.GetByteCount(all[first - 1]) + 1;
-
-            if (size > maxBytes && first < all.Count)
+            for (int index = 0; index < all.Count && count > 1 && (count > maxMessages || size > maxBytes); index++)
             {
-                break;
+                if (!dropped[index] && (!work || all[index].Contains("\"isWork\":true", StringComparison.Ordinal)))
+                {
+                    dropped[index] = true;
+                    count--;
+                    size -= Encoding.UTF8.GetByteCount(all[index]) + 1;
+                }
             }
-
-            first--;
         }
 
         Directory.CreateDirectory(Path.GetDirectoryName(ChatPath(id))!);
         string temporary = ChatPath(id) + ".tmp";
-        await File.WriteAllLinesAsync(temporary, all.Skip(first), cancellation);
+        await File.WriteAllLinesAsync(temporary, all.Where((_, index) => !dropped[index]), cancellation);
         File.Move(temporary, ChatPath(id), true);
-        counts[id] = all.Count - first;
+        counts[id] = count;
     }
 
     /// <inheritdoc />

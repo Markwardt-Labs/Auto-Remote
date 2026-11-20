@@ -56,6 +56,11 @@ public sealed record RemoteEvent
     public IReadOnlyList<ErrorEntry>? Errors { get; init; }
 
     /// <summary>
+    /// Gets whether the workspace now shows the AI's work, for <see cref="RemoteEventKind.ShowWorkChanged" />.
+    /// </summary>
+    public bool? ShowWork { get; init; }
+
+    /// <summary>
     /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
     /// </summary>
     public string? Text { get; init; }
@@ -135,5 +140,15 @@ public enum RemoteEventKind
     /// <summary>
     /// The AI of the workspace ended with an error, which the server recorded; <see cref="RemoteEvent.Errors" /> is the history now.
     /// </summary>
-    ErrorsChanged
+    ErrorsChanged,
+
+    /// <summary>
+    /// The workspace was set to show or hide the AI's work in its chat; the clients read the history again, which now includes or leaves out the tool calls and results.
+    /// </summary>
+    ShowWorkChanged,
+
+    /// <summary>
+    /// The AI wrote a piece of a message it has not finished, which <see cref="RemoteEvent.Text" /> holds; only sent for a workspace that shows the AI's work. Pieces follow each other in order, and the finished message arrives as a <see cref="MessageAdded" /> event that replaces them. Pieces of a message that is never finished, because the AI stopped or failed, are dropped.
+    /// </summary>
+    MessageDelta
 }

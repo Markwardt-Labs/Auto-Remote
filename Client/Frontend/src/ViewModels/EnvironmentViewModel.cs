@@ -266,6 +266,19 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets whether the chat of new workspaces shows the work of the AI, its tool calls and results, dimmed; each workspace can change it afterwards.
+    /// </summary>
+    public bool NewShowWork
+    {
+        get => defaults.ShowWork;
+        set
+        {
+            defaults = defaults with { ShowWork = value };
+            Raise(nameof(NewShowWork));
+        }
+    }
+
+    /// <summary>
     /// Gets or sets the standing instructions of new workspaces; empty for none.
     /// </summary>
     public string NewInstructions

@@ -35,6 +35,20 @@ public sealed class ServerConnectionTests
     }
 
     [Fact]
+    public async Task SetShowWork_SendsTheChoiceForTheWorkspace()
+    {
+        List<RemoteRequest> sent = [];
+        Mock<IMessageChannel> channel = Channel(sent, out _);
+        await using ServerConnection connection = new(new ClientWebSocket(), channel.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
+        Guid id = Guid.NewGuid();
+
+        await connection.SetShowWork(id, true, CancellationToken.None);
+        await connection.SetShowWork(id, false, CancellationToken.None);
+
+        Assert.Equal([(RemoteCommand.SetShowWork, id, (bool?)true), (RemoteCommand.SetShowWork, id, (bool?)false)], sent.Select(request => (request.Command, request.WorkspaceId!.Value, request.ShowWork)));
+    }
+
+    [Fact]
     public async Task Request_ReopensALostConnectionAndReplaysTheWorkspaceWatch()
     {
         List<RemoteRequest> sentFirst = [];

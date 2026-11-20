@@ -83,6 +83,16 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> SetOverrides(Guid id, string? reviewPrompt, string? expandPrompt, int? statusMinutes, CancellationToken cancellation);
 
     /// <summary>
+    /// Sets whether the chat of a workspace shows the AI's work, keeps it and tells every client with <see cref="RemoteEventKind.ShowWorkChanged" />; does nothing when it already is so.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="show">Whether the chat shows the AI's work.</param>
+    /// <param name="cancellation">Cancels the save.</param>
+    /// <returns>The workspace as it now is.</returns>
+    /// <exception cref="RequestException">No such workspace exists.</exception>
+    Task<WorkspaceInfo> SetShowWork(Guid id, bool show, CancellationToken cancellation);
+
+    /// <summary>
     /// Moves a workspace into a group, or out of any group; it goes to the end of that group.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -218,7 +228,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             {
                 if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
                 {
-                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes });
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork });
 
                     if (stored.Adopt)
                     {
@@ -300,7 +310,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             }
 
             string sessionId = await host.CreateSession(full, service, apiKey, cancellation);
-            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId, GroupId = groupId, LastUpdated = await Loaded(sessionId, cancellation) };
+            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId, GroupId = groupId, LastUpdated = await Loaded(sessionId, cancellation), ShowWork = host.Get().NewWorkspaces.ShowWork };
             workspaces.Add(created);
 
             try
@@ -394,6 +404,24 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         using (await Lock(cancellation))
         {
             await Replace(Find(id) with { SessionId = sessionId }, cancellation, false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> SetShowWork(Guid id, bool show, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo workspace = Find(id);
+
+            if (workspace.ShowWork == show)
+            {
+                return workspace;
+            }
+
+            WorkspaceInfo updated = await Replace(workspace with { ShowWork = show }, cancellation, false);
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = id, ShowWork = show });
+            return updated;
         }
     }
 
@@ -635,7 +663,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
     private async Task Save(CancellationToken cancellation, bool announce = true)
     {
-        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, StatusMinutes = workspace.StatusMinutes, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
+        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, StatusMinutes = workspace.StatusMinutes, ShowWork = workspace.ShowWork, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
 
         if (announce)
         {

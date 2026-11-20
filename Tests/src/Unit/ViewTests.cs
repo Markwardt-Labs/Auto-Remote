@@ -468,6 +468,55 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ChatHasAToggleForTheWorkOfTheAiNextToAutoScrollAndShowsThatWorkDimmed()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", ShowWork = true };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory
+        {
+            ShowWork = true,
+            Messages = [new ChatMessage { Role = MessageRole.User, Text = "list files" }, new ChatMessage { Role = MessageRole.Assistant, Text = "shell: ls -la", IsWork = true, Time = DateTimeOffset.UtcNow }, new ChatMessage { Role = MessageRole.Assistant, Text = "Found three files.", Time = DateTimeOffset.UtcNow }]
+        });
+
+        (bool toggled, bool leftOfAutoScroll, string[] dimmed, string[] normal, bool turnedOff) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 900, Content = view };
+            window.Show();
+
+            for (int attempt = 0; attempt < 100 && model.Active!.Chat.Messages.Count < 3; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(20);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Avalonia.Controls.Primitives.ToggleButton[] buttons = [.. window.GetVisualDescendants().OfType<Avalonia.Controls.Primitives.ToggleButton>().Where(button => button.IsEffectivelyVisible)];
+            Avalonia.Controls.Primitives.ToggleButton work = buttons.Single(button => $"{ToolTip.GetTip(button)}".StartsWith("Show the work of the AI", StringComparison.Ordinal));
+            Avalonia.Controls.Primitives.ToggleButton auto = buttons.First(button => $"{ToolTip.GetTip(button)}" == "Auto scroll to new messages");
+            bool checkedNow = work.IsChecked == true;
+            ScrollSafeTextBlock[] texts = [.. window.GetVisualDescendants().OfType<ScrollSafeTextBlock>().Where(block => block.IsEffectivelyVisible)];
+            string[] dim = [.. texts.Where(block => block.Foreground is Avalonia.Media.ISolidColorBrush { Color.R: 0x96 }).Select(block => block.Text ?? string.Empty)];
+            string[] other = [.. texts.Where(block => block.Foreground is not Avalonia.Media.ISolidColorBrush { Color.R: 0x96 } && !string.IsNullOrEmpty(block.Text)).Select(block => block.Text!)];
+            bool left = ReferenceEquals(work.Parent, auto.Parent) && work.Bounds.X < auto.Bounds.X;
+            model.Active!.Chat.ShowWork = false;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool off = work.IsChecked != true;
+            window.Close();
+            return (checkedNow, left, dim, other, off);
+        });
+
+        Assert.True(toggled);
+        Assert.True(leftOfAutoScroll);
+        Assert.Equal(["shell: ls -la"], dimmed);
+        Assert.Equal(["list files"], normal);
+        Assert.True(turnedOff);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheUpdateButtonNextToTheWorkspacesButtonOnlyWhenAnUpdateIsAvailableAndConfirmsBeforeUpdating()
     {
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
@@ -733,7 +782,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         Assert.Equal(1, refreshButtons);
         Assert.Equal(2, refreshWithLocal);
-        Assert.Equal(4, switchesAndDefaults);
+        Assert.Equal(5, switchesAndDefaults);
         Assert.True(defaultsShown);
         Assert.Equal(8, rowBoxes);
         Assert.Equal(1, clearBoxes);

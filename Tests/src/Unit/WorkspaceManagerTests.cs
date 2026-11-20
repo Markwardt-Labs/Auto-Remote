@@ -253,6 +253,59 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
+    public async Task SetShowWork_StoresTheChoiceWithTheWorkspaceTellsEveryClientOnceAndReadsItBackOnTheNextStart()
+    {
+        string session = await Session("/work/a");
+        Guid id = Guid.NewGuid();
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(new StoredCatalog { Workspaces = [new StoredWorkspace { Id = id, SessionId = session }] });
+        List<StoredCatalog> saved = [];
+        store.Setup(x => x.Save(It.IsAny<StoredCatalog>(), It.IsAny<CancellationToken>())).Callback<StoredCatalog, CancellationToken>((catalog, _) => saved.Add(catalog)).Returns(Task.CompletedTask);
+        await manager.Open("workspaces.json", CancellationToken.None);
+        Assert.False((await manager.Get(id, CancellationToken.None)).ShowWork);
+
+        WorkspaceInfo shown = await manager.SetShowWork(id, true, CancellationToken.None);
+        WorkspaceInfo again = await manager.SetShowWork(id, true, CancellationToken.None);
+
+        Assert.True(shown.ShowWork);
+        Assert.Equal(shown, again);
+        Assert.True((await manager.Get(id, CancellationToken.None)).ShowWork);
+        Assert.True(Assert.Single(Assert.Single(saved).Workspaces).ShowWork);
+        events.Verify(x => x.Publish(It.Is<RemoteEvent>(remoteEvent => remoteEvent.Kind == RemoteEventKind.ShowWorkChanged && remoteEvent.WorkspaceId == id && remoteEvent.ShowWork == true)), Times.Once);
+        events.Verify(x => x.Publish(It.Is<RemoteEvent>(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkspacesChanged)), Times.Never);
+
+        WorkspaceManager restarted = new(store.Object, folders.Object, events.Object, host.Object);
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved[^1]);
+        await restarted.Open("workspaces.json", CancellationToken.None);
+        Assert.True((await restarted.Get(id, CancellationToken.None)).ShowWork);
+
+        WorkspaceInfo hidden = await manager.SetShowWork(id, false, CancellationToken.None);
+
+        Assert.False(hidden.ShowWork);
+        Assert.False(Assert.Single(saved[^1].Workspaces).ShowWork);
+    }
+
+    [Fact]
+    public async Task SetShowWork_RefusesAWorkspaceThatDoesNotExist()
+    {
+        await manager.Open("workspaces.json", CancellationToken.None);
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.SetShowWork(Guid.NewGuid(), true, CancellationToken.None));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Create_StartsAWorkspaceWithTheChoiceOfTheEnvironmentForNewWorkspaces(bool show)
+    {
+        host.Mock.Setup(x => x.Get()).Returns(new AiEnvironment { NewWorkspaces = new WorkspaceDefaults { ShowWork = show } });
+
+        WorkspaceInfo created = await manager.Create("/work/app", AiService.ClaudeCode, null, null, CancellationToken.None);
+
+        Assert.Equal(show, created.ShowWork);
+        store.Verify(x => x.Save(It.Is<StoredCatalog>(catalog => catalog.Workspaces.Single().ShowWork == show), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task SetOverrides_StoresTheStatusIntervalWithTheWorkspaceAndClearsIt()
     {
         string session = await Session("/work/a");

@@ -363,4 +363,52 @@ public sealed class WorkspaceStoreTests
 
         Assert.Empty(await store.LoadErrors(id, CancellationToken.None));
     }
+
+    [Fact]
+    public async Task Chat_PurgesTheOldestWorkMessagesBeforeAnythingTheUserOrTheAiSaid()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new(maxMessages: 5);
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+
+        foreach (ChatMessage message in new[]
+        {
+            new ChatMessage { Role = MessageRole.User, Text = "first", Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "work 1", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "work 2", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "answer", Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "work 3", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.User, Text = "second", Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "work 4", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "work 5", Time = now, IsWork = true },
+        })
+        {
+            await store.AppendMessage(id, message, CancellationToken.None);
+        }
+
+        IReadOnlyList<ChatMessage> kept = (await store.LoadMessages(id, CancellationToken.None))!;
+
+        Assert.Equal(["first", "answer", "work 3", "second", "work 4", "work 5"], kept.Select(message => message.Text));
+        Assert.DoesNotContain(kept, message => message.Text is "work 1" or "work 2");
+    }
+
+    [Fact]
+    public async Task Chat_KeepsTheWorkFlagAndLeavesItOutOfOrdinaryMessages()
+    {
+        using TempFolder temp = new();
+        WorkspaceStore store = new();
+        store.Open(temp.Combine("workspaces.json"));
+        Guid id = Guid.NewGuid();
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.Assistant, Text = "said", Time = DateTimeOffset.UtcNow }, CancellationToken.None);
+        await store.AppendMessage(id, new ChatMessage { Role = MessageRole.Assistant, Text = "did", Time = DateTimeOffset.UtcNow, IsWork = true }, CancellationToken.None);
+
+        string[] lines = File.ReadAllLines(temp.Combine($"chats/{id:N}.jsonl"));
+        IReadOnlyList<ChatMessage> loaded = (await store.LoadMessages(id, CancellationToken.None))!;
+
+        Assert.DoesNotContain("isWork", lines[0]);
+        Assert.Contains("\"isWork\":true", lines[1]);
+        Assert.Equal([false, true], loaded.Select(message => message.IsWork));
+    }
 }
