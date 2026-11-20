@@ -23,6 +23,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
+        Errors = new ErrorHistoryViewModel(connection, workspace.Id);
         Loop = new LoopViewModel(connection, workspace);
         Loop.Started += () => Chat.Notice = null;
         OpenLoopCommand = new AsyncCommand(_ => Loop.Open());
@@ -125,6 +126,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 beforeSettings = tab;
                 Tab = WorkspaceTab.Settings;
                 _ = Settings.Reload();
+                _ = Errors.Load();
             }
         });
     }
@@ -179,6 +181,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the workspace's settings.
     /// </summary>
     public SettingsViewModel Settings { get; }
+
+    /// <summary>
+    /// Gets the errors the AI of the workspace ended with, which the error panel of its settings lists.
+    /// </summary>
+    public ErrorHistoryViewModel Errors { get; }
 
     /// <summary>
     /// Gets the absolute path on the server of a path relative to the workspace folder.
@@ -461,6 +468,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         _ = ReadLoop();
         _ = Git.Start();
         _ = Scripts.Start();
+        _ = Errors.Load();
         await Chat.Start();
     }
 
@@ -535,6 +543,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         _ = ReadLoop();
         _ = Chat.Resync();
         _ = Scripts.Start();
+        _ = Errors.Load();
         _ = Git.Refresh();
 
         if (layout == ClientLayout.Panels || Tab == WorkspaceTab.Files)
@@ -553,6 +562,10 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         if (remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
         {
             Follow(state);
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.ErrorsChanged)
+        {
+            Errors.Receive(remoteEvent);
         }
         else if (remoteEvent.Kind == RemoteEventKind.LoopChanged)
         {

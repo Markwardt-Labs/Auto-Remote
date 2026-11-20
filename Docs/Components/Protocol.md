@@ -104,6 +104,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `commitMessage` | string | `GenerateCommitMessage` |
 | `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput` |
 | `savedInput` | saved input | `TakeSavedInput` |
+| `errors` | array of error | `GetErrors` |
 | `scripts` | script runs | `GetScripts` |
 | `event` | event | Pushed by the server, with `id` zero (see Events). |
 
@@ -142,6 +143,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
 | `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; the oldest entries beyond 200 are dropped. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |
+| `GetErrors` | `workspaceId` | `errors` | The errors the AI of the workspace ended with in the last 30 days, the newest first. Entries older than that are removed by the server, when it starts, every 12 hours and whenever the list is read or an error is added. Only the errors of the workspace named are listed. |
 | `TakeSavedInput` | `workspaceId`, `inputId` | `savedInput` | Removes the saved input and answers it, so only one client gets it; refused once it is gone. Every client gets a `SavedInputsChanged` event. |
 | `UpdateServer` | none | none | Makes the server look for the newest release on GitHub, download its server executable and restart with it, which closes every connection. Answers once the download is complete, a second before the restart. Refused when there is no newer release, GitHub cannot be reached, the server does not run from an installed executable or the folder is not writable. Not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
@@ -321,6 +323,13 @@ The client lists every window and colors each one, and the usage icon by the sho
 | `text` | string | The text that was in the chat input. |
 | `time` | string | When it was saved, ISO 8601 UTC. |
 
+**error** (items of `errors`, and the `errors` of `ErrorsChanged` events)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `time` | string | When the error happened, ISO 8601 UTC. |
+| `message` | string | The message the `Failed` event carried. |
+
 **message** (items of `history.messages`, and carried by `MessageAdded` events)
 
 | Property | Type | Meaning |
@@ -468,7 +477,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged` or `SavedInputsChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged` or `ErrorsChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
@@ -477,6 +486,7 @@ The server pushes events to every authenticated connection, as responses with `i
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
 | `savedInputs` | array of saved input | `SavedInputsChanged`: the saved inputs of the workspace now, the last saved first. |
+| `errors` | array of error | `ErrorsChanged`: the errors of the workspace now, the newest first; sent right after the `Failed` event of the same workspace, and only for that workspace. |
 | `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 

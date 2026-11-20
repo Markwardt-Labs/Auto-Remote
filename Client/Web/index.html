@@ -1359,6 +1359,7 @@ class Connection {
   getSavedInputs(workspaceId) { return this.request("GetSavedInputs", { workspaceId }).then(r => r.savedInputs); }
   saveInput(workspaceId, text) { return this.request("SaveInput", { workspaceId, text }).then(r => r.savedInputs); }
   takeSavedInput(workspaceId, inputId) { return this.request("TakeSavedInput", { workspaceId, inputId }).then(r => r.savedInput); }
+  getErrors(workspaceId) { return this.request("GetErrors", { workspaceId }).then(r => r.errors); }
   generateCommitMessage(workspaceId) { return this.request("GenerateCommitMessage", { workspaceId }).then(r => r.commitMessage); }
   gitReset(workspaceId) { return this.request("GitReset", { workspaceId }); }
   gitCreateBranch(workspaceId, name) { return this.request("GitCreateBranch", { workspaceId, name }); }
@@ -1724,6 +1725,7 @@ class WorkspaceView {
     this.loop = null;
     this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
     this.scriptError = new ErrorLine();
+    this.errorsError = new ErrorLine();
     this.syncTimer = null;
     this.build();
     this.listener = event => this.receive(event);
@@ -1733,6 +1735,7 @@ class WorkspaceView {
     this.loadScripts();
     this.loadState();
     this.loadLoop();
+    this.loadErrors();
   }
 
   build() {
@@ -1907,6 +1910,8 @@ class WorkspaceView {
     this.detailsBox = h("div", { class: "stack tight" });
     this.detailsSection = section("How it runs", this.detailsBox);
     this.detailsSection.hidden = true;
+    this.errorsBox = h("div", { class: "stack tight" });
+    this.showErrors([]);
     this.current = null;
     this.formShown = false;
     this.settingsEdits = 0;
@@ -1929,6 +1934,7 @@ class WorkspaceView {
           ...promptRow("Review prompt", this.reviewPromptBox, "Use the review prompt of the global settings"),
           ...promptRow("Expand prompt", this.expandPromptBox, "Use the expand prompt of the global settings")),
         this.detailsSection,
+        section("Errors", this.errorsError.element, this.errorsBox),
         this.settingsError.element,
         section("Workspace",
           h("button", { class: "block", onclick: () => this.home.beginRename() }, "Rename Workspace"),
@@ -1981,6 +1987,22 @@ class WorkspaceView {
     };
 
     return bar;
+  }
+
+  async loadErrors() {
+    const result = await attempt(() => this.connection.getErrors(this.info.id), this.errorsError);
+
+    if (result.ok) {
+      this.showErrors(result.value);
+    }
+  }
+
+  showErrors(errors) {
+    this.errorsBox.replaceChildren(...(errors.length === 0
+      ? [h("div", { class: "muted small" }, "No errors in the last 30 days.")]
+      : errors.map(entry => h("div", { style: "margin-bottom:8px" },
+        h("div", { class: "muted", style: "font-size:11px", title: new Date(entry.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.time)),
+        h("div", { class: "small", style: "white-space:pre-wrap;overflow-wrap:anywhere;user-select:text" }, entry.message)))));
   }
 
   async syncSettings() {
@@ -2076,6 +2098,10 @@ class WorkspaceView {
       this.syncSettings();
     }
 
+    if (this.settingsOpen) {
+      this.loadErrors();
+    }
+
     this.settingsPane.hidden = !this.settingsOpen;
     this.panels.hidden = this.settingsOpen;
 
@@ -2132,6 +2158,7 @@ class WorkspaceView {
     this.loadScripts();
     this.loadState();
     this.loadLoop();
+    this.loadErrors();
     this.loadRoot(this.files?.path ?? "", false);
   }
 
@@ -2765,6 +2792,14 @@ class WorkspaceView {
 
     if (event.kind === "StateChanged") {
       this.followState(event.state);
+      return;
+    }
+
+    if (event.kind === "ErrorsChanged") {
+      if (event.errors) {
+        this.showErrors(event.errors);
+      }
+
       return;
     }
 

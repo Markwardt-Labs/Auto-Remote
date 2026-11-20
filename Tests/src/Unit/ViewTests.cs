@@ -418,6 +418,55 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal("Strong", capability);
     }
 
+    private (bool Header, string[] Messages, bool NoneShown) ErrorPanel(WorkspaceInfo workspace, int expected)
+    {
+        HomeViewModel model = new(connection.Object);
+        model.Start().GetAwaiter().GetResult();
+        HomeView view = new() { DataContext = model };
+        Window window = new() { Width = 900, Height = 900, Content = view };
+        window.Show();
+        model.Active!.ToggleSettingsCommand.Execute(null);
+
+        for (int attempt = 0; attempt < 100 && model.Active.Errors.Entries.Count != expected; attempt++)
+        {
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(20);
+        }
+
+        Expand(window);
+        TextBlock[] texts = [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible)];
+        bool header = window.GetVisualDescendants().OfType<Expander>().Any(section => section.IsEffectivelyVisible && $"{section.Header}" == "Errors");
+        string[] messages = [.. texts.Where(block => block is SelectableTextBlock).Select(block => block.Text ?? string.Empty)];
+        bool none = texts.Any(block => block.Text == "No errors in the last 30 days.");
+        window.Close();
+        return (header, messages, none);
+    }
+
+    [Fact]
+    public async Task HomeView_SettingsListTheErrorsOfTheWorkspaceWithTheirTimesOrSayThereAreNone()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        connection.Setup(x => x.GetErrors(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([new ErrorEntry { Time = DateTimeOffset.UtcNow, Message = "Codex could not be started" }, new ErrorEntry { Time = DateTimeOffset.UtcNow - TimeSpan.FromDays(3), Message = "Rate limit reached" }]);
+
+        (bool header, string[] messages, bool none) = await fixture.Run(() => ErrorPanel(workspace, 2));
+
+        Assert.True(header);
+        Assert.Equal(["Codex could not be started", "Rate limit reached"], messages);
+        Assert.False(none);
+
+        connection.Setup(x => x.GetErrors(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+
+        (bool emptyHeader, string[] noMessages, bool noneShown) = await fixture.Run(() => ErrorPanel(workspace, 0));
+
+        Assert.True(emptyHeader);
+        Assert.Empty(noMessages);
+        Assert.True(noneShown);
+    }
+
     [Fact]
     public async Task HomeView_ShowsTheUpdateButtonNextToTheWorkspacesButtonOnlyWhenAnUpdateIsAvailableAndConfirmsBeforeUpdating()
     {
@@ -1789,7 +1838,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (workspaceSections, workspaceOpen, workspaceWidth, globalSections, globalOpen, globalWidth, opens);
         });
 
-        Assert.Equal(["AI", "Access", "Instructions and prompts", "How it runs", "Workspace"], workspaceSections);
+        Assert.Equal(["AI", "Access", "Instructions and prompts", "How it runs", "Errors", "Workspace"], workspaceSections);
         Assert.All(workspaceOpen, open => Assert.False(open));
         Assert.Equal(["New workspaces", "Status and prompts", "Claude Code", "OpenAI Codex", "Local models", "Image generation"], globalSections);
         Assert.All(globalOpen, open => Assert.False(open));

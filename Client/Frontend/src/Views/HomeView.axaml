@@ -708,6 +708,22 @@
                   </ItemsControl>
                 </StackPanel>
               </Expander>
+              <Expander Classes="section" Header="Errors" IsExpanded="False" DataContext="{Binding $parent[ScrollViewer].DataContext.Errors}">
+                <StackPanel Spacing="8" Margin="0,4,0,8">
+                  <TextBlock Text="No errors in the last 30 days." Classes="muted" FontSize="12" IsVisible="{Binding HasNoErrors}" />
+                  <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
+                  <ItemsControl ItemsSource="{Binding Entries}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <StackPanel Spacing="2" Margin="0,0,0,8">
+                          <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
+                          <SelectableTextBlock Text="{Binding Message}" FontSize="12" TextWrapping="Wrap" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </Expander>
               <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
               <Expander Classes="section" Header="Workspace" IsExpanded="False">
                 <StackPanel Spacing="8" Margin="0,4,0,8">

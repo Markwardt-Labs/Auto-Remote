@@ -93,6 +93,28 @@ internal interface IWorkspaceStore
     /// </summary>
     /// <param name="id">The workspace.</param>
     void DeleteInputs(Guid id);
+
+    /// <summary>
+    /// Reads the errors recorded for a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The errors in the order they were stored, empty when there are none.</returns>
+    Task<IReadOnlyList<ErrorEntry>> LoadErrors(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Replaces the errors recorded for a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="errors">The errors.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    Task SaveErrors(Guid id, IReadOnlyList<ErrorEntry> errors, CancellationToken cancellation);
+
+    /// <summary>
+    /// Deletes the errors recorded for a workspace.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    void DeleteErrors(Guid id);
 }
 
 /// <inheritdoc />
@@ -119,6 +141,8 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     private readonly SemaphoreSlim chats = new(1, 1);
 
     private readonly SemaphoreSlim inputGate = new(1, 1);
+
+    private readonly SemaphoreSlim errorGate = new(1, 1);
 
     private readonly ConcurrentDictionary<Guid, int> counts = new();
 
@@ -356,6 +380,68 @@ internal sealed class WorkspaceStore : IWorkspaceStore
             File.Delete(InputsPath(id));
         }
     }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ErrorEntry>> LoadErrors(Guid id, CancellationToken cancellation)
+    {
+        await errorGate.WaitAsync(cancellation);
+
+        try
+        {
+            if (!File.Exists(ErrorsPath(id)))
+            {
+                return [];
+            }
+
+            try
+            {
+                return JsonSerializer.Deserialize<List<ErrorEntry>>(await File.ReadAllTextAsync(ErrorsPath(id), cancellation), lines) ?? [];
+            }
+            catch (JsonException)
+            {
+                return [];
+            }
+        }
+        finally
+        {
+            errorGate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task SaveErrors(Guid id, IReadOnlyList<ErrorEntry> errors, CancellationToken cancellation)
+    {
+        await errorGate.WaitAsync(cancellation);
+
+        try
+        {
+            if (errors.Count == 0)
+            {
+                File.Delete(ErrorsPath(id));
+                return;
+            }
+
+            Directory.CreateDirectory(Path.GetDirectoryName(ErrorsPath(id))!);
+            string temporary = ErrorsPath(id) + ".tmp";
+            await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(errors, lines), cancellation);
+            File.Move(temporary, ErrorsPath(id), true);
+        }
+        finally
+        {
+            errorGate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public void DeleteErrors(Guid id)
+    {
+        if (File.Exists(ErrorsPath(id)))
+        {
+            File.Delete(ErrorsPath(id));
+        }
+    }
+
+    private string ErrorsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "errors", id.ToString("N") + ".json");
 
     private string InputsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "inputs", id.ToString("N") + ".json");
 

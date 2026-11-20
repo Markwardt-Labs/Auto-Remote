@@ -43,7 +43,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), new ErrorHistory(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -64,6 +64,11 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private IEnumerable<PromptEvent> Answer(FakePrompt prompt)
     {
+        if (prompt.Text.StartsWith("fail", StringComparison.Ordinal))
+        {
+            return [new PromptFailureEvent { Message = "boom: " + prompt.Text }];
+        }
+
         if (prompt.Text == "long")
         {
             Thread.Sleep(600);
@@ -357,6 +362,37 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal(WorkspaceState.Working, during);
         Assert.DoesNotContain(events, remoteEvent => remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is not (WorkspaceState.Ready or WorkspaceState.Working));
         Assert.Equal(WorkspaceState.Ready, await connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task AFailureOfTheAi_IsRecordedWithItsTimeForItsWorkspaceOnlyAndShownToNoOther()
+    {
+        FolderListing folderOne = await connection.CreateFolder(temp.Path, "failing", CancellationToken.None);
+        FolderListing folderTwo = await connection.CreateFolder(temp.Path, "unrelated", CancellationToken.None);
+        WorkspaceInfo failing = await connection.CreateWorkspace(folderOne.Path, null, null, null, CancellationToken.None);
+        WorkspaceInfo unrelated = await connection.CreateWorkspace(folderTwo.Path, null, null, null, CancellationToken.None);
+        DateTimeOffset before = DateTimeOffset.UtcNow;
+
+        await connection.Prompt(failing.Id, "fail now", CancellationToken.None);
+        List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.ErrorsChanged));
+        await connection.Prompt(unrelated.Id, "hello", CancellationToken.None);
+        events = await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.WorkspaceId == unrelated.Id) == 2);
+
+        IReadOnlyList<ErrorEntry> recorded = await connection.GetErrors(failing.Id, CancellationToken.None);
+        IReadOnlyList<ErrorEntry> none = await connection.GetErrors(unrelated.Id, CancellationToken.None);
+
+        ErrorEntry entry = Assert.Single(recorded);
+        Assert.Equal("boom: fail now", entry.Message);
+        Assert.InRange(entry.Time, before - TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
+        Assert.Empty(none);
+        Assert.All(events.Where(remoteEvent => remoteEvent.Kind is RemoteEventKind.Failed or RemoteEventKind.ErrorsChanged), remoteEvent => Assert.Equal(failing.Id, remoteEvent.WorkspaceId));
+        Assert.Equal(recorded, events.Single(remoteEvent => remoteEvent.Kind == RemoteEventKind.ErrorsChanged).Errors);
+        Assert.True(File.Exists(Path.Combine(temp.Combine("data"), "errors", $"{failing.Id:N}.json")));
+        Assert.False(File.Exists(Path.Combine(temp.Combine("data"), "errors", $"{unrelated.Id:N}.json")));
+
+        await connection.DeleteWorkspace(failing.Id, false, CancellationToken.None);
+
+        Assert.False(File.Exists(Path.Combine(temp.Combine("data"), "errors", $"{failing.Id:N}.json")));
     }
 
     [Fact]

@@ -334,5 +334,10 @@ public enum RemoteCommand
     /// <summary>
     /// Removes the saved input <see cref="RemoteRequest.InputId" /> from <see cref="RemoteRequest.WorkspaceId" /> and answers it in <see cref="RemoteResponse.SavedInput" />, so one client alone gets it; every client is told with a <see cref="RemoteEventKind.SavedInputsChanged" /> event. Fails when it was already taken.
     /// </summary>
-    TakeSavedInput
+    TakeSavedInput,
+
+    /// <summary>
+    /// Lists the errors the AI of <see cref="RemoteRequest.WorkspaceId" /> ended with in the last 30 days, the newest first; answered in <see cref="RemoteResponse.Errors" />.
+    /// </summary>
+    GetErrors
 }

@@ -16,6 +16,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<ISavedInputs> savedInputs = new();
 
+    private readonly Mock<IErrorHistory> errors = new();
+
     private readonly Mock<IScriptRunner> scripts = new();
 
     private readonly Mock<IUsageService> usage = new();
@@ -48,7 +50,7 @@ public sealed class RequestHandlerTests
     {
         activity = new WorkspaceActivity(events.Object);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
     }
 
     [Fact]
@@ -848,6 +850,24 @@ public sealed class RequestHandlerTests
         activity.TryEnter(workspace.Id, WorkspaceState.Working);
 
         Assert.Contains("AI is working", (await handler.Handle(request, owner, CancellationToken.None)).Error);
+    }
+
+    [Fact]
+    public async Task Handle_GetErrors_ListsTheErrorsOfTheWorkspaceItNamesAndOpenStartsTheHistory()
+    {
+        ErrorEntry entry = new() { Time = DateTimeOffset.UtcNow, Message = "boom" };
+        errors.Setup(x => x.List(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
+        errors.Setup(x => x.List(It.Is<Guid>(id => id != workspace.Id), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("No such workspace."));
+
+        RemoteResponse listed = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetErrors, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        RemoteResponse other = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.GetErrors, WorkspaceId = Guid.NewGuid() }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 3, Command = RemoteCommand.GetErrors }, owner, CancellationToken.None);
+
+        Assert.Equal([entry], listed.Errors);
+        Assert.Equal("No such workspace.", other.Error);
+        Assert.NotNull(missing.Error);
+        await handler.Open(new ServerConfig { Port = 0, Key = "k", DataFolder = "d" }, CancellationToken.None);
+        errors.Verify(x => x.Open(It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]

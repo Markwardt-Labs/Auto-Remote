@@ -144,4 +144,9 @@ public sealed record RemoteResponse
     /// Gets the saved input that was taken, answering <see cref="RemoteCommand.TakeSavedInput" />.
     /// </summary>
     public SavedInput? SavedInput { get; init; }
+
+    /// <summary>
+    /// Gets the errors of the workspace, the newest first, answering <see cref="RemoteCommand.GetErrors" />.
+    /// </summary>
+    public IReadOnlyList<ErrorEntry>? Errors { get; init; }
 }

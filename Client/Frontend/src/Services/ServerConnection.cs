@@ -339,6 +339,15 @@ internal interface IServerConnection : IAsyncDisposable
     Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Lists the errors the AI of a workspace ended with in the last 30 days.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The errors, the newest first.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<IReadOnlyList<ErrorEntry>> GetErrors(Guid id, CancellationToken cancellation);
+
+    /// <summary>
     /// Removes a saved input from a workspace and returns it, so the caller can put it into the chat input.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -937,6 +946,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> GetSavedInputs(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetSavedInputs, WorkspaceId = id }, cancellation)).SavedInputs ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ErrorEntry>> GetErrors(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetErrors, WorkspaceId = id }, cancellation)).Errors ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SaveInput, WorkspaceId = id, Text = text }, cancellation)).SavedInputs ?? throw Malformed();

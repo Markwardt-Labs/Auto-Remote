@@ -51,6 +51,11 @@ public sealed record RemoteEvent
     public IReadOnlyList<SavedInput>? SavedInputs { get; init; }
 
     /// <summary>
+    /// Gets the errors of the workspace, the newest first, for <see cref="RemoteEventKind.ErrorsChanged" />.
+    /// </summary>
+    public IReadOnlyList<ErrorEntry>? Errors { get; init; }
+
+    /// <summary>
     /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
     /// </summary>
     public string? Text { get; init; }
@@ -125,5 +130,10 @@ public enum RemoteEventKind
     /// <summary>
     /// A chat input was saved in the workspace or taken out of it by any client; <see cref="RemoteEvent.SavedInputs" /> is the list now.
     /// </summary>
-    SavedInputsChanged
+    SavedInputsChanged,
+
+    /// <summary>
+    /// The AI of the workspace ended with an error, which the server recorded; <see cref="RemoteEvent.Errors" /> is the history now.
+    /// </summary>
+    ErrorsChanged
 }
