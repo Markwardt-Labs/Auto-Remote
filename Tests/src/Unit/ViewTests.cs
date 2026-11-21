@@ -879,6 +879,61 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_BuildsOnlyTheViewOfEachMessageKindLoadsOlderChunksOnlyWhenTheUserScrollsUpAndDropsThemWhenTheEndIsReachedAgain()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", ShowWork = true };
+        string tall = string.Join("\n\n", Enumerable.Range(0, 8).Select(line => $"Paragraph {line} of a long answer that wraps over a few lines when the chat is narrow enough."));
+        List<ChatMessage> Chunk(int begin, int end) => [.. Enumerable.Range(begin, end - begin).Select(number => number % 3 == 0 ? new ChatMessage { Role = MessageRole.User, Text = $"u{number}" } : number % 3 == 1 ? new ChatMessage { Role = MessageRole.Assistant, Text = $"w{number}", IsWork = true } : new ChatMessage { Role = MessageRole.Assistant, Text = $"a{number}\n\n{tall}" })];
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { ShowWork = true, Messages = Chunk(80, 100), Older = "80" });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), "80", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { ShowWork = true, Messages = Chunk(60, 80), Older = "60" });
+
+        (int markdown, int answers, int loadedBefore, int afterScrollUp, int afterEnd) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 700, Content = view };
+            window.Show();
+
+            void Settle(Func<bool> done)
+            {
+                for (int attempt = 0; attempt < 200 && !done(); attempt++)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    window.UpdateLayout();
+                    Thread.Sleep(10);
+                }
+
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+
+            ChatViewModel chat = model.Active!.Chat;
+            Settle(() => chat.Messages.Count == 20);
+            ScrollViewer scroller = window.GetVisualDescendants().OfType<ScrollViewer>().Single(item => item.Name == "MessageScroller");
+            Settle(() => scroller.Extent.Height > scroller.Viewport.Height * 2 && scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 1);
+            int markdown = window.GetVisualDescendants().OfType<MarkdownView>().Count();
+            int answers = chat.Messages.Count(message => message is { Role: MessageRole.Assistant, IsWork: false });
+            int loadedBefore = chat.Messages.Count;
+
+            scroller.Offset = new Avalonia.Vector(0, 0);
+            Settle(() => chat.Messages.Count == 40);
+            int afterScrollUp = chat.Messages.Count;
+
+            scroller.ScrollToEnd();
+            Settle(() => chat.Messages.Count == 20);
+            int afterEnd = chat.Messages.Count;
+            window.Close();
+            return (markdown, answers, loadedBefore, afterScrollUp, afterEnd);
+        });
+
+        Assert.Equal(answers, markdown);
+        Assert.Equal((20, 40, 20), (loadedBefore, afterScrollUp, afterEnd));
+        connection.Verify(x => x.GetHistory(It.IsAny<Guid>(), "80", It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheLocalTimeUnderEachMessageThatHasOne()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

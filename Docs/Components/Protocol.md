@@ -45,7 +45,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group; for `CreateWorkspace` and `CloneWorkspace`, the group the new workspace is filed in (omitted: the top level), refused when it no longer exists. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
 | `inputId` | GUID | `TakeSavedInput` | The saved input to take. |
-| `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. |
+| `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. The cursor is the position, counted from the oldest message the client may be shown (work messages count only while the workspace shows its work), of the first message after it: a client that drops the oldest messages it holds adds their number to the cursor it has to read before the first message it keeps, and clients ask for 20 messages at a time. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
 | `offset` | number | `ShiftGroup` | How many places to move: negative is up, positive is down. |
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
@@ -238,7 +238,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `messages` | array of message | The chunk, oldest first. |
-| `older` | string, optional | The cursor to send as `before` to read the messages before this chunk; omitted when there are none. |
+| `older` | string, optional | The cursor to send as `before` to read the messages before this chunk, the decimal position of the chunk's first message; omitted when there are none. |
 | `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
 | `showWork` | bool, optional | `true` when the workspace shows the AI's work: then `messages` include the work messages (`isWork`) and the chunks count them; otherwise they leave them out and the chunks count only what was said. Also the way a client learns the state, after it opens the workspace, reconnects or reads the history again on `ShowWorkChanged` or `MessageDelta`. |
 

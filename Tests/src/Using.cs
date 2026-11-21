@@ -1,4 +1,5 @@
 global using System.Collections.ObjectModel;
+global using System.Collections.Specialized;
 global using System.Net;
 global using System.Net.Sockets;
 global using System.Text;

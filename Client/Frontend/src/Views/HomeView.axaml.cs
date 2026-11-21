@@ -15,6 +15,7 @@ public sealed partial class HomeView : UserControl
         AddHandler(Avalonia.Input.InputElement.PointerPressedEvent, OnFileHoldStart, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         AddHandler(Avalonia.Input.InputElement.PointerMovedEvent, OnFileHoldMoved, Avalonia.Interactivity.RoutingStrategies.Tunnel);
         AddHandler(Avalonia.Input.InputElement.PointerReleasedEvent, OnFileHoldEnd, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+        this.FindControl<ScrollViewer>("MessageScroller")?.AddHandler(Avalonia.Input.InputElement.PointerWheelChangedEvent, OnMessagesWheel, Avalonia.Interactivity.RoutingStrategies.Bubble, true);
         this.FindControl<TextBox>("ChatInput")?.AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnChatKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
 
         AddHandler(Avalonia.Input.InputElement.KeyDownEvent, OnPromptKeyDown, Avalonia.Interactivity.RoutingStrategies.Tunnel);
@@ -521,14 +522,40 @@ public sealed partial class HomeView : UserControl
             }
         }
 
-        if (scroller.Offset.Y <= 1 && chat.HasMore && !loadingOlder)
-        {
-            loadingOlder = true;
+        bool scrollable = scroller.Extent.Height > scroller.Viewport.Height + 1;
 
-            if (!await chat.LoadOlder())
-            {
-                loadingOlder = false;
-            }
+        if (scrollable && scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 1)
+        {
+            chat.TrimToNewest();
+            return;
+        }
+
+        if (args.ExtentDelta.Y == 0 && args.OffsetDelta.Y < 0 && scroller.Offset.Y <= 1)
+        {
+            await LoadOlderMessages(chat);
+        }
+    }
+
+    private async void OnMessagesWheel(object? sender, Avalonia.Input.PointerWheelEventArgs args)
+    {
+        if (sender is ScrollViewer { DataContext: ChatViewModel chat } scroller && args.Delta.Y > 0 && scroller.Offset.Y <= 1)
+        {
+            await LoadOlderMessages(chat);
+        }
+    }
+
+    private async Task LoadOlderMessages(ChatViewModel chat)
+    {
+        if (!chat.HasMore || loadingOlder)
+        {
+            return;
+        }
+
+        loadingOlder = true;
+
+        if (!await chat.LoadOlder())
+        {
+            loadingOlder = false;
         }
     }
 

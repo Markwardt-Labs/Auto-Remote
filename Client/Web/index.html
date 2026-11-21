@@ -361,6 +361,8 @@ details.section > .stack { padding: 4px 0 12px; }
 const storageKey = "autoRemote.connection";
 const draftKey = "autoRemote.draft.";
 const historyChunk = 30;
+const chatChunk = 20;
+const messagePosition = cursor => (/^\d+$/.test(cursor ?? "") ? Number(cursor) : 0);
 const maxAttachment = 20 * 1024 * 1024;
 const paceOf = (period, now = Date.now()) => {
   if (period.percentUsed >= 100) {
@@ -1712,7 +1714,8 @@ class WorkspaceView {
     this.settingsOpen = false;
     this.working = false;
     this.messages = [];
-    this.older = null;
+    this.start = 0;
+    this.lastScrollTop = 0;
     this.loading = true;
     this.loadingOlder = false;
     this.early = [];
@@ -1763,7 +1766,7 @@ class WorkspaceView {
 
   build() {
     this.list = h("div", { class: "inner" });
-    this.scroller = h("div", { class: "messages", onscroll: () => this.scrolled() }, this.list);
+    this.scroller = h("div", { class: "messages", onscroll: () => this.scrolled(), onwheel: event => this.wheeled(event) }, this.list);
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary act", title: "Send", hidden: true, onclick: () => this.send() }, "↑");
@@ -2649,6 +2652,11 @@ class WorkspaceView {
   toggleChatAuto() {
     this.chatAuto = !this.chatAuto;
     this.chatAutoButton.classList.toggle("on", this.chatAuto);
+
+    if (this.chatAuto) {
+      this.trimToNewest();
+    }
+
     this.scrollToEnd();
   }
 
@@ -2773,12 +2781,12 @@ class WorkspaceView {
       this.setSavedInputs(saved.value);
     }
 
-    const result = await attempt(() => this.connection.getHistory(this.info.id, null, historyChunk), this.chatError);
+    const result = await attempt(() => this.connection.getHistory(this.info.id, null, chatChunk), this.chatError);
 
     if (result.ok) {
       this.streaming = null;
       this.messages = [...result.value.messages];
-      this.older = result.value.older ?? null;
+      this.start = messagePosition(result.value.older);
       this.setShowWork(result.value.showWork === true);
       this.setWorking(result.value.working === true);
       this.renderMessages();
@@ -2812,28 +2820,54 @@ class WorkspaceView {
   }
 
   async loadOlder() {
-    if (this.older === null || this.loadingOlder) {
+    if (this.start === 0 || this.loadingOlder) {
       return;
     }
 
     this.loadingOlder = true;
+    const requested = this.start;
 
     try {
-      const result = await attempt(() => this.connection.getHistory(this.info.id, this.older, historyChunk), this.chatError);
+      const result = await attempt(() => this.connection.getHistory(this.info.id, String(requested), chatChunk), this.chatError);
 
-      if (result.ok && result.value.messages.length === 0) {
-        this.older = result.value.older ?? null;
-      } else if (result.ok) {
+      if (result.ok && this.start !== requested) {
+        return;
+      }
+
+      if (result.ok) {
+        this.start = messagePosition(result.value.older);
+      }
+
+      if (result.ok && result.value.messages.length > 0) {
         const height = this.scroller.scrollHeight;
         const top = this.scroller.scrollTop;
         this.messages.unshift(...result.value.messages);
-        this.older = result.value.older ?? null;
         this.list.prepend(...result.value.messages.map(message => this.messageElement(message)));
         this.scroller.scrollTop = top + (this.scroller.scrollHeight - height);
+        this.lastScrollTop = this.scroller.scrollTop;
       }
     } finally {
       this.loadingOlder = false;
     }
+  }
+
+  trimToNewest() {
+    const drop = this.messages.length - chatChunk;
+
+    if (drop <= 0) {
+      return false;
+    }
+
+    this.messages.splice(0, drop);
+    this.start += drop;
+
+    for (let index = 0; index < drop && this.list.firstChild; index++) {
+      this.list.firstChild.remove();
+    }
+
+    this.scroller.scrollTop = this.scroller.scrollHeight;
+    this.lastScrollTop = this.scroller.scrollTop;
+    return true;
   }
 
   receive(event) {
@@ -2911,6 +2945,7 @@ class WorkspaceView {
 
       this.messages.push(event.message);
       this.appendMessage(event.message);
+      this.keepWindow();
     } else if (event.kind === "MessageDelta" && this.showWork && event.text) {
       this.streamMessage(event.text);
     } else if (event.kind === "WorkingChanged") {
@@ -2957,6 +2992,7 @@ class WorkspaceView {
       this.messages.push(message);
       this.streaming = { message, element: this.messageElement(message) };
       this.list.append(this.streaming.element);
+      this.keepWindow();
     } else {
       const message = { ...this.streaming.message, text: this.streaming.message.text + piece };
       this.messages[this.messages.indexOf(this.streaming.message)] = message;
@@ -2981,12 +3017,31 @@ class WorkspaceView {
     this.scrollToEnd();
   }
 
+  keepWindow() {
+    if (this.chatAuto) {
+      this.trimToNewest();
+    }
+  }
+
   scrolled() {
-    if (this.scroller.clientHeight === 0) {
+    const scroller = this.scroller;
+
+    if (scroller.clientHeight === 0) {
       return;
     }
 
-    if (this.scroller.scrollTop < 40) {
+    const movedUp = scroller.scrollTop < this.lastScrollTop;
+    this.lastScrollTop = scroller.scrollTop;
+
+    if (scroller.scrollHeight > scroller.clientHeight + 1 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
+      this.trimToNewest();
+    } else if (movedUp && scroller.scrollTop < 40) {
+      this.loadOlder();
+    }
+  }
+
+  wheeled(event) {
+    if (event.deltaY < 0 && this.scroller.scrollTop <= 1) {
       this.loadOlder();
     }
   }

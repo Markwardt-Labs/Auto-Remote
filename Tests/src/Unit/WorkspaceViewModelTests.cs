@@ -67,9 +67,9 @@ public sealed class WorkspaceViewModelTests
     public async Task Chat_LoadsOlderChunksOnDemandUntilTheBeginning()
     {
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History("before-e", false, "e", "f"));
-        connection.Setup(x => x.GetHistory(workspace.Id, "before-e", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History("before-b", false, "b", "c", "d"));
-        connection.Setup(x => x.GetHistory(workspace.Id, "before-b", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(null, false, "a"));
+        connection.Setup(x => x.GetHistory(workspace.Id, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History("4", false, "e", "f"));
+        connection.Setup(x => x.GetHistory(workspace.Id, "4", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History("1", false, "b", "c", "d"));
+        connection.Setup(x => x.GetHistory(workspace.Id, "1", It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(History(null, false, "a"));
         WorkspaceViewModel model = new(connection.Object, workspace);
         await model.Start();
 

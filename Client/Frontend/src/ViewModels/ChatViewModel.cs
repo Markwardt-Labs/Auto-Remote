@@ -77,10 +77,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly List<RemoteEvent> early = [];
 
-    private readonly int chunk = 30;
+    private readonly int chunk = 20;
 
-
-    private string? older;
+    private int start;
 
     private bool loading;
 
@@ -110,9 +109,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public event Action? Loaded;
 
     /// <summary>
-    /// Gets the messages in order.
+    /// Gets the messages in order: a window of the newest ones, with the chunks the user loaded by scrolling up in front of them until the conversation is back at its end.
     /// </summary>
-    public ObservableCollection<ChatMessage> Messages { get; } = [];
+    public ChatMessageList Messages { get; } = [];
 
     /// <summary>
     /// Gets a value indicating whether the AI is working in the workspace, whichever client gave it the work.
@@ -174,7 +173,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether older messages exist on the server than the ones loaded so far.
     /// </summary>
-    public bool HasMore => older is not null;
+    public bool HasMore => start > 0;
 
     /// <summary>
     /// Gets or sets the prompt being typed, which is kept on the device and comes back when the workspace is opened again.
@@ -247,7 +246,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool AutoScroll
     {
         get => autoScroll;
-        set => Set(ref autoScroll, value);
+        set
+        {
+            if (Set(ref autoScroll, value) && value)
+            {
+                TrimToNewest();
+            }
+        }
     }
 
     /// <summary>
@@ -418,7 +423,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Loads the chunk of messages before the oldest one shown.
     /// </summary>
-    /// <returns><see langword="true" /> if older messages were added at the top.</returns>
+    /// <returns><see langword="true" /> if older messages were added at the top; <see langword="false" /> when there were none or the window moved while they were read (messages were dropped or the conversation was read again), in which case they no longer fit in front of it.</returns>
     public async Task<bool> LoadOlder()
     {
         if (!HasMore || loadingOlder)
@@ -428,33 +433,69 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         loadingOlder = true;
         ChatHistory? history = null;
+        int requested = start;
 
         try
         {
-            if (!await Attempt(async () => history = await connection.GetHistory(workspaceId, older, chunk, CancellationToken.None)))
+            if (!await Attempt(async () => history = await connection.GetHistory(workspaceId, requested.ToString(CultureInfo.InvariantCulture), chunk, CancellationToken.None)))
             {
                 return false;
             }
 
-            if (history!.Messages.Count == 0)
+            if (start != requested)
             {
-                older = history.Older;
-                Raise(nameof(HasMore));
                 return false;
             }
 
-            for (int index = 0; index < history.Messages.Count; index++)
-            {
-                Messages.Insert(index, history.Messages[index]);
-            }
-
-            older = history.Older;
+            start = Position(history!.Older);
             Raise(nameof(HasMore));
+
+            if (history.Messages.Count == 0)
+            {
+                return false;
+            }
+
+            Messages.InsertFirst(history.Messages);
             return true;
         }
         finally
         {
             loadingOlder = false;
+        }
+    }
+
+    /// <summary>
+    /// Drops the oldest messages beyond the newest chunk, which are the chunks the user loaded by scrolling up and, while the conversation follows its end, the ones that fell out of the window, so a long conversation never makes the view build more than a few chunks. What is dropped can be loaded again by scrolling to the top.
+    /// </summary>
+    /// <returns><see langword="true" /> if messages were dropped.</returns>
+    public bool TrimToNewest()
+    {
+        int drop = Messages.Count - chunk;
+
+        if (drop <= 0)
+        {
+            return false;
+        }
+
+        bool hadMore = HasMore;
+        Messages.RemoveFirst(drop);
+        start += drop;
+
+        if (!hadMore)
+        {
+            Raise(nameof(HasMore));
+        }
+
+        return true;
+    }
+
+    private int Position(string? cursor) => cursor is not null && int.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out int position) ? position : 0;
+
+    private void KeepWindow()
+    {
+        if (autoScroll)
+        {
+            TrimToNewest();
         }
     }
 
@@ -478,6 +519,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         {
             streaming = new ChatMessage { Role = MessageRole.Assistant, Text = piece };
             Messages.Add(streaming);
+            KeepWindow();
             return;
         }
 
@@ -512,6 +554,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         else
         {
             Messages.Add(replacement);
+            KeepWindow();
         }
     }
 
@@ -582,14 +625,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         if (await Attempt(async () => history = await connection.GetHistory(workspaceId, null, chunk, CancellationToken.None)))
         {
             streaming = null;
-            Messages.Clear();
-
-            foreach (ChatMessage message in history!.Messages)
-            {
-                Messages.Add(message);
-            }
-
-            older = history.Older;
+            Messages.Reset(history!.Messages);
+            start = Position(history.Older);
             Raise(nameof(HasMore));
             IsAiWorking = history.Working;
 
@@ -641,6 +678,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 else
                 {
                     Messages.Add(message);
+                    KeepWindow();
                 }
 
                 break;

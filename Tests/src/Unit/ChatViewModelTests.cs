@@ -735,4 +735,164 @@ public sealed class ChatViewModelTests
 
         Assert.InRange(chat.ErrorTime!.Value, before, DateTimeOffset.UtcNow.AddSeconds(1));
     }
+
+    private List<ChatMessage> Numbered(int from, int to) => [.. Enumerable.Range(from, to - from).Select(number => Said($"m{number}"))];
+
+    private async Task WithHistory(int total, int newest, bool showWork = false)
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Numbered(total - newest, total), Older = (total - newest).ToString(CultureInfo.InvariantCulture), ShowWork = showWork });
+        connection.Setup(x => x.GetHistory(workspaceId, It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? cursor, int? limit, CancellationToken _) =>
+        {
+            int end = int.Parse(cursor!, CultureInfo.InvariantCulture);
+            int begin = Math.Max(0, end - limit!.Value);
+            return new ChatHistory { Messages = Numbered(begin, end), Older = begin > 0 ? begin.ToString(CultureInfo.InvariantCulture) : null };
+        });
+        await chat.Start();
+    }
+
+    [Fact]
+    public async Task Start_LoadsOnlyOneSmallChunkOfAConversationThatIsLong()
+    {
+        await WithHistory(1000, 20);
+
+        Assert.Equal(20, chat.Messages.Count);
+        Assert.True(chat.HasMore);
+        connection.Verify(x => x.GetHistory(workspaceId, null, 20, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task WhileFollowingTheEndTheOldestMessagesAreDroppedToKeepTheChunkAndScrollingUpLoadsThemAgain()
+    {
+        await WithHistory(1000, 20);
+        List<NotifyCollectionChangedAction> actions = [];
+        chat.Messages.CollectionChanged += (_, args) => actions.Add(args.Action);
+
+        for (int number = 1000; number < 1050; number++)
+        {
+            connection.Raise(x => x.EventReceived += null, Added(Said($"m{number}")));
+        }
+
+        Assert.Equal(20, chat.Messages.Count);
+        Assert.Equal(["m1030", "m1049"], new[] { chat.Messages[0].Text, chat.Messages[^1].Text });
+        Assert.True(chat.HasMore);
+
+        Assert.True(await chat.LoadOlder());
+        Assert.Equal(40, chat.Messages.Count);
+        Assert.Equal(["m1010", "m1049"], new[] { chat.Messages[0].Text, chat.Messages[^1].Text });
+        connection.Verify(x => x.GetHistory(workspaceId, "1030", 20, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(Enumerable.Range(1010, 40).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task WhenAutoScrollIsOffNothingIsDroppedUntilTheViewReachesTheEndAgain()
+    {
+        await WithHistory(1000, 20);
+        chat.AutoScroll = false;
+
+        for (int number = 1000; number < 1015; number++)
+        {
+            connection.Raise(x => x.EventReceived += null, Added(Said($"m{number}")));
+        }
+
+        Assert.Equal(35, chat.Messages.Count);
+        Assert.True(chat.TrimToNewest());
+        Assert.Equal(20, chat.Messages.Count);
+        Assert.Equal("m995", chat.Messages[0].Text);
+        Assert.False(chat.TrimToNewest());
+    }
+
+    [Fact]
+    public async Task ReachingTheEndDropsTheChunksLoadedByScrollingUpAndTheyLoadAgainFromTheRightPlace()
+    {
+        await WithHistory(1000, 20);
+        await chat.LoadOlder();
+        await chat.LoadOlder();
+        Assert.Equal(60, chat.Messages.Count);
+        Assert.Equal("m940", chat.Messages[0].Text);
+        List<NotifyCollectionChangedEventArgs> changes = [];
+        chat.Messages.CollectionChanged += (_, args) => changes.Add(args);
+
+        bool dropped = chat.TrimToNewest();
+
+        Assert.True(dropped);
+        NotifyCollectionChangedEventArgs change = Assert.Single(changes);
+        Assert.Equal((NotifyCollectionChangedAction.Remove, 40, 0), (change.Action, change.OldItems!.Count, change.OldStartingIndex));
+        Assert.Equal(Enumerable.Range(980, 20).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
+        Assert.True(chat.HasMore);
+
+        Assert.True(await chat.LoadOlder());
+        Assert.Equal(["m960", "m999"], new[] { chat.Messages[0].Text, chat.Messages[^1].Text });
+        connection.Verify(x => x.GetHistory(workspaceId, "980", 20, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task ALoadedChunkIsInsertedWithOneNotificationAndTheBeginningOfTheConversationEndsTheLoading()
+    {
+        await WithHistory(30, 20);
+        List<NotifyCollectionChangedEventArgs> changes = [];
+        chat.Messages.CollectionChanged += (_, args) => changes.Add(args);
+
+        Assert.True(await chat.LoadOlder());
+
+        NotifyCollectionChangedEventArgs change = Assert.Single(changes);
+        Assert.Equal((NotifyCollectionChangedAction.Add, 10, 0), (change.Action, change.NewItems!.Count, change.NewStartingIndex));
+        Assert.False(chat.HasMore);
+        Assert.False(await chat.LoadOlder());
+        Assert.Equal(30, chat.Messages.Count);
+    }
+
+    [Fact]
+    public async Task TurningAutoScrollOnDropsTheChunksLoadedWhileItWasOff()
+    {
+        await WithHistory(1000, 20);
+        chat.AutoScroll = false;
+        await chat.LoadOlder();
+        Assert.Equal(40, chat.Messages.Count);
+
+        chat.AutoScroll = true;
+
+        Assert.Equal(20, chat.Messages.Count);
+        Assert.Equal("m980", chat.Messages[0].Text);
+    }
+
+    [Fact]
+    public async Task AnAnswerBeingStreamedTakesTheSeatOfTheOldestMessageAndTheFinishedAnswerTakesItsOwn()
+    {
+        await WithHistory(1000, 20, true);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspaceId, Text = "Hel" });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspaceId, Text = "lo" });
+
+        Assert.Equal((20, "m981", "Hello"), (chat.Messages.Count, chat.Messages[0].Text, chat.Messages[^1].Text));
+
+        connection.Raise(x => x.EventReceived += null, Added(Said("Hello there")));
+
+        Assert.Equal((20, "m981", "Hello there"), (chat.Messages.Count, chat.Messages[0].Text, chat.Messages[^1].Text));
+        Assert.True(await chat.LoadOlder());
+        Assert.Equal("m961", chat.Messages[0].Text);
+    }
+
+    [Fact]
+    public async Task AChunkReadWhileTheWindowMovedIsDiscardedSoNothingIsMissingOrRepeated()
+    {
+        await WithHistory(1000, 20);
+        TaskCompletionSource<ChatHistory> slow = new();
+        connection.Setup(x => x.GetHistory(workspaceId, "980", 20, It.IsAny<CancellationToken>())).Returns(slow.Task);
+
+        Task<bool> loading = chat.LoadOlder();
+        for (int number = 1000; number < 1005; number++)
+        {
+            connection.Raise(x => x.EventReceived += null, Added(Said($"m{number}")));
+        }
+
+        slow.SetResult(new ChatHistory { Messages = Numbered(960, 980), Older = "960" });
+
+        Assert.False(await loading);
+        Assert.Equal(Enumerable.Range(985, 20).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
+
+        connection.Setup(x => x.GetHistory(workspaceId, "985", 20, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Numbered(965, 985), Older = "965" });
+        Assert.True(await chat.LoadOlder());
+        Assert.Equal(Enumerable.Range(965, 40).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
+    }
 }
