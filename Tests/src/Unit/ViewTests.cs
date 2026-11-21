@@ -517,6 +517,59 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_LoopPanelHasASwitchForWaitingOutTheUsageLimitThatIsOnWheneverItOpens()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review" });
+        connection.Setup(x => x.GetUsage(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+
+        (bool shown, bool onAtFirst, bool builtOn, bool builtOff, bool onAgain) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 900, Content = view };
+            window.Show();
+
+            void OpenPanel()
+            {
+                model.Active!.OpenLoopCommand.Execute(null);
+
+                for (int attempt = 0; attempt < 100 && !model.Active.Loop.IsOpen; attempt++)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    Thread.Sleep(10);
+                }
+
+                Thread.Sleep(60);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+
+            OpenPanel();
+            ToggleSwitch? toggle = window.GetVisualDescendants().OfType<ToggleSwitch>().FirstOrDefault(item => item.IsEffectivelyVisible && $"{item.Content}" == "Wait for the usage limit instead of ending");
+            bool on = toggle?.IsChecked == true;
+            bool builtWithIt = model.Active!.Loop.Build(DateTimeOffset.Now).WaitForLimit;
+            toggle!.IsChecked = false;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool builtWithout = model.Active.Loop.Build(DateTimeOffset.Now).WaitForLimit;
+            model.Active.Loop.CancelCommand.Execute(null);
+            OpenPanel();
+            bool again = model.Active.Loop.WaitForLimit;
+            window.Close();
+            return (toggle is not null, on, builtWithIt, builtWithout, again);
+        });
+
+        Assert.True(shown);
+        Assert.True(onAtFirst);
+        Assert.True(builtOn);
+        Assert.False(builtOff);
+        Assert.True(onAgain);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheUpdateButtonNextToTheWorkspacesButtonOnlyWhenAnUpdateIsAvailableAndConfirmsBeforeUpdating()
     {
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });

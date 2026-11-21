@@ -2256,7 +2256,7 @@ class WorkspaceView {
     }[settings.condition];
     const runs = loop.runs ?? 0;
     const line = settings.prompt.replace(/\s+/g, " ").trim();
-    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far`;
+    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far${loop.limitCheckAt ? ", waiting for the usage limit" : ""}`;
   }
 
   loopNext() {
@@ -2267,6 +2267,12 @@ class WorkspaceView {
     }
 
     const busy = this.state() !== "Ready";
+
+    if (loop.limitCheckAt) {
+      const left = (new Date(loop.limitCheckAt).getTime() - Date.now()) / 1000;
+      const until = left >= 3600 ? `${Math.floor(left / 3600)} h ${Math.floor(left % 3600 / 60)} min` : left >= 60 ? `${Math.floor(left / 60)} min ${Math.floor(left % 60)} s` : `${Math.max(1, Math.floor(left))} s`;
+      return left <= 0 ? "The usage limit is reached. The loop is checking it now." : `The usage limit is reached, so the loop waits. It checks again in ${until} and goes on once the AI can be prompted again.`;
+    }
 
     if (!loop.nextRunAt) {
       return busy ? "The first prompt is sent when the workspace is free." : "The first prompt is being sent.";
@@ -2320,6 +2326,7 @@ class WorkspaceView {
     const runs = h("input", { type: "number", min: "1", max: "100000", step: "1", value: "5" });
     const windowSelect = h("select", {}, windows.map(name => h("option", { value: name }, name)));
     const percent = h("input", { type: "number", min: "1", max: "100", step: "5", value: "90" });
+    const waitForLimit = h("input", { type: "checkbox", checked: true });
     const boxes = {
       UntilTime: field("Time of day (the next time it is)", time),
       ForDuration: field("Hours and minutes", h("div", { style: "display:flex;gap:8px" }, hours, minutes)),
@@ -2344,7 +2351,7 @@ class WorkspaceView {
         return fail("The minutes between runs must be between 0 and 1440.");
       }
 
-      const settings = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition };
+      const settings = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition, waitForLimit: waitForLimit.checked };
 
       if (condition === "UntilTime") {
         const [hour, minute] = (time.value || "").split(":").map(Number);
@@ -2396,6 +2403,7 @@ class WorkspaceView {
       field("Minutes between runs", interval),
       field("Ends", kind),
       ...Object.values(boxes),
+      h("label", { class: "check", style: "margin-top:6px" }, waitForLimit, "Wait for the usage limit instead of ending"),
       h("button", { class: "primary block", onclick: start }, "Start Loop"));
   }
 

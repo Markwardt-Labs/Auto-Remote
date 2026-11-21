@@ -470,6 +470,28 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_SaysThatTheLoopWaitsForTheUsageLimitAndWhenItLooksAgain()
+    {
+        DateTimeOffset now = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 600 }, StartedAt = now, Runs = 2, NextRunAt = now.AddSeconds(30) };
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop });
+        Assert.DoesNotContain("usage limit", model.LoopTip);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop with { LimitCheckAt = now.AddMinutes(15) } });
+
+        Assert.EndsWith(", 2 runs so far, waiting for the usage limit", model.LoopTip);
+        Assert.Equal("The usage limit is reached, so the loop waits. It checks again in 15 min 0 s and goes on once the AI can be prompted again.", model.DescribeNext(now));
+        Assert.Equal("The usage limit is reached, so the loop waits. It checks again in 45 s and goes on once the AI can be prompted again.", model.DescribeNext(now.AddSeconds(15 * 60 - 45)));
+        Assert.Equal("The usage limit is reached. The loop is checking it now.", model.DescribeNext(now.AddMinutes(16)));
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop with { LimitCheckAt = null } });
+
+        Assert.Equal("The next prompt is sent in 30 s.", model.DescribeNext(now));
+        Assert.DoesNotContain("usage limit", model.LoopTip);
+    }
+
+    [Fact]
     public async Task Workspace_SaysWhenTheLoopSendsItsNextPromptAndThatItWaitsForBusyWork()
     {
         DateTimeOffset now = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);

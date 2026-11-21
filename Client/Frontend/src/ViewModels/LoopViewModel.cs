@@ -55,6 +55,8 @@ internal sealed class LoopViewModel : ViewModelBase
 
     private decimal? percent = 90;
 
+    private bool waitForLimit = true;
+
     /// <summary>
     /// Raised once the server accepted the loop and the panel closed.
     /// </summary>
@@ -236,6 +238,15 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the loop waits when the usage limit of the service stops its prompts and goes on by itself, instead of ending; on whenever the panel opens.
+    /// </summary>
+    public bool WaitForLimit
+    {
+        get => waitForLimit;
+        set => Set(ref waitForLimit, value);
+    }
+
+    /// <summary>
     /// Gets or sets the share of the window's limit, in percent, at which the loop ends.
     /// </summary>
     public decimal? Percent
@@ -268,6 +279,7 @@ internal sealed class LoopViewModel : ViewModelBase
         Minutes = 0;
         Runs = 5;
         Percent = 90;
+        WaitForLimit = true;
         IsOpen = true;
         IReadOnlyList<string> names = [];
 
@@ -329,7 +341,7 @@ internal sealed class LoopViewModel : ViewModelBase
             throw new InvalidOperationException("The minutes between runs must be between 0 and 1440.");
         }
 
-        LoopSettings settings = new() { Prompt = prompt, IntervalSeconds = (int)Math.Round(intervalMinutes.Value * 60), Condition = selectedCondition.Condition };
+        LoopSettings settings = new() { Prompt = prompt, IntervalSeconds = (int)Math.Round(intervalMinutes.Value * 60), Condition = selectedCondition.Condition, WaitForLimit = waitForLimit };
 
         switch (selectedCondition.Condition)
         {

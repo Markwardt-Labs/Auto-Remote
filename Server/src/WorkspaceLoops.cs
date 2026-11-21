@@ -30,13 +30,17 @@ internal interface IWorkspaceLoops
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null) : IWorkspaceLoops
+internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null) : IWorkspaceLoops
 {
     private readonly ConcurrentDictionary<Guid, LoopRun> loops = new();
 
     private readonly TimeSpan poll = pollInterval ?? TimeSpan.FromMilliseconds(250);
 
     private readonly TimeSpan windowCheck = windowInterval ?? TimeSpan.FromMinutes(1);
+
+    private readonly TimeSpan limitCheck = limitInterval ?? TimeSpan.FromMinutes(15);
+
+    private readonly Regex limitMessage = new(@"usage limit|limit reached|reached (?:your|the) .*limit|hit your .*limit|rate limit|limit exceeded|exceeded (?:your|the) .*limit", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     /// <inheritdoc />
     public LoopInfo? Get(Guid id) => loops.TryGetValue(id, out LoopRun? run) ? run.Info() : null;
@@ -192,8 +196,22 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
                 if (run.Failure is { } failure)
                 {
-                    End(id, run, $"The loop stopped: {failure}");
-                    return;
+                    if (!run.Settings.WaitForLimit || !await Limited(run, failure))
+                    {
+                        End(id, run, $"The loop stopped: {failure}");
+                        return;
+                    }
+
+                    Interlocked.Decrement(ref run.Runs);
+                    reason = await WaitForLimit(id, run);
+
+                    if (reason is not null)
+                    {
+                        End(id, run, reason);
+                        return;
+                    }
+
+                    continue;
                 }
 
                 if (run.Settings.Condition == LoopCondition.Runs && run.Runs >= run.Settings.Runs)
@@ -216,6 +234,55 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
         {
             End(id, run, $"The loop stopped: {exception.Message}");
         }
+    }
+
+    private async Task<bool> Limited(LoopRun run, string failure)
+    {
+        UsageStatus? status = await Read(run);
+        return status is { } read && Full(read) || limitMessage.IsMatch(failure);
+    }
+
+    private bool Full(UsageStatus status) => status.Windows.Any(window => window.PercentUsed >= 100);
+
+    private async Task<UsageStatus?> Read(LoopRun run)
+    {
+        try
+        {
+            return await usage.Refresh(run.Service, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<string?> WaitForLimit(Guid id, LoopRun run)
+    {
+        while (!run.Over)
+        {
+            DateTimeOffset next = DateTimeOffset.UtcNow + limitCheck;
+            run.Await(next);
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = id, Loop = run.Info() });
+
+            if (await Wait(run, () => DateTimeOffset.UtcNow >= next) is { } reason)
+            {
+                return reason;
+            }
+
+            if (run.Over)
+            {
+                return null;
+            }
+
+            if (await Read(run) is not { } status || !Full(status))
+            {
+                break;
+            }
+        }
+
+        run.Await(null);
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = id, Loop = run.Info() });
+        return null;
     }
 
     private async Task<string?> Wait(LoopRun run, Func<bool> done)
@@ -279,6 +346,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
     {
         private DateTimeOffset? nextRunAt;
 
+        private DateTimeOffset? limitCheckAt;
+
         public int Runs;
 
         public volatile bool Over;
@@ -293,6 +362,14 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
         public string? Failure { get; set; }
 
+        public void Await(DateTimeOffset? next)
+        {
+            lock (this)
+            {
+                limitCheckAt = next;
+            }
+        }
+
         public void Schedule(DateTimeOffset next)
         {
             lock (this)
@@ -305,7 +382,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
         {
             lock (this)
             {
-                return new() { Settings = Settings, StartedAt = startedAt, Runs = Volatile.Read(ref Runs), NextRunAt = nextRunAt };
+                return new() { Settings = Settings, StartedAt = startedAt, Runs = Volatile.Read(ref Runs), NextRunAt = nextRunAt, LimitCheckAt = limitCheckAt };
             }
         }
     }

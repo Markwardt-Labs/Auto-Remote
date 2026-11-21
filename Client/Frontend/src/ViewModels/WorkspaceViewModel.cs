@@ -262,7 +262,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a description of the loop that runs, for the tooltip of its icon: what it sends, how often, when it ends and how many runs it made.
     /// </summary>
-    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far";
+    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far{(activeLoop.LimitCheckAt is null ? string.Empty : ", waiting for the usage limit")}";
 
     /// <summary>
     /// Gets when the next automatic prompt of the loop is sent, in words, which the loop icon in the header shows when clicked and which counts down while it is open.
@@ -655,6 +655,13 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         }
 
         bool busy = State != WorkspaceState.Ready;
+
+        if (activeLoop.LimitCheckAt is { } check)
+        {
+            TimeSpan left = check - now;
+            string until = left.TotalHours >= 1 ? $"{(int)left.TotalHours} h {left.Minutes} min" : left.TotalMinutes >= 1 ? $"{(int)left.TotalMinutes} min {left.Seconds} s" : $"{Math.Max(1, left.Seconds)} s";
+            return left <= TimeSpan.Zero ? "The usage limit is reached. The loop is checking it now." : $"The usage limit is reached, so the loop waits. It checks again in {until} and goes on once the AI can be prompted again.";
+        }
 
         if (activeLoop.NextRunAt is not { } next)
         {

@@ -44,4 +44,9 @@ public sealed record LoopSettings
     /// Gets how much of the window's limit must be used, from 1 to 100, for the loop to end, for <see cref="LoopCondition.UntilWindow" />.
     /// </summary>
     public double? Percent { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the loop waits when a run fails because of the usage limit of the service and goes on by itself once the AI can be prompted again, which is the default; when it is <see langword="false" />, such a failure ends the loop like any other.
+    /// </summary>
+    public bool WaitForLimit { get; init; } = true;
 }

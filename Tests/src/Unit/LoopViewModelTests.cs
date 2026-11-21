@@ -188,6 +188,33 @@ public sealed class LoopViewModelTests
     }
 
     [Fact]
+    public async Task WaitForLimit_IsOnWheneverThePanelOpensAndGoesIntoTheSettingsOfTheLoop()
+    {
+        Windows();
+        LoopViewModel panel = Opened();
+        LoopSettings defaults = panel.Build(now);
+        panel.WaitForLimit = false;
+        LoopSettings without = panel.Build(now);
+
+        await panel.Open();
+
+        Assert.True(defaults.WaitForLimit);
+        Assert.False(without.WaitForLimit);
+        Assert.True(panel.WaitForLimit);
+        Assert.True(panel.Build(now).WaitForLimit);
+    }
+
+    [Fact]
+    public void WaitForLimit_IsOnInTheSettingsOfALoopThatDoesNotSayAndOffWhenItSaysSo()
+    {
+        JsonSerializerOptions options = new(JsonSerializerDefaults.Web);
+
+        Assert.True(JsonSerializer.Deserialize<LoopSettings>("""{"prompt":"x"}""", options)!.WaitForLimit);
+        Assert.False(JsonSerializer.Deserialize<LoopSettings>("""{"prompt":"x","waitForLimit":false}""", options)!.WaitForLimit);
+        Assert.Contains("\"waitForLimit\":true", JsonSerializer.Serialize(new LoopSettings { Prompt = "x" }, options));
+    }
+
+    [Fact]
     public async Task Start_SendsTheSettingsToTheServerAndClosesThePanel()
     {
         Windows("Session", "Week");

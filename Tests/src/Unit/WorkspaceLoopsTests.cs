@@ -48,6 +48,7 @@ public sealed class WorkspaceLoopsTests : IDisposable
         prompts.Configure(stopping.Token);
         prompter.OnCreate = session => session.ReplyWith(prompt => [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
         usage.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(10));
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(10));
     }
 
     public void Dispose()
@@ -59,7 +60,7 @@ public sealed class WorkspaceLoopsTests : IDisposable
 
     private FakePromptSession Session => prompter.Sessions[^1];
 
-    private WorkspaceLoops Create(TimeSpan? windowInterval = null) => new(workspaces.Object, prompts, activity, usage.Object, hub, TimeSpan.FromMilliseconds(10), windowInterval ?? TimeSpan.FromMilliseconds(30));
+    private WorkspaceLoops Create(TimeSpan? windowInterval = null, TimeSpan? limitInterval = null) => new(workspaces.Object, prompts, activity, usage.Object, hub, TimeSpan.FromMilliseconds(10), windowInterval ?? TimeSpan.FromMilliseconds(30), limitInterval);
 
     private UsageStatus Status(double percent) => new() { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "5 hours", PercentUsed = percent, WindowMinutes = 300 }] };
 
@@ -513,5 +514,157 @@ public sealed class WorkspaceLoopsTests : IDisposable
     {
         gate.GetAwaiter().GetResult();
         return [new PromptMessageEvent { Text = text }];
+    }
+
+    private int failures;
+
+    private void FailFirst(string message, int times = 1) => prompter.OnCreate = session => session.ReplyWith(prompt => Interlocked.Increment(ref failures) <= times ? [new PromptFailureEvent { Message = message }] : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
+
+    private bool Waiting() => Changes().Any(change => change.Loop?.LimitCheckAt is not null);
+
+    [Fact]
+    public async Task Start_WaitsForTheUsageLimitInsteadOfEndingChecksAgainAndGoesOnOnceItIsFree()
+    {
+        FailFirst("5-hour limit reached, resets at 9pm");
+        int reads = 0;
+        double used = 100;
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(() =>
+        {
+            Interlocked.Increment(ref reads);
+            return Status(used);
+        });
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(100));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 2 }, CancellationToken.None);
+        await Until(Waiting);
+        await Task.Delay(450);
+
+        Assert.NotNull(loops.Get(workspace.Id));
+        Assert.NotNull(loops.Get(workspace.Id)!.LimitCheckAt);
+        Assert.Single(Session.Prompts);
+        Assert.True(reads >= 4);
+        Assert.Equal(0, loops.Get(workspace.Id)!.Runs);
+        Assert.Null(Ended());
+
+        used = 40;
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal(3, Session.Prompts.Count);
+        Assert.Equal("The loop made all its runs.", Ended());
+        Assert.Null(Changes().Where(change => change.Loop is not null).Last().Loop!.LimitCheckAt);
+        Assert.Equal(["reply to go", "reply to go"], Messages());
+    }
+
+    [Fact]
+    public async Task Start_GoesOnToPromptAgainWhenTheUsageCannotBeReadWhileItWaits()
+    {
+        FailFirst("You've hit your usage limit. Try again later.");
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync((UsageStatus?)null);
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(100));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.True(Waiting());
+        Assert.Equal(2, Session.Prompts.Count);
+        Assert.Equal("The loop made all its runs.", Ended());
+    }
+
+    [Fact]
+    public async Task Start_TriesAgainAndWaitsAgainWhenTheLimitIsStillThere()
+    {
+        FailFirst("Rate limit exceeded", 2);
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync((UsageStatus?)null);
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(80));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal(3, Session.Prompts.Count);
+        Assert.Equal("The loop made all its runs.", Ended());
+        Assert.True(Changes().Count(change => change.Loop?.LimitCheckAt is not null) >= 2);
+    }
+
+    [Fact]
+    public async Task Start_WaitsWhenAWindowIsFullEvenIfTheFailureDoesNotSayLimit()
+    {
+        FailFirst("The request failed");
+        double used = 100;
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Status(used));
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(100));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+        await Until(Waiting);
+
+        Assert.NotNull(loops.Get(workspace.Id));
+
+        used = 70;
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal("The loop made all its runs.", Ended());
+    }
+
+    [Fact]
+    public async Task Start_StillEndsWithTheFailureWhenItHasNothingToDoWithTheLimit()
+    {
+        FailFirst("The tool crashed");
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(50));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go" }, CancellationToken.None);
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal("The loop stopped: The tool crashed", Ended());
+        Assert.False(Waiting());
+        Assert.Single(Session.Prompts);
+    }
+
+    [Theory]
+    [InlineData("5-hour limit reached, resets at 9pm", 100)]
+    [InlineData("The request failed", 100)]
+    public async Task Start_EndsLikeOnAnyOtherFailureWhenItWasStartedWithoutWaitingForTheLimit(string failure, double used)
+    {
+        FailFirst(failure);
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(used));
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(50));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", WaitForLimit = false }, CancellationToken.None);
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal($"The loop stopped: {failure}", Ended());
+        Assert.False(Waiting());
+        Assert.Single(Session.Prompts);
+        usage.Verify(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task Cancel_EndsALoopThatWaitsForTheLimitAtOnce()
+    {
+        FailFirst("usage limit reached");
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(100));
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(60));
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go" }, CancellationToken.None);
+        await Until(Waiting);
+
+        await loops.Cancel(workspace.Id);
+        await Task.Delay(250);
+
+        Assert.Null(loops.Get(workspace.Id));
+        Assert.Single(Session.Prompts);
+        Assert.False(prompts.IsBusy(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Start_EndsAWaitingLoopWhenItsTimeIsUp()
+    {
+        FailFirst("usage limit reached");
+        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(100));
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMinutes(10));
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.ForDuration, DurationSeconds = 1 }, CancellationToken.None);
+        await Until(Waiting);
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal("The loop ran for the time it was given.", Ended());
+        Assert.Single(Session.Prompts);
     }
 }

@@ -19,6 +19,14 @@ internal interface IUsageService
     /// <param name="service">The AI provider.</param>
     /// <param name="windows">The limits.</param>
     void Note(AiService service, IReadOnlyList<PromptWindow> windows);
+
+    /// <summary>
+    /// Reads the usage limits of a provider right now, whatever was read before, which runs a minimal prompt of the provider.
+    /// </summary>
+    /// <param name="service">The AI provider.</param>
+    /// <param name="cancellation">Cancels the read.</param>
+    /// <returns>The limits the provider reports, or <see langword="null" /> when they could not be read, for example because the provider cannot be prompted.</returns>
+    Task<UsageStatus?> Refresh(AiService service, CancellationToken cancellation);
 }
 
 /// <inheritdoc />
@@ -34,6 +42,28 @@ internal sealed class UsageService(IPrompterHost host) : IUsageService
 
     /// <inheritdoc />
     public void Note(AiService service, IReadOnlyList<PromptWindow> windows) => cache[service] = new Cached(Status(service, windows), DateTimeOffset.UtcNow + lifetime);
+
+    /// <inheritdoc />
+    public async Task<UsageStatus?> Refresh(AiService service, CancellationToken cancellation)
+    {
+        await reading.WaitAsync(cancellation);
+
+        try
+        {
+            UsageStatus? read = await Read(service, cancellation);
+
+            if (read is not null)
+            {
+                cache[service] = new Cached(read, DateTimeOffset.UtcNow + lifetime);
+            }
+
+            return read;
+        }
+        finally
+        {
+            reading.Release();
+        }
+    }
 
     /// <inheritdoc />
     public async Task<UsageStatus> Get(AiService service, CancellationToken cancellation)

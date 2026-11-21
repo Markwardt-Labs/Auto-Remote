@@ -798,6 +798,7 @@
               <ComboBox ItemsSource="{Binding Windows}" SelectedItem="{Binding SelectedWindow}" HorizontalAlignment="Stretch" />
               <NumericUpDown Value="{Binding Percent}" Minimum="1" Maximum="100" Increment="5" FormatString="0" HorizontalAlignment="Stretch" />
             </StackPanel>
+            <ToggleSwitch IsChecked="{Binding WaitForLimit}" Content="Wait for the usage limit instead of ending" OnContent="" OffContent="" Margin="0,6,0,0" />
             <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="*,8,*" Margin="0,8,0,0">
               <local:TouchButton Grid.Column="0" Content="Cancel" Command="{Binding CancelCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />

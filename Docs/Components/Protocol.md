@@ -254,6 +254,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `runs` | number, optional | How many runs, at least 1, for `Runs`. |
 | `window` | string, optional | The name of the usage window to watch, one `GetUsage` returns, for `UntilWindow`. |
 | `percent` | number, optional | The share of the window's limit, 1 to 100, at which the loop ends, for `UntilWindow`. |
+| `waitForLimit` | bool, optional | Whether the loop waits when the usage limit of the service stops its prompts and goes on by itself (see `limitCheckAt`), instead of ending; `true` when omitted. |
 
 **loop** (`GetLoop`, and `loop` of `LoopChanged`)
 
@@ -262,7 +263,8 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `settings` | loop settings | What the loop was started with. |
 | `startedAt` | string | When the loop was started, ISO 8601 UTC. |
 | `nextRunAt` | string, optional | The earliest time the next prompt is sent (the interval after the start of the last run), absent before the first run; it waits further while the workspace is busy. |
-| `runs` | number | How many runs the loop has started. |
+| `limitCheckAt` | string, optional | While the loop waits because the usage limit stopped its prompts, the time it looks at the limit again (every 15 minutes); absent otherwise. |
+| `runs` | number | How many runs the loop has made; a run the limit cut off is not counted. |
 
 **workspace settings** (`GetWorkspaceSettings`, `SetWorkspaceSettings`)
 
