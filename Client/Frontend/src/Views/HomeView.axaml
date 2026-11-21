@@ -192,6 +192,8 @@
            <Grid Name="ChatGrid" DataContext="{Binding Chat}" RowDefinitions="*,Auto,Auto">
             <DockPanel Grid.Row="0">
             <StackPanel DockPanel.Dock="Bottom" Margin="20,4" Spacing="4" IsVisible="{Binding HasError}">
+              <TextBlock Classes="muted" FontSize="11" Text="{Binding ErrorTime, Converter={x:Static local:MessageConverters.Time}}"
+                         ToolTip.Tip="{Binding ErrorTime, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding ErrorTime, Converter={x:Static local:MessageConverters.HasTime}}" />
               <TextBlock Text="{Binding Error}" Classes="error" />
             </StackPanel>
             <Panel>

@@ -1080,7 +1080,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                     live.Epoch++;
                 }
 
-                events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = failure.Exception is PromptToolStartException ? $"{service.Label()} could not be started: {failure.Message}" : failure.Message });
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Time = DateTimeOffset.UtcNow, Error = failure.Exception is PromptToolStartException ? $"{service.Label()} could not be started: {failure.Message}" : failure.Message });
                 break;
             case PromptStateEvent changed:
                 lock (live.Sync)
@@ -1181,7 +1181,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 SetWorking(id, live, false);
             }
 
-            events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Error = exception.Message });
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Time = DateTimeOffset.UtcNow, Error = exception.Message });
         }
     }
 

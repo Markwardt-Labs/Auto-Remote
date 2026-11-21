@@ -9,6 +9,8 @@ internal abstract class ViewModelBase : INotifyPropertyChanged
 
     private string? error;
 
+    private DateTimeOffset? errorTime;
+
     /// <inheritdoc />
     public event PropertyChangedEventHandler? PropertyChanged;
 
@@ -32,14 +34,43 @@ internal abstract class ViewModelBase : INotifyPropertyChanged
             if (Set(ref error, value))
             {
                 Raise(nameof(HasError));
+                ErrorTime = value is null ? null : DateTimeOffset.UtcNow;
             }
         }
+    }
+
+    /// <summary>
+    /// Gets when <see cref="Error" /> was set, or <see langword="null" /> when there is no error.
+    /// </summary>
+    public DateTimeOffset? ErrorTime
+    {
+        get => errorTime;
+        private set => Set(ref errorTime, value);
     }
 
     /// <summary>
     /// Gets a value indicating whether <see cref="Error" /> is set.
     /// </summary>
     public bool HasError => error is not null;
+
+    /// <summary>
+    /// Shows an error that happened at a given time, also when it reads like the one shown, so that its time follows the newest failure.
+    /// </summary>
+    /// <param name="message">The error message.</param>
+    /// <param name="time">When the error happened.</param>
+    protected void Report(string message, DateTimeOffset time)
+    {
+        bool changed = !string.Equals(error, message, StringComparison.Ordinal);
+        error = message;
+        Raise(nameof(Error));
+
+        if (changed)
+        {
+            Raise(nameof(HasError));
+        }
+
+        ErrorTime = time;
+    }
 
     /// <summary>
     /// Sets a field and raises <see cref="PropertyChanged" /> when the value changed.

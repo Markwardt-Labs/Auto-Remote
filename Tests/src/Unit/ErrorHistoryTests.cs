@@ -97,6 +97,18 @@ public sealed class ErrorHistoryTests
     }
 
     [Fact]
+    public async Task Open_RecordsTheFailureWithTheTimeItsEventCarriesSoEveryoneSeesTheSameTime()
+    {
+        await history.Open(CancellationToken.None);
+        DateTimeOffset happened = new(2026, 11, 20, 11, 59, 30, TimeSpan.Zero);
+
+        hub.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = first.Id, Error = "boom", Time = happened });
+        await Until(() => Changes() == 1);
+
+        Assert.Equal(happened, Assert.Single(await history.List(first.Id, CancellationToken.None)).Time);
+    }
+
+    [Fact]
     public async Task AnErrorOfOneWorkspaceIsNeverListedOrAnnouncedInAnother()
     {
         await history.Open(CancellationToken.None);

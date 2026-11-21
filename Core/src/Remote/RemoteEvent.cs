@@ -69,6 +69,11 @@ public sealed record RemoteEvent
     /// Gets the failure message, for <see cref="RemoteEventKind.Failed" />.
     /// </summary>
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Gets when the event happened, for <see cref="RemoteEventKind.Failed" />, so that every client shows the same time for the failure.
+    /// </summary>
+    public DateTimeOffset? Time { get; init; }
 }
 
 /// <summary>

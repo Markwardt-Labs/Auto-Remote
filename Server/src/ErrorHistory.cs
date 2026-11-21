@@ -63,11 +63,11 @@ internal sealed class ErrorHistory(IWorkspaceStore store, IWorkspaceManager work
     {
         if (remoteEvent.Kind == RemoteEventKind.Failed && remoteEvent.Error is { Length: > 0 } message)
         {
-            _ = Record(remoteEvent.WorkspaceId, message);
+            _ = Record(remoteEvent.WorkspaceId, message, remoteEvent.Time);
         }
     }
 
-    private async Task Record(Guid id, string message)
+    private async Task Record(Guid id, string message, DateTimeOffset? time)
     {
         try
         {
@@ -77,7 +77,7 @@ internal sealed class ErrorHistory(IWorkspaceStore store, IWorkspaceManager work
 
             try
             {
-                IReadOnlyList<ErrorEntry> recorded = Newest([.. Fresh(await store.LoadErrors(id, CancellationToken.None)), new ErrorEntry { Time = clock.GetUtcNow(), Message = message }]);
+                IReadOnlyList<ErrorEntry> recorded = Newest([.. Fresh(await store.LoadErrors(id, CancellationToken.None)), new ErrorEntry { Time = time ?? clock.GetUtcNow(), Message = message }]);
                 recorded = [.. recorded.Take(MaxEntries)];
                 await store.SaveErrors(id, recorded, CancellationToken.None);
                 events.Publish(new RemoteEvent { Kind = RemoteEventKind.ErrorsChanged, WorkspaceId = id, Errors = recorded });

@@ -570,6 +570,43 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ChatErrorShowsWhenItHappenedAboveItsTextAndGoesWithTheNextInputOfAnyClient()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        DateTimeOffset happened = DateTimeOffset.UtcNow.AddMinutes(-3);
+
+        (string[] shown, string[] after) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 900, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Thread.Sleep(100);
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = workspace.Id, Error = "usage limit reached", Time = happened });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            string[] Texts() => [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible && block.Text is { Length: > 0 }).Select(block => block.Text!)];
+            string[] with = Texts();
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspace.Id, Message = new ChatMessage { Role = MessageRole.User, Text = "again", Time = DateTimeOffset.UtcNow } });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            string[] without = Texts();
+            window.Close();
+            return (with, without);
+        });
+
+        int error = Array.IndexOf(shown, "usage limit reached");
+        Assert.True(error > 0);
+        Assert.Equal(happened.ToStamp(DateTimeOffset.UtcNow), shown[error - 1]);
+        Assert.DoesNotContain("usage limit reached", after);
+        Assert.DoesNotContain(happened.ToStamp(DateTimeOffset.UtcNow), after.Where(text => text != "again"));
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheUpdateButtonNextToTheWorkspacesButtonOnlyWhenAnUpdateIsAvailableAndConfirmsBeforeUpdating()
     {
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });

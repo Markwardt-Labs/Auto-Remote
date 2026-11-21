@@ -856,6 +856,20 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Prompt_StampsTheFailuresItPublishesWithTheTimeTheyHappened()
+    {
+        DateTimeOffset before = DateTimeOffset.UtcNow;
+        prompter.OnCreate = session => session.Fail("boom");
+
+        await service.Prompt(workspace.Id, "hello", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        RemoteEvent failure = Events(RemoteEventKind.Failed).Single();
+        Assert.Equal("boom", failure.Error);
+        Assert.InRange(failure.Time!.Value, before, DateTimeOffset.UtcNow.AddSeconds(1));
+    }
+
+    [Fact]
     public async Task Prompt_ClosesTheSessionItMadeWhenItCannotBeAttachedToTheWorkspace()
     {
         workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));

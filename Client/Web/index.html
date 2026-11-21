@@ -1393,6 +1393,24 @@ class ErrorLine {
   }
 }
 
+class StampedErrorLine extends ErrorLine {
+  constructor() {
+    super();
+    this.stamp = h("div", { class: "muted", style: "font-size:11px" });
+    this.text = h("div");
+    this.element.append(this.stamp, this.text);
+    this.message = null;
+  }
+
+  set(message, time) {
+    this.message = message || null;
+    this.text.textContent = message ?? "";
+    this.stamp.textContent = message ? messageStamp(time ?? new Date()) : "";
+    this.stamp.title = message ? new Date(time ?? new Date()).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) : "";
+    this.element.hidden = !message;
+  }
+}
+
 let audio = null;
 
 function unlockAudio() {
@@ -1708,7 +1726,7 @@ class WorkspaceView {
     this.tokens = [];
     this.find = { open: false, query: "", matchCase: false, wholeWord: false, starts: [], current: -1 };
     this.wrap = false;
-    this.chatError = new ErrorLine();
+    this.chatError = new StampedErrorLine();
     this.filesError = new ErrorLine();
     this.settingsError = new ErrorLine();
     this.historyError = new ErrorLine();
@@ -2879,6 +2897,10 @@ class WorkspaceView {
         return;
       }
 
+      if (event.message.role === "User") {
+        this.chatError.set(null);
+      }
+
       if (this.streaming && event.message.role === "Assistant" && !event.message.isWork) {
         this.messages[this.messages.indexOf(this.streaming.message)] = event.message;
         this.streaming.element.replaceWith(this.messageElement(event.message));
@@ -2898,7 +2920,7 @@ class WorkspaceView {
         this.dropStreaming();
       }
     } else if (event.kind === "Failed") {
-      this.chatError.set(event.error);
+      this.chatError.set(event.error, event.time);
       this.dropStreaming();
     } else if (event.kind === "SavedInputsChanged" && event.savedInputs) {
       this.setSavedInputs(event.savedInputs);
@@ -3104,7 +3126,7 @@ class WorkspaceView {
       this.inputChanged();
       this.input.focus();
     } else {
-      const message = this.chatError.element.textContent;
+      const message = this.chatError.message;
       const again = await attempt(() => this.connection.getSavedInputs(this.info.id), this.chatError);
 
       if (again.ok) {

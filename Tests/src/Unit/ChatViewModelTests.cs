@@ -657,4 +657,82 @@ public sealed class ChatViewModelTests
 
         Assert.Equal(["one"], chat.Messages.Select(message => message.Text));
     }
+
+    private RemoteEvent Failed(string error, DateTimeOffset? time, Guid? workspace = null) => new() { Kind = RemoteEventKind.Failed, WorkspaceId = workspace ?? workspaceId, Error = error, Time = time };
+
+    private RemoteEvent Typed(string text, Guid? workspace = null) => new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspace ?? workspaceId, Message = new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow } };
+
+    [Fact]
+    public async Task AFailureShowsWhenItHappenedAsTheEventSaysAndTheNewestFailureOfTheSameTextTakesOverTheTime()
+    {
+        await Showing();
+        DateTimeOffset first = new(2026, 11, 21, 9, 0, 0, TimeSpan.Zero);
+
+        connection.Raise(x => x.EventReceived += null, Failed("usage limit reached", first));
+
+        Assert.Equal(("usage limit reached", first), (chat.Error, chat.ErrorTime));
+        Assert.True(chat.HasError);
+
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+        connection.Raise(x => x.EventReceived += null, Failed("usage limit reached", first.AddHours(2)));
+
+        Assert.Equal(("usage limit reached", first.AddHours(2)), (chat.Error, chat.ErrorTime));
+        Assert.Contains(nameof(ChatViewModel.ErrorTime), changed);
+    }
+
+    [Fact]
+    public async Task AFailureWithoutATimeIsStampedWhenItArrives()
+    {
+        await Showing();
+        DateTimeOffset before = DateTimeOffset.UtcNow;
+
+        connection.Raise(x => x.EventReceived += null, Failed("older server", null));
+
+        Assert.InRange(chat.ErrorTime!.Value, before, DateTimeOffset.UtcNow.AddSeconds(1));
+    }
+
+    [Fact]
+    public async Task TheNextInputOfAnyClientTakesTheErrorAwayAndItsTimeWithIt()
+    {
+        await Showing(Said("earlier"));
+        connection.Raise(x => x.EventReceived += null, Failed("The AI could not be started", DateTimeOffset.UtcNow));
+        Assert.True(chat.HasError);
+
+        connection.Raise(x => x.EventReceived += null, Typed("try again"));
+
+        Assert.Null(chat.Error);
+        Assert.False(chat.HasError);
+        Assert.Null(chat.ErrorTime);
+        Assert.Equal(["earlier", "try again"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task TheErrorStaysWhileOnlyTheAiOrOtherWorkspacesSpeak()
+    {
+        await Showing();
+        connection.Raise(x => x.EventReceived += null, Failed("still here", DateTimeOffset.UtcNow));
+
+        connection.Raise(x => x.EventReceived += null, Added(Said("an answer")));
+        connection.Raise(x => x.EventReceived += null, Added(Did("shell: ls")));
+        connection.Raise(x => x.EventReceived += null, Typed("typed elsewhere", Guid.NewGuid()));
+        connection.Raise(x => x.EventReceived += null, Failed("another workspace", DateTimeOffset.UtcNow, Guid.NewGuid()));
+
+        Assert.Equal("still here", chat.Error);
+    }
+
+    [Fact]
+    public async Task AnErrorTheClientHasItselfIsStampedWithTheTimeItHappened()
+    {
+        connection.Setup(x => x.SetShowWork(workspaceId, true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The workspace is gone."));
+        DateTimeOffset before = DateTimeOffset.UtcNow;
+
+        chat.ShowWork = true;
+        for (int attempt = 0; attempt < 100 && chat.Error is null; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.InRange(chat.ErrorTime!.Value, before, DateTimeOffset.UtcNow.AddSeconds(1));
+    }
 }

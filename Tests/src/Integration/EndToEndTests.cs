@@ -406,6 +406,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal("boom: fail now", entry.Message);
         Assert.InRange(entry.Time, before - TimeSpan.FromSeconds(1), DateTimeOffset.UtcNow + TimeSpan.FromSeconds(1));
         Assert.Empty(none);
+        Assert.Equal(entry.Time, events.First(remoteEvent => remoteEvent.Kind == RemoteEventKind.Failed).Time);
         Assert.All(events.Where(remoteEvent => remoteEvent.Kind is RemoteEventKind.Failed or RemoteEventKind.ErrorsChanged), remoteEvent => Assert.Equal(failing.Id, remoteEvent.WorkspaceId));
         Assert.Equal(recorded, events.Single(remoteEvent => remoteEvent.Kind == RemoteEventKind.ErrorsChanged).Errors);
         Assert.True(File.Exists(Path.Combine(temp.Combine("data"), "errors", $"{failing.Id:N}.json")));

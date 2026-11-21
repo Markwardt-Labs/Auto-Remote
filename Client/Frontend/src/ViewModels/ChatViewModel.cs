@@ -628,6 +628,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                     break;
                 }
 
+                if (message.Role == MessageRole.User)
+                {
+                    Error = null;
+                }
+
                 if (streaming is not null && message is { Role: MessageRole.Assistant, IsWork: false })
                 {
                     Replace(streaming, message);
@@ -655,7 +660,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
                 break;
             case RemoteEventKind.Failed:
-                Error = remoteEvent.Error;
+                Report(remoteEvent.Error ?? "The AI failed.", remoteEvent.Time ?? DateTimeOffset.UtcNow);
                 Unstream();
                 break;
             case RemoteEventKind.SavedInputsChanged when remoteEvent.SavedInputs is { } saved:
