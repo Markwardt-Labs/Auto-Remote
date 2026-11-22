@@ -70,6 +70,12 @@ internal sealed class MarkdownView : ContentControl
 
     private readonly StringBuilder plain = new();
 
+    private readonly double zoomStep = 1.25;
+
+    private readonly double minZoom = 0.25;
+
+    private readonly double maxZoom = 4;
+
     private ScrollSafeTextBlock? block;
 
     private int blockStart;
@@ -568,12 +574,52 @@ internal sealed class MarkdownView : ContentControl
         }
     }
 
-    private ScrollViewer Picture(DiagramPicture picture) => new()
+    private StackPanel Picture(DiagramPicture picture)
     {
-        HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
-        VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
-        Content = new Image { Source = picture.Image, Width = picture.Width, Height = picture.Height, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left },
-    };
+        double zoom = 1;
+        Image image = new() { Source = picture.Image, Width = picture.Width, Height = picture.Height, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left };
+        Button reset = Zoomer("100%", "Reset Zoom");
+        Button smaller = Zoomer("-", "Zoom Out");
+        Button larger = Zoomer("+", "Zoom In");
+
+        void Apply(double value)
+        {
+            zoom = Math.Clamp(value, minZoom, maxZoom);
+            image.Width = picture.Width * zoom;
+            image.Height = picture.Height * zoom;
+            reset.Content = $"{Math.Round(zoom * 100)}%";
+        }
+
+        smaller.Click += (_, _) => Apply(zoom / zoomStep);
+        larger.Click += (_, _) => Apply(zoom * zoomStep);
+        reset.Click += (_, _) => Apply(1);
+
+        ScrollViewer scroller = new()
+        {
+            HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+            VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+            Content = image,
+        };
+
+        scroller.AddHandler(PointerWheelChangedEvent, (_, args) =>
+        {
+            if (args.KeyModifiers.HasFlag(Avalonia.Input.KeyModifiers.Control))
+            {
+                Apply(args.Delta.Y > 0 ? zoom * zoomStep : zoom / zoomStep);
+                args.Handled = true;
+            }
+        }, Avalonia.Interactivity.RoutingStrategies.Tunnel);
+
+        StackPanel bar = new() { Orientation = Orientation.Horizontal, Spacing = 4, HorizontalAlignment = HorizontalAlignment.Right, Children = { smaller, reset, larger } };
+        return new StackPanel { Spacing = 8, Children = { bar, scroller } };
+    }
+
+    private Button Zoomer(string text, string tip)
+    {
+        Button button = new() { Content = text, MinWidth = 36, MinHeight = 28, Padding = new Thickness(8, 2), FontSize = 12, HorizontalContentAlignment = HorizontalAlignment.Center };
+        ToolTip.SetTip(button, tip);
+        return button;
+    }
 
     private Border Code(Block source)
     {

@@ -56,9 +56,9 @@ internal sealed class DiagramSource(IServerConnection connection) : IDiagramSour
 
     private readonly ConcurrentDictionary<string, Task<DiagramPicture>> drawing = new();
 
-    private readonly int maxPictures = 32;
+    private readonly int maxPictures = 16;
 
-    private readonly double sharpness = 2;
+    private readonly double sharpness = 3;
 
     private readonly double largestSide = 4096;
 

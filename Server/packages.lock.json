@@ -13,12 +13,12 @@
       },
       "Mermaider": {
         "type": "Direct",
-        "requested": "[0.12.2, )",
-        "resolved": "0.12.2",
-        "contentHash": "GGTKdAUc22Sus45Rkf0oPQjrQq5yOTIaFjXZoo3IBY0HB7Nbn6MyXXrknmdy5YADZBRNK3awV6sw9QY1KXfpfQ==",
+        "requested": "[0.17.0, )",
+        "resolved": "0.17.0",
+        "contentHash": "VVNQIIUHkoOTbLygi4eiWUXitHQJrbzP+eM8IafyBAK4IUAw/GgTNiBTS7uVF9cCxyMu9d23bRKZVLDolyGSIQ==",
         "dependencies": {
-          "Microsoft.Extensions.ObjectPool": "10.0.3",
-          "Sugiyama": "0.12.2"
+          "Microsoft.Extensions.ObjectPool": "11.0.0",
+          "Sugiyama": "0.17.0"
         }
       },
       "Microsoft.NET.ILLink.Tasks": {
@@ -62,13 +62,13 @@
       },
       "Microsoft.Extensions.ObjectPool": {
         "type": "Transitive",
-        "resolved": "10.0.3",
-        "contentHash": "dQKlVXzqflsv5X8iDlAN5YmTL1GcLCrOLKo1s9PNdfjqxeu0S/jmWTfiLGno+8+o1qFL3+VFAH5/ftmypN+sPw=="
+        "resolved": "11.0.0",
+        "contentHash": "RdBrj+XP4290tK/fegTdMQQkHLflX6ir2NagnjOGbi8T4QF+Vsz8To11xp2zy6sjp7eQVv/XXYGH2hZ43FED/w=="
       },
       "Sugiyama": {
         "type": "Transitive",
-        "resolved": "0.12.2",
-        "contentHash": "zctOh0QNzLLzrkaV9WJO15bLCQ2Fvl4Lf/zEoFaMeoD244B9pTXiHEikM3PXkj+CniiOwJg6uYNL/ZDaNWAJ0w=="
+        "resolved": "0.17.0",
+        "contentHash": "pBQucu6DG1fc1ElTLeBKR4FIPTAb/EDFsH4+XD1TKx1hN8AYAQq4t6kia3dkpbM7EJ42T8NWkyDp7v1fhlrtRA=="
       },
       "Markwardt.AutoRemote": {
         "type": "Project"

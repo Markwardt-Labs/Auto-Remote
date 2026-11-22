@@ -30,7 +30,7 @@ public sealed class DiagramTests(HeadlessFixture fixture)
 
         Assert.Same(pictures[0], pictures[1]);
         Assert.Equal((120d, 60d), (pictures[0].Width, pictures[0].Height));
-        Assert.Equal(2d, pictures[0].Scale);
+        Assert.Equal(3d, pictures[0].Scale);
         Assert.True(found);
         Assert.True(sameFound);
         connection.Verify(x => x.RenderDiagram(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -164,5 +164,53 @@ public sealed class DiagramTests(HeadlessFixture fixture)
         Assert.False(image);
         Assert.Contains(texts, text => text == "The diagram cannot be drawn: oops");
         Assert.Contains(texts, text => text.Contains("graph TD", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task MarkdownView_ZoomsADrawnDiagramWithItsButtonsWithinTheLimitsAndResetsIt()
+    {
+        Mock<IDiagramSource> diagrams = new();
+        diagrams.Setup(x => x.Find("graph TD\n  A --> B")).Returns(() => Picture());
+
+        (double[] widths, string[] labels) = await fixture.Run(() =>
+        {
+            MarkdownView view = new() { Source = diagram, Diagrams = diagrams.Object };
+            Window window = new() { Width = 500, Height = 600, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            Button Find(string tip) => view.GetVisualDescendants().OfType<Button>().Single(button => Equals(ToolTip.GetTip(button), tip));
+            void Press(string tip) => Find(tip).RaiseEvent(new Avalonia.Interactivity.RoutedEventArgs(Button.ClickEvent));
+            double Width() => view.GetVisualDescendants().OfType<Image>().Single().Width;
+
+            List<double> seen = [Width()];
+            Press("Zoom In");
+            seen.Add(Width());
+            Press("Reset Zoom");
+            seen.Add(Width());
+            Press("Zoom Out");
+            seen.Add(Width());
+
+            for (int press = 0; press < 20; press++)
+            {
+                Press("Zoom Out");
+            }
+
+            seen.Add(Width());
+            string small = Find("Reset Zoom").Content!.ToString()!;
+
+            for (int press = 0; press < 40; press++)
+            {
+                Press("Zoom In");
+            }
+
+            seen.Add(Width());
+            string large = Find("Reset Zoom").Content!.ToString()!;
+            window.Close();
+            return (seen.ToArray(), new[] { small, large });
+        });
+
+        Assert.Equal([120, 150, 120, 96, 30, 480], widths);
+        Assert.Equal(["25%", "400%"], labels);
     }
 }
