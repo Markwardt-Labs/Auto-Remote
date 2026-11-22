@@ -461,6 +461,40 @@ public sealed partial class HomeView : UserControl
         }
     }
 
+    private void OnMarkdownScrolled(object? sender, ScrollChangedEventArgs args)
+    {
+        if (sender is ScrollViewer { Content: MarkdownView view } scroller)
+        {
+            view.UpdateTrail(scroller.Offset.Y);
+        }
+    }
+
+    private void OnOutlineChosen(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Control { Tag: int index })
+        {
+            this.FindControl<MarkdownView>("MarkdownPreview")?.ScrollTo(index);
+            this.FindControl<Button>("MarkdownOutlineButton")?.Flyout?.Hide();
+        }
+    }
+
+    private void OnTrailChosen(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Control { Tag: int index })
+        {
+            this.FindControl<MarkdownView>("MarkdownPreview")?.ScrollTo(index);
+        }
+    }
+
+    private void OnFoldLevelChosen(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
+    {
+        if (sender is Control control && int.TryParse($"{control.Tag}", CultureInfo.InvariantCulture, out int level))
+        {
+            this.FindControl<MarkdownView>("MarkdownPreview")?.FoldToLevel(level);
+            this.FindControl<Button>("MarkdownLevelButton")?.Flyout?.Hide();
+        }
+    }
+
     private void OnFindToggled(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
         if (sender is Avalonia.Controls.Primitives.ToggleButton { IsChecked: true })

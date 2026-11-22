@@ -13,14 +13,15 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <param name="layout">How the conversation and files are laid out.</param>
     /// <param name="drafts">Where the text typed in the message box is kept, or <see langword="null" /> to keep none.</param>
     /// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
-    public WorkspaceViewModel(IServerConnection connection, WorkspaceInfo workspace, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IVoiceRecorder? recorder = null)
+    /// <param name="preferences">Where display choices such as numbered markdown sections are kept, or <see langword="null" /> to keep none.</param>
+    public WorkspaceViewModel(IServerConnection connection, WorkspaceInfo workspace, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IVoiceRecorder? recorder = null, IViewPreferences? preferences = null)
     {
         this.layout = layout;
         this.connection = connection;
         Workspace = workspace;
         Chat = new ChatViewModel(connection, workspace.Id, drafts, recorder);
         Git = new GitViewModel(connection, workspace.Id);
-        Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels);
+        Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels, null, preferences);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
         Errors = new ErrorHistoryViewModel(connection, workspace.Id);

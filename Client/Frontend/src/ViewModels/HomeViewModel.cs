@@ -18,7 +18,8 @@ internal sealed class HomeViewModel : ViewModelBase
     /// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
     /// <param name="newWindow">Opens another window of the app as a process of its own, or <see langword="null" /> when this client cannot, which hides the button.</param>
     /// <param name="update">Offers an update of the client and the server, or <see langword="null" /> when none is offered.</param>
-    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, UpdateViewModel? update = null)
+    /// <param name="preferences">Where display choices such as numbered markdown sections are kept, or <see langword="null" /> to keep none.</param>
+    public HomeViewModel(IServerConnection connection, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, TimeProvider? time = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, UpdateViewModel? update = null, IViewPreferences? preferences = null)
     {
         Update = update;
         this.recorder = recorder;
@@ -30,6 +31,7 @@ internal sealed class HomeViewModel : ViewModelBase
         this.connection = connection;
         this.layout = layout;
         this.drafts = drafts;
+        this.preferences = preferences;
         connection.Lost += () => IsOffline = true;
         connection.Reconnected += () =>
         {
@@ -124,6 +126,8 @@ internal sealed class HomeViewModel : ViewModelBase
     private readonly ClientLayout layout;
 
     private readonly IDraftStore? drafts;
+
+    private readonly IViewPreferences? preferences;
 
     private readonly IVoiceRecorder? recorder;
 
@@ -822,7 +826,7 @@ internal sealed class HomeViewModel : ViewModelBase
             return existing;
         }
 
-        WorkspaceViewModel created = new(connection, workspace, layout, drafts, recorder);
+        WorkspaceViewModel created = new(connection, workspace, layout, drafts, recorder, preferences);
         created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, workspace.Name);
         created.Chat.PromptFailed += () => keeper?.Release(workspace.Id);
         WorkspaceState previous = created.State;

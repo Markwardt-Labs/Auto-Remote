@@ -621,6 +621,50 @@
                         <Path Classes="lineIcon" Data="{StaticResource UnfoldAllIconGeometry}" MaxWidth="12" MaxHeight="12" IsVisible="{Binding MarkdownCollapsed}" />
                       </Panel>
                     </ToggleButton>
+                    <ToggleButton Classes="icon" ToolTip.Tip="Number the sections" IsChecked="{Binding MarkdownNumbered, Mode=TwoWay}" IsVisible="{Binding IsMarkdownPreview}" IsEnabled="{Binding HasMarkdownOutline}">
+                      <TextBlock Text="1." FontSize="11" FontWeight="SemiBold" />
+                    </ToggleButton>
+                    <local:TouchButton Name="MarkdownLevelButton" Classes="icon" ToolTip.Tip="Fold to a nesting level" IsVisible="{Binding IsMarkdownPreview}" IsEnabled="{Binding HasMarkdownOutline}">
+                      <Path Classes="lineIcon" Data="{StaticResource LevelsIconGeometry}" MaxWidth="12" MaxHeight="12" />
+                      <Button.Flyout>
+                        <Flyout Placement="BottomEdgeAlignedRight">
+                          <StackPanel Spacing="6">
+                            <TextBlock Text="Show the headings down to level" Classes="muted" FontSize="11" />
+                            <StackPanel Orientation="Horizontal" Spacing="4">
+                              <ItemsControl ItemsSource="{Binding MarkdownLevelChoices}">
+                                <ItemsControl.ItemsPanel>
+                                  <ItemsPanelTemplate>
+                                    <StackPanel Orientation="Horizontal" Spacing="4" />
+                                  </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                  <DataTemplate>
+                                    <local:TouchButton Classes="icon" Content="{Binding}" Tag="{Binding}" MinWidth="30" HorizontalContentAlignment="Center" Click="OnFoldLevelChosen" />
+                                  </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                              </ItemsControl>
+                              <local:TouchButton Classes="icon" Content="All" Tag="0" MinWidth="30" HorizontalContentAlignment="Center" Click="OnFoldLevelChosen" />
+                            </StackPanel>
+                          </StackPanel>
+                        </Flyout>
+                      </Button.Flyout>
+                    </local:TouchButton>
+                    <local:TouchButton Name="MarkdownOutlineButton" Classes="icon" ToolTip.Tip="Outline" IsVisible="{Binding IsMarkdownPreview}" IsEnabled="{Binding HasMarkdownOutline}">
+                      <Path Classes="lineIcon" Data="{StaticResource OutlineIconGeometry}" MaxWidth="12" MaxHeight="12" />
+                      <Button.Flyout>
+                        <Flyout Placement="BottomEdgeAlignedRight">
+                          <ScrollViewer MaxHeight="360" MinWidth="220" MaxWidth="420" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl ItemsSource="{Binding MarkdownOutline}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <local:TouchButton Classes="icon" Content="{Binding Label}" Tag="{Binding Index}" Margin="{Binding Indent}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" FontSize="12" Click="OnOutlineChosen" />
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </ScrollViewer>
+                        </Flyout>
+                      </Button.Flyout>
+                    </local:TouchButton>
                     <ToggleButton Classes="icon" ToolTip.Tip="Word wrap" IsChecked="{Binding WrapLines, Mode=TwoWay}" IsVisible="{Binding !IsMarkdownPreview}">
                       <Path Classes="lineIcon" Data="{StaticResource WrapIconGeometry}" MaxWidth="12" MaxHeight="12" />
                     </ToggleButton>
@@ -652,9 +696,29 @@
               <Border Grid.Row="2" Background="Transparent" Padding="14,8">
                 <Panel>
                   <local:SyntaxView IsVisible="{Binding IsTextPreview}" File="{Binding Preview}" Matches="{Binding Find.Matches}" Wrap="{Binding WrapLines}" />
-                  <ScrollViewer IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto">
-                    <local:MarkdownView Collapsible="True" AllCollapsed="{Binding MarkdownCollapsed, Mode=TwoWay}" Source="{Binding Preview.Text}" Matches="{Binding Find.Matches}" PlainText="{Binding MarkdownText, Mode=OneWayToSource}" />
+                  <ScrollViewer Name="MarkdownScroller" IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMarkdownScrolled">
+                    <local:MarkdownView Name="MarkdownPreview" Collapsible="True" AllCollapsed="{Binding MarkdownCollapsed, Mode=TwoWay}" Numbered="{Binding MarkdownNumbered}" Source="{Binding MarkdownSource}" Matches="{Binding Find.Matches}"
+                                        PlainText="{Binding MarkdownText, Mode=OneWayToSource}" Outline="{Binding MarkdownOutline, Mode=OneWayToSource}" Trail="{Binding MarkdownTrail, Mode=OneWayToSource}" />
                   </ScrollViewer>
+                  <Border IsVisible="{Binding HasMarkdownTrail}" Height="30" VerticalAlignment="Top" Margin="-14,-8,-14,0" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">
+                    <ScrollViewer HorizontalScrollBarVisibility="Hidden" VerticalScrollBarVisibility="Disabled" Padding="10,0">
+                      <ItemsControl ItemsSource="{Binding MarkdownTrail}" VerticalAlignment="Center">
+                        <ItemsControl.ItemsPanel>
+                          <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" />
+                          </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <StackPanel Orientation="Horizontal">
+                              <TextBlock Text="&#x203A;" Classes="muted" IsVisible="{Binding HasParent}" VerticalAlignment="Center" Margin="2,0" />
+                              <local:TouchButton Classes="icon" Content="{Binding Title}" Tag="{Binding Index}" FontSize="12" Padding="6,2" Click="OnTrailChosen" />
+                            </StackPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </ScrollViewer>
+                  </Border>
                   <local:DiffView IsVisible="{Binding IsDiffPreview}" Diff="{Binding Diff}" Wrap="{Binding WrapLines}" />
                 </Panel>
               </Border>

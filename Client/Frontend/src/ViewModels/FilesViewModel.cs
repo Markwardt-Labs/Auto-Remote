@@ -13,8 +13,10 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// <param name="git">The git state of the workspace, which colors the tree and supplies the diffs.</param>
     /// <param name="desktop">Whether this is the desktop layout: the tree always starts at the workspace folder, and keeps the open file selected with its folders open.</param>
     /// <param name="previewInterval">The shortest time between two readings of the open file after changes were reported, or <see langword="null" /> for three seconds.</param>
-    public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false, TimeSpan? previewInterval = null)
+    /// <param name="preferences">Where the markdown files whose sections are numbered are kept, or <see langword="null" /> to keep none.</param>
+    public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false, TimeSpan? previewInterval = null, IViewPreferences? preferences = null)
     {
+        this.preferences = preferences;
         this.previewInterval = previewInterval ?? TimeSpan.FromSeconds(3);
         this.connection = connection;
         this.workspaceId = workspaceId;
@@ -99,6 +101,18 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private bool markdownCollapsed;
 
+    private bool markdownNumbered;
+
+    private readonly IViewPreferences? preferences;
+
+    private HashSet<string> numberedFiles = [];
+
+    private bool applyingNumbered;
+
+    private IReadOnlyList<MarkdownHeading> markdownOutline = [];
+
+    private IReadOnlyList<MarkdownHeading> markdownTrail = [];
+
     private bool showHidden;
 
     /// <summary>
@@ -181,6 +195,8 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
                 Raise(nameof(IsFindable));
                 Raise(nameof(IsPreviewing));
                 Raise(nameof(IsMarkdownPreview));
+                Raise(nameof(MarkdownSource));
+                ApplyNumbered();
                 Raise(nameof(IsTextPreview));
                 Raise(nameof(PreviewTitle));
                 _ = Reveal(OpenPath != opened);
@@ -259,6 +275,72 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     public bool IsMarkdownPreview => preview is not null && (preview.Path.EndsWith(".md", StringComparison.OrdinalIgnoreCase) || preview.Path.EndsWith(".markdown", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
+    /// Gets the text the markdown view renders: the previewed file when it is markdown, and nothing otherwise, so a code file is never parsed as markdown behind the scenes.
+    /// </summary>
+    public string? MarkdownSource => IsMarkdownPreview ? preview!.Text : null;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the headings of the rendered markdown show their section numbers. It is off by default, and turning it on is remembered for the file in this workspace on the device; every file starts from what was remembered for it.
+    /// </summary>
+    public bool MarkdownNumbered
+    {
+        get => markdownNumbered;
+        set
+        {
+            if (Set(ref markdownNumbered, value) && !applyingNumbered && IsMarkdownPreview)
+            {
+                _ = RememberNumbered(preview!.Path, value);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets the headings of the rendered markdown, which the markdown view keeps up to date; they make up the outline.
+    /// </summary>
+    internal IReadOnlyList<MarkdownHeading> MarkdownOutline
+    {
+        get => markdownOutline;
+        set
+        {
+            if (Set(ref markdownOutline, value))
+            {
+                Raise(nameof(HasMarkdownOutline));
+                Raise(nameof(MarkdownLevelChoices));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the rendered markdown has any headings.
+    /// </summary>
+    public bool HasMarkdownOutline => markdownOutline.Count > 0;
+
+    /// <summary>
+    /// Gets the nesting levels the rendered markdown can be folded to, 1 up to how deep its headings are nested.
+    /// </summary>
+    public IReadOnlyList<int> MarkdownLevelChoices => [.. Enumerable.Range(1, markdownOutline.Count == 0 ? 0 : markdownOutline.Max(heading => heading.Depth) + 1)];
+
+    /// <summary>
+    /// Gets or sets the headings the top of the rendered markdown is under, outermost first, which the markdown view keeps up to date and the breadcrumb shows; empty while the view is at its top.
+    /// </summary>
+    internal IReadOnlyList<MarkdownHeading> MarkdownTrail
+    {
+        get => markdownTrail;
+        set
+        {
+            if (Set(ref markdownTrail, value))
+            {
+                Raise(nameof(HasMarkdownTrail));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the breadcrumb of the rendered markdown has anything to show.
+    /// </summary>
+    public bool HasMarkdownTrail => markdownTrail.Count > 0;
+
+    /// <summary>
     /// Gets a value indicating whether the previewed file can be searched with the find bar.
     /// </summary>
     public bool IsFindable => preview is not null;
@@ -334,7 +416,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// Shows the root folder shown last, or the workspace folder at first, up to date, and asks the server to report its changes.
     /// </summary>
     /// <returns>A task that completes once the folder is shown.</returns>
-    public Task Start()
+    public async Task Start()
     {
         if (!subscribed)
         {
@@ -342,7 +424,8 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             connection.EventReceived += Receive;
         }
 
-        return Open(files?.Path ?? string.Empty);
+        await LoadNumbered();
+        await Open(files?.Path ?? string.Empty);
     }
 
     /// <summary>
@@ -617,6 +700,55 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
                     Find.Seek(result.Line);
                 }
             }
+        }
+    }
+
+    private async Task LoadNumbered()
+    {
+        if (preferences is null)
+        {
+            return;
+        }
+
+        try
+        {
+            numberedFiles = [.. await preferences.NumberedFiles(workspaceId, CancellationToken.None)];
+            ApplyNumbered();
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
+    }
+
+    private void ApplyNumbered()
+    {
+        applyingNumbered = true;
+        MarkdownNumbered = IsMarkdownPreview && numberedFiles.Contains(preview!.Path);
+        applyingNumbered = false;
+    }
+
+    private async Task RememberNumbered(string path, bool numbered)
+    {
+        if (numbered)
+        {
+            numberedFiles.Add(path);
+        }
+        else
+        {
+            numberedFiles.Remove(path);
+        }
+
+        if (preferences is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await preferences.SetNumbered(workspaceId, path, numbered, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
         }
     }
 

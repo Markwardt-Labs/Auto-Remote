@@ -201,7 +201,7 @@ button.icon.recording { color: var(--danger); }
 .preview .code .gutter { flex: none; position: sticky; left: 0; margin: 0; padding: 0 12px 0 14px; text-align: right; color: #858585; background: var(--background); user-select: none; font: inherit; }
 .preview .code .src { margin: 0; flex: 1 0 auto; padding-right: 12px; font: inherit; }
 .find { background: #EA5C0055; }
-.find.current { background: #515C6A; }
+.find.current { background: #515C6A; scroll-margin-top: 40px; }
 .row { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 4px; margin: 1px 0; cursor: pointer; }
 .row:hover { background: var(--hover); }
 .row.on { background: var(--selection); }
@@ -233,7 +233,26 @@ button.icon.recording { color: var(--danger); }
 .md .mdsec:last-child { margin-bottom: 0; }
 .md .mdhead { display: flex; align-items: center; gap: 2px; }
 .md .mdhead > :is(h1, h2, h3, h4, h5, h6) { flex: 1; min-width: 0; margin: 0; }
-.md .mdbody { margin-top: 10px; }
+.md .mdbody { margin: 10px 0 0 11px; padding-left: var(--indent, 16px); border-left: 1px solid var(--border); }
+.md .mdhead:hover + .mdbody { border-left-color: var(--accent); }
+.md .mdsec:is(.l1, .l2) > .mdhead { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.md .mdsec.l1 > .mdhead > h1 { font-weight: 700; }
+.md .mdsec:is(.l4, .l5) > .mdhead > :is(h4, h5) { font-weight: 500; }
+.md .mdsec.l6 > .mdhead > h6 { font-weight: 400; }
+.md .mdsec.l3 > .mdhead > h3 { opacity: .95; } .md .mdsec.l4 > .mdhead > h4 { opacity: .9; } .md .mdsec.l5 > .mdhead > h5 { opacity: .85; } .md .mdsec.l6 > .mdhead > h6 { opacity: .8; }
+.md .mdnum { display: none; flex: none; font-size: 12px; color: var(--muted); opacity: .7; margin-right: 8px; white-space: nowrap; }
+.md.numbered .mdnum:not(:empty) { display: block; }
+.crumbbox { position: relative; height: 0; flex: none; z-index: 2; }
+.crumbs { position: absolute; top: 0; left: 0; right: 0; height: 30px; display: flex; align-items: center; gap: 2px; padding: 0 10px; background: var(--elevated); border-bottom: 1px solid var(--border); overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.crumbs button { flex: none; padding: 2px 6px; font-size: 12px; }
+.crumbs .sep { flex: none; color: var(--muted); }
+.pbar .menu-wrap { flex: none; }
+.pbar .menu-wrap .menu-list { left: auto; right: 0; top: calc(100% + 2px); }
+.pbar .menu-list.outline { min-width: 220px; max-width: 420px; max-height: 360px; overflow-y: auto; }
+.pbar .menu-list .levels { display: flex; gap: 4px; padding: 4px 8px; }
+.pbar .menu-list .levels button { width: auto; min-width: 30px; padding: 4px 8px; text-align: center; }
+.pbar .menu-list .hint { padding: 4px 12px; font-size: 11px; color: var(--muted); }
+.pbar .menu-list.outline button { font-size: 12px; white-space: nowrap; }
 .md .mdbody > :last-child { margin-bottom: 0; }
 .md .mdfold { flex: none; padding: 2px 6px; font-size: 15px; line-height: 1; }
 .md .mdsec.collapsed > .mdbody { display: none; }
@@ -359,6 +378,27 @@ details.section > .stack { padding: 4px 0 12px; }
 "use strict";
 
 const storageKey = "autoRemote.connection";
+const numberedKey = "autoRemote.numbered.";
+
+function readNumbered(workspaceId) {
+  try {
+    const files = JSON.parse(localStorage.getItem(`${numberedKey}${workspaceId}`));
+    return new Set(Array.isArray(files) ? files.filter(file => typeof file === "string") : []);
+  } catch (exception) {
+    return new Set();
+  }
+}
+
+function writeNumbered(workspaceId, files) {
+  try {
+    if (files.size === 0) {
+      localStorage.removeItem(`${numberedKey}${workspaceId}`);
+    } else {
+      localStorage.setItem(`${numberedKey}${workspaceId}`, JSON.stringify([...files]));
+    }
+  } catch (exception) {
+  }
+}
 const draftKey = "autoRemote.draft.";
 const historyChunk = 30;
 const chatChunk = 20;
@@ -1135,6 +1175,8 @@ function renderMarkdown(source, folds) {
 function foldMarkdown(root, folds) {
   const open = [];
   const sections = [];
+  const headings = [];
+  const siblings = new Map();
 
   for (const node of [...root.childNodes]) {
     const level = /^H([1-6])$/.exec(node.tagName)?.[1];
@@ -1149,16 +1191,33 @@ function foldMarkdown(root, folds) {
     }
 
     const index = sections.length;
+    const parent = open.at(-1)?.index ?? -1;
+    const depth = open.length;
+    siblings.set(parent, (siblings.get(parent) ?? 0) + 1);
     const toggle = h("button", { class: "flat mdfold", onclick: () => folds.toggle(index) });
-    const body = h("div", { class: "mdbody" });
-    const section = h("div", { class: "mdsec" }, h("div", { class: "mdhead" }, toggle, node), body);
+    const number = h("span", { class: "mdnum" });
+    const head = h("div", { class: "mdhead" }, toggle, number, node);
+    const body = h("div", { class: "mdbody", style: `--indent:${Math.max(6, 16 - 2 * depth)}px` });
+    const section = h("div", { class: `mdsec l${level}` }, head, body);
     section.toggle = toggle;
+    section.head = head;
+    section.number = number;
     (open.at(-1)?.body ?? root).append(section);
-    open.push({ level: Number(level), body, section });
+    open.push({ level: Number(level), body, section, index });
     sections.push(section);
+    headings.push({ index, title: node.textContent.trim(), level: Number(level), depth, parent, own: siblings.get(parent) });
+  }
+
+  const titled = headings.length > 1 && headings.filter(heading => heading.parent < 0).length === 1;
+
+  for (const heading of headings) {
+    const parentNumber = heading.parent >= 0 ? headings[heading.parent].number : "";
+    heading.number = titled && heading.index === 0 ? "" : parentNumber === "" ? String(heading.own) : `${parentNumber}.${heading.own}`;
+    sections[heading.index].number.textContent = heading.number;
   }
 
   folds.sections = sections;
+  folds.headings = headings;
   folds.apply();
 }
 
@@ -1524,6 +1583,8 @@ const icons = {
   mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 0.75 10 13", 14],
   foldAll: ["M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12", "1 1.5 12 11", 13],
   unfoldAll: ["M1,7 L13,7 M4,5 L7,2 L10,5 M4,9 L7,12 L10,9", "1 1.5 12 11", 13],
+  outline: ["M1,3 L3,3 M5,3 L13,3 M3,7 L5,7 M7,7 L13,7 M5,11 L7,11 M9,11 L13,11", "0 1 14 12", 13],
+  levels: ["M1,5 L7,2 L13,5 L7,8 Z M1,9 L7,12 L13,9", "0 1 14 12", 13],
   remote: ["M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5", "1.5 0.5 12 13", 13],
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
 };
@@ -1844,12 +1905,24 @@ class WorkspaceView {
     this.previewTitle = h("div", { class: "name" });
     this.previewNote = h("span", { class: "note", hidden: true }, "Read-only, viewing a diff");
     this.wrapButton = h("button", { class: "flat icon", title: "Word wrap", onclick: () => this.setWrap(!this.wrap) }, icon("wrap"));
-    this.folds = { collapsed: new Set(), sections: [], toggle: index => this.toggleFold(index), apply: () => this.applyFolds() };
+    this.folds = { collapsed: new Set(), sections: [], headings: [], toggle: index => this.toggleFold(index), apply: () => this.applyFolds() };
     this.foldButton = h("button", { class: "flat icon", hidden: true, onclick: () => this.foldAll() });
+    this.numbered = false;
+    this.numberedFiles = readNumbered(this.info.id);
+    this.numberButton = h("button", { class: "flat icon", hidden: true, title: "Number the sections", onclick: () => this.toggleNumbered() }, "1.");
+    this.levelMenu = h("div", { class: "menu-list", hidden: true });
+    this.levelButton = h("button", { class: "flat icon", title: "Fold to a nesting level", onclick: event => this.openMenu(event, this.levelMenu) }, icon("levels"));
+    this.levelWrap = h("div", { class: "menu-wrap", hidden: true }, this.levelButton, this.levelMenu);
+    this.outlineMenu = h("div", { class: "menu-list outline", hidden: true });
+    this.outlineButton = h("button", { class: "flat icon", title: "Outline", onclick: event => this.openMenu(event, this.outlineMenu) }, icon("outline"));
+    this.outlineWrap = h("div", { class: "menu-wrap", hidden: true }, this.outlineButton, this.outlineMenu);
+    this.crumbs = h("div", { class: "crumbs" });
+    this.crumbBox = h("div", { class: "crumbbox", hidden: true }, this.crumbs);
+    this.crumbKey = "";
     this.gutter = h("pre", { class: "gutter" });
     this.source = h("pre", { class: "src" });
     this.previewCode = h("div", { class: "code" }, this.gutter, this.source);
-    this.previewMarkdown = h("div", { class: "md", hidden: true });
+    this.previewMarkdown = h("div", { class: "md", hidden: true, onscroll: () => this.updateCrumbs() });
     this.previewDiff = h("div", { class: "diff", hidden: true });
     this.findToggle = h("button", { class: "flat icon", title: "Find (Ctrl+F)", onclick: () => this.setFind(!this.find.open) }, icon("find"));
     this.findInput = h("input", { type: "text", placeholder: "Find", oninput: () => { this.find.query = this.findInput.value; this.search(true, true); }, onkeydown: event => this.findKeyed(event) });
@@ -1866,9 +1939,10 @@ class WorkspaceView {
     this.backButton = h("button", { class: "flat icon", title: "Back", disabled: true, onclick: () => this.navigate(-1) }, icon("back"));
     this.forwardButton = h("button", { class: "flat icon", title: "Forward", disabled: true, onclick: () => this.navigate(1) }, icon("forward"));
     this.previewPane = h("div", { class: "preview", hidden: true },
-      h("div", { class: "pbar" }, this.backButton, this.forwardButton, this.previewKind, this.previewTitle, this.previewNote, this.findToggle, this.foldButton, this.wrapButton, h("button", { class: "flat icon", title: "Close", onclick: () => this.closePreview(true) }, icon("close"))),
+      h("div", { class: "pbar" }, this.backButton, this.forwardButton, this.previewKind, this.previewTitle, this.previewNote, this.findToggle, this.foldButton, this.numberButton, this.levelWrap, this.outlineWrap, this.wrapButton, h("button", { class: "flat icon", title: "Close", onclick: () => this.closePreview(true) }, icon("close"))),
       this.findBar,
       this.previewCode,
+      this.crumbBox,
       this.previewMarkdown,
       this.previewDiff);
     this.placeholder = h("div", { class: "placeholder muted" }, "Select a file to see its content.");
@@ -1888,7 +1962,7 @@ class WorkspaceView {
       h("button", { onclick: choose("tag") }, "Tag"),
       h("button", { onclick: choose("remote") }, "Remote"));
     this.versionWrap = h("div", { class: "menu-wrap version-line", hidden: true }, this.versionButton, this.versionMenu);
-    this.menuListener = () => { this.versionMenu.hidden = true; };
+    this.menuListener = () => { this.versionMenu.hidden = true; this.levelMenu.hidden = true; this.outlineMenu.hidden = true; };
     document.addEventListener("click", this.menuListener);
     this.changesToggle = h("button", { class: "flat icon", title: "Toggle changes mode", hidden: true, onclick: () => this.setChangesMode(!this.changesMode) }, icon("changes"));
     this.hiddenToggle = h("button", { class: "flat icon", title: "See hidden files", onclick: () => this.setShowHidden(!this.showHidden) }, icon("eye"));
@@ -3625,6 +3699,8 @@ class WorkspaceView {
     this.findToggle.hidden = false;
     this.wrapButton.hidden = markdown;
     this.foldButton.hidden = !markdown;
+    this.setMarkdownTools(markdown);
+    this.setNumbered(markdown && this.numberedFiles.has(content.path));
     this.tokens = markdown ? [] : highlightSyntax(content.path, content.text);
     this.gutter.textContent = markdown ? "" : Array.from({ length: content.text.split("\n").length }, (_, i) => i + 1).join("\n");
     this.previewPane.hidden = false;
@@ -3717,7 +3793,128 @@ class WorkspaceView {
       plain += node.data;
     }
 
+    this.renderMarkdownMenus();
+    this.updateCrumbs();
     return { nodes, plain };
+  }
+
+  setMarkdownTools(visible) {
+    this.numberButton.hidden = !visible;
+    this.levelWrap.hidden = !visible;
+    this.outlineWrap.hidden = !visible;
+    this.levelMenu.hidden = true;
+    this.outlineMenu.hidden = true;
+
+    if (!visible) {
+      this.crumbKey = "";
+      this.crumbBox.hidden = true;
+    }
+  }
+
+  openMenu(event, menu) {
+    event.stopPropagation();
+    const opening = menu.hidden;
+    this.levelMenu.hidden = true;
+    this.outlineMenu.hidden = true;
+    menu.hidden = !opening;
+  }
+
+  toggleNumbered() {
+    const value = !this.numbered;
+    this.setNumbered(value);
+
+    if (this.preview && this.isMarkdown()) {
+      if (value) {
+        this.numberedFiles.add(this.preview.path);
+      } else {
+        this.numberedFiles.delete(this.preview.path);
+      }
+
+      writeNumbered(this.info.id, this.numberedFiles);
+    }
+  }
+
+  setNumbered(value) {
+    this.numbered = value;
+    this.numberButton.classList.toggle("on", value);
+    this.previewMarkdown.classList.toggle("numbered", value);
+  }
+
+  renderMarkdownMenus() {
+    const headings = this.folds.headings;
+    const levels = headings.length === 0 ? 0 : Math.max(...headings.map(heading => heading.depth)) + 1;
+    const choose = level => () => { this.levelMenu.hidden = true; this.foldToLevel(level); };
+    this.levelButton.disabled = headings.length === 0;
+    this.outlineButton.disabled = headings.length === 0;
+    this.numberButton.disabled = headings.length === 0;
+    this.levelMenu.replaceChildren(
+      h("div", { class: "hint" }, "Show the headings down to level"),
+      h("div", { class: "levels" }, ...Array.from({ length: levels }, (_, i) => h("button", { onclick: choose(i + 1) }, String(i + 1))), h("button", { onclick: choose(0) }, "All")));
+    this.outlineMenu.replaceChildren(...headings.map(heading => h("button", { style: `padding-left:${12 + heading.depth * 14}px`, onclick: () => { this.outlineMenu.hidden = true; this.scrollToHeading(heading.index); } }, heading.number === "" ? heading.title : `${heading.number}  ${heading.title}`)));
+  }
+
+  foldToLevel(level) {
+    const { collapsed, headings } = this.folds;
+    collapsed.clear();
+
+    if (level > 0) {
+      headings.filter(heading => heading.depth >= level - 1).forEach(heading => collapsed.add(heading.index));
+    }
+
+    this.applyFolds();
+  }
+
+  scrollToHeading(index) {
+    const { collapsed, headings, sections } = this.folds;
+
+    for (let at = index; at >= 0; at = headings[at].parent) {
+      collapsed.delete(at);
+    }
+
+    this.applyFolds();
+    const scroller = this.previewMarkdown;
+    const top = sections[index].head.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+    scroller.scrollTop = Math.max(0, top - 34);
+    this.updateCrumbs();
+  }
+
+  updateCrumbs() {
+    const scroller = this.previewMarkdown;
+    const { headings, sections } = this.folds;
+    const trail = [];
+
+    if (!scroller.hidden && scroller.scrollTop >= 1) {
+      const top = scroller.getBoundingClientRect().top;
+      let found = -1;
+
+      for (let i = 0; i < sections.length; i++) {
+        if (sections[i].head.offsetParent === null) {
+          continue;
+        }
+
+        if (sections[i].head.getBoundingClientRect().top - top >= 30) {
+          break;
+        }
+
+        found = i;
+      }
+
+      for (let at = found; at >= 0; at = headings[at].parent) {
+        trail.unshift(headings[at]);
+      }
+    }
+
+    const key = trail.map(heading => heading.index).join(",");
+
+    if (key === this.crumbKey) {
+      return;
+    }
+
+    this.crumbKey = key;
+    this.crumbBox.hidden = trail.length === 0;
+    this.crumbs.replaceChildren(...trail.flatMap((heading, position) => [
+      ...(position > 0 ? [h("span", { class: "sep" }, "›")] : []),
+      h("button", { class: "flat", onclick: () => this.scrollToHeading(heading.index) }, heading.title)]));
   }
 
   applyFolds() {
@@ -3730,6 +3927,7 @@ class WorkspaceView {
     this.foldButton.replaceChildren(icon(all ? "unfoldAll" : "foldAll"));
     this.foldButton.title = all ? "Expand all" : "Collapse all";
     this.foldButton.classList.toggle("on", all);
+    this.updateCrumbs();
   }
 
   toggleFold(index) {
@@ -4164,6 +4362,8 @@ class WorkspaceView {
     this.previewMarkdown.hidden = true;
     this.findToggle.hidden = true;
     this.foldButton.hidden = true;
+    this.setMarkdownTools(false);
+    this.setNumbered(false);
     this.wrapButton.hidden = false;
     const marker = { Added: "+ ", Removed: "- " };
     const lines = diff.isBinary ? [h("div", { class: "diff-note" }, "Binary file.")] : diff.lines.length === 0 ? [h("div", { class: "diff-note" }, "No changes.")] : diff.lines.map(line => h("div", { class: `dl${line.kind === "Added" ? " added" : line.kind === "Removed" ? " removed" : ""}` },

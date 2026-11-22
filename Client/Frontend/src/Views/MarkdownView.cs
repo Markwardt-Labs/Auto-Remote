@@ -30,6 +30,21 @@ internal sealed class MarkdownView : ContentControl
     /// </summary>
     public static readonly StyledProperty<bool> AllCollapsedProperty = AvaloniaProperty.Register<MarkdownView, bool>(nameof(AllCollapsed), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
 
+    /// <summary>
+    /// Identifies the <see cref="Numbered" /> property.
+    /// </summary>
+    public static readonly StyledProperty<bool> NumberedProperty = AvaloniaProperty.Register<MarkdownView, bool>(nameof(Numbered));
+
+    /// <summary>
+    /// Identifies the <see cref="Outline" /> property.
+    /// </summary>
+    internal static readonly StyledProperty<IReadOnlyList<MarkdownHeading>> OutlineProperty = AvaloniaProperty.Register<MarkdownView, IReadOnlyList<MarkdownHeading>>(nameof(Outline), [], defaultBindingMode: Avalonia.Data.BindingMode.OneWayToSource);
+
+    /// <summary>
+    /// Identifies the <see cref="Trail" /> property.
+    /// </summary>
+    internal static readonly StyledProperty<IReadOnlyList<MarkdownHeading>> TrailProperty = AvaloniaProperty.Register<MarkdownView, IReadOnlyList<MarkdownHeading>>(nameof(Trail), [], defaultBindingMode: Avalonia.Data.BindingMode.OneWayToSource);
+
     private static readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
 
     static MarkdownView()
@@ -42,6 +57,7 @@ internal sealed class MarkdownView : ContentControl
         CollapsibleProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
         AllCollapsedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.CollapseAll());
         MatchesProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+        NumberedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.ShowNumbers());
     }
 
     private readonly MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
@@ -59,6 +75,14 @@ internal sealed class MarkdownView : ContentControl
     private readonly List<Section> sections = [];
 
     private readonly List<bool> collapsed = [];
+
+    private readonly List<MarkdownHeading> headings = [];
+
+    private readonly FontWeight[] weights = [FontWeight.Bold, FontWeight.SemiBold, FontWeight.SemiBold, FontWeight.Medium, FontWeight.Medium, FontWeight.Normal];
+
+    private readonly double[] fades = [1, 1, 0.95, 0.9, 0.85, 0.8];
+
+    private readonly double barHeight = 30;
 
     private int containing = -1;
 
@@ -101,6 +125,33 @@ internal sealed class MarkdownView : ContentControl
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether each heading shows its section number, such as 2.1.3, in front of its text.
+    /// </summary>
+    public bool Numbered
+    {
+        get => GetValue(NumberedProperty);
+        set => SetValue(NumberedProperty, value);
+    }
+
+    /// <summary>
+    /// Gets the headings of the document, nested ones included, in reading order; empty unless <see cref="Collapsible" />.
+    /// </summary>
+    internal IReadOnlyList<MarkdownHeading> Outline
+    {
+        get => GetValue(OutlineProperty);
+        private set => SetValue(OutlineProperty, value);
+    }
+
+    /// <summary>
+    /// Gets the headings the top of the view is under, from the outermost to the innermost, as <see cref="UpdateTrail" /> last set them; empty at the very top.
+    /// </summary>
+    internal IReadOnlyList<MarkdownHeading> Trail
+    {
+        get => GetValue(TrailProperty);
+        private set => SetValue(TrailProperty, value);
+    }
+
+    /// <summary>
     /// Gets the text as laid out on screen, the text blocks in order separated by line breaks, which is what the matches index into.
     /// </summary>
     public string PlainText
@@ -119,6 +170,7 @@ internal sealed class MarkdownView : ContentControl
         containing = -1;
         Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0, Collapsible);
         PlainText = plain.ToString();
+        Annotate();
 
         while (collapsed.Count < sections.Count)
         {
@@ -136,6 +188,7 @@ internal sealed class MarkdownView : ContentControl
         }
 
         Fold();
+        Avalonia.Threading.Dispatcher.UIThread.Post(() => UpdateTrail(this.FindAncestorOfType<ScrollViewer>()?.Offset.Y ?? 0), Avalonia.Threading.DispatcherPriority.Loaded);
 
         if (Matches is { Navigate: true } && current is var (target, offset, _))
         {
@@ -144,7 +197,7 @@ internal sealed class MarkdownView : ContentControl
                 if (target.TextLayout is { } layout)
                 {
                     Rect rect = layout.HitTestTextPosition(offset);
-                    target.BringIntoView(new Rect(rect.X, rect.Y, Math.Max(rect.Width, 1), rect.Height).Inflate(new Thickness(40, 20)));
+                    target.BringIntoView(new Rect(rect.X, rect.Y, Math.Max(rect.Width, 1), rect.Height).Inflate(new Thickness(40, barHeight + 10, 40, 20)));
                 }
             }, Avalonia.Threading.DispatcherPriority.Loaded);
         }
@@ -154,7 +207,7 @@ internal sealed class MarkdownView : ContentControl
     {
         for (int i = 0; i < sections.Count; i++)
         {
-            sections[i].Body.IsVisible = !collapsed[i];
+            sections[i].Frame.IsVisible = !collapsed[i];
             sections[i].Chevron.Content = collapsed[i] ? "▸" : "▾";
         }
 
@@ -178,6 +231,121 @@ internal sealed class MarkdownView : ContentControl
         Fold();
     }
 
+    /// <summary>
+    /// Scrolls a heading to just below the breadcrumb bar, opening the sections it is nested under and its own.
+    /// </summary>
+    /// <param name="index">The <see cref="MarkdownHeading.Index" /> of the heading.</param>
+    internal void ScrollTo(int index)
+    {
+        if (index < 0 || index >= sections.Count)
+        {
+            return;
+        }
+
+        for (int at = index; at >= 0; at = sections[at].Parent)
+        {
+            collapsed[at] = false;
+        }
+
+        Fold();
+        UpdateLayout();
+
+        if (this.FindAncestorOfType<ScrollViewer>() is { } scroller && sections[index].Head.TranslatePoint(new Point(0, 0), this) is { } position)
+        {
+            scroller.Offset = new Vector(scroller.Offset.X, Math.Max(0, position.Y - barHeight - 4));
+        }
+    }
+
+    /// <summary>
+    /// Folds the document so the headings down to a nesting level show and everything under the headings of that level is hidden.
+    /// </summary>
+    /// <param name="level">The nesting level, 1 for only the headings of the top level, or 0 to open every section.</param>
+    internal void FoldToLevel(int level)
+    {
+        for (int i = 0; i < collapsed.Count; i++)
+        {
+            collapsed[i] = level > 0 && sections[i].Depth >= level - 1;
+        }
+
+        Fold();
+    }
+
+    /// <summary>
+    /// Works out which headings the top of the view is under, the ones at or above the breadcrumb bar that lies over its top, and publishes them as <see cref="Trail" />.
+    /// </summary>
+    /// <param name="offset">How far the view is scrolled down.</param>
+    internal void UpdateTrail(double offset)
+    {
+        List<MarkdownHeading> trail = [];
+
+        if (offset >= 1)
+        {
+            int found = -1;
+
+            for (int i = 0; i < sections.Count; i++)
+            {
+                if (!sections[i].Head.IsEffectivelyVisible || sections[i].Head.TranslatePoint(new Point(0, 0), this) is not { } position)
+                {
+                    continue;
+                }
+
+                if (position.Y >= offset + barHeight)
+                {
+                    break;
+                }
+
+                found = i;
+            }
+
+            for (int at = found; at >= 0; at = sections[at].Parent)
+            {
+                trail.Insert(0, headings[at]);
+            }
+        }
+
+        if (!trail.Select(item => item.Index).SequenceEqual(Trail.Select(item => item.Index)))
+        {
+            Trail = trail;
+        }
+    }
+
+    private void Annotate()
+    {
+        Dictionary<int, int> siblings = [];
+        headings.Clear();
+        bool titled = sections.Count > 1 && sections.Count(section => section.Parent < 0) == 1;
+
+        for (int i = 0; i < sections.Count; i++)
+        {
+            Section section = sections[i];
+            siblings[section.Parent] = siblings.GetValueOrDefault(section.Parent) + 1;
+            string own = siblings[section.Parent].ToString(CultureInfo.InvariantCulture);
+            string parentNumber = section.Parent >= 0 ? headings[section.Parent].Number : string.Empty;
+            string number = titled && i == 0 ? string.Empty : parentNumber.Length == 0 ? own : $"{parentNumber}.{own}";
+            section.NumberLabel.Text = number;
+            headings.Add(new MarkdownHeading { Index = i, Title = section.Title, Level = section.Level, Depth = section.Depth, Number = number, Parent = section.Parent });
+        }
+
+        ShowNumbers();
+        Outline = [.. headings];
+        Trail = [];
+    }
+
+    private void ShowNumbers()
+    {
+        foreach (Section section in sections)
+        {
+            section.NumberLabel.IsVisible = Numbered && !string.IsNullOrEmpty(section.NumberLabel.Text);
+        }
+    }
+
+    private string TitleOf(HeadingBlock heading) => heading.Inline is null ? string.Empty : string.Concat(heading.Inline.Descendants().Select(node => node switch
+    {
+        LiteralInline literal => literal.Content.ToString(),
+        CodeInline code => code.Content,
+        _ => string.Empty,
+    })).Trim();
+
     private void Toggle(int index)
     {
         collapsed[index] = !collapsed[index];
@@ -186,15 +354,27 @@ internal sealed class MarkdownView : ContentControl
 
     private Section NewSection(HeadingBlock heading, int parent, ScrollSafeTextBlock title, int index)
     {
+        int depth = parent >= 0 ? sections[parent].Depth + 1 : 0;
+        int level = Math.Clamp(heading.Level, 1, 6);
+        title.FontWeight = weights[level - 1];
+        title.Opacity = fades[level - 1];
         Button chevron = new() { VerticalAlignment = VerticalAlignment.Top, Margin = new Thickness(0, 0, 4, 0), FontSize = 12 };
         chevron.Classes.Add("icon");
         chevron.Click += (_, _) => Toggle(index);
-        Grid head = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
-        Grid.SetColumn(title, 1);
+        TextBlock number = new() { FontSize = 12, Opacity = 0.7, VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(0, 0, 8, 0), IsVisible = Numbered };
+        number.Classes.Add("muted");
+        Grid head = new() { ColumnDefinitions = new ColumnDefinitions("Auto,Auto,*") };
+        Grid.SetColumn(number, 1);
+        Grid.SetColumn(title, 2);
         head.Children.Add(chevron);
+        head.Children.Add(number);
         head.Children.Add(title);
+        Border ruled = new() { BorderBrush = Brush("Border", Brushes.Gray), BorderThickness = level <= 2 ? new Thickness(0, 0, 0, 1) : default, Padding = level <= 2 ? new Thickness(0, 0, 0, 4) : default, Child = head };
         StackPanel body = new() { Spacing = 10 };
-        return new Section { Body = body, Chevron = chevron, Parent = parent, Level = heading.Level, Root = new StackPanel { Spacing = 10, Children = { head, body } } };
+        Border frame = new() { BorderBrush = Brush("Border", Brushes.Gray), BorderThickness = new Thickness(1, 0, 0, 0), Margin = new Thickness(11, 0, 0, 0), Padding = new Thickness(Math.Max(6, 16 - (2 * depth)), 0, 0, 0), Child = body };
+        head.PointerEntered += (_, _) => frame.BorderBrush = Brush("Accent", Brushes.Orange);
+        head.PointerExited += (_, _) => frame.BorderBrush = Brush("Border", Brushes.Gray);
+        return new Section { Body = body, Frame = frame, Head = head, Chevron = chevron, NumberLabel = number, Parent = parent, Level = level, Depth = depth, Title = TitleOf(heading), Root = new StackPanel { Spacing = 10, Children = { ruled, frame } } };
     }
 
     private void Begin(ScrollSafeTextBlock target)
@@ -494,12 +674,22 @@ internal sealed class MarkdownView : ContentControl
     {
         public required StackPanel Body { get; init; }
 
+        public required Border Frame { get; init; }
+
+        public required Grid Head { get; init; }
+
         public required StackPanel Root { get; init; }
 
         public required Button Chevron { get; init; }
 
+        public required TextBlock NumberLabel { get; init; }
+
         public required int Parent { get; init; }
 
         public required int Level { get; init; }
+
+        public required int Depth { get; init; }
+
+        public required string Title { get; init; }
     }
 }

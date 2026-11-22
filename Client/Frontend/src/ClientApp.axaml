@@ -399,6 +399,8 @@
       <Geometry x:Key="MicIconGeometry">M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5</Geometry>
       <Geometry x:Key="FoldAllIconGeometry">M1,7 L13,7 M4,2 L7,5 L10,2 M4,12 L7,9 L10,12</Geometry>
       <Geometry x:Key="UnfoldAllIconGeometry">M1,7 L13,7 M4,5 L7,2 L10,5 M4,9 L7,12 L10,9</Geometry>
+      <Geometry x:Key="OutlineIconGeometry">M1,3 L3,3 M5,3 L13,3 M3,7 L5,7 M7,7 L13,7 M5,11 L7,11 M9,11 L13,11</Geometry>
+      <Geometry x:Key="LevelsIconGeometry">M1,5 L7,2 L13,5 L7,8 Z M1,9 L7,12 L13,9</Geometry>
       <Geometry x:Key="MinimizeIconGeometry">M1,1 M13,13 M1,10.6 L13,10.6 L13,12 L1,12 Z</Geometry>
       <Geometry x:Key="MaximizeIconGeometry">M1,1 L13,1 L13,13 L1,13 Z</Geometry>
       <Geometry x:Key="RestoreIconGeometry">M4,1 L13,1 L13,10 L10,10 M1,4 L10,4 L10,13 L1,13 Z</Geometry>

@@ -15,7 +15,7 @@ public class ClientApp : Avalonia.Application
     /// </summary>
     /// <param name="head">The executable assembly of the head, whose version is reported to the server.</param>
     /// <param name="layout">How a focused workspace lays out its conversation and files.</param>
-    /// <param name="dataFolder">The folder holding the saved settings and message box drafts, or <see langword="null" /> for the <c>AutoRemote</c> folder of the user's application data.</param>
+    /// <param name="dataFolder">The folder holding the saved settings, message box drafts and display preferences, or <see langword="null" /> for the <c>AutoRemote</c> folder of the user's application data.</param>
     /// <param name="chime">Plays the ding when a workspace becomes ready again, or <see langword="null" /> for silence.</param>
     /// <param name="notifier">Tells the user outside the app that a workspace they gave work to is ready, or <see langword="null" /> for no notifications.</param>
     /// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
@@ -29,7 +29,7 @@ public class ClientApp : Avalonia.Application
         string folder = dataFolder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoRemote");
         IAppInfo info = new IAppInfo.Factory().Create(head);
         LocalServers locals = new(new LocalEndpoint());
-        MainViewModel model = new(info, new IServerConnection.Factory(new IMessageChannel.Factory(), new ConsoleLog(), null, localServers ? locals : null), new SettingsStore(Path.Combine(folder, "settings.json")), layout, new DraftStore(Path.Combine(folder, "drafts.json")), chime, notifier, keeper, recorder, newWindow, new IReleaseFeed.Factory().Create(), updater, null, null, localServers ? locals : null);
+        MainViewModel model = new(info, new IServerConnection.Factory(new IMessageChannel.Factory(), new ConsoleLog(), null, localServers ? locals : null), new SettingsStore(Path.Combine(folder, "settings.json")), layout, new DraftStore(Path.Combine(folder, "drafts.json")), chime, notifier, keeper, recorder, newWindow, new IReleaseFeed.Factory().Create(), updater, null, null, localServers ? locals : null, new ViewPreferences(Path.Combine(folder, "preferences.json")));
         MainView view = new() { DataContext = model };
         _ = model.Start();
 

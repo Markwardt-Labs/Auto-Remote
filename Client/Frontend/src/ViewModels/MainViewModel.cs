@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
-internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null, TimeSpan? updateWait = null, ILocalServers? locals = null) : ViewModelBase
+internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null, TimeSpan? updateWait = null, ILocalServers? locals = null, IViewPreferences? preferences = null) : ViewModelBase
 {
     private IServerConnection? connection;
 
@@ -320,7 +320,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             return;
         }
 
-        HomeViewModel opening = new(opened, layout, drafts, chime, null, notifier, keeper, recorder, newWindow, updating);
+        HomeViewModel opening = new(opened, layout, drafts, chime, null, notifier, keeper, recorder, newWindow, updating, preferences);
         home = opening;
         opening.ChangeServerRequested += () => _ = ChangeServer();
         opening.NewWorkspaceRequested += async () =>
