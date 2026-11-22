@@ -66,6 +66,14 @@ public sealed partial class HomeView : UserControl
 
     private bool loadingOlder;
 
+    private Control? anchor;
+
+    private double anchorContent;
+
+    private int anchorIndex;
+
+    private bool laidOutHooked;
+
     private bool fitting;
 
     private ChatViewModel? followed;
@@ -540,20 +548,15 @@ public sealed partial class HomeView : UserControl
             return;
         }
 
-        if (args.ExtentDelta.Y > 0)
+        if (args.ExtentDelta.Y > 0 && chat.AutoScroll && !GrewAboveAnchor())
         {
-            if (loadingOlder)
-            {
-                scroller.Offset = new Vector(scroller.Offset.X, scroller.Offset.Y + args.ExtentDelta.Y);
-                loadingOlder = false;
-                return;
-            }
+            scroller.ScrollToEnd();
+            return;
+        }
 
-            if (chat.AutoScroll)
-            {
-                scroller.ScrollToEnd();
-                return;
-            }
+        if ((args.OffsetDelta.Y != 0 && args.ExtentDelta.Y == 0) || anchor?.IsAttachedToVisualTree() != true)
+        {
+            CaptureAnchor(scroller);
         }
 
         bool scrollable = scroller.Extent.Height > scroller.Viewport.Height + 1;
@@ -587,19 +590,110 @@ public sealed partial class HomeView : UserControl
 
         loadingOlder = true;
 
-        if (!await chat.LoadOlder())
+        try
+        {
+            await chat.LoadOlder();
+        }
+        finally
         {
             loadingOlder = false;
         }
     }
 
+    private void CaptureAnchor(ScrollViewer scroller)
+    {
+        anchor = null;
+
+        if (this.FindControl<ItemsControl>("MessageList") is not { ItemsPanelRoot: { } panel } list)
+        {
+            return;
+        }
+
+        foreach (Control child in panel.Children)
+        {
+            if (ContentTop(child, list) is { } top && top + child.Bounds.Height - scroller.Offset.Y > 0.5)
+            {
+                anchor = child;
+                anchorContent = top;
+                anchorIndex = IndexOfMessage(child);
+                return;
+            }
+        }
+    }
+
+    private double HowFarAnchorMoved()
+    {
+        if (anchor is not { } kept || !kept.IsAttachedToVisualTree() || this.FindControl<ItemsControl>("MessageList") is not { } list || ContentTop(kept, list) is not { } top)
+        {
+            return 0;
+        }
+
+        return top - anchorContent;
+    }
+
+    private int IndexOfMessage(Control child) => child.DataContext is ChatMessage message && followed is { } chat ? chat.Messages.IndexOf(message) : -1;
+
+    private bool GrewAboveAnchor() => anchor is { } kept && kept.IsAttachedToVisualTree() && anchorIndex >= 0 && IndexOfMessage(kept) > anchorIndex;
+
+    private void Compensate(ScrollViewer scroller)
+    {
+        double moved = HowFarAnchorMoved();
+
+        if (Math.Abs(moved) < 0.5)
+        {
+            return;
+        }
+
+        anchorContent += moved;
+        int index = anchor is { } kept ? IndexOfMessage(kept) : -1;
+
+        bool removed = index >= 0 && index < anchorIndex;
+
+        if (index >= 0)
+        {
+            anchorIndex = index;
+        }
+
+        if (removed)
+        {
+            return;
+        }
+
+        scroller.Offset = new Vector(scroller.Offset.X, Math.Max(0, scroller.Offset.Y + moved));
+    }
+
+    private double? ContentTop(Control child, ItemsControl list) => child.TranslatePoint(new Avalonia.Point(0, 0), list) is { } at ? at.Y + list.Margin.Top : null;
+
+    private void OnMessagesLaidOut(object? sender, EventArgs args)
+    {
+        if (sender is not ScrollViewer scroller || followed is null)
+        {
+            return;
+        }
+
+        if (anchor?.IsAttachedToVisualTree() != true)
+        {
+            CaptureAnchor(scroller);
+            return;
+        }
+
+        Compensate(scroller);
+    }
+
     private void OnMessagesChanged(object? sender, EventArgs args)
     {
         loadingOlder = false;
+        anchor = null;
 
         if (sender is not ScrollViewer scroller)
         {
             return;
+        }
+
+        if (!laidOutHooked)
+        {
+            laidOutHooked = true;
+            scroller.LayoutUpdated += OnMessagesLaidOut;
         }
 
         if (followed is not null)

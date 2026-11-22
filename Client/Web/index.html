@@ -149,7 +149,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .menu-list button:disabled { opacity: 0.45; cursor: default; }
 .tree .row { user-select: none; }
 .messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
-.messages { flex: 1; overflow-y: auto; padding: 0 16px; }
+.messages { flex: 1; overflow-y: auto; padding: 0 16px; overflow-anchor: none; }
 .autoscroll { position: absolute; right: 22px; bottom: 8px; background: var(--elevated); border: 1px solid var(--border); }
 .worktoggle { position: absolute; right: 62px; bottom: 8px; background: var(--elevated); border: 1px solid var(--border); }
 .msg.work { margin: 8px 0; }
@@ -1844,6 +1844,9 @@ class WorkspaceView {
   build() {
     this.list = h("div", { class: "inner" });
     this.scroller = h("div", { class: "messages", onscroll: () => this.scrolled(), onwheel: event => this.wheeled(event) }, this.list);
+    this.anchor = null;
+    this.anchorContent = 0;
+    new ResizeObserver(() => this.keepAnchor()).observe(this.list);
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
     this.sendButton = h("button", { class: "primary act", title: "Send", hidden: true, onclick: () => this.send() }, "↑");
@@ -2962,6 +2965,7 @@ class WorkspaceView {
         this.list.prepend(...result.value.messages.map(message => this.messageElement(message)));
         this.scroller.scrollTop = top + (this.scroller.scrollHeight - height);
         this.lastScrollTop = this.scroller.scrollTop;
+        this.captureAnchor();
       }
     } finally {
       this.loadingOlder = false;
@@ -2984,6 +2988,7 @@ class WorkspaceView {
 
     this.scroller.scrollTop = this.scroller.scrollHeight;
     this.lastScrollTop = this.scroller.scrollTop;
+    this.captureAnchor();
     return true;
   }
 
@@ -3152,14 +3157,52 @@ class WorkspaceView {
       return;
     }
 
+    this.keepAnchor();
     const movedUp = scroller.scrollTop < this.lastScrollTop;
     this.lastScrollTop = scroller.scrollTop;
+    this.captureAnchor();
 
     if (scroller.scrollHeight > scroller.clientHeight + 1 && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2) {
       this.trimToNewest();
     } else if (movedUp && scroller.scrollTop < 40) {
       this.loadOlder();
     }
+  }
+
+  contentTop(element) {
+    return element.getBoundingClientRect().top - this.scroller.getBoundingClientRect().top + this.scroller.scrollTop;
+  }
+
+  captureAnchor() {
+    this.anchor = null;
+
+    if (this.scroller.clientHeight === 0) {
+      return;
+    }
+
+    for (const child of this.list.children) {
+      if (this.contentTop(child) + child.offsetHeight - this.scroller.scrollTop > 0.5) {
+        this.anchor = child;
+        this.anchorContent = this.contentTop(child);
+        return;
+      }
+    }
+  }
+
+  keepAnchor() {
+    if (!this.anchor?.isConnected || this.scroller.clientHeight === 0) {
+      return;
+    }
+
+    const moved = this.contentTop(this.anchor) - this.anchorContent;
+
+    if (Math.abs(moved) < 0.5) {
+      return;
+    }
+
+    this.anchorContent += moved;
+    this.scroller.scrollTop += moved;
+    this.lastScrollTop = this.scroller.scrollTop;
   }
 
   wheeled(event) {

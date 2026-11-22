@@ -214,7 +214,7 @@
             </StackPanel>
             <Panel>
             <ScrollViewer Name="MessageScroller" Padding="16,0" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMessagesScrolled" DataContextChanged="OnMessagesChanged">
-              <ItemsControl ItemsSource="{Binding Messages}" Margin="0,8">
+              <ItemsControl Name="MessageList" ItemsSource="{Binding Messages}" Margin="0,8">
                 <ItemsControl.ItemTemplate>
                   <local:ChatMessageTemplate>
                     <local:ChatMessageTemplate.User>

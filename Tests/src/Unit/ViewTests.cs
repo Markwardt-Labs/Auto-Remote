@@ -1090,6 +1090,173 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal((1, 1), (sentAnyway, cancelled));
     }
 
+    public enum DuringTheLoad
+    {
+        Nothing,
+        TheUserScrollsOn,
+        AMessageArrivesAtTheBottom,
+        TheTextOfTheOldMessagesReflows,
+    }
+
+    [Theory]
+    [InlineData(DuringTheLoad.Nothing, false)]
+    [InlineData(DuringTheLoad.TheUserScrollsOn, false)]
+    [InlineData(DuringTheLoad.AMessageArrivesAtTheBottom, false)]
+    [InlineData(DuringTheLoad.TheTextOfTheOldMessagesReflows, false)]
+    [InlineData(DuringTheLoad.Nothing, true)]
+    public async Task HomeView_KeepsWhatIsOnScreenWhereItIsWhileOlderChunksLoadWhateverElseHappensMeanwhile(DuringTheLoad during, bool autoScroll)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        string tall = string.Join("\n\n", Enumerable.Range(0, 8).Select(line => $"Paragraph {line} of a long answer that wraps over a few lines when the chat is narrow enough."));
+        List<ChatMessage> Chunk(int begin, int end) => [.. Enumerable.Range(begin, end - begin).Select(number => number % 2 == 0 ? new ChatMessage { Role = MessageRole.Assistant, Text = $"a{number}\n\n{tall}" } : new ChatMessage { Role = MessageRole.User, Text = $"u{number}" })];
+        TaskCompletionSource<ChatHistory> pending = new();
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Chunk(80, 100), Older = "80" });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), "80", It.IsAny<int?>(), It.IsAny<CancellationToken>())).Returns(pending.Task);
+
+        double moved = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 700, Content = view };
+            window.Show();
+
+            void Settle(Func<bool> done)
+            {
+                for (int attempt = 0; attempt < 200 && !done(); attempt++)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    window.UpdateLayout();
+                    Thread.Sleep(10);
+                }
+
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+            }
+
+            ChatViewModel chat = model.Active!.Chat;
+            Settle(() => chat.Messages.Count == 20);
+            chat.AutoScroll = autoScroll;
+            ScrollViewer scroller = window.GetVisualDescendants().OfType<ScrollViewer>().Single(item => item.Name == "MessageScroller");
+            Settle(() => scroller.Extent.Height > scroller.Viewport.Height * 2 && scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 1);
+            Control OnScreen(string start) => window.GetVisualDescendants().OfType<Control>().First(control => control.DataContext is ChatMessage message && message.Text.StartsWith(start, StringComparison.Ordinal));
+            double Y(string start) => Avalonia.VisualExtensions.TranslatePoint(OnScreen(start), new Avalonia.Point(0, 0), scroller)!.Value.Y;
+
+            scroller.Offset = new Avalonia.Vector(0, 300);
+            Settle(() => false || scroller.Offset.Y == 300);
+            scroller.Offset = new Avalonia.Vector(0, 0);
+            Settle(() => false || scroller.Offset.Y == 0);
+            Settle(() => chat.HasMore);
+            double before = Y("a80");
+
+            if (during == DuringTheLoad.TheUserScrollsOn)
+            {
+                scroller.Offset = new Avalonia.Vector(0, 25);
+                Settle(() => scroller.Offset.Y == 25);
+                before = Y("a80");
+            }
+            else if (during == DuringTheLoad.AMessageArrivesAtTheBottom)
+            {
+                connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspace.Id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = $"live\n\n{tall}" } });
+                Settle(() => false || chat.Messages.Count == 21);
+                before = Y("a80");
+            }
+
+            pending.SetResult(new ChatHistory { Messages = Chunk(60, 80), Older = "60" });
+            Settle(() => chat.Messages.Count >= 40 || (autoScroll && chat.Messages.Count >= 20 && chat.Messages[0].Text.StartsWith("a60", StringComparison.Ordinal)));
+
+            for (int round = 0; round < 5; round++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                Thread.Sleep(20);
+            }
+
+            if (during == DuringTheLoad.TheTextOfTheOldMessagesReflows)
+            {
+                before = Y("a80");
+                window.Width = 1000;
+                Settle(() => false || window.Width == 1000);
+            }
+
+            double after = Y("a80");
+            window.Close();
+            return after - before;
+        });
+
+        Assert.InRange(moved, -1.5, 1.5);
+    }
+
+    [Fact]
+    public async Task HomeView_KeepsTheMessageAtTheTopOfTheScreenInPlaceThroughSeveralChunksLoadedOneAfterTheOtherWhileTheUserKeepsScrollingUp()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        string tall = string.Join("\n\n", Enumerable.Range(0, 5).Select(line => $"Paragraph {line} of a long answer that wraps over a few lines when the chat is narrow enough."));
+        List<ChatMessage> Chunk(int begin, int end) => [.. Enumerable.Range(begin, end - begin).Select(number => new ChatMessage { Role = MessageRole.Assistant, Text = $"a{number}\n\n{tall}" })];
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Chunk(80, 100), Older = "80" });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? cursor, int? _, CancellationToken _) =>
+        {
+            Thread.Sleep(30);
+            int end = int.Parse(cursor!, CultureInfo.InvariantCulture);
+            int begin = Math.Max(0, end - 20);
+            return new ChatHistory { Messages = Chunk(begin, end), Older = begin > 0 ? begin.ToString(CultureInfo.InvariantCulture) : null };
+        });
+
+        double[] moves = await fixture.Run<double[]>(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 700, Content = view };
+            window.Show();
+
+            void Pump(int rounds)
+            {
+                for (int round = 0; round < rounds; round++)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    window.UpdateLayout();
+                    Thread.Sleep(20);
+                }
+            }
+
+            ChatViewModel chat = model.Active!.Chat;
+            Pump(20);
+            chat.AutoScroll = false;
+            ScrollViewer scroller = window.GetVisualDescendants().OfType<ScrollViewer>().Single(item => item.Name == "MessageScroller");
+            scroller.ScrollToEnd();
+            Pump(10);
+            Control OnScreen(string start) => window.GetVisualDescendants().OfType<Control>().First(control => control.DataContext is ChatMessage message && message.Text.StartsWith(start, StringComparison.Ordinal));
+            double Y(string start) => Avalonia.VisualExtensions.TranslatePoint(OnScreen(start), new Avalonia.Point(0, 0), scroller)!.Value.Y;
+            List<double> moved = [];
+
+            foreach (int first in new[] { 80, 60, 40 })
+            {
+                scroller.Offset = new Avalonia.Vector(0, 0);
+                Pump(3);
+                double before = Y($"a{first}");
+                int count = chat.Messages.Count;
+
+                for (int wait = 0; wait < 100 && chat.Messages.Count == count; wait++)
+                {
+                    Pump(1);
+                }
+
+                Pump(8);
+                moved.Add(Y($"a{first}") - before);
+            }
+
+            window.Close();
+            return [.. moved];
+        });
+
+        Assert.All(moves, move => Assert.InRange(move, -1.5, 1.5));
+    }
+
     [Fact]
     public async Task HomeView_ShowsTheLocalTimeUnderEachMessageThatHasOne()
     {
