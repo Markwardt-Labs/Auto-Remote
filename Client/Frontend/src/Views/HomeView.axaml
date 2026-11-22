@@ -713,7 +713,7 @@
                 <Panel>
                   <local:SyntaxView IsVisible="{Binding IsTextPreview}" File="{Binding Preview}" Matches="{Binding Find.Matches}" Wrap="{Binding WrapLines}" />
                   <ScrollViewer Name="MarkdownScroller" IsVisible="{Binding IsMarkdownPreview}" HorizontalScrollBarVisibility="Disabled" VerticalScrollBarVisibility="Auto" ScrollChanged="OnMarkdownScrolled">
-                    <local:MarkdownView Name="MarkdownPreview" Collapsible="True" AllCollapsed="{Binding MarkdownCollapsed, Mode=TwoWay}" Numbered="{Binding MarkdownNumbered}" Source="{Binding MarkdownSource}" Matches="{Binding Find.Matches}"
+                    <local:MarkdownView Name="MarkdownPreview" Collapsible="True" Diagrams="{Binding Diagrams}" AllCollapsed="{Binding MarkdownCollapsed, Mode=TwoWay}" Numbered="{Binding MarkdownNumbered}" Source="{Binding MarkdownSource}" Matches="{Binding Find.Matches}"
                                         PlainText="{Binding MarkdownText, Mode=OneWayToSource}" Outline="{Binding MarkdownOutline, Mode=OneWayToSource}" Trail="{Binding MarkdownTrail, Mode=OneWayToSource}" />
                   </ScrollViewer>
                   <Border IsVisible="{Binding HasMarkdownTrail}" Height="30" VerticalAlignment="Top" Margin="-14,-8,-14,0" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1">

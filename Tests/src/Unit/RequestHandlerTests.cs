@@ -20,6 +20,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IWindowGuard> guard = new();
 
+    private readonly Mock<IDiagramService> diagrams = new();
+
     private readonly Mock<IScriptRunner> scripts = new();
 
     private readonly Mock<IUsageService> usage = new();
@@ -53,7 +55,7 @@ public sealed class RequestHandlerTests
         activity = new WorkspaceActivity(events.Object);
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
     }
 
     [Fact]
@@ -318,6 +320,28 @@ public sealed class RequestHandlerTests
         Assert.Null(response.Error);
         guard.Verify(x => x.Cancel(workspace.Id), Times.Once);
         loops.Verify(x => x.Cancel(workspace.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_RenderDiagram_AnswersTheSvgTheServiceDrew()
+    {
+        diagrams.Setup(x => x.Render("graph TD\n A --> B", It.IsAny<CancellationToken>())).ReturnsAsync("<svg/>");
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RenderDiagram, Text = "graph TD\n A --> B" }, owner, CancellationToken.None);
+
+        Assert.Equal("<svg/>", response.Diagram);
+    }
+
+    [Fact]
+    public async Task Handle_RenderDiagram_ReportsWhyADiagramCannotBeDrawnAndNeedsItsText()
+    {
+        diagrams.Setup(x => x.Render("nonsense", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The diagram cannot be drawn: nonsense"));
+
+        RemoteResponse refused = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.RenderDiagram, Text = "nonsense" }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.RenderDiagram }, owner, CancellationToken.None);
+
+        Assert.Equal("The diagram cannot be drawn: nonsense", refused.Error);
+        Assert.NotNull(missing.Error);
     }
 
     [Fact]

@@ -186,6 +186,15 @@ internal interface IServerConnection : IAsyncDisposable
     Task PromptOverLimit(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Has the server draw a Mermaid diagram.
+    /// </summary>
+    /// <param name="source">The Mermaid text.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The diagram as SVG.</returns>
+    /// <exception cref="RemoteException">The server could not draw the diagram.</exception>
+    Task<string> RenderDiagram(string source, CancellationToken cancellation);
+
+    /// <summary>
     /// Ends the automatic pause of a workspace without telling the AI to resume, and ends the loop of the workspace if it has one.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -925,6 +934,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task PromptOverLimit(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = true }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<string> RenderDiagram(string source, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenderDiagram, Text = source }, cancellation)).Diagram ?? throw new IOException("The server sent no diagram.");
 
     /// <inheritdoc />
     public async Task CancelLimitPause(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelLimitPause, WorkspaceId = id }, cancellation);

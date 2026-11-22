@@ -31,6 +31,11 @@ internal sealed class MarkdownView : ContentControl
     public static readonly StyledProperty<bool> AllCollapsedProperty = AvaloniaProperty.Register<MarkdownView, bool>(nameof(AllCollapsed), defaultBindingMode: Avalonia.Data.BindingMode.TwoWay);
 
     /// <summary>
+    /// Identifies the <see cref="Diagrams" /> property.
+    /// </summary>
+    internal static readonly StyledProperty<IDiagramSource?> DiagramsProperty = AvaloniaProperty.Register<MarkdownView, IDiagramSource?>(nameof(Diagrams));
+
+    /// <summary>
     /// Identifies the <see cref="Numbered" /> property.
     /// </summary>
     public static readonly StyledProperty<bool> NumberedProperty = AvaloniaProperty.Register<MarkdownView, bool>(nameof(Numbered));
@@ -58,6 +63,7 @@ internal sealed class MarkdownView : ContentControl
         AllCollapsedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.CollapseAll());
         MatchesProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
         NumberedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.ShowNumbers());
+        DiagramsProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
     }
 
     private readonly MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
@@ -122,6 +128,15 @@ internal sealed class MarkdownView : ContentControl
     {
         get => GetValue(AllCollapsedProperty);
         set => SetValue(AllCollapsedProperty, value);
+    }
+
+    /// <summary>
+    /// Gets or sets where the pictures of Mermaid diagrams come from. A code block of the language <c>mermaid</c> is shown as the diagram when there is one, with the text of the block left out of <see cref="PlainText" />; without it, as the code it is, which is how the conversation shows it.
+    /// </summary>
+    internal IDiagramSource? Diagrams
+    {
+        get => GetValue(DiagramsProperty);
+        set => SetValue(DiagramsProperty, value);
     }
 
     /// <summary>
@@ -465,6 +480,7 @@ internal sealed class MarkdownView : ContentControl
     {
         HeadingBlock heading => Heading(heading),
         ParagraphBlock paragraph => Text(paragraph.Inline, 14, FontWeight.Normal),
+        FencedCodeBlock { Info: { } info } fenced when Diagrams is not null && string.Equals(info, "mermaid", StringComparison.OrdinalIgnoreCase) => Diagram(fenced),
         FencedCodeBlock or CodeBlock => Code(block),
         QuoteBlock quote => Quote(quote, indent),
         ListBlock list => List(list, indent),
@@ -503,6 +519,61 @@ internal sealed class MarkdownView : ContentControl
         End();
         return result;
     }
+
+    private Border Diagram(FencedCodeBlock block)
+    {
+        string source = string.Join('\n', block.Lines.Lines.Take(block.Lines.Count).Select(line => line.ToString()));
+        Border host = new() { Background = Brush("Elevated", Brushes.DimGray), CornerRadius = new CornerRadius(8), Padding = new Thickness(12) };
+        IDiagramSource diagrams = Diagrams!;
+
+        if (diagrams.Find(source) is { } ready)
+        {
+            host.Child = Picture(ready);
+            return host;
+        }
+
+        Button draw = new() { Content = "Show Diagram", HorizontalAlignment = HorizontalAlignment.Left };
+        draw.Click += (_, _) =>
+        {
+            host.Child = new TextBlock { Text = "Drawing the diagram...", FontSize = 12, Foreground = Brush("Muted", Brushes.Gray) };
+            _ = Show(host, diagrams, source);
+        };
+
+        host.Child = draw;
+        return host;
+    }
+
+    private async Task Show(Border host, IDiagramSource diagrams, string source)
+    {
+        try
+        {
+            host.Child = Picture(await diagrams.Draw(source, CancellationToken.None));
+        }
+        catch (Exception exception) when (exception is RemoteException or InvalidDataException or IOException)
+        {
+            host.Child = new StackPanel
+            {
+                Spacing = 8,
+                Children =
+                {
+                    new TextBlock { Text = exception.Message, FontSize = 12, TextWrapping = TextWrapping.Wrap, Foreground = Brush("Danger", Brushes.IndianRed) },
+                    new ScrollViewer
+                    {
+                        HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+                        VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+                        Content = new ScrollSafeTextBlock { Text = source, FontFamily = mono, FontSize = 12 },
+                    },
+                },
+            };
+        }
+    }
+
+    private ScrollViewer Picture(DiagramPicture picture) => new()
+    {
+        HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto,
+        VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Disabled,
+        Content = new Image { Source = picture.Image, Width = picture.Width, Height = picture.Height, Stretch = Stretch.Uniform, HorizontalAlignment = HorizontalAlignment.Left },
+    };
 
     private Border Code(Block source)
     {

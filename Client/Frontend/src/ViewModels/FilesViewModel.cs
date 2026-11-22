@@ -17,6 +17,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     public FilesViewModel(IServerConnection connection, Guid workspaceId, GitViewModel git, bool desktop = false, TimeSpan? previewInterval = null, IViewPreferences? preferences = null)
     {
         this.preferences = preferences;
+        Diagrams = new DiagramSource(connection);
         this.previewInterval = previewInterval ?? TimeSpan.FromSeconds(3);
         this.connection = connection;
         this.workspaceId = workspaceId;
@@ -278,6 +279,11 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// Gets the text the markdown view renders: the previewed file when it is markdown, and nothing otherwise, so a code file is never parsed as markdown behind the scenes.
     /// </summary>
     public string? MarkdownSource => IsMarkdownPreview ? preview!.Text : null;
+
+    /// <summary>
+    /// Gets where the pictures of the Mermaid diagrams of the rendered markdown come from, which is the server.
+    /// </summary>
+    internal IDiagramSource Diagrams { get; }
 
     /// <summary>
     /// Gets or sets a value indicating whether the headings of the rendered markdown show their section numbers. It is off by default, and turning it on is remembered for the file in this workspace on the device; every file starts from what was remembered for it.

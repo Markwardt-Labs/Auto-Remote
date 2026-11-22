@@ -154,4 +154,9 @@ public sealed record RemoteResponse
     /// Gets the usage window that made the server refuse a <see cref="RemoteCommand.Prompt" />, which it does while a window of the provider is at or past the maximum, unless the request confirmed that the work starts anyway; it comes with an error.
     /// </summary>
     public LimitPause? OverLimit { get; init; }
+
+    /// <summary>
+    /// Gets the SVG of the diagram, answering <see cref="RemoteCommand.RenderDiagram" />.
+    /// </summary>
+    public string? Diagram { get; init; }
 }

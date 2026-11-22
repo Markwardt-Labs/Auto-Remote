@@ -97,6 +97,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `files` | files | `ListFiles` |
 | `searchResults` | array of search result | `SearchFiles` |
 | `content` | content | `ReadFile` |
+| `diagram` | string | `RenderDiagram`: the SVG document. |
 | `state` | string | `GetWorkspaceState`: the workspace's state, as in the `StateChanged` event. |
 | `git` | git status | `GetGitStatus` |
 | `gitBranch` | branch state | `GetGitBranchState` |
@@ -153,6 +154,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `UpdateServer` | none | none | Makes the server look for the newest release on GitHub, download its server executable and restart with it, which closes every connection. Answers once the download is complete, a second before the restart. Refused when there is no newer release, GitHub cannot be reached, the server does not run from an installed executable or the folder is not writable. Not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
+| `RenderDiagram` | `text` (Mermaid source) | `diagram` | Draws the diagram as SVG in the colors of the clients' dark theme. Not tied to a workspace and allowed in any state. Refused when the text is empty or over 100,000 characters, cannot be drawn or takes over 20 seconds. |
 | `SearchFiles` | `workspaceId`, `text`, optional `searchContent`, optional `showHidden` | `searchResults` | Walks the workspace folder, skipping `.git`, symbolic links and (unless `showHidden`) what `.filehide` files hide. By name it matches `text` as a case insensitive subsequence of the path, ranking file name matches and runs of consecutive characters higher, and returns at most 50 files. By content it returns at most 200 lines containing `text`, ignoring case, skipping binary files and files over 1 MB. |
 | `WatchWorkspace` | `workspaceId` | none | Says that this connection has the workspace open, in place of the one it had open before. The server watches the whole folder of every workspace some connection has open, however deep, and pushes what changes in it to every connection as `FilesChanged` and `GitChanged` events, also when the change was made outside Auto Remote. The watch ends with the connection, and a connection that reconnects sends it again. |
 | `CloneWorkspace` | `url`, `path` (existing folder on the server), optional `name`, optional `service`, optional `apiKey`, optional `groupId` | `workspace` | The server runs `git clone` into a new folder of that name (the repository's name when omitted) inside `path` and creates a workspace in it. Refused when the folder exists; a failed clone leaves nothing behind. It answers when the clone is done, which can take minutes. |

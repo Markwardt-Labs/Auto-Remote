@@ -237,6 +237,8 @@ button.icon.recording { color: var(--danger); }
 .md code { font: 13px var(--mono); background: var(--elevated); }
 .md pre.mdcode { background: var(--elevated); border-radius: 8px; padding: 12px; overflow-x: auto; white-space: pre; }
 .md pre.mdcode code { font-size: 12px; background: none; }
+.md .mddiagram { background: var(--elevated); border-radius: 8px; padding: 12px; overflow-x: auto; }
+.md .mddiagram img { display: block; max-width: none; }
 .md .mdsec { margin: 0 0 10px; }
 .md .mdsec:last-child { margin-bottom: 0; }
 .md .mdhead { display: flex; align-items: center; gap: 2px; }
@@ -546,9 +548,9 @@ function markdownCells(line) {
   return line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map(cell => cell.trim().replace(/\\\|/g, "|"));
 }
 
-function markdownBlocks(lines, parent) {
+function markdownBlocks(lines, parent, diagrams) {
   const blank = line => /^\s*$/.test(line);
-  const fence = /^ {0,3}(`{3,}|~{3,})/;
+  const fence = /^ {0,3}(`{3,}|~{3,})\s*([^`\s]*)/;
   const heading = /^ {0,3}(#{1,6})\s+(.*?)(?:\s+#+)?\s*$/;
   const rule = /^ {0,3}([-*_])( *\1){2,} *$/;
   const quote = /^ {0,3}>/;
@@ -573,7 +575,7 @@ function markdownBlocks(lines, parent) {
       }
 
       i++;
-      parent.append(h("pre", { class: "mdcode" }, h("code", {}, code.join("\n"))));
+      parent.append(diagrams && m[2].toLowerCase() === "mermaid" ? diagrams.block(code.join("\n")) : h("pre", { class: "mdcode" }, h("code", {}, code.join("\n"))));
     } else if ((m = heading.exec(line))) {
       parent.append(h(`h${m[1].length}`, {}, markdownInline(m[2])));
       i++;
@@ -588,7 +590,7 @@ function markdownBlocks(lines, parent) {
       }
 
       const block = h("blockquote");
-      markdownBlocks(inner, block);
+      markdownBlocks(inner, block, diagrams);
       parent.append(block);
     } else if ((m = item.exec(line))) {
       const base = m[1].length;
@@ -628,7 +630,7 @@ function markdownBlocks(lines, parent) {
         }
 
         const li = h("li");
-        markdownBlocks(body, li);
+        markdownBlocks(body, li, diagrams);
         list.append(li);
 
         while (i < lines.length && blank(lines[i]) && lines.slice(i).some(candidate => !blank(candidate) && item.test(candidate) && item.exec(candidate)[1].length <= base + 1)) {
@@ -1169,9 +1171,58 @@ function syntaxNodes(path, text) {
   return nodes;
 }
 
-function renderMarkdown(source, folds) {
+class Diagrams {
+  constructor(connection) {
+    this.connection = connection;
+    this.drawn = new Map();
+    this.drawing = new Map();
+  }
+
+  block(source) {
+    const text = source.trim();
+    const host = h("div", { class: "mddiagram" });
+
+    if (this.drawn.has(text)) {
+      host.append(this.picture(this.drawn.get(text)));
+      return host;
+    }
+
+    const button = h("button", { type: "button" }, "Show Diagram");
+    button.addEventListener("click", () => {
+      host.replaceChildren(h("div", { class: "muted small" }, "Drawing the diagram..."));
+      this.draw(text).then(
+        svg => host.replaceChildren(this.picture(svg)),
+        error => host.replaceChildren(h("div", { class: "error small" }, error.message), h("pre", { class: "mdcode" }, h("code", {}, source))));
+    });
+    host.append(button);
+    return host;
+  }
+
+  draw(text) {
+    if (this.drawing.has(text)) {
+      return this.drawing.get(text);
+    }
+
+    const task = this.connection.renderDiagram(text).then(svg => {
+      if (this.drawn.size >= 32) {
+        this.drawn.clear();
+      }
+
+      this.drawn.set(text, svg);
+      return svg;
+    }).finally(() => this.drawing.delete(text));
+    this.drawing.set(text, task);
+    return task;
+  }
+
+  picture(svg) {
+    return h("img", { alt: "Diagram", src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}` });
+  }
+}
+
+function renderMarkdown(source, folds, diagrams) {
   const root = h("div", { class: "md" });
-  markdownBlocks(source.replace(/\r\n?/g, "\n").split("\n"), root);
+  markdownBlocks(source.replace(/\r\n?/g, "\n").split("\n"), root, diagrams);
 
   if (folds) {
     foldMarkdown(root, folds);
@@ -1419,6 +1470,7 @@ class Connection {
   listFolders(path) { return this.request("ListFolders", { path: path ?? undefined }).then(r => r.listing); }
   createFolder(path, name) { return this.request("CreateFolder", { path, name }).then(r => r.listing); }
   getHistory(workspaceId, before, limit) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit }).then(r => r.history); }
+  renderDiagram(source) { return this.request("RenderDiagram", { text: source }).then(r => r.diagram); }
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
   promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
   cancelLimitPause(workspaceId) { return this.request("CancelLimitPause", { workspaceId }); }
@@ -1930,6 +1982,7 @@ class WorkspaceView {
     this.folds = { collapsed: new Set(), sections: [], headings: [], toggle: index => this.toggleFold(index), apply: () => this.applyFolds() };
     this.foldButton = h("button", { class: "flat icon", hidden: true, onclick: () => this.foldAll() });
     this.numbered = false;
+    this.diagrams = new Diagrams(this.connection);
     this.numberedFiles = readNumbered(this.info.id);
     this.numberButton = h("button", { class: "flat icon", hidden: true, title: "Number the sections", onclick: () => this.toggleNumbered() }, "1.");
     this.levelMenu = h("div", { class: "menu-list", hidden: true });
@@ -3921,13 +3974,17 @@ class WorkspaceView {
   }
 
   layoutMarkdown() {
-    this.previewMarkdown.replaceChildren(...renderMarkdown(this.preview.text, this.folds).childNodes);
+    this.previewMarkdown.replaceChildren(...renderMarkdown(this.preview.text, this.folds, this.diagrams).childNodes);
     const walker = document.createTreeWalker(this.previewMarkdown, NodeFilter.SHOW_TEXT);
     const nodes = [];
     let plain = "";
     let last = null;
 
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      if (node.parentElement.closest(".mddiagram")) {
+        continue;
+      }
+
       const block = node.parentElement.closest("p, h1, h2, h3, h4, h5, h6, li, td, th, pre");
 
       if (nodes.length > 0 && block !== last) {

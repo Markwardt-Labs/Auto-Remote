@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -173,6 +173,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.SetShowWork:
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.SetShowWork(RequireWorkspace(request), request.ShowWork ?? throw new RequestException("The request needs ShowWork."), cancellation) };
+            case RemoteCommand.RenderDiagram:
+                return new RemoteResponse { Id = 0, Diagram = await diagrams.Render(Require(request.Text, "text"), cancellation) };
             case RemoteCommand.CancelLimitPause:
                 guard.Cancel(RequireWorkspace(request));
                 await loops.Cancel(RequireWorkspace(request));

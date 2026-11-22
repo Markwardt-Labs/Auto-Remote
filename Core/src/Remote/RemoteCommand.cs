@@ -349,5 +349,10 @@ public enum RemoteCommand
     /// <summary>
     /// Ends the automatic pause of a workspace without telling the AI to resume, and ends the loop of the workspace if it has one, so nothing goes on by itself.
     /// </summary>
-    CancelLimitPause
+    CancelLimitPause,
+
+    /// <summary>
+    /// Draws the Mermaid diagram in <see cref="RemoteRequest.Text" /> as SVG, answered in <see cref="RemoteResponse.Diagram" />, so a client can show the diagram a markdown file describes without a diagram engine of its own.
+    /// </summary>
+    RenderDiagram
 }

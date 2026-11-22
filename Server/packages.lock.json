@@ -11,6 +11,16 @@
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
       },
+      "Mermaider": {
+        "type": "Direct",
+        "requested": "[0.12.2, )",
+        "resolved": "0.12.2",
+        "contentHash": "GGTKdAUc22Sus45Rkf0oPQjrQq5yOTIaFjXZoo3IBY0HB7Nbn6MyXXrknmdy5YADZBRNK3awV6sw9QY1KXfpfQ==",
+        "dependencies": {
+          "Microsoft.Extensions.ObjectPool": "10.0.3",
+          "Sugiyama": "0.12.2"
+        }
+      },
       "Microsoft.NET.ILLink.Tasks": {
         "type": "Direct",
         "requested": "[10.0.13, )",
@@ -49,6 +59,16 @@
         "dependencies": {
           "Microsoft.Extensions.DependencyInjection.Abstractions": "10.0.0"
         }
+      },
+      "Microsoft.Extensions.ObjectPool": {
+        "type": "Transitive",
+        "resolved": "10.0.3",
+        "contentHash": "dQKlVXzqflsv5X8iDlAN5YmTL1GcLCrOLKo1s9PNdfjqxeu0S/jmWTfiLGno+8+o1qFL3+VFAH5/ftmypN+sPw=="
+      },
+      "Sugiyama": {
+        "type": "Transitive",
+        "resolved": "0.12.2",
+        "contentHash": "zctOh0QNzLLzrkaV9WJO15bLCQ2Fvl4Lf/zEoFaMeoD244B9pTXiHEikM3PXkj+CniiOwJg6uYNL/ZDaNWAJ0w=="
       },
       "Markwardt.AutoRemote": {
         "type": "Project"
