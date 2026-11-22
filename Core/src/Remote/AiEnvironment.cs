@@ -106,6 +106,28 @@ public sealed record AiEnvironment
     public int StatusMinutes { get; init; } = 5;
 
     /// <summary>
+    /// Gets the share of a usage window of Claude Code, in percent, at which the AI is told to pause its work in every workspace that uses it. From 1 to 100; 95 by default. The server checks again every 15 minutes and tells the AI to resume once no window of the provider is at or past it.
+    /// </summary>
+    public double ClaudeMaxWindowPercent { get; init; } = 95;
+
+    /// <summary>
+    /// Gets the share of a usage window of OpenAI Codex, in percent, at which the AI is told to pause its work in every workspace that uses it. From 1 to 100; 95 by default.
+    /// </summary>
+    public double CodexMaxWindowPercent { get; init; } = 95;
+
+    /// <summary>
+    /// Gets the maximum usage window share that applies to an AI provider.
+    /// </summary>
+    /// <param name="service">The provider.</param>
+    /// <returns>The maximum, in percent, or <see langword="null" /> for a provider that reports no usage windows, which has none.</returns>
+    public double? MaxWindowPercentOf(AiService service) => service switch
+    {
+        AiService.ClaudeCode => ClaudeMaxWindowPercent,
+        AiService.Codex => CodexMaxWindowPercent,
+        _ => null
+    };
+
+    /// <summary>
     /// Gets the prompt the review button sends in every workspace that has no review prompt of its own. It is never empty: an empty one is replaced by the default.
     /// </summary>
     public string ReviewPrompt { get; init; } = "review workspace and fix any problems or inconsistencies";

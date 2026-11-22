@@ -17,6 +17,8 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private FakePrompter prompterOf = null!;
 
+    private Mock<IUsageService> usageOf = null!;
+
     private readonly Mock<IServerUpdater> updater = new();
 
     public async Task InitializeAsync()
@@ -40,10 +42,10 @@ public sealed class EndToEndTests : IAsyncLifetime
         WorkspaceManager workspaces = new(store, folders, hub, host);
         PromptService prompts = new(workspaces, store, host, hub, activity, snapshots);
         WorkspaceVersioning versioning = new(git, prompts, hub, activity);
-        Mock<IUsageService> usage = new();
+        Mock<IUsageService> usage = usageOf = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), new ErrorHistory(store, workspaces, hub), prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), new ErrorHistory(store, workspaces, hub), new WindowGuard(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) }, prompts, scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -348,6 +350,55 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         Assert.Equal(["long", "short", "reply to long", "reply to short"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
         Assert.Equal([true, false], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working == true));
+    }
+
+    [Fact]
+    public async Task AUsageWindowAtTheMaximumPausesTheAiWhileItWorksAndEveryoneSeesItUntilTheWindowIsBelowItAndTheAiIsToldToResume()
+    {
+        UsageStatus Status(double percent) => new() { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "5 hours", PercentUsed = percent, WindowMinutes = 300 }] };
+        usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(50));
+        usageOf.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(97));
+        FolderListing folder = await connection.CreateFolder(temp.Path, "limited", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+
+        await connection.Prompt(workspace.Id, "long", CancellationToken.None);
+        usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(97));
+        List<RemoteEvent> paused = await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged && remoteEvent.LimitPause is not null));
+
+        LimitPause pause = paused.First(remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged).LimitPause!;
+        Assert.Equal(("5 hours", 97d, 95d), (pause.Window, pause.PercentUsed, pause.MaxPercent));
+        Assert.Equal(pause.Window, (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).LimitPause?.Window);
+
+        usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(40));
+        usageOf.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(40));
+        List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged && remoteEvent.LimitPause is null) && items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message?.Role == MessageRole.Assistant) >= 3);
+
+        string[] said = [.. events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message?.Role == MessageRole.User).Select(remoteEvent => remoteEvent.Message!.Text)];
+        Assert.Equal(["long", "pause current work", "resume unfinished work"], said);
+        Assert.Null((await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).LimitPause);
+    }
+
+    [Fact]
+    public async Task APromptOverTheMaximumIsRefusedUntilTheUserConfirmsAndThenTheWorkspaceIgnoresTheMaximumForThatWork()
+    {
+        UsageStatus Status(double percent) => new() { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "5 hours", PercentUsed = percent, WindowMinutes = 300 }] };
+        usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(97));
+        FolderListing folder = await connection.CreateFolder(temp.Path, "confirmed", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+
+        RemoteException refused = await Assert.ThrowsAsync<RemoteException>(() => connection.Prompt(workspace.Id, "long", CancellationToken.None));
+
+        Assert.Equal(("5 hours", 97d, 95d), (refused.OverLimit?.Window, refused.OverLimit?.PercentUsed, refused.OverLimit?.MaxPercent));
+        Assert.DoesNotContain(received, remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded);
+
+        await connection.PromptOverLimit(workspace.Id, "long", CancellationToken.None);
+        List<RemoteEvent> events = await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && items.Last().Working == false);
+
+        Assert.Equal(["long", "reply to long"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
+        Assert.DoesNotContain(events, remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged);
+
+        await connection.CancelLimitPause(workspace.Id, CancellationToken.None);
+        await Assert.ThrowsAsync<RemoteException>(() => connection.Prompt(workspace.Id, "again", CancellationToken.None));
     }
 
     [Fact]

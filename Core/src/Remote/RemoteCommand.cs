@@ -344,5 +344,10 @@ public enum RemoteCommand
     /// <summary>
     /// Sets whether the chat of <see cref="RemoteRequest.WorkspaceId" /> shows the AI's work, <see cref="RemoteRequest.ShowWork" />, for every client, and announces it with <see cref="RemoteEventKind.ShowWorkChanged" />.
     /// </summary>
-    SetShowWork
+    SetShowWork,
+
+    /// <summary>
+    /// Ends the automatic pause of a workspace without telling the AI to resume, and ends the loop of the workspace if it has one, so nothing goes on by itself.
+    /// </summary>
+    CancelLimitPause
 }

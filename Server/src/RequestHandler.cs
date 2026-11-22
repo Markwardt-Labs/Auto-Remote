@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -46,6 +46,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         folders.Configure(config.DefaultFolder);
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
         await errors.Open(cancellation);
+        guard.Open(cancellation);
     }
 
     /// <inheritdoc />
@@ -131,11 +132,10 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.CreateFolder:
                 return new RemoteResponse { Id = 0, Listing = await folders.Create(Require(request.Path, "path"), Require(request.Name, "name"), cancellation) };
             case RemoteCommand.GetHistory:
-                return new RemoteResponse { Id = 0, History = await prompts.History(RequireWorkspace(request), request.Before, request.Limit, cancellation) };
+                return new RemoteResponse { Id = 0, History = (await prompts.History(RequireWorkspace(request), request.Before, request.Limit, cancellation)) with { LimitPause = guard.Get(RequireWorkspace(request)) } };
             case RemoteCommand.Prompt:
                 RequireAiInput(request);
-                await prompts.Prompt(RequireWorkspace(request), Require(request.Text, "text"), cancellation);
-                return new RemoteResponse { Id = 0 };
+                return await Prompt(RequireWorkspace(request), Require(request.Text, "text"), request.IgnoreLimit == true, cancellation);
             case RemoteCommand.UploadAttachment:
                 RequireAiInput(request);
                 return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
@@ -173,6 +173,10 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.SetShowWork:
                 return new RemoteResponse { Id = 0, Workspace = await workspaces.SetShowWork(RequireWorkspace(request), request.ShowWork ?? throw new RequestException("The request needs ShowWork."), cancellation) };
+            case RemoteCommand.CancelLimitPause:
+                guard.Cancel(RequireWorkspace(request));
+                await loops.Cancel(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
             case RemoteCommand.GetErrors:
                 return new RemoteResponse { Id = 0, Errors = await errors.List(RequireWorkspace(request), cancellation) };
             case RemoteCommand.GetSavedInputs:
@@ -303,6 +307,34 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         {
             throw new RequestException(activity.Describe(id));
         }
+    }
+
+    private async Task<RemoteResponse> Prompt(Guid id, string text, bool ignoreLimit, CancellationToken cancellation)
+    {
+        if (ignoreLimit)
+        {
+            guard.Exempt(id);
+        }
+        else if (await guard.Over(id, (await workspaces.Get(id, cancellation)).Service, text, cancellation) is { } over)
+        {
+            return new RemoteResponse { Id = 0, Error = $"The {over.Window} usage window is at {over.PercentUsed:0.#}%, at or past the maximum of {over.MaxPercent:0.#}%. Confirm to start the work anyway.", OverLimit = over };
+        }
+
+        try
+        {
+            await prompts.Prompt(id, text, cancellation);
+        }
+        catch (RequestException)
+        {
+            if (ignoreLimit)
+            {
+                guard.Unexempt(id);
+            }
+
+            throw;
+        }
+
+        return new RemoteResponse { Id = 0 };
     }
 
     private void RequireAiInput(RemoteRequest request)

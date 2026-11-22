@@ -492,6 +492,29 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
+    public async Task Workspace_SaysThatTheLoopIsPausedWithTheAiWhileAUsageWindowIsAtTheMaximum()
+    {
+        DateTimeOffset now = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
+        WorkspaceViewModel model = await StartedWorkspace(true);
+        LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 600 }, StartedAt = now, Runs = 2, NextRunAt = now.AddSeconds(30) };
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop });
+        List<string?> changed = [];
+        model.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspace.Id, LimitPause = new LimitPause { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = now, NextCheckAt = now.AddMinutes(15) } });
+
+        Assert.EndsWith(", 2 runs so far, paused with the AI at the max usage window limit", model.LoopTip);
+        Assert.StartsWith("The loop is paused with the AI", model.DescribeNext(now));
+        Assert.Contains(nameof(WorkspaceViewModel.LoopTip), changed);
+        Assert.Contains(nameof(WorkspaceViewModel.LoopNext), changed);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspace.Id, LimitPause = null });
+
+        Assert.DoesNotContain("max usage window limit", model.LoopTip);
+        Assert.Equal("The next prompt is sent in 30 s.", model.DescribeNext(now));
+    }
+
+    [Fact]
     public async Task Workspace_SaysWhenTheLoopSendsItsNextPromptAndThatItWaitsForBusyWork()
     {
         DateTimeOffset now = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);

@@ -18,6 +18,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IErrorHistory> errors = new();
 
+    private readonly Mock<IWindowGuard> guard = new();
+
     private readonly Mock<IScriptRunner> scripts = new();
 
     private readonly Mock<IUsageService> usage = new();
@@ -49,8 +51,9 @@ public sealed class RequestHandlerTests
     public RequestHandlerTests()
     {
         activity = new WorkspaceActivity(events.Object);
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
     }
 
     [Fact]
@@ -274,6 +277,49 @@ public sealed class RequestHandlerTests
         prompts.Verify(x => x.Prompt(workspace.Id, "go", It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    private LimitPause Pause() => new() { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };
+
+    [Fact]
+    public async Task Handle_Prompt_IsRefusedWithTheWindowWhileAUsageWindowIsAtTheMaximumUntilTheUserConfirms()
+    {
+        LimitPause over = Pause();
+        guard.Setup(x => x.Over(workspace.Id, workspace.Service, "go", It.IsAny<CancellationToken>())).ReturnsAsync(over);
+
+        RemoteResponse refused = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+
+        Assert.Equal(over, refused.OverLimit);
+        Assert.Contains("5h usage window is at 96%", refused.Error);
+        prompts.Verify(x => x.Prompt(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        guard.Verify(x => x.Exempt(It.IsAny<Guid>()), Times.Never);
+
+        RemoteResponse confirmed = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go", IgnoreLimit = true }, owner, CancellationToken.None);
+
+        Assert.Null(confirmed.Error);
+        guard.Verify(x => x.Exempt(workspace.Id), Times.Once);
+        prompts.Verify(x => x.Prompt(workspace.Id, "go", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_Prompt_TakesBackTheExemptionWhenAConfirmedPromptCannotBeSent()
+    {
+        prompts.Setup(x => x.Prompt(workspace.Id, "go", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The workspace is stopping."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go", IgnoreLimit = true }, owner, CancellationToken.None);
+
+        Assert.Equal("The workspace is stopping.", response.Error);
+        guard.Verify(x => x.Unexempt(workspace.Id), Times.Once);
+    }
+
+    [Fact]
+    public async Task Handle_CancelLimitPause_EndsThePauseWithoutAResumeAndTheLoopOfTheWorkspace()
+    {
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CancelLimitPause, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        guard.Verify(x => x.Cancel(workspace.Id), Times.Once);
+        loops.Verify(x => x.Cancel(workspace.Id), Times.Once);
+    }
+
     [Fact]
     public async Task Handle_GetHistory_PassesTheChunkBounds()
     {
@@ -283,6 +329,18 @@ public sealed class RequestHandlerTests
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetHistory, WorkspaceId = workspace.Id, Before = "9:2", Limit = 5 }, owner, CancellationToken.None);
 
         Assert.Equal(chunk, response.History);
+    }
+
+    [Fact]
+    public async Task Handle_GetHistory_TellsWhetherTheWorkspaceIsPausedBecauseOfAUsageWindow()
+    {
+        LimitPause pause = new() { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };
+        prompts.Setup(x => x.History(workspace.Id, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        guard.Setup(x => x.Get(workspace.Id)).Returns(pause);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetHistory, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Equal(pause, response.History?.LimitPause);
     }
 
     [Fact]

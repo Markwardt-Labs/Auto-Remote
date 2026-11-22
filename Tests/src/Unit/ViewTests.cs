@@ -977,6 +977,120 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsAnAutomaticUsageLimitPauseAsABannerInTheChatAndAnIconInTheHeaderUntilItEnds()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        LimitPause pause = new() { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+
+        (bool bannerBefore, bool iconBefore, bool bannerShown, string text, bool iconShown, string tip, bool bannerAfter, bool iconAfter) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 800, Content = view };
+            window.Show();
+
+            for (int attempt = 0; attempt < 100 && model.Active is null; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Border banner = window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "LimitPauseBanner");
+            TouchButton icon = window.GetVisualDescendants().OfType<TouchButton>().Single(button => button.Name == "LimitPauseIndicatorButton");
+            bool bannerBefore = banner.IsEffectivelyVisible;
+            bool iconBefore = icon.IsEffectivelyVisible;
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspace.Id, LimitPause = pause });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool bannerShown = banner.IsEffectivelyVisible;
+            string text = banner.GetVisualDescendants().OfType<TextBlock>().First().Text ?? string.Empty;
+            bool iconShown = icon.IsEffectivelyVisible;
+            string tip = $"{ToolTip.GetTip(icon)}";
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspace.Id, LimitPause = null });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool bannerAfter = banner.IsEffectivelyVisible;
+            bool iconAfter = icon.IsEffectivelyVisible;
+            window.Close();
+            return (bannerBefore, iconBefore, bannerShown, text, iconShown, tip, bannerAfter, iconAfter);
+        });
+
+        Assert.False(bannerBefore);
+        Assert.False(iconBefore);
+        Assert.True(bannerShown);
+        Assert.Contains("Paused automatically", text);
+        Assert.Contains("5h usage window is at 96%", text);
+        Assert.True(iconShown);
+        Assert.Equal(text, tip);
+        Assert.False(bannerAfter);
+        Assert.False(iconAfter);
+    }
+
+    [Fact]
+    public async Task HomeView_AsksBeforeStartingWorkOverTheLimitAndHasAControlThatCancelsTheAutomaticResume()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        LimitPause pause = new() { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], LimitPause = pause });
+        connection.Setup(x => x.Prompt(workspace.Id, "go on", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("over", pause));
+        connection.Setup(x => x.PromptOverLimit(workspace.Id, "go on", It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        connection.Setup(x => x.CancelLimitPause(workspace.Id, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        (bool hiddenBefore, string[] buttons, bool shown, string text, bool hiddenAfter, int sentAnyway, int cancelled) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 800, Content = view };
+            window.Show();
+
+            void Settle(Func<bool> done)
+            {
+                for (int attempt = 0; attempt < 200 && !done(); attempt++)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    Thread.Sleep(10);
+                }
+
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+
+            Settle(() => model.Active?.Chat.HasLimitPause == true);
+            Border overlay = window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "OverLimitOverlay");
+            Border banner = window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "LimitPauseBanner");
+            bool hiddenBefore = !overlay.IsEffectivelyVisible;
+            string[] buttons = [.. banner.GetVisualDescendants().OfType<TouchButton>().Select(button => $"{button.Content}")];
+
+            model.Active!.Chat.Input = "go on";
+            model.Active.Chat.SendCommand.Execute(null);
+            Settle(() => model.Active.Chat.IsAskingOverLimit);
+            bool shown = overlay.IsEffectivelyVisible;
+            string text = string.Join(" | ", overlay.GetVisualDescendants().OfType<TextBlock>().Select(block => block.Text));
+
+            overlay.GetVisualDescendants().OfType<TouchButton>().Single(button => $"{button.Content}" == "Start Anyway").Command!.Execute(null);
+            Settle(() => !model.Active.Chat.IsAskingOverLimit && model.Active.Chat.Input.Length == 0);
+            bool hiddenAfter = !overlay.IsEffectivelyVisible;
+            banner.GetVisualDescendants().OfType<TouchButton>().Single().Command!.Execute(null);
+            Settle(() => model.Active.Chat.Notice is not null);
+            window.Close();
+            return (hiddenBefore, buttons, shown, text, hiddenAfter, connection.Invocations.Count(call => call.Method.Name == nameof(IServerConnection.PromptOverLimit)), connection.Invocations.Count(call => call.Method.Name == nameof(IServerConnection.CancelLimitPause)));
+        });
+
+        Assert.True(hiddenBefore);
+        Assert.Equal(["Cancel Auto Resume"], buttons);
+        Assert.True(shown);
+        Assert.Contains("Over the usage limit", text);
+        Assert.Contains("5h usage window is at 96%", text);
+        Assert.True(hiddenAfter);
+        Assert.Equal((1, 1), (sentAnyway, cancelled));
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheLocalTimeUnderEachMessageThatHasOne()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

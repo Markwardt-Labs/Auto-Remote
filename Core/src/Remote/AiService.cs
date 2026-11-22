@@ -64,5 +64,11 @@ public static class AiServiceExtensions
         /// </summary>
         /// <returns><see langword="true" /> for Claude Code and Codex.</returns>
         public bool TakesApiKey() => service != AiService.Local;
+
+        /// <summary>
+        /// Gets a value indicating whether the provider reports usage windows, which is what the maximum usage window limit of its settings holds the AI to; the local models report none.
+        /// </summary>
+        /// <returns><see langword="true" /> if the provider reports usage windows.</returns>
+        public bool ReportsUsage() => service != AiService.Local;
     }
 }

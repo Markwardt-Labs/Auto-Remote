@@ -149,6 +149,28 @@ public sealed class EnvironmentViewModelTests
     }
 
     [Fact]
+    public async Task MaxWindowLimits_AreReadPerProviderAndSentClampedToOneToHundredWithOneDecimalWhenTheSettingsClose()
+    {
+        EnvironmentViewModel model = Open(Current with { ClaudeMaxWindowPercent = 80, CodexMaxWindowPercent = 85 });
+        await model.Load();
+        Assert.Equal((80m, 85m), (model.ClaudeMaxWindowPercent, model.CodexMaxWindowPercent));
+
+        model.ClaudeMaxWindowPercent = 250;
+        model.CodexMaxWindowPercent = null;
+        model.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 1);
+
+        Assert.Equal((100d, 95d), (saved[0].ClaudeMaxWindowPercent, saved[0].CodexMaxWindowPercent));
+
+        EnvironmentViewModel fine = Open(Current with { ClaudeMaxWindowPercent = 80 });
+        await fine.Load();
+        fine.ClaudeMaxWindowPercent = 92.46m;
+        fine.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 2);
+        Assert.Equal(92.5d, saved[1].ClaudeMaxWindowPercent);
+    }
+
+    [Fact]
     public async Task Prompts_AreReadFromTheEnvironmentAndSentTrimmedWhenTheSettingsClose()
     {
         EnvironmentViewModel model = Open();

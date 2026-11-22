@@ -61,6 +61,11 @@ public sealed record RemoteEvent
     public bool? ShowWork { get; init; }
 
     /// <summary>
+    /// Gets the automatic pause the workspace is in, for <see cref="RemoteEventKind.LimitPauseChanged" />; <see langword="null" /> when the pause ended.
+    /// </summary>
+    public LimitPause? LimitPause { get; init; }
+
+    /// <summary>
     /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
     /// </summary>
     public string? Text { get; init; }
@@ -151,6 +156,11 @@ public enum RemoteEventKind
     /// The workspace was set to show or hide the AI's work in its chat; the clients read the history again, which now includes or leaves out the tool calls and results.
     /// </summary>
     ShowWorkChanged,
+
+    /// <summary>
+    /// The workspace was paused automatically because a usage window of its provider reached the maximum of the global settings, or the pause changed (it was read again) or ended; <see cref="RemoteEvent.LimitPause" /> is the pause now, or <see langword="null" /> once the AI is no longer held.
+    /// </summary>
+    LimitPauseChanged,
 
     /// <summary>
     /// The AI wrote a piece of a message it has not finished, which <see cref="RemoteEvent.Text" /> holds; only sent for a workspace that shows the AI's work. Pieces follow each other in order, and the finished message arrives as a <see cref="MessageAdded" /> event that replaces them. Pieces of a message that is never finished, because the AI stopped or failed, are dropped.

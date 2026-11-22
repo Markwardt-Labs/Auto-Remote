@@ -90,6 +90,42 @@ public sealed class PrompterHostTests : IDisposable
         Assert.Equal("gemma", prompter.Environment.LocalSettings.Models!.Fast);
     }
 
+    [Theory]
+    [InlineData(AiService.ClaudeCode, 70)]
+    [InlineData(AiService.Codex, 99.5)]
+    [InlineData(AiService.Codex, 100)]
+    [InlineData(AiService.ClaudeCode, 1)]
+    public async Task Set_KeepsTheMaximumUsageWindowLimitOfEachProviderThatReportsUsageWhichIs95PercentUntilChanged(AiService service, double percent)
+    {
+        PrompterHost host = await Configured();
+        Assert.Equal([95d, 95d, null], Enum.GetValues<AiService>().Select(each => host.Get().MaxWindowPercentOf(each)));
+        AiEnvironment changed = service == AiService.ClaudeCode ? host.Get() with { ClaudeMaxWindowPercent = percent } : host.Get() with { CodexMaxWindowPercent = percent };
+
+        AiEnvironment saved = await host.Set(changed, CancellationToken.None);
+        PrompterHost next = await Configured();
+
+        Assert.Equal(percent, saved.MaxWindowPercentOf(service));
+        Assert.Equal(percent, next.Get().MaxWindowPercentOf(service));
+        Assert.Equal(95, next.Get().MaxWindowPercentOf(service == AiService.ClaudeCode ? AiService.Codex : AiService.ClaudeCode));
+        Assert.Null(next.Get().MaxWindowPercentOf(AiService.Local));
+    }
+
+    [Theory]
+    [InlineData(AiService.ClaudeCode, 0, "Claude Code")]
+    [InlineData(AiService.Codex, 100.1, "OpenAI Codex")]
+    [InlineData(AiService.ClaudeCode, double.NaN, "Claude Code")]
+    [InlineData(AiService.Codex, -5, "OpenAI Codex")]
+    public async Task Set_RefusesAMaximumUsageWindowLimitOutOfRangeNamingTheProviderAndKeepsTheOldOne(AiService service, double percent, string name)
+    {
+        PrompterHost host = await Configured();
+        AiEnvironment changed = service == AiService.ClaudeCode ? host.Get() with { ClaudeMaxWindowPercent = percent } : host.Get() with { CodexMaxWindowPercent = percent };
+
+        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => host.Set(changed, CancellationToken.None));
+
+        Assert.Equal($"The maximum usage window limit of {name} must be from 1 to 100 percent.", exception.Message);
+        Assert.Equal(95, host.Get().MaxWindowPercentOf(service));
+    }
+
     [Fact]
     public async Task Set_KeepsTheStatusIntervalAndRefusesOneOutOfRangeAndTheInstructionsOfNewSessionsCarryIt()
     {

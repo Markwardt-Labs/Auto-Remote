@@ -67,6 +67,10 @@ internal sealed class EnvironmentViewModel : ViewModelBase
 
     private decimal? statusMinutes = 5;
 
+    private decimal? claudeMaxWindowPercent = 95;
+
+    private decimal? codexMaxWindowPercent = 95;
+
     private string reviewPrompt = string.Empty;
 
     private string expandPrompt = string.Empty;
@@ -469,6 +473,24 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets the share, in percent, of a usage window of Claude Code at which the AI is told to pause its work in every workspace that uses it, which it is told to resume from once no window is at or past it; empty restores the default of 95.
+    /// </summary>
+    public decimal? ClaudeMaxWindowPercent
+    {
+        get => claudeMaxWindowPercent;
+        set => Set(ref claudeMaxWindowPercent, value);
+    }
+
+    /// <summary>
+    /// Gets or sets the share, in percent, of a usage window of OpenAI Codex at which the AI is told to pause its work in every workspace that uses it; empty restores the default of 95.
+    /// </summary>
+    public decimal? CodexMaxWindowPercent
+    {
+        get => codexMaxWindowPercent;
+        set => Set(ref codexMaxWindowPercent, value);
+    }
+
+    /// <summary>
     /// Gets or sets the prompt the review button sends in every workspace that has none of its own; empty restores the default.
     /// </summary>
     public string ReviewPrompt
@@ -500,6 +522,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         }
     }
 
+    private double Percent(decimal? percent) => percent is { } value ? (double)Math.Clamp(Math.Round(value, 1), 1, 100) : 95;
+
     private string? KeyUpdate(string entered, bool clear) => clear ? string.Empty : entered.Trim().Length > 0 ? entered.Trim() : null;
 
     private string? Blank(string text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
@@ -530,6 +554,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
             LocalImageModels = Names(ImageRows),
             NewWorkspaces = defaults with { Instructions = defaults.Instructions.Trim() },
             StatusMinutes = statusMinutes is { } minutes ? (int)Math.Clamp(Math.Round(minutes), 1, 1440) : 5,
+            ClaudeMaxWindowPercent = Percent(claudeMaxWindowPercent),
+            CodexMaxWindowPercent = Percent(codexMaxWindowPercent),
             ReviewPrompt = reviewPrompt.Trim(),
             ExpandPrompt = expandPrompt.Trim()
         };
@@ -556,6 +582,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         clearOpenAiApiKey = false;
         localImageServer = environment.LocalImageServer;
         statusMinutes = environment.StatusMinutes;
+        claudeMaxWindowPercent = (decimal)environment.ClaudeMaxWindowPercent;
+        codexMaxWindowPercent = (decimal)environment.CodexMaxWindowPercent;
         reviewPrompt = environment.ReviewPrompt;
         expandPrompt = environment.ExpandPrompt;
         defaults = environment.NewWorkspaces;

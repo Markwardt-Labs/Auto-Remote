@@ -31,6 +31,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         CancelLoopCommand = new AsyncCommand(_ => CancelLoop());
         Chat.PropertyChanged += (_, args) =>
         {
+            if (args.PropertyName == nameof(ChatViewModel.HasLimitPause))
+            {
+                Raise(nameof(LoopTip));
+                Raise(nameof(LoopNext));
+            }
+
             if (args.PropertyName == nameof(ChatViewModel.HasContent))
             {
                 Raise(nameof(ShowHaltButtons));
@@ -263,7 +269,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a description of the loop that runs, for the tooltip of its icon: what it sends, how often, when it ends and how many runs it made.
     /// </summary>
-    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far{(activeLoop.LimitCheckAt is null ? string.Empty : ", waiting for the usage limit")}";
+    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far{(activeLoop.LimitCheckAt is null ? string.Empty : ", waiting for the usage limit")}{(Chat.HasLimitPause ? ", paused with the AI at the max usage window limit" : string.Empty)}";
 
     /// <summary>
     /// Gets when the next automatic prompt of the loop is sent, in words, which the loop icon in the header shows when clicked and which counts down while it is open.
@@ -656,6 +662,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         }
 
         bool busy = State != WorkspaceState.Ready;
+
+        if (Chat.HasLimitPause)
+        {
+            return "The loop is paused with the AI because a usage window is at or past the max usage window limit. It sends nothing until the AI resumes, and goes on then.";
+        }
 
         if (activeLoop.LimitCheckAt is { } check)
         {

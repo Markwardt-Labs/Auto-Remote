@@ -146,6 +146,11 @@ public sealed record RemoteRequest
     public bool? ShowWork { get; init; }
 
     /// <summary>
+    /// Gets whether a <see cref="RemoteCommand.Prompt" /> goes ahead although a usage window is at or past the maximum, which the user confirmed; the workspace then ignores the maximum until the work this prompt starts is done.
+    /// </summary>
+    public bool? IgnoreLimit { get; init; }
+
+    /// <summary>
     /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" /> and the base64 WAV audio for <see cref="RemoteCommand.Transcribe" />.
     /// </summary>
     public string? Data { get; init; }

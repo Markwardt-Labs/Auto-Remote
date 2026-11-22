@@ -21,6 +21,7 @@
   --working: #007ACC;
   --on-working: #FFFFFF;
   --danger: #C74E39;
+  --warning: #D7A52B;
   --scrim: #00000099;
   --pace-very-low: #6FBF73;
   --pace-low: #569CD6;
@@ -136,6 +137,12 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .script-input input { flex: 1; }
 .row.running .name { font-weight: 700; }
 .topbar .title .loop-indicator { display: inline-flex; vertical-align: middle; margin-left: 8px; }
+.topbar .title .limit-indicator { color: var(--warning); }
+.limit-banner { display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); border-bottom: 1px solid var(--warning); flex: none; }
+.limit-banner svg { flex: none; margin-top: 1px; color: var(--warning); }
+.limit-banner > div { flex: 1; }
+.limit-banner button { flex: none; font-size: 12px; padding: 2px 8px; }
+.limit-banner[hidden] { display: none; }
 .row-check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .topbar .title { user-select: none; -webkit-touch-callout: none; }
 .topbar.offline .title::after { content: " (reconnecting…)"; font-size: 12px; opacity: 0.8; }
@@ -1228,7 +1235,12 @@ function folderName(folder) {
   return name || folder;
 }
 
-class RemoteError extends Error { }
+class RemoteError extends Error {
+  constructor(message, overLimit) {
+    super(message);
+    this.overLimit = overLimit ?? null;
+  }
+}
 
 class Connection {
   constructor(socket) {
@@ -1322,7 +1334,7 @@ class Connection {
       this.pending.delete(response.id);
 
       if (response.error) {
-        request.reject(new RemoteError(response.error));
+        request.reject(new RemoteError(response.error, response.overLimit));
       } else {
         request.resolve(response);
       }
@@ -1408,6 +1420,8 @@ class Connection {
   createFolder(path, name) { return this.request("CreateFolder", { path, name }).then(r => r.listing); }
   getHistory(workspaceId, before, limit) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit }).then(r => r.history); }
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
+  promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
+  cancelLimitPause(workspaceId) { return this.request("CancelLimitPause", { workspaceId }); }
   transcribe(data) { return this.request("Transcribe", { data }).then(r => r.transcript ?? ""); }
   uploadAttachment(workspaceId, name, data) { return this.request("UploadAttachment", { workspaceId, name, data }).then(r => r.attachmentPath); }
   listFiles(workspaceId, path, showHidden) { return this.request("ListFiles", { workspaceId, path, showHidden }).then(r => r.files); }
@@ -1777,6 +1791,7 @@ class WorkspaceView {
     this.working = false;
     this.messages = [];
     this.start = 0;
+    this.limitPause = null;
     this.lastScrollTop = 0;
     this.loading = true;
     this.loadingOlder = false;
@@ -1860,7 +1875,10 @@ class WorkspaceView {
     this.showWork = false;
     this.streaming = null;
     this.workButton = h("button", { class: "flat icon worktoggle", title: "Show the work of the AI (tool calls and results, dimmed) and stream its answer as it is written", onclick: () => this.toggleWork() }, icon("work"));
+    this.limitText = h("div", {});
+    this.limitBanner = h("div", { class: "limit-banner", hidden: true }, icon("pause"), this.limitText, h("button", { class: "flat", title: "End the automatic pause without resuming the work and the loop", onclick: () => this.cancelLimitPause() }, "Cancel Auto Resume"));
     this.chatBody = h("div", { class: "pane-body chat" },
+      this.limitBanner,
       h("div", { class: "messages-wrap" }, this.scroller, this.workButton, this.chatAutoButton),
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
@@ -2328,6 +2346,25 @@ class WorkspaceView {
     }
   }
 
+  limitPauseText() {
+    const pause = this.limitPause;
+
+    if (!pause) {
+      return "";
+    }
+
+    const percent = value => String(Math.round(value * 10) / 10);
+    return `Paused automatically: the ${pause.window} usage window is at ${percent(pause.percentUsed)}%, at or past the maximum of ${percent(pause.maxPercent)}%. The AI resumes once it is below the maximum; the server checks again at ${new Date(pause.nextCheckAt).toLocaleTimeString([], { timeStyle: "short" })}.`;
+  }
+
+  setLimitPause(pause) {
+    this.limitPause = pause;
+    this.limitBanner.hidden = !pause;
+    this.limitText.textContent = this.limitPauseText();
+    this.home.updateLimit(this);
+    this.home.updateLoop(this);
+  }
+
   setLoop(loop, notice) {
     this.loop = loop;
     this.chatNotice.textContent = notice ?? "";
@@ -2352,7 +2389,7 @@ class WorkspaceView {
     }[settings.condition];
     const runs = loop.runs ?? 0;
     const line = settings.prompt.replace(/\s+/g, " ").trim();
-    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far${loop.limitCheckAt ? ", waiting for the usage limit" : ""}`;
+    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far${loop.limitCheckAt ? ", waiting for the usage limit" : ""}${this.limitPause ? ", paused with the AI at the max usage window limit" : ""}`;
   }
 
   loopNext() {
@@ -2363,6 +2400,10 @@ class WorkspaceView {
     }
 
     const busy = this.state() !== "Ready";
+
+    if (this.limitPause) {
+      return "The loop is paused with the AI because a usage window is at or past the max usage window limit. It sends nothing until the AI resumes, and goes on then.";
+    }
 
     if (loop.limitCheckAt) {
       const left = (new Date(loop.limitCheckAt).getTime() - Date.now()) / 1000;
@@ -2864,6 +2905,7 @@ class WorkspaceView {
       this.start = messagePosition(result.value.older);
       this.setShowWork(result.value.showWork === true);
       this.setWorking(result.value.working === true);
+      this.setLimitPause(result.value.limitPause ?? null);
       this.renderMessages();
     }
 
@@ -2970,6 +3012,11 @@ class WorkspaceView {
 
     if (event.kind === "LoopChanged") {
       this.setLoop(event.loop ?? null, event.loop ? null : event.text ?? null);
+      return;
+    }
+
+    if (event.kind === "LimitPauseChanged") {
+      this.setLimitPause(event.limitPause ?? null);
       return;
     }
 
@@ -3447,6 +3494,8 @@ class WorkspaceView {
     } catch (exception) {
     }
 
+    let refused = null;
+
     const result = await attempt(async () => {
       const lines = text ? [text] : [];
 
@@ -3454,14 +3503,66 @@ class WorkspaceView {
         lines.push(`Attached file: ${await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file))}`);
       }
 
-      await this.connection.prompt(this.info.id, lines.join("\n"));
+      const prompt = lines.join("\n");
+
+      try {
+        await this.connection.prompt(this.info.id, prompt);
+      } catch (exception) {
+        if (!exception.overLimit) {
+          throw exception;
+        }
+
+        refused = { pause: exception.overLimit, prompt, typed: text, attachments: sending.length };
+      }
     }, this.chatError);
+
+    if (refused) {
+      this.notifyWhenReady = false;
+      this.askOverLimit(refused);
+      return false;
+    }
 
     if (!result.ok) {
       this.notifyWhenReady = false;
     }
 
     return result.ok;
+  }
+
+  askOverLimit(ask) {
+    const percent = value => String(Math.round(value * 10) / 10);
+    const text = `The ${ask.pause.window} usage window is at ${percent(ask.pause.percentUsed)}%, at or past the maximum of ${percent(ask.pause.maxPercent)}%. Start the work anyway? The workspace ignores the maximum until this work is done.`;
+    const go = async () => {
+      this.home.closeDialog();
+
+      if (ask.typed && this.input.value.trim() === ask.typed && this.attachments.length === ask.attachments) {
+        this.input.value = "";
+        this.fitInput();
+        this.saveDraft();
+        this.attachments = [];
+        this.renderAttachments();
+      }
+
+      this.notifyWhenReady = true;
+
+      if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
+        this.notifyWhenReady = false;
+      }
+    };
+    this.home.dialogError.set(null);
+    this.home.dialogHost.replaceChildren(h("div", { class: "dialog" },
+      h("h3", { class: "serif" }, "Over the usage limit"),
+      h("div", { class: "muted" }, text),
+      h("button", { class: "primary block", onclick: go }, "Start Anyway"),
+      h("button", { class: "block", onclick: () => this.home.closeDialog() }, "Cancel")));
+    this.home.dialogHost.hidden = false;
+  }
+
+  async cancelLimitPause() {
+    if ((await attempt(() => this.connection.cancelLimitPause(this.info.id), this.chatError)).ok) {
+      this.chatNotice.textContent = "The automatic resume was cancelled, so nothing goes on by itself. Send a message to start work again.";
+      this.chatNotice.hidden = false;
+    }
   }
 
   syncNodes(old, entries) {
@@ -4812,7 +4913,8 @@ class Home {
     this.menuButton = h("button", { class: "flat menu", title: "Workspaces", onclick: () => this.setDrawer(!this.drawerOpen) }, "☰");
     this.titleText = h("span", {}, "Auto Remote");
     this.loopIndicator = h("button", { class: "flat icon loop-indicator", hidden: true, onclick: () => this.showLoopNext() }, icon("loop"));
-    this.title = h("div", { class: "title serif" }, this.titleText, this.loopIndicator);
+    this.limitIndicator = h("button", { class: "flat icon loop-indicator limit-indicator", hidden: true, onclick: () => this.showLimitPause() }, icon("pause"));
+    this.title = h("div", { class: "title serif" }, this.titleText, this.loopIndicator, this.limitIndicator);
     this.gearButton = h("button", { class: "flat gear", title: "Workspace settings", onclick: () => this.active?.toggleSettings() }, "\u2699\uFE0E");
     this.usageButton = h("button", { class: "flat usage", title: "AI usage limits", onclick: () => this.toggleUsage() });
     this.usageButton.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18"><path d="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>';
@@ -5037,6 +5139,25 @@ class Home {
     this.dialogHost.hidden = false;
   }
 
+  showLimitPause() {
+    const view = this.active;
+
+    if (!view || view.limitPause === null) {
+      return;
+    }
+
+    this.dialogError.set(null);
+    this.dialogHost.replaceChildren(h("div", { class: "dialog" }, h("h3", { class: "serif" }, "Paused automatically"), h("div", { class: "muted" }, view.limitPauseText()), h("button", { class: "block", onclick: () => this.closeDialog() }, "Close")));
+    this.dialogHost.hidden = false;
+  }
+
+  updateLimit(view) {
+    if (view === this.active) {
+      this.limitIndicator.hidden = view.limitPause === null;
+      this.limitIndicator.title = view.limitPauseText();
+    }
+  }
+
   updateLoop(view) {
     if (view === this.active) {
       this.loopIndicator.hidden = view.loop === null;
@@ -5109,6 +5230,7 @@ class Home {
     this.showUsage(workspace?.service ?? null);
     this.titleText.textContent = workspace ? folderName(workspace.folder) : "Auto Remote";
     this.loopIndicator.hidden = true;
+    this.limitIndicator.hidden = true;
     this.topbar.classList.remove("working");
 
     if (workspace) {
@@ -5125,6 +5247,7 @@ class Home {
       view.focus();
       this.updateWorking(view);
       this.updateLoop(view);
+      this.updateLimit(view);
 
       let opened = false;
 
@@ -5829,6 +5952,9 @@ class AiEnvironmentScreen {
     };
     this.newInstructions = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
     this.statusMinutes = h("input", { type: "number", min: "1", max: "1440", step: "1" });
+    const limitTip = "When a usage window of this provider reaches this share, the AI is told to pause its work; it is checked again every 15 minutes and told to resume once no window is at or past it";
+    this.claudeMax = h("input", { type: "number", min: "1", max: "100", step: "any", title: limitTip });
+    this.codexMax = h("input", { type: "number", min: "1", max: "100", step: "any", title: limitTip });
     this.reviewPrompt = h("textarea", { rows: 2 });
     this.expandPrompt = h("textarea", { rows: 2 });
     this.claudeCommand = this.text();
@@ -5870,11 +5996,13 @@ class AiEnvironmentScreen {
           section("Claude Code",
             this.field("Command", this.claudeCommand),
             this.field("Configuration folder (optional)", this.claudeFolder),
-            this.claudeKey.element),
+            this.claudeKey.element,
+            this.field("Max usage window limit (%)", this.claudeMax)),
           section("OpenAI Codex",
             this.field("Command", this.codexCommand),
             this.field("Configuration folder (optional)", this.codexFolder),
-            this.codexKey.element),
+            this.codexKey.element,
+            this.field("Max usage window limit (%)", this.codexMax)),
           section("Local models",
             this.field("OpenCode command", this.localCommand),
             this.field("Model server address", this.localServer),
@@ -5909,6 +6037,8 @@ class AiEnvironmentScreen {
     this.newEffort.value = defaults.effort ?? "High";
     this.newInstructions.value = defaults.instructions ?? "";
     this.statusMinutes.value = environment.statusMinutes ?? 5;
+    this.claudeMax.value = environment.claudeMaxWindowPercent ?? 95;
+    this.codexMax.value = environment.codexMaxWindowPercent ?? 95;
     this.reviewPrompt.value = environment.reviewPrompt ?? "";
     this.expandPrompt.value = environment.expandPrompt ?? "";
 
@@ -5934,6 +6064,10 @@ class AiEnvironmentScreen {
 
   keyUpdate(key) {
     return key.clear.checked ? "" : key.input.value.trim() || undefined;
+  }
+
+  percent(input) {
+    return input.value.trim() === "" ? 95 : Math.min(100, Math.max(1, Math.round(Number(input.value) * 10) / 10));
   }
 
   names(rows) {
@@ -5965,6 +6099,8 @@ class AiEnvironmentScreen {
         instructions: this.newInstructions.value.trim()
       },
       statusMinutes: this.statusMinutes.value.trim() === "" ? 5 : Math.min(1440, Math.max(1, Math.round(Number(this.statusMinutes.value)))),
+      claudeMaxWindowPercent: this.percent(this.claudeMax),
+      codexMaxWindowPercent: this.percent(this.codexMax),
       reviewPrompt: this.reviewPrompt.value.trim(),
       expandPrompt: this.expandPrompt.value.trim()
     };

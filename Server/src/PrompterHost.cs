@@ -313,6 +313,16 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
             throw new RequestException("The status interval must be from 1 to 1440 minutes.");
         }
 
+        foreach (AiService service in Enum.GetValues<AiService>().Where(service => service.ReportsUsage()))
+        {
+            double max = environment.MaxWindowPercentOf(service)!.Value;
+
+            if (double.IsNaN(max) || max is < 1 or > 100)
+            {
+                throw new RequestException($"The maximum usage window limit of {service.Label()} must be from 1 to 100 percent.");
+            }
+        }
+
         if (!Enum.IsDefined(environment.NewWorkspaces.Capability) || !Enum.IsDefined(environment.NewWorkspaces.Effort))
         {
             throw new RequestException("The capability or the effort of new workspaces is not one the AI knows.");

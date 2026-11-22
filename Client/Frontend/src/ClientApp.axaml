@@ -364,6 +364,7 @@
       <SolidColorBrush x:Key="Working" Color="#007ACC" />
       <SolidColorBrush x:Key="OnWorking" Color="White" />
       <SolidColorBrush x:Key="Danger" Color="#C74E39" />
+      <SolidColorBrush x:Key="Warning" Color="#D7A52B" />
       <SolidColorBrush x:Key="PaceVeryLow" Color="#6FBF73" />
       <SolidColorBrush x:Key="PaceLow" Color="#569CD6" />
       <SolidColorBrush x:Key="PaceHigh" Color="#E0A458" />

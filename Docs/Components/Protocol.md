@@ -66,6 +66,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `text` | string | `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the chat input to save, the line written to a script, or the text to search for. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
 | `showWork` | bool | `SetShowWork` | Whether the chat of the workspace shows the AI's work (required for that command). |
+| `ignoreLimit` | bool | no | `Prompt` only: the user confirmed that the work starts although a usage window is at or past the maximum; the workspace then ignores the maximum until the work is done. |
 | `showHidden` | bool | no | `ListFiles` and `SearchFiles`; includes the entries a `.filehide` file hides. |
 | `searchContent` | bool | no | `SearchFiles` only; searches the contents of the files instead of their names. |
 
@@ -106,6 +107,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput` |
 | `savedInput` | saved input | `TakeSavedInput` |
 | `errors` | array of error | `GetErrors` |
+| `overLimit` | limit pause | `Prompt`, together with `error`: the window that made the server refuse the prompt. |
 | `scripts` | script runs | `GetScripts` |
 | `event` | event | Pushed by the server, with `id` zero (see Events). |
 
@@ -139,7 +141,8 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `SetAiEnvironment` | `aiEnvironment` | `aiEnvironment` | Replaces the environment and applies it to every workspace from the next session on. A key left out stays as it is and an empty one is removed. Refused for an empty command, an address that is not http or https, a context size below one, local models for some capabilities but not all, OpenAI image generation without a key and local image generation without a checkpoint for every capability. |
 | `ListLocalModels` | optional `url` | `names` | The models the local model server offers (Ollama by default). Refused when the server cannot be reached. |
 | `ListImageModels` | optional `url` | `names` | The checkpoints the Stable Diffusion server offers. Refused when the server cannot be reached. |
-| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a git action runs). |
+| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a git action runs). Also refused, with `overLimit` in the response, while a usage window of the workspace's provider is at or past the maximum (or the workspace is in an automatic pause), unless `ignoreLimit` is true or the text is the pause prompt (`pause current work`). |
+| `CancelLimitPause` | `workspaceId` | none | Ends the automatic pause of the workspace without telling the AI to resume, and ends the loop of the workspace if it has one; the AI is not paused again while it finishes what it is doing. Nothing happens when the workspace is not paused. |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 20 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
 | `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
@@ -240,7 +243,18 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `messages` | array of message | The chunk, oldest first. |
 | `older` | string, optional | The cursor to send as `before` to read the messages before this chunk, the decimal position of the chunk's first message; omitted when there are none. |
 | `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
+| `limitPause` | limit pause, optional | The automatic pause the workspace is in because of a usage window; omitted when it is in none. A client takes it from here when it opens the workspace, reconnects or reads the history again, and follows it with `LimitPauseChanged` events. |
 | `showWork` | bool, optional | `true` when the workspace shows the AI's work: then `messages` include the work messages (`isWork`) and the chunks count them; otherwise they leave them out and the chunks count only what was said. Also the way a client learns the state, after it opens the workspace, reconnects or reads the history again on `ShowWorkChanged` or `MessageDelta`. |
+
+**limit pause** (`limitPause` of the history and of `LimitPauseChanged`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `window` | string | The name of the usage window that is at or past the maximum, as the provider reports it. |
+| `percentUsed` | number | The share of that window that is used, in percent, as of the last reading. |
+| `maxPercent` | number | The maximum of the global settings the window is held to. |
+| `pausedAt` | string | When the AI was told to pause, ISO 8601 UTC. |
+| `nextCheckAt` | string | When the server reads the windows again, ISO 8601 UTC. |
 
 **loop settings** (`loop` of `StartLoop`)
 
@@ -300,6 +314,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `localImageServer` | string | Address of the Stable Diffusion server. |
 | `localImageModels` | capability names | The checkpoint for each capability; all four when `imageGeneration` is `Local`. |
 | `statusMinutes` | number | How often, in minutes (1 to 1440, default 5), the AI is told to report its status in every workspace that has no interval of its own. |
+| `claudeMaxWindowPercent`, `codexMaxWindowPercent` | number | The share of a usage window of Claude Code and of OpenAI Codex, the providers that report usage windows, from 1 to 100 (default 95, fractions allowed, one number for each provider), at which the server tells the AI of a workspace that uses it to pause (see Workspaces). There is no single maximum, and the local models, which report none, have no such setting; omitted by an older server and then 95. |
 | `reviewPrompt`, `expandPrompt` | string | The prompts the review and expand buttons send in every workspace that has none of its own; trimmed, and a blank one is replaced by the default (`review workspace and fix any problems or inconsistencies`, `expand upon content in workspace in areas that make sense`). |
 | `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. `showWork` says whether the chat of a new workspace shows the AI's work (tool calls and results, dimmed), off by default. A workspace keeps the values it was created with whatever this says later. |
 
@@ -484,10 +499,11 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged` or `ShowWorkChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged`, `ShowWorkChanged` or `LimitPauseChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
+| `limitPause` | limit pause | `LimitPauseChanged`: the automatic pause the workspace is in now, sent when it starts and each time the server reads the windows again and they are still past the maximum; omitted when the pause ended. |
 | `path` | string | `FilesChanged`: a folder relative to the workspace folder whose entries or their contents changed (empty for the workspace folder itself); one event per folder. `ScriptOutput` and `ScriptRemoved`: the file of the run. |
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Managing`, `Stopping` or `Canceling`. |

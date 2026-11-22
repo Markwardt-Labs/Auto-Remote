@@ -173,8 +173,25 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The prompt.</param>
     /// <param name="cancellation">Cancels the wait.</param>
-    /// <exception cref="RemoteException">The server refused.</exception>
+    /// <exception cref="RemoteException">The server refused; <see cref="RemoteException.OverLimit" /> is set when it did because a usage window is at or past the maximum, in which case <see cref="PromptOverLimit" /> sends the prompt once the user confirmed.</exception>
     Task Prompt(Guid id, string text, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sends a prompt that goes ahead although a usage window is at or past the maximum, which the user confirmed: the workspace ignores the maximum until the work the prompt starts is done.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task PromptOverLimit(Guid id, string text, CancellationToken cancellation);
+
+    /// <summary>
+    /// Ends the automatic pause of a workspace without telling the AI to resume, and ends the loop of the workspace if it has one.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task CancelLimitPause(Guid id, CancellationToken cancellation);
 
     /// <summary>
     /// Stores a file on the server so that a prompt can refer to it.
@@ -907,6 +924,12 @@ internal sealed class ServerConnection : IServerConnection
     public async Task Prompt(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text }, cancellation);
 
     /// <inheritdoc />
+    public async Task PromptOverLimit(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = true }, cancellation);
+
+    /// <inheritdoc />
+    public async Task CancelLimitPause(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelLimitPause, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
     public async Task<string> Transcribe(ReadOnlyMemory<byte> audio, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.Transcribe, Data = Convert.ToBase64String(audio.Span) }, cancellation)).Transcript ?? throw Malformed();
 
     /// <inheritdoc />
@@ -1166,7 +1189,7 @@ internal sealed class ServerConnection : IServerConnection
                 }
 
                 RemoteResponse response = await completion.Task;
-                return response.Error is { } error ? throw new RemoteException(error) : response;
+                return response.Error is { } error ? throw new RemoteException(error, response.OverLimit) : response;
             }
             finally
             {

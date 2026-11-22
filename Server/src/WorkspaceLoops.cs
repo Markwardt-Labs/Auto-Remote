@@ -30,7 +30,7 @@ internal interface IWorkspaceLoops
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null) : IWorkspaceLoops
+internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null) : IWorkspaceLoops
 {
     private readonly ConcurrentDictionary<Guid, LoopRun> loops = new();
 
@@ -151,12 +151,18 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
             while (!run.Over)
             {
                 run.LastWindowCheck = DateTimeOffset.MinValue;
-                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id));
+                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && guard?.IsPaused(id) != true);
 
                 if (run.Over || reason is not null)
                 {
                     End(id, run, reason);
                     return;
+                }
+
+                if (guard is not null && await guard.Hold(id, run.Service, CancellationToken.None))
+                {
+                    await Task.Delay(poll);
+                    continue;
                 }
 
                 DateTimeOffset started = DateTimeOffset.UtcNow;

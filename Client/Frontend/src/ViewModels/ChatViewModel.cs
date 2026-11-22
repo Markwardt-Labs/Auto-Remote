@@ -23,6 +23,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         ExpandCommand = new AsyncCommand(_ => Preset(settings => settings.ExpandPrompt ?? settings.GlobalExpandPrompt), () => blockReason is null && !HasContent);
         PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, []), () => blockReason is null && !HasContent);
         ResumeCommand = new AsyncCommand(_ => Deliver(ResumePrompt, []), () => blockReason is null && !HasContent);
+        ConfirmOverLimitCommand = new AsyncCommand(_ => ConfirmOverLimit());
+        CancelOverLimitCommand = new AsyncCommand(_ =>
+        {
+            ClearOverLimit();
+            return Task.CompletedTask;
+        });
+        CancelLimitPauseCommand = new AsyncCommand(_ => CancelLimitPause());
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
         SaveInputCommand = new AsyncCommand(_ => SaveInput(), () => HasText);
         ToggleSavedInputsCommand = new AsyncCommand(_ =>
@@ -98,6 +105,10 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private bool loadingOlder;
 
     private bool showWork;
+
+    private LimitPause? limitPause;
+
+    private OverLimitAsk? overLimit;
 
     private ChatMessage? streaming;
 
@@ -224,6 +235,57 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether no input is saved, which the list says in place of its entries.
     /// </summary>
     public bool HasNoSavedInputs => SavedInputs.Count == 0;
+
+    /// <summary>
+    /// Gets the automatic pause the AI of the workspace is in because a usage window of its provider reached the maximum of the global settings, or <see langword="null" /> when it is in none.
+    /// </summary>
+    public LimitPause? LimitPause
+    {
+        get => limitPause;
+        private set
+        {
+            if (Set(ref limitPause, value))
+            {
+                Raise(nameof(HasLimitPause));
+                Raise(nameof(LimitPauseText));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the server refused the input because a usage window is at or past the maximum, so the user is asked whether to start the work anyway.
+    /// </summary>
+    public bool IsAskingOverLimit => overLimit is not null;
+
+    /// <summary>
+    /// Gets what the question says: which window is at what share of its limit and that the maximum is ignored for the work the input starts.
+    /// </summary>
+    public string OverLimitText => overLimit is { } ask ? $"The {ask.Pause.Window} usage window is at {ask.Pause.PercentUsed:0.#}%, at or past the maximum of {ask.Pause.MaxPercent:0.#}%. Start the work anyway? The workspace ignores the maximum until this work is done." : string.Empty;
+
+    /// <summary>
+    /// Gets the command that sends the refused input anyway, which makes the workspace ignore the maximum until the work it starts is done.
+    /// </summary>
+    public AsyncCommand ConfirmOverLimitCommand { get; }
+
+    /// <summary>
+    /// Gets the command that drops the question and sends nothing.
+    /// </summary>
+    public AsyncCommand CancelOverLimitCommand { get; }
+
+    /// <summary>
+    /// Gets the command that ends the automatic pause without resuming anything and ends the loop, so nothing goes on by itself.
+    /// </summary>
+    public AsyncCommand CancelLimitPauseCommand { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the AI of the workspace is paused automatically because of a usage window, which the chat and the header show.
+    /// </summary>
+    public bool HasLimitPause => limitPause is not null;
+
+    /// <summary>
+    /// Gets what the automatic pause says: which window is at what share of its limit, what the maximum is and when the server looks again.
+    /// </summary>
+    public string LimitPauseText => limitPause is { } pause ? $"Paused automatically: the {pause.Window} usage window is at {pause.PercentUsed:0.#}%, at or past the maximum of {pause.MaxPercent:0.#}%. The AI resumes once it is below the maximum; the server checks again at {pause.NextCheckAt.ToLocalTime():t}." : string.Empty;
 
     /// <summary>
     /// Gets a value indicating whether the server holds at least one saved input of the workspace, which the load button shows with a blue border.
@@ -634,6 +696,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             start = Position(history.Older);
             Raise(nameof(HasMore));
             IsAiWorking = history.Working;
+            LimitPause = history.LimitPause;
 
             if (showWork != history.ShowWork)
             {
@@ -705,6 +768,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             case RemoteEventKind.Failed:
                 Report(remoteEvent.Error ?? "The AI failed.", remoteEvent.Time ?? DateTimeOffset.UtcNow);
                 Unstream();
+                break;
+            case RemoteEventKind.LimitPauseChanged:
+                LimitPause = remoteEvent.LimitPause;
                 break;
             case RemoteEventKind.SavedInputsChanged when remoteEvent.SavedInputs is { } saved:
                 ShowSavedInputs(saved);
@@ -981,6 +1047,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Notice = null;
         PromptStarted?.Invoke();
 
+        OverLimitAsk? refused = null;
+
         bool sent = await Attempt(async () =>
         {
             List<string> lines = text.Length == 0 ? [] : [text];
@@ -990,8 +1058,26 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 lines.Add($"Attached file: {await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None)}");
             }
 
-            await connection.Prompt(workspaceId, string.Join('\n', lines), CancellationToken.None);
+            string prompt = string.Join('\n', lines);
+
+            try
+            {
+                await connection.Prompt(workspaceId, prompt, CancellationToken.None);
+            }
+            catch (RemoteException exception) when (exception.OverLimit is { } pause)
+            {
+                refused = new OverLimitAsk(pause, prompt, text, sending.Count);
+            }
         });
+
+        if (refused is not null)
+        {
+            overLimit = refused;
+            Raise(nameof(IsAskingOverLimit));
+            Raise(nameof(OverLimitText));
+            PromptFailed?.Invoke();
+            return false;
+        }
 
         if (!sent)
         {
@@ -1000,4 +1086,44 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         return sent;
     }
+
+    private void ClearOverLimit()
+    {
+        overLimit = null;
+        Raise(nameof(IsAskingOverLimit));
+        Raise(nameof(OverLimitText));
+    }
+
+    private async Task ConfirmOverLimit()
+    {
+        if (overLimit is not { } ask)
+        {
+            return;
+        }
+
+        ClearOverLimit();
+
+        if (ask.Typed.Length > 0 && input.Trim() == ask.Typed && Attachments.Count == ask.Attachments)
+        {
+            Input = string.Empty;
+            Attachments.Clear();
+        }
+
+        PromptStarted?.Invoke();
+
+        if (!await Attempt(() => connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
+        {
+            PromptFailed?.Invoke();
+        }
+    }
+
+    private async Task CancelLimitPause()
+    {
+        if (await Attempt(() => connection.CancelLimitPause(workspaceId, CancellationToken.None)))
+        {
+            Notice = "The automatic resume was cancelled, so nothing goes on by itself. Send a message to start work again.";
+        }
+    }
+
+    private sealed record OverLimitAsk(LimitPause Pause, string Prompt, string Typed, int Attachments);
 }

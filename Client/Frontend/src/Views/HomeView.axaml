@@ -33,6 +33,15 @@
                 </Flyout>
               </Button.Flyout>
             </local:TouchButton>
+            <local:TouchButton Name="LimitPauseIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.Chat.LimitPauseText, FallbackValue=''}"
+                  IsVisible="{Binding Active.Chat.HasLimitPause, FallbackValue=False}">
+              <Path Name="LimitPauseIndicator" Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="16" MaxHeight="16" />
+              <Button.Flyout>
+                <Flyout Placement="Bottom">
+                  <TextBlock Text="{Binding Active.Chat.LimitPauseText, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
+                </Flyout>
+              </Button.Flyout>
+            </local:TouchButton>
           </StackPanel>
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
@@ -191,6 +200,13 @@
            <Panel IsVisible="{Binding ShowChatView}">
            <Grid Name="ChatGrid" DataContext="{Binding Chat}" RowDefinitions="*,Auto,Auto">
             <DockPanel Grid.Row="0">
+            <Border Name="LimitPauseBanner" DockPanel.Dock="Top" IsVisible="{Binding HasLimitPause}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Warning}" BorderThickness="0,0,0,1" Padding="14,8">
+              <Grid ColumnDefinitions="Auto,*,Auto">
+                <Path Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="14" MaxHeight="14" VerticalAlignment="Top" Margin="0,2,10,0" />
+                <TextBlock Grid.Column="1" Text="{Binding LimitPauseText}" TextWrapping="Wrap" FontSize="12" />
+                <local:TouchButton Grid.Column="2" Content="Cancel Auto Resume" Command="{Binding CancelLimitPauseCommand}" Classes="flat" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Top" ToolTip.Tip="End the automatic pause without resuming the work and the loop" />
+              </Grid>
+            </Border>
             <StackPanel DockPanel.Dock="Bottom" Margin="20,4" Spacing="4" IsVisible="{Binding HasError}">
               <TextBlock Classes="muted" FontSize="11" Text="{Binding ErrorTime, Converter={x:Static local:MessageConverters.Time}}"
                          ToolTip.Tip="{Binding ErrorTime, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding ErrorTime, Converter={x:Static local:MessageConverters.HasTime}}" />
@@ -970,6 +986,17 @@
           <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
           <local:TouchButton Content="{Binding PromptConfirm}" Command="{Binding ConfirmCommand}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           <local:TouchButton Content="Cancel" Command="{Binding CancelCommand}" IsVisible="{Binding ShowCancel}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Border>
+
+    <Border Name="OverLimitOverlay" IsVisible="{Binding Active.Chat.IsAskingOverLimit, FallbackValue=False}" Background="{DynamicResource Scrim}">
+      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+        <StackPanel DataContext="{Binding Active.Chat}" Spacing="12">
+          <TextBlock Text="Over the usage limit" Classes="serif" FontSize="20" />
+          <TextBlock Text="{Binding OverLimitText}" Classes="muted" TextWrapping="Wrap" />
+          <local:TouchButton Content="Start Anyway" Command="{Binding ConfirmOverLimitCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="Cancel" Command="{Binding CancelOverLimitCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
         </StackPanel>
       </Border>
     </Border>

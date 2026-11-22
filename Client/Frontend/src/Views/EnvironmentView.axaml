@@ -69,6 +69,8 @@
             <TextBlock Text="API key" Classes="muted" />
             <TextBox Text="{Binding ClaudeApiKey}" PasswordChar="•" PlaceholderText="Enter a key to set or replace it" TextInputOptions.AutoCapitalization="False" />
             <CheckBox Content="A key is set, remove it" IsChecked="{Binding ClearClaudeApiKey}" IsVisible="{Binding HasClaudeApiKey}" />
+            <TextBlock Text="Max usage window limit (%)" Classes="muted" />
+            <NumericUpDown Value="{Binding ClaudeMaxWindowPercent}" Minimum="1" Maximum="100" Increment="1" FormatString="0.#" HorizontalAlignment="Stretch" ToolTip.Tip="When a usage window of this provider reaches this share, the AI is told to pause its work; it is checked again every 15 minutes and told to resume once no window is at or past it" />
           </StackPanel>
         </Expander>
 
@@ -81,6 +83,8 @@
             <TextBlock Text="API key" Classes="muted" />
             <TextBox Text="{Binding CodexApiKey}" PasswordChar="•" PlaceholderText="Enter a key to set or replace it" TextInputOptions.AutoCapitalization="False" />
             <CheckBox Content="A key is set, remove it" IsChecked="{Binding ClearCodexApiKey}" IsVisible="{Binding HasCodexApiKey}" />
+            <TextBlock Text="Max usage window limit (%)" Classes="muted" />
+            <NumericUpDown Value="{Binding CodexMaxWindowPercent}" Minimum="1" Maximum="100" Increment="1" FormatString="0.#" HorizontalAlignment="Stretch" ToolTip.Tip="When a usage window of this provider reaches this share, the AI is told to pause its work; it is checked again every 15 minutes and told to resume once no window is at or past it" />
           </StackPanel>
         </Expander>
 

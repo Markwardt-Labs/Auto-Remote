@@ -24,4 +24,9 @@ public sealed record ChatHistory
     /// Gets a value indicating whether the workspace is set to show the AI's work: when it is, the messages include the tool calls and results; when it is not, they leave them out.
     /// </summary>
     public bool ShowWork { get; init; }
+
+    /// <summary>
+    /// Gets the automatic pause the workspace is in because of a usage window, or <see langword="null" /> when it is in none.
+    /// </summary>
+    public LimitPause? LimitPause { get; init; }
 }

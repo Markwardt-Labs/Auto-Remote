@@ -60,7 +60,7 @@ public sealed class WorkspaceLoopsTests : IDisposable
 
     private FakePromptSession Session => prompter.Sessions[^1];
 
-    private WorkspaceLoops Create(TimeSpan? windowInterval = null, TimeSpan? limitInterval = null) => new(workspaces.Object, prompts, activity, usage.Object, hub, TimeSpan.FromMilliseconds(10), windowInterval ?? TimeSpan.FromMilliseconds(30), limitInterval);
+    private WorkspaceLoops Create(TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null) => new(workspaces.Object, prompts, activity, usage.Object, hub, TimeSpan.FromMilliseconds(10), windowInterval ?? TimeSpan.FromMilliseconds(30), limitInterval, guard);
 
     private UsageStatus Status(double percent) => new() { Service = AiService.ClaudeCode, Windows = [new UsagePeriod { Name = "5 hours", PercentUsed = percent, WindowMinutes = 300 }] };
 
@@ -97,6 +97,44 @@ public sealed class WorkspaceLoopsTests : IDisposable
         Assert.Equal("The loop made all its runs.", Ended());
         Assert.False(prompts.IsBusy(workspace.Id));
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Start_SendsNothingWhileTheWorkspaceIsPausedBecauseOfAUsageWindowAndGoesOnOnceThePauseEnds()
+    {
+        bool paused = true;
+        Mock<IWindowGuard> guard = new();
+        guard.Setup(x => x.IsPaused(workspace.Id)).Returns(() => paused);
+        WorkspaceLoops loops = Create(guard: guard.Object);
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "again", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+        await Task.Delay(300);
+        Assert.Empty(prompter.Sessions);
+
+        paused = false;
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal(["again"], Session.Prompts.Select(prompt => prompt.Text).ToList());
+    }
+
+    [Fact]
+    public async Task Start_AsksTheGuardBeforeEveryPromptAndSendsNothingWhileItHoldsTheWorkspaceBecauseAUsageWindowIsAtTheMaximum()
+    {
+        bool hold = true;
+        Mock<IWindowGuard> guard = new();
+        guard.Setup(x => x.Hold(workspace.Id, It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => hold);
+        WorkspaceLoops loops = Create(guard: guard.Object);
+
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "again", Condition = LoopCondition.Runs, Runs = 2 }, CancellationToken.None);
+        await Task.Delay(300);
+        Assert.Empty(prompter.Sessions);
+        Assert.NotNull(loops.Get(workspace.Id));
+
+        hold = false;
+        await Until(() => loops.Get(workspace.Id) is null);
+
+        Assert.Equal(["again", "again"], Session.Prompts.Select(prompt => prompt.Text).ToList());
+        guard.Verify(x => x.Hold(workspace.Id, It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.AtLeast(3));
     }
 
     [Fact]

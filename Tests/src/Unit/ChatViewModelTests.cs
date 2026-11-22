@@ -898,4 +898,145 @@ public sealed class ChatViewModelTests
         Assert.True(await chat.LoadOlder());
         Assert.Equal(Enumerable.Range(965, 40).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
     }
+
+    private LimitPause Pause(double percent = 96) => new() { Window = "5h", PercentUsed = percent, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };
+
+    [Fact]
+    public async Task LimitPause_IsReadWithTheHistoryAndFollowsTheServerAsItStartsChangesAndEnds()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        LimitPause first = Pause();
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], LimitPause = first });
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        await chat.Start();
+
+        Assert.Equal((first, true), (chat.LimitPause, chat.HasLimitPause));
+        Assert.Contains("the 5h usage window is at 96%", chat.LimitPauseText);
+        Assert.Contains("maximum of 95%", chat.LimitPauseText);
+
+        LimitPause next = Pause(97.5);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspaceId, LimitPause = next });
+        Assert.Contains("is at 97.5%", chat.LimitPauseText);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = Guid.NewGuid(), LimitPause = null });
+        Assert.True(chat.HasLimitPause);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspaceId, LimitPause = null });
+
+        Assert.False(chat.HasLimitPause);
+        Assert.Equal(string.Empty, chat.LimitPauseText);
+        Assert.Contains(nameof(ChatViewModel.HasLimitPause), changed);
+        Assert.Contains(nameof(ChatViewModel.LimitPauseText), changed);
+    }
+
+    private void Refuse(string prompt) => connection.Setup(x => x.Prompt(workspaceId, prompt, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("over", Pause()));
+
+    [Fact]
+    public async Task Send_WhenTheServerRefusesBecauseOfTheMaximumKeepsTheInputAsksAndSendsItAnywayOnlyOnConfirm()
+    {
+        Refuse("keep going");
+        chat.Input = "keep going";
+        List<string?> changed = [];
+        chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
+
+        chat.SendCommand.Execute(null);
+        await Until(() => chat.IsAskingOverLimit);
+
+        Assert.Equal("keep going", chat.Input);
+        Assert.Null(chat.Error);
+        Assert.Contains("5h usage window is at 96%", chat.OverLimitText);
+        Assert.Contains("ignores the maximum until this work is done", chat.OverLimitText);
+        connection.Verify(x => x.PromptOverLimit(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        chat.ConfirmOverLimitCommand.Execute(null);
+        await Until(() => chat.Input.Length == 0);
+
+        connection.Verify(x => x.PromptOverLimit(workspaceId, "keep going", It.IsAny<CancellationToken>()), Times.Once);
+        Assert.False(chat.IsAskingOverLimit);
+        Assert.Contains(nameof(ChatViewModel.IsAskingOverLimit), changed);
+    }
+
+    [Fact]
+    public async Task Send_SendsTheAttachmentsOfARefusedInputAnywayAndClearsTheBoxOnlyWhileItStillHoldsThem()
+    {
+        connection.Setup(x => x.UploadAttachment(workspaceId, "a.png", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync("/srv/a.png");
+        Refuse("look\nAttached file: /srv/a.png");
+        chat.Input = "look";
+        chat.Attach("a.png", new byte[] { 1 });
+
+        chat.SendCommand.Execute(null);
+        await Until(() => chat.IsAskingOverLimit && chat.Input == "look" && chat.Attachments.Count == 1);
+        chat.ConfirmOverLimitCommand.Execute(null);
+        await Until(() => chat.Attachments.Count == 0 && chat.Input.Length == 0);
+
+        connection.Verify(x => x.PromptOverLimit(workspaceId, "look\nAttached file: /srv/a.png", It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.UploadAttachment(workspaceId, "a.png", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task CancelOverLimit_DropsTheQuestionAndSendsNothing()
+    {
+        Refuse("keep going");
+        chat.Input = "keep going";
+        chat.SendCommand.Execute(null);
+        await Until(() => chat.IsAskingOverLimit);
+
+        chat.CancelOverLimitCommand.Execute(null);
+
+        Assert.False(chat.IsAskingOverLimit);
+        Assert.Equal("keep going", chat.Input);
+        Assert.Equal(string.Empty, chat.OverLimitText);
+        connection.Verify(x => x.PromptOverLimit(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task TheButtonsThatSendAFixedPromptAskToo()
+    {
+        Refuse("resume unfinished work");
+
+        chat.ResumeCommand.Execute(null);
+        await Until(() => chat.IsAskingOverLimit);
+        chat.ConfirmOverLimitCommand.Execute(null);
+        await Until(() => connection.Invocations.Any(call => call.Method.Name == nameof(IServerConnection.PromptOverLimit)));
+
+        connection.Verify(x => x.PromptOverLimit(workspaceId, "resume unfinished work", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task ARefusalThatIsNotAboutTheMaximumShowsAsAnErrorWithoutAsking()
+    {
+        connection.Setup(x => x.Prompt(workspaceId, "go", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The workspace is stopping."));
+        chat.Input = "go";
+
+        chat.SendCommand.Execute(null);
+        await Until(() => chat.Error is not null);
+
+        Assert.False(chat.IsAskingOverLimit);
+        Assert.Equal("The workspace is stopping.", chat.Error);
+    }
+
+    [Fact]
+    public async Task CancelLimitPause_AsksTheServerToEndThePauseWithoutResumingAndSaysSoUnderTheConversation()
+    {
+        connection.Setup(x => x.CancelLimitPause(workspaceId, It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+        chat.CancelLimitPauseCommand.Execute(null);
+        await Until(() => chat.Notice is not null);
+
+        connection.Verify(x => x.CancelLimitPause(workspaceId, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Contains("automatic resume was cancelled", chat.Notice);
+    }
+
+    [Fact]
+    public async Task CancelLimitPause_ShowsWhyTheServerRefused()
+    {
+        connection.Setup(x => x.CancelLimitPause(workspaceId, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("No such workspace."));
+
+        chat.CancelLimitPauseCommand.Execute(null);
+        await Until(() => chat.Error is not null);
+
+        Assert.Equal("No such workspace.", chat.Error);
+        Assert.Null(chat.Notice);
+    }
 }
