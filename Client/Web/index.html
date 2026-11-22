@@ -164,6 +164,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .composer .box { display: flex; align-items: center; gap: 6px; padding: 4px 0 4px 8px; box-sizing: border-box; height: 120px; min-height: 60px; }
 .composer textarea, .composer textarea:focus, .composer textarea:hover { flex: 1; background: transparent; border: 0; border-radius: 0; padding: 0; min-height: 0; max-height: 100%; height: auto; resize: none; outline: none; align-self: center; }
 .composer .box button { align-self: center; }
+.composer .box button.act.saved { border-color: var(--accent); }
 .composer .box button.act { flex: none; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
 .composer .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 0 0 4px 8px; }
 .composer .chip { display: flex; align-items: center; gap: 6px; background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 12px; }
@@ -1865,7 +1866,7 @@ class WorkspaceView {
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
       this.savedPanel,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.loadInputButton, this.saveInputButton, this.sendButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -3212,6 +3213,7 @@ class WorkspaceView {
 
   setSavedInputs(saved) {
     this.savedInputs = [...saved];
+    this.loadInputButton.classList.toggle("saved", this.savedInputs.length > 0);
     this.renderSaved();
   }
 

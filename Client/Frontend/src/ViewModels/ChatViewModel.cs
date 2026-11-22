@@ -226,6 +226,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool HasNoSavedInputs => SavedInputs.Count == 0;
 
     /// <summary>
+    /// Gets a value indicating whether the server holds at least one saved input of the workspace, which the load button shows with a blue border.
+    /// </summary>
+    public bool HasSavedInputs => SavedInputs.Count > 0;
+
+    /// <summary>
     /// Gets the command that saves <see cref="Input" /> as a saved input on the server and clears it; it is available while text is typed.
     /// </summary>
     public AsyncCommand SaveInputCommand { get; }
@@ -717,6 +722,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
 
         Raise(nameof(HasNoSavedInputs));
+        Raise(nameof(HasSavedInputs));
     }
 
     private async Task SaveInput()

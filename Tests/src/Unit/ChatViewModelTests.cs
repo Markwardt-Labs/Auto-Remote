@@ -340,6 +340,7 @@ public sealed class ChatViewModelTests
 
         Assert.Equal([entry], chat.SavedInputs);
         Assert.False(chat.HasNoSavedInputs);
+        Assert.True(chat.HasSavedInputs);
     }
 
     [Fact]
@@ -410,10 +411,12 @@ public sealed class ChatViewModelTests
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = Guid.NewGuid(), SavedInputs = [] });
 
         Assert.Equal([second, first], chat.SavedInputs);
+        Assert.True(chat.HasSavedInputs);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspaceId, SavedInputs = [] });
 
         Assert.True(chat.HasNoSavedInputs);
+        Assert.False(chat.HasSavedInputs);
     }
 
     [Fact]

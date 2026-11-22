@@ -934,6 +934,49 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_LoadInputIsTheFirstButtonBesideTheMessageBoxAndHasABlueBorderOnlyWhileThereAreSavedInputs()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        SavedInput saved = new() { Id = Guid.NewGuid(), Text = "later", Time = DateTimeOffset.UtcNow };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+
+        (bool first, bool without, bool with, bool again) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 800, Content = view };
+            window.Show();
+
+            for (int attempt = 0; attempt < 100 && model.Active is null; attempt++)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                Thread.Sleep(10);
+            }
+
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            TouchButton load = window.GetVisualDescendants().OfType<TouchButton>().Single(button => $"{ToolTip.GetTip(button)}" == "Load a saved input");
+            bool first = ((StackPanel)load.Parent!).Children[0] == load;
+            bool without = load.Classes.Contains("saved");
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspace.Id, SavedInputs = [saved] });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool with = load.Classes.Contains("saved");
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspace.Id, SavedInputs = [] });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool again = load.Classes.Contains("saved");
+            window.Close();
+            return (first, without, with, again);
+        });
+
+        Assert.True(first);
+        Assert.False(without);
+        Assert.True(with);
+        Assert.False(again);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsTheLocalTimeUnderEachMessageThatHasOne()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
