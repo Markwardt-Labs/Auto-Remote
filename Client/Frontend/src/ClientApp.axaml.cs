@@ -36,7 +36,13 @@ public class ClientApp : Avalonia.Application
         if (TryGetFeature(typeof(IActivatableLifetime)) is IActivatableLifetime lifetime)
         {
             DateTime? left = null;
-            lifetime.Deactivated += (_, _) => left = DateTime.UtcNow;
+            bool changed = false;
+            model.PropertyChanged += (_, args) => changed |= left is not null && args.PropertyName == nameof(MainViewModel.Current);
+            lifetime.Deactivated += (_, _) =>
+            {
+                left = DateTime.UtcNow;
+                changed = false;
+            };
             lifetime.Activated += (_, _) =>
             {
                 if (left is { } at && DateTime.UtcNow - at > awayLimit)
@@ -44,7 +50,13 @@ public class ClientApp : Avalonia.Application
                     _ = model.Resume();
                 }
 
+                if (changed)
+                {
+                    view.Redraw();
+                }
+
                 left = null;
+                changed = false;
             };
         }
 

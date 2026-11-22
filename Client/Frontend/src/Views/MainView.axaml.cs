@@ -19,6 +19,18 @@ public sealed partial class MainView : UserControl
     /// <returns>A task that completes once the workspace is shown.</returns>
     public Task Open(Guid workspaceId) => DataContext is MainViewModel model ? model.Focus(workspaceId) : Task.CompletedTask;
 
+    /// <summary>
+    /// Builds the screen that shows again. A screen that was made while the app was out of sight, as the one a restarted server moves it to, comes out with the text of its buttons missing on Android, and one made while the app is in front does not.
+    /// </summary>
+    public void Redraw()
+    {
+        if (this.FindControl<Border>("Root")?.Child is ContentControl host && host.Content is { } shown)
+        {
+            host.SetCurrentValue(ContentControl.ContentProperty, null);
+            host.SetCurrentValue(ContentControl.ContentProperty, shown);
+        }
+    }
+
     /// <inheritdoc />
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {

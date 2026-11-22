@@ -1881,6 +1881,39 @@ public sealed class ViewTests(HeadlessFixture fixture)
         }));
     }
 
+    [Fact]
+    public async Task MainView_RedrawBuildsTheScreenAgainAndKeepsFollowingTheViewModel()
+    {
+        Mock<IAppInfo> info = new();
+        info.SetupGet(x => x.Name).Returns("Auto Remote");
+        info.SetupGet(x => x.Version).Returns("1.0.0");
+        MainViewModel model = new(info.Object, new Mock<IServerConnection.IFactory>().Object, new Mock<ISettingsStore>().Object);
+
+        (bool rebuilt, bool sameTexts, bool stillBound) = await fixture.Run(() =>
+        {
+            model.Start().GetAwaiter().GetResult();
+            MainView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            ConnectView before = window.GetVisualDescendants().OfType<ConnectView>().Single();
+            string[] textsBefore = [.. before.GetVisualDescendants().OfType<TouchButton>().Select(button => $"{button.Content}")];
+
+            view.Redraw();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+
+            ConnectView after = window.GetVisualDescendants().OfType<ConnectView>().Single();
+            string[] textsAfter = [.. after.GetVisualDescendants().OfType<TouchButton>().Select(button => $"{button.Content}")];
+            bool rebuilt = !ReferenceEquals(before, after);
+            model.Start().GetAwaiter().GetResult();
+            window.Close();
+            return (rebuilt, textsBefore.SequenceEqual(textsAfter), model.Current is ConnectViewModel);
+        });
+
+        Assert.True(rebuilt);
+        Assert.True(sameTexts);
+        Assert.True(stillBound);
+    }
+
     [Theory]
     [InlineData(ClientLayout.Tabs, 390, false, "")]
     [InlineData(ClientLayout.Tabs, 390, true, "")]
