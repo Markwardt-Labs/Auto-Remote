@@ -1207,7 +1207,7 @@ class Diagrams {
     }
 
     const task = this.connection.renderDiagram(text).then(svg => {
-      if (this.drawn.size >= 32) {
+      if (this.drawn.size >= 16) {
         this.drawn.clear();
       }
 

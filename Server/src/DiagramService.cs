@@ -18,6 +18,25 @@ internal interface IDiagramService
 /// <inheritdoc />
 internal sealed class DiagramService : IDiagramService
 {
+    /// <summary>
+    /// Initializes a new instance of the <see cref="DiagramService" /> class.
+    /// </summary>
+    public DiagramService()
+    {
+        svgColors = new SvgColors(palette);
+        colors = new Mermaider.Models.RenderOptions
+        {
+            Bg = palette["--bg"],
+            Fg = palette["--fg"],
+            Line = palette["--line"],
+            Accent = palette["--accent"],
+            Muted = palette["--muted"],
+            Surface = palette["--surface"],
+            Border = palette["--border"],
+            LayoutProvider = new DiagramLayout(Mermaider.MermaidRenderer.LayoutProvider),
+        };
+    }
+
     private readonly ConcurrentDictionary<string, string> drawn = new();
 
     private readonly int maxLength = 100_000;
@@ -26,18 +45,20 @@ internal sealed class DiagramService : IDiagramService
 
     private readonly TimeSpan limit = TimeSpan.FromSeconds(20);
 
-    private readonly Regex selfRelationships = new(@"^[ \t]*(\S+)[ \t]+[|o{}]+--[|o{}]+[ \t]+\1[ \t]*:.*\r?\n?", RegexOptions.Multiline | RegexOptions.CultureInvariant);
-
-    private readonly Mermaider.Models.RenderOptions colors = new()
+    private readonly IReadOnlyDictionary<string, string> palette = new Dictionary<string, string>
     {
-        Bg = "#2D2D2D",
-        Fg = "#CCCCCC",
-        Line = "#969696",
-        Accent = "#007ACC",
-        Muted = "#969696",
-        Surface = "#252525",
-        Border = "#3C3C3C"
+        ["--bg"] = "#2D2D2D",
+        ["--fg"] = "#CCCCCC",
+        ["--line"] = "#969696",
+        ["--accent"] = "#007ACC",
+        ["--muted"] = "#969696",
+        ["--surface"] = "#252525",
+        ["--border"] = "#3C3C3C",
     };
+
+    private readonly Mermaider.Models.RenderOptions colors;
+
+    private readonly ISvgColors svgColors;
 
     /// <inheritdoc />
     public async Task<string> Render(string source, CancellationToken cancellation)
@@ -65,7 +86,7 @@ internal sealed class DiagramService : IDiagramService
 
         try
         {
-            svg = await Task.Run(() => Mermaider.MermaidRenderer.RenderSvg(Drawable(text), colors), CancellationToken.None).WaitAsync(limit, cancellation);
+            svg = await Task.Run(() => svgColors.Resolve(Mermaider.MermaidRenderer.RenderSvg(text, colors)), CancellationToken.None).WaitAsync(limit, cancellation);
         }
         catch (TimeoutException)
         {
@@ -84,6 +105,4 @@ internal sealed class DiagramService : IDiagramService
         drawn[key] = svg;
         return svg;
     }
-
-    private string Drawable(string text) => text.StartsWith("erDiagram", StringComparison.Ordinal) ? selfRelationships.Replace(text, string.Empty) : text;
 }

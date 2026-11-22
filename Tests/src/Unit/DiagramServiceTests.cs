@@ -67,6 +67,28 @@ public sealed class DiagramServiceTests
     {
         string svg = await service.Render("erDiagram\n  Folder ||--o{ Folder : \"parent of\"\n  Folder ||--o{ File : holds\n  Folder {\n    int id PK\n  }", CancellationToken.None);
 
-        Assert.Contains("Folder", svg);
+        Assert.Contains("parent of", svg);
+        Assert.Contains("holds", svg);
+    }
+
+    [Fact]
+    public async Task Render_LeavesNoColorFunctionForRenderersThatCannotEvaluateThem()
+    {
+        string svg = await service.Render("flowchart TD\n  subgraph Group\n    A{Decision} --> B[(Store)]\n  end\n  B --> C([Done])", CancellationToken.None);
+
+        Assert.DoesNotContain("color-mix", svg, StringComparison.Ordinal);
+        Assert.DoesNotMatch(@"var\(--(?!_|fs-)", svg);
+    }
+
+    [Fact]
+    public async Task Render_DrawsALoopBackToTheEntryAsABackEdgeAndTheEntryAboveTheRest()
+    {
+        string svg = await service.Render("flowchart TD\n  Start([Start]) --> Input[Read]\n  Input --> Valid{Valid}\n  Valid -->|No| Err[Error]\n  Err --> Input\n  Valid -->|Yes| Done([Done])", CancellationToken.None);
+
+        double Top(string id) => double.Parse(System.Text.RegularExpressions.Regex.Match(svg, $@"data-id=""{id}""[\s\S]*?<text x=""[\d.]+"" y=""([\d.]+)""").Groups[1].Value, CultureInfo.InvariantCulture);
+
+        Assert.True(Top("Start") < Top("Input"));
+        Assert.True(Top("Input") < Top("Valid"));
+        Assert.True(Top("Valid") < Top("Done"));
     }
 }

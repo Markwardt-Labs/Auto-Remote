@@ -6,7 +6,12 @@ A fenced block tagged `mermaid` in a previewed markdown file is drawn as a pictu
 
 The server turns the text into an SVG with Mermaider, a pure .NET library, so there is one implementation of Mermaid for the desktop, mobile and web clients, none of which would otherwise have a way to run Mermaid (no Node or browser engine is available on Android). The `RenderDiagram` command carries the text and answers the SVG. The server caches the SVG by a hash of the trimmed text and bounds the text length and the drawing time, so a pathological diagram answers an error instead of holding a connection.
 
-The colors are explicit hex values for the clients' dark theme. Mermaider derives line, surface and border shades with CSS `color-mix()` unless they are given, and the Avalonia clients' SVG renderer does not evaluate it, which left lines and table borders invisible. An ER diagram relationship from an entity to itself is dropped before drawing because Mermaider fails on it.
+The server shapes the picture so it reads well and looks the same everywhere:
+
+- Colors: the options give Mermaider the dark theme's seven base colors, but it derives the rest (group fills, shape gradients, shadows) with CSS `color-mix()` and `var()`, which browsers evaluate and the Avalonia clients' SVG renderer does not, so shapes that used them were drawn black. After drawing, every such expression is evaluated on the server and replaced by the plain color it stands for, so all clients show identical colors. References to Mermaider's own derived variables stay (their definitions are plain colors by then), as do font size variables.
+- Cycles: Mermaider's flowchart and state layout breaks cycles in an arbitrary order, which drew a retry loop as the main flow and put the entry state at the bottom. The layout is wrapped so that the edges that close a cycle (found by walking the graph from its first edge, so the order the author wrote it in decides) are laid out reversed and drawn backward afterwards, with their arrow ends and route swapped back. Edges between subgraphs follow the nodes inside them. Class, ER and the other diagram types are laid out as Mermaider does.
+
+The remaining flaws are Mermaider's: edges of a state diagram that cross a composite state run through its box, and `o--o` and `x--x` edges of flowcharts are not drawn. The optional MSAGL layout was tried and is worse (it flips the flow and overlaps subgraphs).
 
 ## Clients
 
