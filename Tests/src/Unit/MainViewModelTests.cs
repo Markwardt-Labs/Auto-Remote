@@ -461,10 +461,12 @@ public sealed class MainViewModelTests
 
         mismatch.Update.ConfirmCommand.Execute(null);
         await WaitFor(() => updating.Current is UpdateViewModel);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("The server is down."));
         await Task.Delay(100);
 
         Assert.IsType<UpdateViewModel>(updating.Current);
         await WaitFor(() => updating.Current is ConnectViewModel);
+        await Task.Delay(100);
 
         Assert.Equal("The server did not come back after the update.", Assert.IsType<ConnectViewModel>(updating.Current).Error);
     }
