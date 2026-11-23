@@ -70,6 +70,8 @@ internal sealed class MarkdownView : ContentControl
 
     private readonly StringBuilder plain = new();
 
+    private readonly Regex lineBreakTag = new(@"^<br\s*/?>$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     private readonly double zoomStep = 1.25;
 
     private readonly double minZoom = 0.25;
@@ -776,6 +778,10 @@ internal sealed class MarkdownView : ContentControl
                         run.Foreground = Brush("Accent", Brushes.Orange);
                         run.TextDecorations = TextDecorations.Underline;
                     });
+                    break;
+                case HtmlInline html when lineBreakTag.IsMatch(html.Tag):
+                    plain.Append('\n');
+                    target.Add(new LineBreak());
                     break;
                 case HtmlInline html:
                     Emit(target, html.Tag);

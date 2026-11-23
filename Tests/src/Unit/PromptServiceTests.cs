@@ -100,6 +100,8 @@ public sealed class PromptServiceTests : IDisposable
         Assert.True(condition());
     }
 
+    private async Task Settled() => await Until(() => !service.IsBusy(workspace.Id) && Events(RemoteEventKind.WorkingChanged).Count(remoteEvent => remoteEvent.Working == true) == Events(RemoteEventKind.WorkingChanged).Count(remoteEvent => remoteEvent.Working == false));
+
     private List<RemoteEvent> Events(RemoteEventKind kind)
     {
         lock (events)
@@ -296,7 +298,7 @@ public sealed class PromptServiceTests : IDisposable
         prompter.OnCreate = session => session.Reply("hi there");
 
         await service.Prompt(workspace.Id, "hello", CancellationToken.None);
-        await Until(() => !service.IsBusy(workspace.Id));
+        await Settled();
 
         Assert.Equal(["hello"], Messages(MessageRole.User));
         Assert.Equal(["hi there"], Messages(MessageRole.Assistant));
@@ -356,7 +358,7 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Single(Session.Prompts);
 
         release.SetResult();
-        await Until(() => !service.IsBusy(workspace.Id));
+        await Settled();
 
         Assert.Equal(["one", "two"], Session.Prompts.Select(prompt => prompt.Text).ToList());
         Assert.Contains("may have been missed", Session.Prompts[1].Notes.Single());
@@ -377,7 +379,7 @@ public sealed class PromptServiceTests : IDisposable
         await service.Prompt(workspace.Id, "two", CancellationToken.None);
 
         release.SetResult();
-        await Until(() => !service.IsBusy(workspace.Id));
+        await Settled();
 
         List<string> order;
 
