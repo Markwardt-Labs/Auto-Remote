@@ -3,6 +3,7 @@ namespace Markwardt.AutoRemote.Tests.Unit;
 [Collection("Headless")]
 public sealed class MarkdownLineBreakTests(HeadlessFixture fixture)
 {
+    // A shown window with a hard line break loops forever in Avalonia's headless text layout and eats memory without bound, so these tests only inspect the built controls.
     private async Task<List<string>> Pieces(string source) => await fixture.Run(() =>
     {
         MarkdownView view = new() { Source = source };
