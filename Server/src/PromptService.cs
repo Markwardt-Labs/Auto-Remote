@@ -150,6 +150,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private readonly TimeSpan idleTimeout = TimeSpan.FromMinutes(5);
 
+    private readonly string silentEnd = "The AI finished without writing a reply or using a tool. A model can do this when it runs out of output tokens while it reasons, or when it answers with nothing.";
+
     private readonly TimeSpan stopWait = TimeSpan.FromSeconds(15);
 
     private readonly TimeSpan shutdownWait = TimeSpan.FromSeconds(10);
@@ -648,6 +650,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             lock (live.Sync)
             {
+                live.Stopped = true;
                 live.Pending.Clear();
                 live.Steered.Clear();
                 live.Epoch++;
@@ -937,6 +940,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         lock (live.Stream)
         {
             live.Partial.Clear();
+            live.Thinking = false;
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = id, Message = message });
         }
 
@@ -1052,12 +1056,22 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         switch (output)
         {
             case PromptMessageEvent { Text: { Length: > 0 } reply }:
+                live.Produced = true;
                 Say(id, live, new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow });
                 break;
             case PromptDeltaEvent { Text: { Length: > 0 } piece } when live.ShowWork:
-                Stream(id, live, piece);
+                Stream(id, live, live.Thinking ? $"\n\n{piece}" : piece);
+                live.Thinking = false;
+                break;
+            case PromptThinkingEvent { Text: { Length: > 0 } thought } when live.ShowWork:
+                Stream(id, live, live.Thinking ? thought : $"Thinking: {thought}");
+                live.Thinking = true;
+                break;
+            case PromptNoticeEvent { Text: { Length: > 0 } notice }:
+                Say(id, live, Work(notice));
                 break;
             case PromptToolCallEvent call:
+                live.Produced = true;
                 if (call.Name == "shell")
                 {
                     live.Tally.Running[call.Id] = 0;
@@ -1075,6 +1089,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             case PromptFailureEvent failure:
                 lock (live.Sync)
                 {
+                    live.Failed = true;
                     live.Pending.Clear();
                     live.Steered.Clear();
                     live.Epoch++;
@@ -1145,7 +1160,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                             if (live.Steered.Count == 0)
                             {
                                 live.Draining = false;
-                                SetWorking(id, live, false);
+                                Finish(id, live);
                                 Expire(id, live);
                                 return;
                             }
@@ -1174,6 +1189,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             lock (live.Sync)
             {
+                live.Failed = true;
                 live.Pending.Clear();
                 live.Steered.Clear();
                 live.Expecting = false;
@@ -1261,7 +1277,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             return;
         }
 
-        SetWorking(id, live, false);
+        Finish(id, live);
         Expire(id, live);
     }
 
@@ -1294,7 +1310,13 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             live.Working = working;
 
-            if (!working)
+            if (working)
+            {
+                live.Produced = false;
+                live.Stopped = false;
+                live.Failed = false;
+            }
+            else
             {
                 if (activity.Get(id) == WorkspaceState.Working)
                 {
@@ -1306,6 +1328,16 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = id, Working = working });
         }
+    }
+
+    private void Finish(Guid id, Live live)
+    {
+        if (live.Working && !live.Produced && !live.Stopped && !live.Failed)
+        {
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Time = DateTimeOffset.UtcNow, Error = silentEnd });
+        }
+
+        SetWorking(id, live, false);
     }
 
     private void StopIdle(Live live)
@@ -1388,6 +1420,14 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public Tally Tally { get; set; } = new();
 
         public bool Working { get; set; }
+
+        public bool Produced { get; set; }
+
+        public bool Stopped { get; set; }
+
+        public bool Failed { get; set; }
+
+        public bool Thinking { get; set; }
 
         public bool Expecting { get; set; }
 

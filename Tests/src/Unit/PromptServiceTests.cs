@@ -195,6 +195,19 @@ public sealed class PromptServiceTests : IDisposable
         yield return new PromptMessageEvent { Text = "Hello world" };
     }
 
+    private IEnumerable<PromptEvent> Reasoning()
+    {
+        yield return new PromptThinkingEvent { Text = "let me " };
+        Thread.Sleep(80);
+        yield return new PromptThinkingEvent { Text = "think" };
+        Thread.Sleep(80);
+        yield return new PromptDeltaEvent { Text = "The " };
+        Thread.Sleep(80);
+        yield return new PromptDeltaEvent { Text = "answer" };
+        Thread.Sleep(80);
+        yield return new PromptMessageEvent { Text = "The answer" };
+    }
+
     private PromptService Streaming(out Action<RemoteEvent> deliver)
     {
         Action<RemoteEvent>? handler = null;
@@ -505,6 +518,97 @@ public sealed class PromptServiceTests : IDisposable
         await Task.Delay(300);
 
         Assert.Single(Session.Prompts);
+    }
+
+    [Fact]
+    public async Task Prompt_ReportsAWorkThatEndsWithoutAReplyOrAToolCallAndStillLeavesTheWorkspaceReady()
+    {
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptThinkingEvent { Text = "hmm" }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        string error = Assert.Single(Events(RemoteEventKind.Failed)).Error!;
+        Assert.Contains("finished without writing a reply or using a tool", error);
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Prompt_ReportsNothingForAWorkWhoseAnswerIsOnlyAToolCallAndItsResult()
+    {
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptToolCallEvent { Id = "1", Name = "read_file", Input = "{}" }, new PromptToolResultEvent { Id = "1", Output = "text", IsError = false }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Empty(Events(RemoteEventKind.Failed));
+    }
+
+    [Fact]
+    public async Task Prompt_ReportsAnEndWithoutAReplyOnlyForTheWorkThatHadNoneAndNotForTheNext()
+    {
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "empty" ? [] : [new PromptMessageEvent { Text = "fine" }]);
+
+        await service.Prompt(workspace.Id, "empty", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+        await service.Prompt(workspace.Id, "answered", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Single(Events(RemoteEventKind.Failed));
+    }
+
+    [Fact]
+    public async Task Interrupt_EndsTheWorkWithoutReportingThatTheAiGaveNoReply()
+    {
+        prompter.OnCreate = session => session.Hang();
+        await service.Prompt(workspace.Id, "long", CancellationToken.None);
+        await Until(() => Session.Prompts.Count == 1);
+
+        await service.Interrupt(workspace.Id);
+        await Task.Delay(200);
+
+        Assert.False(service.IsBusy(workspace.Id));
+        Assert.Empty(Events(RemoteEventKind.Failed));
+    }
+
+    [Fact]
+    public async Task Prompt_StreamsTheReasoningOfTheAiAsItsOwnPassageBeforeTheAnswerOnlyWhileTheWorkspaceShowsTheWork()
+    {
+        Use(workspace with { ShowWork = true });
+        PromptService streaming = Streaming(out _);
+        prompter.OnCreate = session => session.ReplyWith(_ => Reasoning());
+
+        await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !streaming.IsBusy(workspace.Id));
+
+        Assert.Equal("Thinking: let me think\n\nThe answer", string.Concat(Events(RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text)));
+        Assert.Equal(["The answer"], Messages(MessageRole.Assistant));
+    }
+
+    [Fact]
+    public async Task Prompt_SendsNoReasoningWhileTheWorkspaceDoesNotShowTheWork()
+    {
+        PromptService streaming = Streaming(out _);
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptThinkingEvent { Text = "let me think" }, new PromptMessageEvent { Text = "done" }]);
+
+        await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !streaming.IsBusy(workspace.Id));
+
+        Assert.Empty(Events(RemoteEventKind.MessageDelta));
+        Assert.Empty(Events(RemoteEventKind.Failed));
+    }
+
+    [Fact]
+    public async Task Prompt_ShowsWhatTheToolDoesOnItsOwnAsAWorkMessage()
+    {
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptNoticeEvent { Text = "The context window is full." }, new PromptMessageEvent { Text = "done" }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        ChatMessage notice = Assert.Single(Events(RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message!), message => message.IsWork);
+        Assert.Equal("The context window is full.", notice.Text);
+        Assert.Equal(MessageRole.Assistant, notice.Role);
     }
 
     [Fact]
