@@ -2,7 +2,7 @@ namespace Markwardt.AutoRemote.Tests.Unit;
 
 public sealed class ServerConnectionTests
 {
-    private Mock<IMessageChannel> Channel(List<RemoteRequest> sent, out Channel<RemoteResponse> replies)
+    private Mock<IMessageChannel> Channel(List<RemoteRequest> sent, out Channel<RemoteResponse> replies, Func<RemoteRequest, RemoteResponse>? answer = null)
     {
         Channel<RemoteResponse> queue = System.Threading.Channels.Channel.CreateUnbounded<RemoteResponse>();
         replies = queue;
@@ -10,7 +10,7 @@ public sealed class ServerConnectionTests
         channel.Setup(item => item.Send(It.IsAny<RemoteRequest>(), It.IsAny<CancellationToken>())).Callback((RemoteRequest request, CancellationToken _) =>
         {
             sent.Add(request);
-            queue.Writer.TryWrite(new RemoteResponse { Id = request.Id });
+            queue.Writer.TryWrite(answer?.Invoke(request) ?? new RemoteResponse { Id = request.Id });
         }).Returns(Task.CompletedTask);
         channel.Setup(item => item.Receive<RemoteResponse>(It.IsAny<CancellationToken>())).Returns(async (CancellationToken cancellation) => await queue.Reader.WaitToReadAsync(cancellation) ? await queue.Reader.ReadAsync(cancellation) : null);
         return channel;
@@ -163,5 +163,20 @@ public sealed class ServerConnectionTests
         Assert.Equal(1, opened);
         Assert.Equal(1, reconnected);
         Assert.Equal([RemoteCommand.Prompt], sentSecond.Select(request => request.Command));
+    }
+
+    [Fact]
+    public async Task ConfigureOllamaService_SendsTheChoiceAndThePasswordAndReturnsTheEnvironment()
+    {
+        List<RemoteRequest> sent = [];
+        AiEnvironment environment = new() { LocalOptimizeContext = true };
+        Mock<IMessageChannel> channel = Channel(sent, out _, request => new RemoteResponse { Id = request.Id, AiEnvironment = environment });
+        await using ServerConnection connection = new(new ClientWebSocket(), channel.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
+
+        Task<AiEnvironment> pending = connection.ConfigureOllamaService(true, "pw", CancellationToken.None);
+
+        Assert.Equal(environment, await pending);
+        RemoteRequest request = Assert.Single(sent);
+        Assert.Equal((RemoteCommand.ConfigureOllamaService, true, "pw"), (request.Command, request.Enabled, request.Password));
     }
 }

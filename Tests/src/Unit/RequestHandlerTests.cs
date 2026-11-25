@@ -1023,4 +1023,27 @@ public sealed class RequestHandlerTests
         Assert.Contains("expand prompt mine -> ", line);
         Assert.DoesNotContain("capability", line);
     }
+
+    [Fact]
+    public async Task Handle_ConfigureOllamaService_HandsTheChoiceAndThePasswordToTheHostAndReturnsTheEnvironment()
+    {
+        AiEnvironment environment = new() { LocalOptimizeContext = true, OllamaServiceControl = true };
+        host.Setup(x => x.ConfigureOllamaService(true, "pw", It.IsAny<CancellationToken>())).ReturnsAsync(environment);
+
+        RemoteResponse done = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureOllamaService, Enabled = true, Password = "pw" }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.ConfigureOllamaService }, owner, CancellationToken.None);
+
+        Assert.Equal(environment, done.AiEnvironment);
+        Assert.Contains("needs enabled", missing.Error);
+    }
+
+    [Fact]
+    public async Task Handle_ConfigureOllamaService_ReportsWhyTheServiceWasNotChanged()
+    {
+        host.Setup(x => x.ConfigureOllamaService(true, "bad", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("The password was not accepted."));
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ConfigureOllamaService, Enabled = true, Password = "bad" }, owner, CancellationToken.None);
+
+        Assert.Equal("The password was not accepted.", response.Error);
+    }
 }

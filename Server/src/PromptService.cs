@@ -866,6 +866,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
     private async Task<IPromptSession> Obtain(WorkspaceInfo workspace, CancellationToken cancellation)
     {
+        await host.Prepare(workspace.Service, cancellation);
+
         if (workspace.SessionId is { } stored)
         {
             IPromptSession? loaded = null;

@@ -623,6 +623,16 @@ internal interface IServerConnection : IAsyncDisposable
     Task<AiEnvironment> SetAiEnvironment(AiEnvironment environment, CancellationToken cancellation);
 
     /// <summary>
+    /// Has the server turn optimized context of the systemd Ollama service on or off, which needs root rights.
+    /// </summary>
+    /// <param name="enabled">Whether the service runs with the optimized context settings.</param>
+    /// <param name="password">The password of the server account for <c>sudo</c>, or <see langword="null" /> when the server needs none. It is only used for this request.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The environment as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused, for example because the password was not accepted.</exception>
+    Task<AiEnvironment> ConfigureOllamaService(bool enabled, string? password, CancellationToken cancellation);
+
+    /// <summary>
     /// Asks the local model server which models it offers.
     /// </summary>
     /// <param name="server">The address to ask, or <see langword="null" /> for the one of the environment.</param>
@@ -1078,6 +1088,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<AiEnvironment> SetAiEnvironment(AiEnvironment environment, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SetAiEnvironment, AiEnvironment = environment }, cancellation)).AiEnvironment ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<AiEnvironment> ConfigureOllamaService(bool enabled, string? password, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ConfigureOllamaService, Enabled = enabled, Password = password }, cancellation)).AiEnvironment ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<string>> ListLocalModels(string? server, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ListLocalModels, Url = server }, cancellation)).Names ?? throw Malformed();

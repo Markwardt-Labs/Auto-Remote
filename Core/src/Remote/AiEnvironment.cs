@@ -61,6 +61,31 @@ public sealed record AiEnvironment
     public string LocalServer { get; init; } = "http://localhost:11434/v1";
 
     /// <summary>
+    /// Gets the command that starts Ollama, which Auto Remote runs itself when the model server is on this machine and not running, so that it can set the variables Ollama only reads when it starts.
+    /// </summary>
+    public string OllamaCommand { get; init; } = "ollama";
+
+    /// <summary>
+    /// Gets a value indicating whether the Ollama that Auto Remote starts runs with a quantized (<c>q4_0</c>) key and value cache and flash attention, which lets the same memory hold a context several times larger. Auto Remote always starts Ollama with no limit on how long a model load may stall.
+    /// </summary>
+    public bool LocalOptimizeContext { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the server can configure the Ollama of the local models as a systemd service (it is Linux with systemd, the model server is on this machine and an <c>ollama.service</c> unit exists), which is the only case the optimized context can be applied to an Ollama that already runs. Filled in when reading and ignored when setting.
+    /// </summary>
+    public bool OllamaServiceControl { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether configuring the Ollama service needs the sudo password of the server's user (passwordless sudo does not work for it). Filled in when reading and ignored when setting.
+    /// </summary>
+    public bool OllamaServiceNeedsPassword { get; init; }
+
+    /// <summary>
+    /// Gets what the server can say about the Ollama it runs the local models on (started by Auto Remote with its settings, or already running outside it and so out of reach), or <see langword="null" /> when there is nothing to say. Filled in when reading and ignored when setting.
+    /// </summary>
+    public string? LocalServerNote { get; init; }
+
+    /// <summary>
     /// Gets the model to run for each capability. Local models cannot run without one for every capability.
     /// </summary>
     public CapabilityNames LocalModels { get; init; } = new();

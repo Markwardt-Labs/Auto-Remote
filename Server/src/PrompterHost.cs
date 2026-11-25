@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Server;
 /// <summary>
 /// Owns the one Live AI prompter of the server and the environment it runs in, which the user sets from the clients and the server keeps in its data folder, replacing what the server config used to say about the AI.
 /// </summary>
-internal interface IPrompterHost
+internal interface IPrompterHost : IAsyncDisposable
 {
     /// <summary>
     /// Gets the prompter every session of the server is made by.
@@ -22,6 +22,24 @@ internal interface IPrompterHost
     /// <param name="config">The server settings.</param>
     /// <param name="cancellation">Cancels the read of the stored environment.</param>
     Task Configure(ServerConfig config, CancellationToken cancellation);
+
+    /// <summary>
+    /// Turns the optimized context of the Ollama service on or off with root rights (the drop-in with the variables is written or removed and the service restarted through <c>sudo</c>) and keeps the choice in the environment.
+    /// </summary>
+    /// <param name="enabled">Whether the optimized context is wanted.</param>
+    /// <param name="password">The sudo password of the server's user, or <see langword="null" /> when none is needed. It is used once and never kept or logged.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The environment as it now is, without the API keys.</returns>
+    /// <exception cref="RequestException">The server cannot configure the service, the password is not accepted or the change failed.</exception>
+    Task<AiEnvironment> ConfigureOllamaService(bool enabled, string? password, CancellationToken cancellation);
+
+    /// <summary>
+    /// Makes whatever a workspace of a provider runs on ready before its session is made: for the local models, the Ollama they run on (started with the environment's settings when it is not running); nothing for the other providers.
+    /// </summary>
+    /// <param name="service">The provider of the workspace.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>A task that completes when it is ready, or when it is clear it cannot be made ready (the failure is then the AI's own).</returns>
+    Task Prepare(AiService service, CancellationToken cancellation);
 
     /// <summary>
     /// Reads the environment, without the API keys.
@@ -110,7 +128,7 @@ internal interface IPrompterHost
 }
 
 /// <inheritdoc />
-internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = null, Func<Uri?, CancellationToken, Task<IReadOnlyList<string>>>? listLocalModels = null, Func<Uri?, CancellationToken, Task<IReadOnlyList<string>>>? listImageModels = null) : IPrompterHost
+internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = null, Func<Uri?, CancellationToken, Task<IReadOnlyList<string>>>? listLocalModels = null, Func<Uri?, CancellationToken, Task<IReadOnlyList<string>>>? listImageModels = null, IOllamaService? ollama = null) : IPrompterHost
 {
     private readonly Func<string, IPrompter> create = createPrompter ?? (folder => new Prompter(folder));
 
@@ -119,6 +137,8 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
     private readonly Func<Uri?, CancellationToken, Task<IReadOnlyList<string>>> imageModels = listImageModels ?? ((server, cancellation) => LocalImageSetup.ListModels(server, cancellation));
 
     private readonly SemaphoreSlim writing = new(1, 1);
+
+    private readonly IOllamaService local = ollama ?? new OllamaService();
 
     private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
@@ -156,6 +176,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
         string folder = Path.Combine(config.DataFolder, "liveai");
         prompter = create(folder);
         Apply(kept);
+        await local.Refresh(kept, cancellation);
     }
 
     /// <inheritdoc />
@@ -165,7 +186,29 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
     public string? UserInstructions(string? stored) => builtIn.Visible(stored);
 
     /// <inheritdoc />
-    public AiEnvironment Get() => kept with { ClaudeApiKey = null, CodexApiKey = null, OpenAiApiKey = null, HasClaudeApiKey = !string.IsNullOrEmpty(kept.ClaudeApiKey), HasCodexApiKey = !string.IsNullOrEmpty(kept.CodexApiKey), HasOpenAiApiKey = !string.IsNullOrEmpty(kept.OpenAiApiKey) };
+    public async Task<AiEnvironment> ConfigureOllamaService(bool enabled, string? password, CancellationToken cancellation)
+    {
+        RootResult result = await local.ConfigureService(kept, enabled, password, cancellation);
+
+        switch (result.Outcome)
+        {
+            case RootOutcome.Done:
+                return await Set(kept with { LocalOptimizeContext = enabled }, cancellation);
+            case RootOutcome.WrongPassword:
+                throw new RequestException("The password was not accepted.");
+            default:
+                throw new RequestException(result.Message ?? "Configuring the Ollama service failed.");
+        }
+    }
+
+    /// <inheritdoc />
+    public Task Prepare(AiService service, CancellationToken cancellation) => service == AiService.Local ? local.Ensure(kept, cancellation) : Task.CompletedTask;
+
+    /// <inheritdoc />
+    public ValueTask DisposeAsync() => local.DisposeAsync();
+
+    /// <inheritdoc />
+    public AiEnvironment Get() => kept with { ClaudeApiKey = null, CodexApiKey = null, OpenAiApiKey = null, HasClaudeApiKey = !string.IsNullOrEmpty(kept.ClaudeApiKey), HasCodexApiKey = !string.IsNullOrEmpty(kept.CodexApiKey), HasOpenAiApiKey = !string.IsNullOrEmpty(kept.OpenAiApiKey), LocalServerNote = local.Note, OllamaServiceControl = local.ServiceControl, OllamaServiceNeedsPassword = local.ServiceNeedsPassword };
 
     /// <inheritdoc />
     public async Task<AiEnvironment> Set(AiEnvironment environment, CancellationToken cancellation)
@@ -180,6 +223,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
                 CodexCommand = environment.CodexCommand ?? string.Empty,
                 LocalCommand = environment.LocalCommand ?? string.Empty,
                 LocalServer = environment.LocalServer ?? string.Empty,
+                OllamaCommand = environment.OllamaCommand ?? string.Empty,
                 LocalImageServer = environment.LocalImageServer ?? string.Empty,
                 LocalModels = environment.LocalModels ?? new CapabilityNames(),
                 LocalImageModels = environment.LocalImageModels ?? new CapabilityNames(),
@@ -199,12 +243,22 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
                 CodexCommand = given.CodexCommand.Trim(),
                 LocalCommand = given.LocalCommand.Trim(),
                 LocalServer = given.LocalServer.Trim(),
+                OllamaCommand = string.IsNullOrWhiteSpace(given.OllamaCommand) ? defaults.OllamaCommand : given.OllamaCommand.Trim(),
+                LocalServerNote = null,
+                OllamaServiceControl = false,
+                OllamaServiceNeedsPassword = false,
                 LocalImageServer = given.LocalImageServer.Trim()
             };
             Check(next);
             Apply(next);
             kept = next;
             await Write(next, cancellation);
+
+            if (new[] { next.LocalModels.Fast, next.LocalModels.Balanced, next.LocalModels.Strong, next.LocalModels.Max }.Any(model => !string.IsNullOrWhiteSpace(model)))
+            {
+                await local.Ensure(next, cancellation);
+            }
+
             return Get();
         }
         finally
@@ -443,7 +497,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
     {
         if (file is not null)
         {
-            await stored.Write(file, JsonSerializer.SerializeToNode(environment with { HasClaudeApiKey = false, HasCodexApiKey = false, HasOpenAiApiKey = false }, options)!.AsObject(), cancellation);
+            await stored.Write(file, JsonSerializer.SerializeToNode(environment with { HasClaudeApiKey = false, HasCodexApiKey = false, HasOpenAiApiKey = false, LocalServerNote = null, OllamaServiceControl = false, OllamaServiceNeedsPassword = false }, options)!.AsObject(), cancellation);
         }
     }
 }

@@ -25,6 +25,14 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         });
         RefreshLocalModelsCommand = new AsyncCommand(_ => RefreshLocal());
         RefreshImageModelsCommand = new AsyncCommand(_ => RefreshImage());
+        ConfirmServiceCommand = new AsyncCommand(_ => ConfirmService());
+        CancelServiceCommand = new AsyncCommand(_ =>
+        {
+            localOptimizeContext = !serviceWanted;
+            CloseServiceDialog();
+            Raise(nameof(LocalOptimizeContext));
+            return Task.CompletedTask;
+        });
     }
 
     private readonly IServerConnection connection;
@@ -56,6 +64,24 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     private string localCommand = string.Empty;
 
     private string localServer = string.Empty;
+
+    private string ollamaCommand = string.Empty;
+
+    private bool localOptimizeContext;
+
+    private bool ollamaServiceControl;
+
+    private bool ollamaServiceNeedsPassword;
+
+    private bool serviceWanted;
+
+    private bool isServiceDialogOpen;
+
+    private string servicePassword = string.Empty;
+
+    private string? serviceError;
+
+    private string? localServerNote;
 
     private string openAiApiKey = string.Empty;
 
@@ -396,6 +422,122 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets or sets the Ollama executable Auto Remote starts when the model server is on this machine and not running.
+    /// </summary>
+    public string OllamaCommand
+    {
+        get => ollamaCommand;
+        set => Set(ref ollamaCommand, value ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the Ollama Auto Remote starts runs with a quantized key and value cache and flash attention, so the same memory holds a much larger context.
+    /// </summary>
+    public bool LocalOptimizeContext
+    {
+        get => localOptimizeContext;
+        set
+        {
+            if (Set(ref localOptimizeContext, value) && ollamaServiceControl)
+            {
+                serviceWanted = value;
+                ServicePassword = string.Empty;
+                ServiceError = null;
+                Raise(nameof(ServiceTitle));
+                Raise(nameof(ServiceText));
+                Raise(nameof(ServiceConfirm));
+                IsServiceDialogOpen = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the Ollama of the local models is a systemd service the server can reconfigure with root rights, in which case switching optimized context asks for confirmation first.
+    /// </summary>
+    public bool OllamaServiceControl => ollamaServiceControl;
+
+    /// <summary>
+    /// Gets a value indicating whether the dialog that applies the optimized context setting to the Ollama service is open.
+    /// </summary>
+    public bool IsServiceDialogOpen
+    {
+        get => isServiceDialogOpen;
+        private set => Set(ref isServiceDialogOpen, value);
+    }
+
+    /// <summary>
+    /// Gets the title of the Ollama service dialog.
+    /// </summary>
+    public string ServiceTitle => serviceWanted ? "Optimize Ollama context?" : "Stop optimizing Ollama context?";
+
+    /// <summary>
+    /// Gets what the Ollama service dialog explains.
+    /// </summary>
+    public string ServiceText => (serviceWanted
+        ? "Ollama runs as a system service, so changing its settings needs root rights. The server adds a systemd drop-in with a quantized key and value cache and flash attention, and restarts the service, which unloads its models for a moment."
+        : "Ollama runs as a system service, so changing its settings needs root rights. The server removes its systemd drop-in and restarts the service, which unloads its models for a moment.")
+        + (ollamaServiceNeedsPassword ? " Enter the password of the account the server runs as; it is only used for this change and never stored." : string.Empty);
+
+    /// <summary>
+    /// Gets the label of the button that applies the change.
+    /// </summary>
+    public string ServiceConfirm => serviceWanted ? "Optimize and Restart" : "Restore and Restart";
+
+    /// <summary>
+    /// Gets a value indicating whether the server needs the account password for the change.
+    /// </summary>
+    public bool NeedsServicePassword => ollamaServiceNeedsPassword;
+
+    /// <summary>
+    /// Gets or sets the password of the server account, sent only with the change and cleared afterwards.
+    /// </summary>
+    public string ServicePassword
+    {
+        get => servicePassword;
+        set => Set(ref servicePassword, value ?? string.Empty);
+    }
+
+    /// <summary>
+    /// Gets why the change failed, or <see langword="null" />.
+    /// </summary>
+    public string? ServiceError
+    {
+        get => serviceError;
+        private set
+        {
+            if (Set(ref serviceError, value))
+            {
+                Raise(nameof(HasServiceError));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the change failed.
+    /// </summary>
+    public bool HasServiceError => serviceError is not null;
+
+    /// <summary>
+    /// Gets the command that applies the optimized context setting to the Ollama service.
+    /// </summary>
+    public AsyncCommand ConfirmServiceCommand { get; }
+
+    /// <summary>
+    /// Gets the command that closes the Ollama service dialog and puts the setting back.
+    /// </summary>
+    public AsyncCommand CancelServiceCommand { get; }
+
+    /// <summary>
+    /// Gets what the server says about the Ollama of the local models (whether Auto Remote started it with the settings or it runs outside Auto Remote), or <see langword="null" /> when there is nothing.
+    /// </summary>
+    public string? LocalServerNote => localServerNote;
+
+    /// <summary>
+    /// Gets a value indicating whether the server has something to say about the Ollama of the local models.
+    /// </summary>
+    public bool HasLocalServerNote => !string.IsNullOrEmpty(localServerNote);
+
+    /// <summary>
     /// Gets or sets the image generation service.
     /// </summary>
     public Choice<ImageGenerationKind> SelectedImage
@@ -546,6 +688,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
             CodexApiKey = KeyUpdate(codexApiKey, clearCodexApiKey),
             LocalCommand = localCommand.Trim(),
             LocalServer = localServer.Trim(),
+            OllamaCommand = ollamaCommand.Trim(),
+            LocalOptimizeContext = localOptimizeContext,
             LocalModels = Names(LocalRows),
             LocalContexts = contexts,
             ImageGeneration = selectedImage.Value,
@@ -577,6 +721,11 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         clearCodexApiKey = false;
         localCommand = environment.LocalCommand;
         localServer = environment.LocalServer;
+        ollamaCommand = environment.OllamaCommand;
+        localOptimizeContext = environment.LocalOptimizeContext;
+        localServerNote = environment.LocalServerNote;
+        ollamaServiceControl = environment.OllamaServiceControl;
+        ollamaServiceNeedsPassword = environment.OllamaServiceNeedsPassword;
         openAiApiKey = string.Empty;
         hasOpenAiApiKey = environment.HasOpenAiApiKey;
         clearOpenAiApiKey = false;
@@ -621,6 +770,36 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         }
 
         return false;
+    }
+
+    private void CloseServiceDialog()
+    {
+        ServicePassword = string.Empty;
+        ServiceError = null;
+        IsServiceDialogOpen = false;
+    }
+
+    private async Task ConfirmService()
+    {
+        AiEnvironment? saved = null;
+        string? password = ollamaServiceNeedsPassword ? servicePassword : null;
+        bool succeeded = await Attempt(async () => saved = await connection.ConfigureOllamaService(serviceWanted, password, CancellationToken.None));
+
+        if (succeeded && saved is not null)
+        {
+            localOptimizeContext = saved.LocalOptimizeContext;
+            localServerNote = saved.LocalServerNote;
+            ollamaServiceControl = saved.OllamaServiceControl;
+            ollamaServiceNeedsPassword = saved.OllamaServiceNeedsPassword;
+            baseline = baseline is null ? null : baseline with { LocalOptimizeContext = saved.LocalOptimizeContext };
+            CloseServiceDialog();
+            Raise(null);
+            return;
+        }
+
+        ServiceError = Error;
+        Error = null;
+        ServicePassword = string.Empty;
     }
 
     private async Task RefreshLocal()

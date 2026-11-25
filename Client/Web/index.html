@@ -374,7 +374,7 @@ details.section > .stack { padding: 4px 0 12px; }
 .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 12px; }
 .dialog h3 { font-size: 20px; }
 
-.newws { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px; max-width: 820px; width: 100%; margin: 0 auto; }
+.newws { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px; max-width: 820px; width: 100%; margin: 0 auto; }
 .newws header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
 .newws h1 { font-size: 26px; }
 .newws .path { display: flex; align-items: center; gap: 12px; margin: 12px 0 8px; }
@@ -1493,6 +1493,7 @@ class Connection {
   setWorkspaceSettings(workspaceId, settings) { return this.request("SetWorkspaceSettings", { workspaceId, settings }).then(r => r.settings); }
   getAiEnvironment() { return this.request("GetAiEnvironment", {}).then(r => r.aiEnvironment); }
   setAiEnvironment(aiEnvironment) { return this.request("SetAiEnvironment", { aiEnvironment }).then(r => r.aiEnvironment); }
+  configureOllamaService(enabled, password) { return this.request("ConfigureOllamaService", { enabled, password: password || undefined }).then(r => r.aiEnvironment); }
   listLocalModels(url) { return this.request("ListLocalModels", { url: url || undefined }).then(r => r.names ?? []); }
   listImageModels(url) { return this.request("ListImageModels", { url: url || undefined }).then(r => r.names ?? []); }
   moveWorkspace(workspaceId, groupId) { return this.request("MoveWorkspace", { workspaceId, groupId: groupId ?? undefined }).then(r => r.workspace); }
@@ -6158,8 +6159,9 @@ class AiEnvironmentScreen {
     return capabilities.map(name => {
       const model = h("input", { type: "text", autocomplete: "off", autocapitalize: "off", spellcheck: false, style: "flex:1;min-width:0" });
       model.setAttribute("list", listId);
-      const context = withContext ? h("input", { type: "number", min: "1", max: "2000000", step: "1024", placeholder: "Context", style: "width:120px" }) : null;
-      return { name, model, context, element: h("div", { style: "display:flex;gap:8px;align-items:center" }, h("div", { style: "width:72px" }, name), model, ...(context ? [context] : [])) };
+      const context = withContext ? h("input", { type: "number", min: "1", max: "2000000", step: "1024", placeholder: "Context size (tokens)", style: "width:100%;box-sizing:border-box" }) : null;
+      const top = h("div", { style: "display:flex;gap:8px;align-items:center" }, h("div", { style: "width:72px;flex:none" }, name), model);
+      return { name, model, context, element: context ? h("div", { style: "display:flex;flex-direction:column;gap:4px" }, top, h("div", { style: "padding-left:80px" }, context)) : top };
     });
   }
 
@@ -6188,6 +6190,24 @@ class AiEnvironmentScreen {
     this.codexKey = this.keyField("API key");
     this.localCommand = this.text();
     this.localServer = this.text();
+    this.ollamaCommand = this.text();
+    this.localOptimize = h("input", { type: "checkbox", onchange: () => this.askService() });
+    this.serviceControl = false;
+    this.serviceNeedsPassword = false;
+    this.serviceTitle = h("h3", { class: "serif" });
+    this.serviceText = h("div", { class: "muted" });
+    this.servicePassword = h("input", { type: "password", placeholder: "Password", autocomplete: "off", onkeydown: event => { if (event.key === "Enter") { this.confirmService(); } } });
+    this.serviceError = new ErrorLine();
+    this.serviceConfirm = h("button", { class: "primary block", onclick: () => this.confirmService() });
+    this.serviceDialog = h("div", { class: "dialog-wrap", hidden: true },
+      h("div", { class: "dialog" },
+        this.serviceTitle,
+        this.serviceText,
+        this.servicePassword,
+        this.serviceError.element,
+        this.serviceConfirm,
+        h("button", { class: "block", onclick: () => this.cancelService() }, "Cancel")));
+    this.localNote = h("div", { class: "muted small", hidden: true });
     this.localRows = this.rows("local-model-names", true);
     this.imageSelect = h("select", { onchange: () => this.syncImage() }, Object.entries(imageKinds).map(([key, label]) => h("option", { value: key }, label)));
     this.openAiKey = this.keyField("OpenAI API key");
@@ -6229,6 +6249,9 @@ class AiEnvironmentScreen {
           section("Local models",
             this.field("OpenCode command", this.localCommand),
             this.field("Model server address", this.localServer),
+            this.field("Ollama command", this.ollamaCommand),
+            h("label", { class: "check", title: "Auto Remote starts Ollama itself when the model server is on this machine and is not running. With this on it starts it with a quantized (q4_0) key and value cache and flash attention, so the same memory holds a much larger context. It always starts it with no limit on how long a model load may stall." }, this.localOptimize, "Optimize context"),
+            this.localNote,
             h("button", { class: "block", onclick: () => this.refreshLocal() }, "Refresh Models"),
             ...this.localRows.map(row => row.element)),
           section("Image generation",
@@ -6237,7 +6260,64 @@ class AiEnvironmentScreen {
             this.imageBox,
             this.localNames,
             this.imageNames))),
-      h("div", { class: "foot" }, this.error.element, this.notice));
+      h("div", { class: "foot" }, this.error.element, this.notice),
+      this.serviceDialog);
+  }
+
+  askService() {
+    if (!this.serviceControl) {
+      return;
+    }
+
+    const wanted = this.localOptimize.checked;
+    this.serviceTitle.textContent = wanted ? "Optimize Ollama context?" : "Stop optimizing Ollama context?";
+    this.serviceText.textContent = (wanted
+      ? "Ollama runs as a system service, so changing its settings needs root rights. The server adds a systemd drop-in with a quantized key and value cache and flash attention, and restarts the service, which unloads its models for a moment."
+      : "Ollama runs as a system service, so changing its settings needs root rights. The server removes its systemd drop-in and restarts the service, which unloads its models for a moment.")
+      + (this.serviceNeedsPassword ? " Enter the password of the account the server runs as; it is only used for this change and never stored." : "");
+    this.serviceConfirm.textContent = wanted ? "Optimize and Restart" : "Restore and Restart";
+    this.servicePassword.hidden = !this.serviceNeedsPassword;
+    this.servicePassword.value = "";
+    this.serviceError.set(null);
+    this.serviceDialog.hidden = false;
+  }
+
+  closeService() {
+    this.servicePassword.value = "";
+    this.serviceError.set(null);
+    this.serviceDialog.hidden = true;
+  }
+
+  cancelService() {
+    this.localOptimize.checked = !this.localOptimize.checked;
+    this.closeService();
+  }
+
+  async confirmService() {
+    const password = this.serviceNeedsPassword ? this.servicePassword.value : undefined;
+    const result = await attempt(() => this.connection.configureOllamaService(this.localOptimize.checked, password), this.serviceError);
+    this.servicePassword.value = "";
+
+    if (result.ok) {
+      const saved = result.value;
+      this.localOptimize.checked = saved.localOptimizeContext === true;
+      this.showServiceState(saved);
+
+      if (this.baseline !== null) {
+        const previous = JSON.parse(this.baseline);
+        previous.localOptimizeContext = this.localOptimize.checked;
+        this.baseline = JSON.stringify(previous);
+      }
+
+      this.closeService();
+    }
+  }
+
+  showServiceState(environment) {
+    this.serviceControl = environment.ollamaServiceControl === true;
+    this.serviceNeedsPassword = environment.ollamaServiceNeedsPassword === true;
+    this.localNote.textContent = environment.localServerNote ?? "";
+    this.localNote.hidden = !environment.localServerNote;
   }
 
   syncImage() {
@@ -6253,6 +6333,9 @@ class AiEnvironmentScreen {
     this.codexFolder.value = environment.codexConfigFolder ?? "";
     this.localCommand.value = environment.localCommand ?? "";
     this.localServer.value = environment.localServer ?? "";
+    this.ollamaCommand.value = environment.ollamaCommand ?? "ollama";
+    this.localOptimize.checked = environment.localOptimizeContext === true;
+    this.showServiceState(environment);
     this.imageSelect.value = environment.imageGeneration ?? "None";
     this.imageServer.value = environment.localImageServer ?? "";
     const defaults = environment.newWorkspaces ?? {};
@@ -6309,6 +6392,8 @@ class AiEnvironmentScreen {
       codexApiKey: this.keyUpdate(this.codexKey),
       localCommand: this.localCommand.value.trim(),
       localServer: this.localServer.value.trim(),
+      ollamaCommand: this.ollamaCommand.value.trim(),
+      localOptimizeContext: this.localOptimize.checked,
       localModels: this.names(this.localRows),
       localContexts: Object.keys(contexts).length > 0 ? contexts : undefined,
       imageGeneration: this.imageSelect.value,

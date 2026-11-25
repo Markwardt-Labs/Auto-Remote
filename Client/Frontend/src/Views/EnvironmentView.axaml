@@ -94,14 +94,18 @@
             <TextBox Text="{Binding LocalCommand}" TextInputOptions.AutoCapitalization="False" />
             <TextBlock Text="Model server address" Classes="muted" />
             <TextBox Text="{Binding LocalServer}" TextInputOptions.AutoCapitalization="False" />
+            <TextBlock Text="Ollama command" Classes="muted" />
+            <TextBox Text="{Binding OllamaCommand}" TextInputOptions.AutoCapitalization="False" />
+            <CheckBox Content="Optimize context" IsChecked="{Binding LocalOptimizeContext}" ToolTip.Tip="Auto Remote starts Ollama itself when the model server is on this machine and is not running. With this on it starts it with a quantized (q4_0) key and value cache and flash attention, so the same memory holds a much larger context. It always starts it with no limit on how long a model load may stall." />
+            <TextBlock Text="{Binding LocalServerNote}" IsVisible="{Binding HasLocalServerNote}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <local:TouchButton Content="Refresh Models" Command="{Binding RefreshLocalModelsCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             <ItemsControl ItemsSource="{Binding LocalRows}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <Grid ColumnDefinitions="72,*,120" ColumnSpacing="8" Margin="0,2">
+                  <Grid ColumnDefinitions="72,*" RowDefinitions="Auto,Auto" ColumnSpacing="8" RowSpacing="4" Margin="0,2">
                     <TextBlock Grid.Column="0" Text="{Binding Name}" VerticalAlignment="Center" />
                     <ComboBox Grid.Column="1" IsEditable="True" Text="{Binding Model}" ItemsSource="{Binding $parent[UserControl].DataContext.LocalModelNames}" HorizontalAlignment="Stretch" />
-                    <NumericUpDown Grid.Column="2" Value="{Binding Context}" Minimum="1" Maximum="2000000" Increment="1024" FormatString="0" PlaceholderText="Context" />
+                    <NumericUpDown Grid.Row="1" Grid.Column="1" Value="{Binding Context}" Minimum="1" Maximum="2000000" Increment="1024" FormatString="0" PlaceholderText="Context size (tokens)" HorizontalAlignment="Stretch" />
                   </Grid>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
@@ -163,6 +167,18 @@
       <TextBlock Text="{Binding Notice}" IsVisible="{Binding HasNotice}" Classes="muted" />
     </StackPanel>
   </Grid>
+  <Border IsVisible="{Binding IsServiceDialogOpen}" Background="{DynamicResource Scrim}">
+    <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+      <StackPanel Spacing="12">
+        <TextBlock Text="{Binding ServiceTitle}" Classes="serif" FontSize="20" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding ServiceText}" Classes="muted" TextWrapping="Wrap" />
+        <TextBox Text="{Binding ServicePassword}" IsVisible="{Binding NeedsServicePassword}" PasswordChar="•" PlaceholderText="Password" AcceptsReturn="False" TextInputOptions.AutoCapitalization="False" />
+        <TextBlock Text="{Binding ServiceError}" IsVisible="{Binding HasServiceError}" Classes="error" TextWrapping="Wrap" />
+        <local:TouchButton Content="{Binding ServiceConfirm}" Command="{Binding ConfirmServiceCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        <local:TouchButton Content="Cancel" Command="{Binding CancelServiceCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+      </StackPanel>
+    </Border>
+  </Border>
   <local:UpdateDialogView DataContext="{Binding Update}" IsVisible="{Binding IsOpen, FallbackValue=False}" />
   </Grid>
 </UserControl>

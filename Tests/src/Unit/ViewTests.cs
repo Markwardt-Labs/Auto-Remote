@@ -49,6 +49,72 @@ public sealed class ViewTests(HeadlessFixture fixture)
         return (texts.Count, grids, text);
     });
 
+    [Theory]
+    [InlineData(390)]
+    [InlineData(1000)]
+    public async Task EnvironmentView_GivesTheContextSizeOfEachLocalModelItsOwnWideFieldSoATypicalSizeFits(int width)
+    {
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment { LocalModels = new CapabilityNames { Fast = "a", Balanced = "b", Strong = "c", Max = "d" }, LocalContexts = new CapabilityContexts { Fast = 131072, Balanced = 262144, Strong = 32768, Max = 1048576 }, LocalOptimizeContext = true, LocalServerNote = "Auto Remote started Ollama." });
+
+        (double[] widths, string[] texts, bool optimize, bool note) = await fixture.Run(() =>
+        {
+            EnvironmentViewModel model = new(connection.Object);
+            model.Load().GetAwaiter().GetResult();
+            Window window = new() { Width = width, Height = 1400, Content = new EnvironmentView { DataContext = model } };
+            window.Show();
+            Expand(window);
+            window.UpdateLayout();
+            List<NumericUpDown> fields = [.. window.GetVisualDescendants().OfType<NumericUpDown>().Where(field => field.IsEffectivelyVisible && field.PlaceholderText == "Context size (tokens)")];
+            bool optimize = window.GetVisualDescendants().OfType<CheckBox>().Any(box => box.IsEffectivelyVisible && Equals(box.Content, "Optimize context") && box.IsChecked == true);
+            bool note = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.IsEffectivelyVisible && block.Text == "Auto Remote started Ollama.");
+            double[] widths = [.. fields.Select(field => field.Bounds.Width)];
+            string[] texts = [.. fields.Select(field => field.Text ?? string.Empty)];
+            window.Close();
+            return (widths, texts, optimize, note);
+        });
+
+        Assert.Equal(["131072", "262144", "32768", "1048576"], texts);
+        Assert.All(widths, fieldWidth => Assert.True(fieldWidth >= 200, $"The context field is {fieldWidth} wide."));
+        Assert.True(optimize);
+        Assert.True(note);
+    }
+
+    [Fact]
+    public async Task EnvironmentView_ShowsThePasswordDialogOnlyWhileSwitchingOptimizeContextOnAControllableService()
+    {
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment { OllamaServiceControl = true, OllamaServiceNeedsPassword = true });
+
+        (bool before, bool opened, bool password, bool title, bool after) = await fixture.Run(() =>
+        {
+            EnvironmentViewModel model = new(connection.Object);
+            model.Load().GetAwaiter().GetResult();
+            Window window = new() { Width = 500, Height = 1400, Content = new EnvironmentView { DataContext = model } };
+            window.Show();
+            Expand(window);
+            window.UpdateLayout();
+            bool Visible(Func<Avalonia.Visual, bool> match) => window.GetVisualDescendants().Any(visual => visual.IsEffectivelyVisible && match(visual));
+            bool before = Visible(visual => visual is TextBlock { Text: "Optimize Ollama context?" });
+            model.LocalOptimizeContext = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            bool opened = Visible(visual => visual is TextBlock { Text: "Optimize Ollama context?" });
+            bool password = Visible(visual => visual is TextBox { PasswordChar: '\u2022', PlaceholderText: "Password" });
+            bool title = Visible(visual => visual is Button { Content: "Optimize and Restart" });
+            model.CancelServiceCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            bool after = Visible(visual => visual is TextBlock { Text: "Optimize Ollama context?" });
+            window.Close();
+            return (before, opened, password, title, after);
+        });
+
+        Assert.False(before);
+        Assert.True(opened);
+        Assert.True(password);
+        Assert.True(title);
+        Assert.False(after);
+    }
+
     private void Expand(Window window)
     {
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
@@ -863,7 +929,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             int refreshWithLocal = Refresh();
             int rowBoxes = window.GetVisualDescendants().OfType<ComboBox>().Count(box => box.IsEditable && box.IsEffectivelyVisible);
-            int clearBoxes = window.GetVisualDescendants().OfType<CheckBox>().Count(box => box.IsEffectivelyVisible);
+            int clearBoxes = window.GetVisualDescendants().OfType<CheckBox>().Count(box => box.IsEffectivelyVisible && Equals(box.Content, "A key is set, remove it"));
             int switchesAndDefaults = window.GetVisualDescendants().OfType<ToggleSwitch>().Count(item => item.IsEffectivelyVisible);
             bool defaultsShown = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.Text == "New workspaces") && window.GetVisualDescendants().OfType<TextBox>().Any(box => box.IsEffectivelyVisible && box.PlaceholderText == "Standing instructions for the AI...");
             window.Close();

@@ -47,6 +47,11 @@ public enum RemoteCommand
     SetAiEnvironment,
 
     /// <summary>
+    /// Turns the optimized context of the Ollama service on or off with root rights, on a server that runs it as a systemd service: <see cref="RemoteRequest.Enabled" /> says which and <see cref="RemoteRequest.Password" /> is the sudo password of the server's user, which is only needed when <see cref="AiEnvironment.OllamaServiceNeedsPassword" /> is set, is used once and is never kept or logged. The server writes or removes a systemd drop-in with the variables, restarts the service, waits for it to answer and keeps the choice in the environment; answered with the environment as it now is in <see cref="RemoteResponse.AiEnvironment" />. Refused when the server cannot do it or the password is not accepted.
+    /// </summary>
+    ConfigureOllamaService,
+
+    /// <summary>
     /// Asks the model server at <see cref="RemoteRequest.Url" /> (the one of the environment when omitted) which models it offers; answered in <see cref="RemoteResponse.Names" />.
     /// </summary>
     ListLocalModels,

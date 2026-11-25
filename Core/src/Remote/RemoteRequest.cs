@@ -61,6 +61,16 @@ public sealed record RemoteRequest
     public AiEnvironment? AiEnvironment { get; init; }
 
     /// <summary>
+    /// Gets whether <see cref="RemoteCommand.ConfigureOllamaService" /> turns the optimized context on (<see langword="true" />) or off.
+    /// </summary>
+    public bool? Enabled { get; init; }
+
+    /// <summary>
+    /// Gets the sudo password for <see cref="RemoteCommand.ConfigureOllamaService" />, or <see langword="null" /> when the server's user needs none. It is only ever passed to <c>sudo</c> on standard input.
+    /// </summary>
+    public string? Password { get; init; }
+
+    /// <summary>
     /// Gets the folder or group name the command needs, if any.
     /// </summary>
     public string? Name { get; init; }

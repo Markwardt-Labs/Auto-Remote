@@ -14,6 +14,8 @@ public sealed class PrompterHostTests : IDisposable
 
     private Exception? failure;
 
+    private readonly Mock<IOllamaService> ollama = new();
+
     private PrompterHost Host() => new(folder =>
     {
         folders.Add(folder);
@@ -26,7 +28,7 @@ public sealed class PrompterHostTests : IDisposable
     {
         imageAsked.Add(server);
         return Task.FromResult<IReadOnlyList<string>>(["sdxl"]);
-    });
+    }, ollama.Object);
 
     private readonly BuiltInInstructions builtIn = new();
 
@@ -378,7 +380,7 @@ public sealed class PrompterHostTests : IDisposable
         mock.SetupSet(x => x.Environment = It.IsAny<PromptEnvironment>());
         mock.Setup(x => x.Load(session.Id, It.IsAny<CancellationToken>())).ReturnsAsync(session);
         File.WriteAllText(Path.Combine(temp.Path, "environment.json"), $$"""{ "imageGeneration": "{{images}}", "openAiApiKey": "sk-image" }""");
-        return (new PrompterHost(_ => mock.Object), session, mock);
+        return (new PrompterHost(_ => mock.Object, null, null, ollama.Object), session, mock);
     }
 
     [Fact]
@@ -480,6 +482,60 @@ public sealed class PrompterHostTests : IDisposable
 
         Assert.False(prompter.Sessions[0].Configuration.IsShellAllowed);
         Assert.Null(prompter.Sessions[0].Configuration.Instructions);
+    }
+
+    [Fact]
+    public async Task Set_StoresTheOllamaSettingsKeepsTheNoteOutOfTheFileAndReportsTheNoteWhenReading()
+    {
+        ollama.SetupGet(x => x.Note).Returns("Auto Remote started Ollama.");
+        PrompterHost host = Host();
+        await host.Configure(Config, CancellationToken.None);
+
+        AiEnvironment saved = await host.Set(host.Get() with { OllamaCommand = "  ", LocalOptimizeContext = true, LocalServerNote = "client note" }, CancellationToken.None);
+
+        Assert.Equal(("ollama", true, "Auto Remote started Ollama."), (saved.OllamaCommand, saved.LocalOptimizeContext, saved.LocalServerNote));
+        JsonElement file = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(temp.Path, "environment.json"))).RootElement;
+        Assert.True(file.GetProperty("localOptimizeContext").GetBoolean());
+        Assert.Equal("ollama", file.GetProperty("ollamaCommand").GetString());
+        Assert.True(!file.TryGetProperty("localServerNote", out JsonElement note) || note.ValueKind == JsonValueKind.Null);
+    }
+
+    [Fact]
+    public async Task Set_MakesOllamaReadyOnlyWhenAModelIsSetForALocalCapability()
+    {
+        PrompterHost host = Host();
+        await host.Configure(Config, CancellationToken.None);
+
+        await host.Set(host.Get() with { LocalOptimizeContext = true }, CancellationToken.None);
+        ollama.Verify(x => x.Ensure(It.IsAny<AiEnvironment>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        await host.Set(host.Get() with { LocalModels = new CapabilityNames { Fast = "gemma4:26b", Balanced = "gemma4:26b", Strong = "gemma4:26b", Max = "gemma4:26b" } }, CancellationToken.None);
+
+        ollama.Verify(x => x.Ensure(It.Is<AiEnvironment>(environment => environment.LocalOptimizeContext && environment.LocalModels.Fast == "gemma4:26b"), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(AiService.Local, 1)]
+    [InlineData(AiService.ClaudeCode, 0)]
+    [InlineData(AiService.Codex, 0)]
+    public async Task Prepare_MakesOllamaReadyOnlyForTheLocalModels(AiService service, int expected)
+    {
+        PrompterHost host = Host();
+        await host.Configure(Config, CancellationToken.None);
+
+        await host.Prepare(service, CancellationToken.None);
+
+        ollama.Verify(x => x.Ensure(It.IsAny<AiEnvironment>(), It.IsAny<CancellationToken>()), Times.Exactly(expected));
+    }
+
+    [Fact]
+    public async Task DisposeAsync_StopsTheOllamaTheHostStarted()
+    {
+        PrompterHost host = Host();
+
+        await host.DisposeAsync();
+
+        ollama.Verify(x => x.DisposeAsync(), Times.Once);
     }
 
     [Fact]
@@ -625,5 +681,49 @@ public sealed class PrompterHostTests : IDisposable
         Assert.Contains("command", exception.Message);
         Assert.Equal(new CapabilityNames(), saved.LocalModels);
         Assert.Equal(new WorkspaceDefaults(), saved.NewWorkspaces);
+    }
+
+    [Fact]
+    public async Task ConfigureOllamaService_StoresTheSettingAndReportsTheServiceStateOnceTheServiceWasChanged()
+    {
+        ollama.SetupGet(x => x.ServiceControl).Returns(true);
+        ollama.SetupGet(x => x.ServiceNeedsPassword).Returns(true);
+        ollama.Setup(x => x.ConfigureService(It.IsAny<AiEnvironment>(), true, "pw", It.IsAny<CancellationToken>())).ReturnsAsync(new RootResult(RootOutcome.Done));
+        PrompterHost host = await Configured();
+
+        AiEnvironment saved = await host.ConfigureOllamaService(true, "pw", CancellationToken.None);
+
+        Assert.Equal((true, true, true), (saved.LocalOptimizeContext, saved.OllamaServiceControl, saved.OllamaServiceNeedsPassword));
+        Assert.True(host.Get().LocalOptimizeContext);
+        JsonElement file = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(temp.Path, "environment.json"))).RootElement;
+        Assert.True(file.GetProperty("localOptimizeContext").GetBoolean());
+        Assert.False(file.TryGetProperty("ollamaServiceControl", out JsonElement control) && control.ValueKind == JsonValueKind.True);
+        Assert.DoesNotContain("pw", await File.ReadAllTextAsync(Path.Combine(temp.Path, "environment.json")));
+    }
+
+    [Fact]
+    public async Task ConfigureOllamaService_RefusesAWrongPasswordAndLeavesTheSettingAlone()
+    {
+        ollama.Setup(x => x.ConfigureService(It.IsAny<AiEnvironment>(), true, "bad", It.IsAny<CancellationToken>())).ReturnsAsync(new RootResult(RootOutcome.WrongPassword));
+        PrompterHost host = await Configured();
+
+        RequestException failure = await Assert.ThrowsAsync<RequestException>(() => host.ConfigureOllamaService(true, "bad", CancellationToken.None));
+
+        Assert.Equal("The password was not accepted.", failure.Message);
+        Assert.False(host.Get().LocalOptimizeContext);
+    }
+
+    [Fact]
+    public async Task ConfigureOllamaService_PassesOnWhyTheServiceCouldNotBeChanged()
+    {
+        ollama.Setup(x => x.ConfigureService(It.IsAny<AiEnvironment>(), false, null, It.IsAny<CancellationToken>())).ReturnsAsync(new RootResult(RootOutcome.NotAllowed, "This user may not use sudo on the server."));
+        ollama.Setup(x => x.ConfigureService(It.IsAny<AiEnvironment>(), true, null, It.IsAny<CancellationToken>())).ReturnsAsync(new RootResult(RootOutcome.Failed));
+        PrompterHost host = await Configured();
+
+        RequestException refused = await Assert.ThrowsAsync<RequestException>(() => host.ConfigureOllamaService(false, null, CancellationToken.None));
+        RequestException vague = await Assert.ThrowsAsync<RequestException>(() => host.ConfigureOllamaService(true, null, CancellationToken.None));
+
+        Assert.Equal("This user may not use sudo on the server.", refused.Message);
+        Assert.Equal("Configuring the Ollama service failed.", vague.Message);
     }
 }

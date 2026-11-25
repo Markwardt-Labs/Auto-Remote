@@ -59,6 +59,7 @@ internal static class Program
             Console.WriteLine("Closing the AI sessions");
             await prompts.Close();
             Console.WriteLine("Closed the AI sessions");
+            await host.DisposeAsync();
         }
 
         if (restart.IsRequested)

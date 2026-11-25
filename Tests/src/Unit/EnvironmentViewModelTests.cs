@@ -70,6 +70,24 @@ public sealed class EnvironmentViewModelTests
     }
 
     [Fact]
+    public async Task TheOllamaSettingsAreShownEditedAndSentWhileTheNoteOfTheServerIsOnlyShown()
+    {
+        EnvironmentViewModel model = Open(Current with { OllamaCommand = "/opt/ollama", LocalOptimizeContext = true, LocalServerNote = "Ollama already runs outside Auto Remote." });
+
+        await model.Load();
+
+        Assert.Equal(("/opt/ollama", true, true, "Ollama already runs outside Auto Remote."), (model.OllamaCommand, model.LocalOptimizeContext, model.HasLocalServerNote, model.LocalServerNote));
+
+        model.LocalOptimizeContext = false;
+        model.OllamaCommand = " ollama ";
+        model.CloseCommand.Execute(null);
+        await Until(() => saved.Count == 1);
+
+        AiEnvironment sent = Assert.Single(saved);
+        Assert.Equal(("ollama", false, null), (sent.OllamaCommand, sent.LocalOptimizeContext, sent.LocalServerNote));
+    }
+
+    [Fact]
     public async Task Load_ShowsWhatNewWorkspacesStartWith()
     {
         EnvironmentViewModel model = Open();
@@ -410,5 +428,94 @@ public sealed class EnvironmentViewModelTests
 
         Assert.False(model.HasError);
         Assert.Equal("claude2", saved.Single().ClaudeCommand);
+    }
+
+    [Fact]
+    public async Task SwitchingOptimizeContextWithoutAControllableServiceOpensNoDialog()
+    {
+        EnvironmentViewModel model = Open();
+        await model.Load();
+
+        model.LocalOptimizeContext = true;
+
+        Assert.False(model.IsServiceDialogOpen);
+        Assert.False(model.OllamaServiceControl);
+    }
+
+    [Fact]
+    public async Task SwitchingOptimizeContextOnAControllableServiceAsksForThePasswordTheServerNeeds()
+    {
+        EnvironmentViewModel model = Open(Current with { OllamaServiceControl = true, OllamaServiceNeedsPassword = true });
+        await model.Load();
+
+        model.LocalOptimizeContext = true;
+
+        Assert.True(model.IsServiceDialogOpen);
+        Assert.True(model.NeedsServicePassword);
+        Assert.Equal(("Optimize and Restart", "Optimize Ollama context?"), (model.ServiceConfirm, model.ServiceTitle));
+        Assert.Contains("password", model.ServiceText);
+
+        model.CancelServiceCommand.Execute(null);
+
+        Assert.False(model.IsServiceDialogOpen);
+        Assert.False(model.LocalOptimizeContext);
+        connection.Verify(x => x.ConfigureOllamaService(It.IsAny<bool>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ConfirmingSendsThePasswordAppliesTheSettingAndKeepsOtherEditsUnsaved()
+    {
+        EnvironmentViewModel model = Open(Current with { OllamaServiceControl = true, OllamaServiceNeedsPassword = true });
+        await model.Load();
+        model.ClaudeCommand = "claude2";
+        model.LocalOptimizeContext = true;
+        model.ServicePassword = "hunter2";
+        connection.Setup(x => x.ConfigureOllamaService(true, "hunter2", It.IsAny<CancellationToken>())).ReturnsAsync(Current with { OllamaServiceControl = true, OllamaServiceNeedsPassword = false, LocalOptimizeContext = true, LocalServerNote = "Configured." });
+
+        model.ConfirmServiceCommand.Execute(null);
+        await Until(() => !model.IsServiceDialogOpen);
+
+        Assert.Equal(("", true, "claude2", "Configured."), (model.ServicePassword, model.LocalOptimizeContext, model.ClaudeCommand, model.LocalServerNote));
+        Assert.False(model.NeedsServicePassword);
+        Assert.Empty(saved);
+
+        model.CloseCommand.Execute(null);
+        await Until(() => closed);
+
+        Assert.Equal(("claude2", true), (saved.Single().ClaudeCommand, saved.Single().LocalOptimizeContext));
+    }
+
+    [Fact]
+    public async Task ConfirmingWithoutAPasswordNeededSendsNone()
+    {
+        EnvironmentViewModel model = Open(Current with { OllamaServiceControl = true, LocalOptimizeContext = true });
+        await model.Load();
+        model.LocalOptimizeContext = false;
+        model.ServicePassword = "stray";
+        connection.Setup(x => x.ConfigureOllamaService(false, null, It.IsAny<CancellationToken>())).ReturnsAsync(Current with { OllamaServiceControl = true });
+
+        model.ConfirmServiceCommand.Execute(null);
+        await Until(() => !model.IsServiceDialogOpen);
+
+        Assert.Equal(("Restore and Restart", false), (model.ServiceConfirm, model.LocalOptimizeContext));
+        connection.Verify(x => x.ConfigureOllamaService(false, null, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task AWrongPasswordIsShownInTheDialogWhichStaysOpenWithTheFieldCleared()
+    {
+        EnvironmentViewModel model = Open(Current with { OllamaServiceControl = true, OllamaServiceNeedsPassword = true });
+        await model.Load();
+        model.LocalOptimizeContext = true;
+        model.ServicePassword = "bad";
+        connection.Setup(x => x.ConfigureOllamaService(true, "bad", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The password was not accepted."));
+
+        model.ConfirmServiceCommand.Execute(null);
+        await Until(() => model.HasServiceError);
+
+        Assert.Equal("The password was not accepted.", model.ServiceError);
+        Assert.True(model.IsServiceDialogOpen);
+        Assert.Equal(string.Empty, model.ServicePassword);
+        Assert.False(model.HasError);
     }
 }
