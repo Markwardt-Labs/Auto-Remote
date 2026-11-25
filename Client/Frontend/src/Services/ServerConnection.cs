@@ -162,10 +162,11 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="id">The workspace identifier.</param>
     /// <param name="before">The cursor of <see cref="ChatHistory.Older" /> to read before, or <see langword="null" /> for the newest messages.</param>
     /// <param name="limit">The most messages to read, or <see langword="null" /> for the server's default.</param>
+    /// <param name="characters">The most characters of text to read (at least one message is always read), or <see langword="null" /> for the server\'s default.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <returns>The chunk in order and whether the AI is working.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<ChatHistory> GetHistory(Guid id, string? before, int? limit, CancellationToken cancellation);
+    Task<ChatHistory> GetHistory(Guid id, string? before, int? limit, int? characters, CancellationToken cancellation);
 
     /// <summary>
     /// Sends a prompt to the AI in a workspace. It is accepted at once, also while the AI works, and the conversation arrives as events.
@@ -927,7 +928,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<FolderListing> CreateFolder(string parent, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateFolder, Path = parent, Name = name }, cancellation)).Listing ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<ChatHistory> GetHistory(Guid id, string? before, int? limit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetHistory, WorkspaceId = id, Before = before, Limit = limit }, cancellation)).History ?? throw Malformed();
+    public async Task<ChatHistory> GetHistory(Guid id, string? before, int? limit, int? characters, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetHistory, WorkspaceId = id, Before = before, Limit = limit, Characters = characters }, cancellation)).History ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task Prompt(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text }, cancellation);

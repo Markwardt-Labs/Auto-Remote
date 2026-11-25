@@ -14,7 +14,7 @@ public sealed class WorkScenarios
 
         Assert.Contains("red", await server.Ask(workspace, $"What color is the square in the attached image? Answer with one lowercase word.\nAttached file: {image}"), StringComparison.OrdinalIgnoreCase);
         Assert.Contains("4711", await server.Ask(workspace, $"What is the secret number in the attached text file? Answer with just the number.\nAttached file: {notes}"), StringComparison.Ordinal);
-        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
         Assert.Contains(history.Messages, message => message.Role == MessageRole.User && message.Text.Contains("Attached file: " + notes, StringComparison.Ordinal));
         Assert.Empty(server.Failures(workspace));
     }
@@ -56,7 +56,7 @@ public sealed class WorkScenarios
 
         Assert.Contains("could not be started", server.Failures(workspace, mark)[0]);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
-        Assert.False((await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Working);
+        Assert.False((await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).Working);
     }
 
     [LocalModelFact]
@@ -74,7 +74,7 @@ public sealed class WorkScenarios
         Assert.Empty(server.Failures(workspace));
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
         Assert.Matches("^[0-9a-f]{32}$", (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single().SessionId);
-        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
         Assert.Contains(history.Messages, message => message.Role == MessageRole.User && message.Text.Contains("hello.txt", StringComparison.Ordinal));
     }
 
@@ -133,7 +133,7 @@ public sealed class WorkScenarios
 
         Console.Error.WriteLine("ERROR: " + error.Message);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
-        RemoteException history = await Assert.ThrowsAsync<RemoteException>(() => server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None));
+        RemoteException history = await Assert.ThrowsAsync<RemoteException>(() => server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None));
         Assert.Contains("does not exist", history.Message, StringComparison.Ordinal);
     }
 

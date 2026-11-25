@@ -86,6 +86,11 @@ public sealed record RemoteRequest
     public int? Limit { get; init; }
 
     /// <summary>
+    /// Gets how many characters of text <see cref="RemoteCommand.GetHistory" /> reads at most (the chunk always has at least one message), or <see langword="null" /> for the server's default; a chunk is bounded by its text as well as by <see cref="Limit" />, so a conversation of a few long messages and one of many short tool calls load in pieces of about the same weight.
+    /// </summary>
+    public int? Characters { get; init; }
+
+    /// <summary>
     /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" />, the input for <see cref="RemoteCommand.SaveInput" /> or the input line for <see cref="RemoteCommand.SendScriptInput" />.
     /// </summary>
     public string? Text { get; init; }

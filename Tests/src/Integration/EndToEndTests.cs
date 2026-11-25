@@ -331,7 +331,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Kind == RemoteEventKind.WorkingChanged);
 
         Assert.Equal(["hello", "reply to hello", "again", "reply to again"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
-        ChatHistory history = await connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
         Assert.Equal(["hello", "reply to hello", "again", "reply to again"], history.Messages.Select(message => message.Text));
         Assert.False(history.Working);
     }
@@ -344,7 +344,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         await connection.Prompt(workspace.Id, "long", CancellationToken.None);
         await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
-        Assert.True((await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Working);
+        Assert.True((await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).Working);
         await connection.Prompt(workspace.Id, "short", CancellationToken.None);
         List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Working == false);
 
@@ -367,7 +367,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         LimitPause pause = paused.First(remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged).LimitPause!;
         Assert.Equal(("5 hours", 97d, 95d), (pause.Window, pause.PercentUsed, pause.MaxPercent));
-        Assert.Equal(pause.Window, (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).LimitPause?.Window);
+        Assert.Equal(pause.Window, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).LimitPause?.Window);
 
         usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(40));
         usageOf.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(40));
@@ -375,7 +375,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         string[] said = [.. events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message?.Role == MessageRole.User).Select(remoteEvent => remoteEvent.Message!.Text)];
         Assert.Equal(["long", "pause current work", "resume unfinished work"], said);
-        Assert.Null((await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).LimitPause);
+        Assert.Null((await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).LimitPause);
     }
 
     [Fact]
@@ -485,22 +485,22 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         await connection.Prompt(workspace.Id, "work please", CancellationToken.None);
         await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && events.Last().Working == false);
-        ChatHistory hidden = await connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory hidden = await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
 
         await connection.SetShowWork(workspace.Id, true, CancellationToken.None);
         await changed.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        ChatHistory shown = await other.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory shown = await other.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.False(hidden.ShowWork);
         Assert.Equal(["work please", "reply to work please"], hidden.Messages.Select(message => message.Text));
         Assert.True(shown.ShowWork);
-        Assert.Equal(["work please", "shell: ls", "a.txt", "reply to work please"], shown.Messages.Select(message => message.Text));
+        Assert.Equal(["work please", "Run ls", "→ a.txt", "reply to work please"], shown.Messages.Select(message => message.Text));
         Assert.Equal([false, true, true, false], shown.Messages.Select(message => message.IsWork));
         Assert.Contains(workspace.Id, (await connection.ListWorkspaces(CancellationToken.None)).Workspaces.Where(item => item.ShowWork).Select(item => item.Id));
 
         await connection.SetShowWork(workspace.Id, false, CancellationToken.None);
 
-        Assert.Equal(["work please", "reply to work please"], (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
+        Assert.Equal(["work please", "reply to work please"], (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
     }
 
     [Fact]
@@ -533,7 +533,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.StartsWith(string.Concat(pieces), "The answer is streamed.", StringComparison.Ordinal);
         Assert.DoesNotContain(events.Skip(final + 1), remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta);
         Assert.Equal("The answer is streamed.", events[final].Message!.Text);
-        Assert.Equal(["stream quietly", "The answer is streamed.", "stream aloud", "The answer is streamed."], (await connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
+        Assert.Equal(["stream quietly", "The answer is streamed.", "stream aloud", "The answer is streamed."], (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
     }
 
     [Fact]
@@ -548,8 +548,8 @@ public sealed class EndToEndTests : IAsyncLifetime
             await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == (index + 1) * 2 && events.Last().Working == false);
         }
 
-        ChatHistory newest = await connection.GetHistory(workspace.Id, null, 4, CancellationToken.None);
-        ChatHistory older = await connection.GetHistory(workspace.Id, newest.Older, 4, CancellationToken.None);
+        ChatHistory newest = await connection.GetHistory(workspace.Id, null, 4, null, CancellationToken.None);
+        ChatHistory older = await connection.GetHistory(workspace.Id, newest.Older, 4, null, CancellationToken.None);
 
         Assert.NotNull(newest.Older);
         Assert.Equal(["q1", "reply to q1", "q2", "reply to q2"], newest.Messages.Select(message => message.Text));

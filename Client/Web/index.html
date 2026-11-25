@@ -414,7 +414,9 @@ function writeNumbered(workspaceId, files) {
 }
 const draftKey = "autoRemote.draft.";
 const historyChunk = 30;
-const chatChunk = 20;
+const chatChunkMessages = 100;
+const chatChunkCharacters = 20000;
+const chatReachRounds = 60;
 const messagePosition = cursor => (/^\d+$/.test(cursor ?? "") ? Number(cursor) : 0);
 const maxAttachment = 20 * 1024 * 1024;
 const paceOf = (period, now = Date.now()) => {
@@ -1502,7 +1504,7 @@ class Connection {
   shiftGroup(groupId, offset) { return this.request("ShiftGroup", { groupId, offset }); }
   listFolders(path) { return this.request("ListFolders", { path: path ?? undefined }).then(r => r.listing); }
   createFolder(path, name) { return this.request("CreateFolder", { path, name }).then(r => r.listing); }
-  getHistory(workspaceId, before, limit) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit }).then(r => r.history); }
+  getHistory(workspaceId, before, limit, characters) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit, characters }).then(r => r.history); }
   renderDiagram(source) { return this.request("RenderDiagram", { text: source }).then(r => r.diagram); }
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
   promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
@@ -2978,7 +2980,7 @@ class WorkspaceView {
     this.applyState();
   }
 
-  async loadChat() {
+  async loadChat(reach = null) {
     this.loading = true;
     const saved = await attempt(() => this.connection.getSavedInputs(this.info.id), this.chatError);
 
@@ -2986,12 +2988,26 @@ class WorkspaceView {
       this.setSavedInputs(saved.value);
     }
 
-    const result = await attempt(() => this.connection.getHistory(this.info.id, null, chatChunk), this.chatError);
+    const result = await attempt(() => this.connection.getHistory(this.info.id, null, chatChunkMessages, chatChunkCharacters), this.chatError);
 
     if (result.ok) {
+      const window = [...result.value.messages];
+      let older = result.value.older;
+
+      for (let round = 0; reach && older && !window.some(message => this.reaches(message, reach)) && round < chatReachRounds; round++) {
+        const more = await attempt(() => this.connection.getHistory(this.info.id, older, chatChunkMessages, chatChunkCharacters), this.chatError);
+
+        if (!more.ok) {
+          break;
+        }
+
+        window.unshift(...more.value.messages);
+        older = more.value.older;
+      }
+
       this.streaming = null;
-      this.messages = [...result.value.messages];
-      this.start = messagePosition(result.value.older);
+      this.messages = window;
+      this.start = messagePosition(older);
       this.setShowWork(result.value.showWork === true);
       this.setWorking(result.value.working === true);
       this.setLimitPause(result.value.limitPause ?? null);
@@ -2999,6 +3015,53 @@ class WorkspaceView {
     }
 
     this.flushEarly();
+  }
+
+  reaches(message, wanted) {
+    return message.role === wanted.role && message.text === wanted.text && (!message.time || !wanted.time || message.time === wanted.time);
+  }
+
+  async reloadChat() {
+    const reach = this.messages.find(message => !message.isWork && message !== this.streaming?.message) ?? null;
+    const visible = [];
+
+    if (!this.chatAuto && this.scroller.clientHeight > 0) {
+      const scroller = this.scroller.getBoundingClientRect();
+
+      [...this.list.children].forEach((child, index) => {
+        const box = child.getBoundingClientRect();
+
+        if (this.messages[index] && box.bottom > scroller.top + 0.5 && box.top < scroller.bottom && visible.length < 40) {
+          visible.push({ message: this.messages[index], top: box.top - scroller.top });
+        }
+      });
+    }
+
+    this.reloading = true;
+
+    try {
+      await this.loadChat(reach);
+    } finally {
+      this.reloading = false;
+    }
+
+    if (visible.length > 0) {
+      this.returnTo(visible);
+    }
+  }
+
+  returnTo(visible) {
+    for (const { message, top } of visible) {
+      const index = this.messages.findIndex(shown => this.reaches(shown, message));
+      const element = index >= 0 ? this.list.children[index] : null;
+
+      if (element) {
+        this.scroller.scrollTop = this.contentTop(element) - top;
+        this.lastScrollTop = this.scroller.scrollTop;
+        this.captureAnchor();
+        return;
+      }
+    }
   }
 
   flushEarly() {
@@ -3034,7 +3097,7 @@ class WorkspaceView {
     const requested = this.start;
 
     try {
-      const result = await attempt(() => this.connection.getHistory(this.info.id, String(requested), chatChunk), this.chatError);
+      const result = await attempt(() => this.connection.getHistory(this.info.id, String(requested), chatChunkMessages, chatChunkCharacters), this.chatError);
 
       if (result.ok && this.start !== requested) {
         return;
@@ -3059,7 +3122,21 @@ class WorkspaceView {
   }
 
   trimToNewest() {
-    const drop = this.messages.length - chatChunk;
+    let keep = 0;
+    let weight = 0;
+
+    for (let index = this.messages.length - 1; index >= 0 && keep < chatChunkMessages; index--) {
+      const length = this.messages[index].text.length;
+
+      if (keep > 0 && weight + length > chatChunkCharacters) {
+        break;
+      }
+
+      weight += length;
+      keep++;
+    }
+
+    const drop = this.messages.length - keep;
 
     if (drop <= 0) {
       return false;
@@ -3089,7 +3166,7 @@ class WorkspaceView {
     }
 
     if (event.kind === "ShowWorkChanged") {
-      this.loadChat();
+      this.reloadChat();
       return;
     }
 
@@ -3148,19 +3225,25 @@ class WorkspaceView {
         this.chatError.set(null);
       }
 
-      if (this.streaming && event.message.role === "Assistant" && !event.message.isWork) {
-        this.messages[this.messages.indexOf(this.streaming.message)] = event.message;
-        this.streaming.element.replaceWith(this.messageElement(event.message));
+      const message = event.message;
+
+      if (this.streaming && message.role === "Assistant" && (message.isThought ? this.streaming.message.isThought === true : !message.isWork && this.streaming.message.isThought !== true)) {
+        this.messages[this.messages.indexOf(this.streaming.message)] = message;
+        this.streaming.element.replaceWith(this.messageElement(message));
         this.streaming = null;
         this.scrollToEnd();
         return;
+      }
+
+      if (this.streaming && message.isThought) {
+        this.dropStreaming();
       }
 
       this.messages.push(event.message);
       this.appendMessage(event.message);
       this.keepWindow();
     } else if (event.kind === "MessageDelta" && this.showWork && event.text) {
-      this.streamMessage(event.text);
+      this.streamMessage(event.text, event.thought === true);
     } else if (event.kind === "WorkingChanged") {
       this.setWorking(event.working === true);
 
@@ -3196,12 +3279,19 @@ class WorkspaceView {
 
   renderMessages() {
     this.list.replaceChildren(...this.messages.map(message => this.messageElement(message)));
-    this.scrollToEnd(true);
+
+    if (this.chatAuto || !this.reloading) {
+      this.scrollToEnd(true);
+    }
   }
 
-  streamMessage(piece) {
+  streamMessage(piece, thought) {
+    if (this.streaming && (this.streaming.message.isThought === true) !== thought) {
+      this.dropStreaming();
+    }
+
     if (!this.streaming) {
-      const message = { role: "Assistant", text: piece };
+      const message = { role: "Assistant", text: piece, time: new Date().toISOString(), isWork: thought, isThought: thought };
       this.messages.push(message);
       this.streaming = { message, element: this.messageElement(message) };
       this.list.append(this.streaming.element);

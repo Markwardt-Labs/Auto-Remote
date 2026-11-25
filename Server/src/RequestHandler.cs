@@ -132,7 +132,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.CreateFolder:
                 return new RemoteResponse { Id = 0, Listing = await folders.Create(Require(request.Path, "path"), Require(request.Name, "name"), cancellation) };
             case RemoteCommand.GetHistory:
-                return new RemoteResponse { Id = 0, History = (await prompts.History(RequireWorkspace(request), request.Before, request.Limit, cancellation)) with { LimitPause = guard.Get(RequireWorkspace(request)) } };
+                return new RemoteResponse { Id = 0, History = (await prompts.History(RequireWorkspace(request), request.Before, request.Limit, request.Characters, cancellation)) with { LimitPause = guard.Get(RequireWorkspace(request)) } };
             case RemoteCommand.Prompt:
                 RequireAiInput(request);
                 return await Prompt(RequireWorkspace(request), Require(request.Text, "text"), request.IgnoreLimit == true, cancellation);

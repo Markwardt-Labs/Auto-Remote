@@ -23,7 +23,7 @@ public sealed class HistoryScenarios
 
         do
         {
-            ChatHistory chunk = await server.Connection.GetHistory(workspace.Id, cursor, 3, CancellationToken.None);
+            ChatHistory chunk = await server.Connection.GetHistory(workspace.Id, cursor, 3, null, CancellationToken.None);
             Assert.True(chunk.Messages.Count <= 3);
             stored.InsertRange(0, chunk.Messages.Select(message => (message.Role, message.Text.Trim())));
             cursor = chunk.Older;
@@ -53,7 +53,7 @@ public sealed class HistoryScenarios
         string reply = await server.Ask(workspace, prompt);
 
         Assert.Contains("ZEBRA", reply, StringComparison.Ordinal);
-        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
         Assert.Equal(prompt.Trim(), history.Messages.First(message => message.Role == MessageRole.User).Text.Trim());
         Assert.Empty(server.Failures(workspace));
     }

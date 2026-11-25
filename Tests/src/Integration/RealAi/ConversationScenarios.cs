@@ -38,7 +38,7 @@ public sealed class ConversationScenarios
         await server.Stop();
         await server.Launch();
 
-        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
         Assert.Contains(history.Messages, message => message.Role == MessageRole.User && message.Text.Contains("TANGERINE", StringComparison.Ordinal));
         Assert.Contains("TANGERINE", await server.Ask(workspace, "What was the code word? Reply with just the word."), StringComparison.OrdinalIgnoreCase);
         Assert.Empty(server.Failures(workspace));

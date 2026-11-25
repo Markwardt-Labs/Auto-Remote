@@ -348,7 +348,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_GetHistory_PassesTheChunkBounds()
     {
         ChatHistory chunk = new() { Messages = [], Older = "4:0", Working = true };
-        prompts.Setup(x => x.History(workspace.Id, "9:2", 5, It.IsAny<CancellationToken>())).ReturnsAsync(chunk);
+        prompts.Setup(x => x.History(workspace.Id, "9:2", 5, null, It.IsAny<CancellationToken>())).ReturnsAsync(chunk);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetHistory, WorkspaceId = workspace.Id, Before = "9:2", Limit = 5 }, owner, CancellationToken.None);
 
@@ -359,7 +359,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_GetHistory_TellsWhetherTheWorkspaceIsPausedBecauseOfAUsageWindow()
     {
         LimitPause pause = new() { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };
-        prompts.Setup(x => x.History(workspace.Id, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        prompts.Setup(x => x.History(workspace.Id, null, null, null, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         guard.Setup(x => x.Get(workspace.Id)).Returns(pause);
 
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetHistory, WorkspaceId = workspace.Id }, owner, CancellationToken.None);

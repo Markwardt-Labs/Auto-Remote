@@ -8,7 +8,7 @@ public sealed class ChatViewModelTests
 
     private readonly ChatViewModel chat;
 
-    public ChatViewModelTests() => chat = new ChatViewModel(connection.Object, workspaceId);
+    public ChatViewModelTests() => chat = new ChatViewModel(connection.Object, workspaceId) { ChunkMessages = 20 };
 
     [Fact]
     public void AutoScroll_IsOnUntilTurnedOff()
@@ -95,7 +95,7 @@ public sealed class ChatViewModelTests
     public async Task ReviewAndExpand_AreAvailableWhileTheAiWorksAndSendTheirPromptToTheWorkInProgress(bool review)
     {
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetWorkspaceSettings(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it", GlobalExpandPrompt = "expand it" });
         string? sent = null;
         connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, text, _) => sent = text).Returns(Task.CompletedTask);
@@ -171,7 +171,7 @@ public sealed class ChatViewModelTests
     public async Task Start_RaisesLoadedOnceTheConversationIsShown()
     {
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }] });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.User, Text = "hi" }] });
         int shown = -1;
         chat.Loaded += () => shown = chat.Messages.Count;
 
@@ -186,7 +186,7 @@ public sealed class ChatViewModelTests
         Mock<IDraftStore> drafts = new();
         drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("half written");
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object);
 
         await restoring.Start();
@@ -201,7 +201,7 @@ public sealed class ChatViewModelTests
         Mock<IDraftStore> drafts = new();
         drafts.Setup(x => x.Load(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync("old draft");
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         ChatViewModel restoring = new(connection.Object, workspaceId, drafts.Object) { Input = "typed already" };
 
         await restoring.Start();
@@ -235,7 +235,7 @@ public sealed class ChatViewModelTests
         ChatMessage one = new() { Role = MessageRole.User, Text = "one" };
         ChatMessage two = new() { Role = MessageRole.Assistant, Text = "two" };
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.SetupSequence(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>()))
+        connection.SetupSequence(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new ChatHistory { Messages = [one], Working = true })
             .ReturnsAsync(new ChatHistory { Messages = [one, two], Working = false });
         await chat.Start();
@@ -400,7 +400,7 @@ public sealed class ChatViewModelTests
     public async Task SavedInputs_AreReadWithTheConversationAndFollowTheEventsOfEveryClient()
     {
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         SavedInput first = Saved("first", 1);
         SavedInput second = Saved("second", 2);
         connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([first]);
@@ -429,13 +429,123 @@ public sealed class ChatViewModelTests
         Assert.False(chat.IsSavedInputsOpen);
     }
 
+    private static ChatMessage Thought(string text) => new() { Role = MessageRole.Assistant, Text = text, IsWork = true, IsThought = true, Time = DateTimeOffset.UtcNow };
+
+    private RemoteEvent Piece(string text, bool thought) => new() { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspaceId, Text = text, Thought = thought ? true : null };
+
+    [Fact]
+    public async Task TheReasoningBeingStreamedIsAWorkMessageWithATimeThatTheFinishedReasoningTakesTheSeatOfBeforeTheAnswerStreams()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(true, Said("before"));
+        await chat.Start();
+
+        connection.Raise(x => x.EventReceived += null, Piece("let me ", true));
+        connection.Raise(x => x.EventReceived += null, Piece("think", true));
+
+        ChatMessage streamed = chat.Messages[^1];
+        Assert.Equal(("let me think", true, true), (streamed.Text, streamed.IsWork, streamed.IsThought));
+        Assert.NotNull(streamed.Time);
+
+        connection.Raise(x => x.EventReceived += null, Added(Thought("let me think")));
+        connection.Raise(x => x.EventReceived += null, Piece("The ", false));
+        connection.Raise(x => x.EventReceived += null, Piece("answer", false));
+        connection.Raise(x => x.EventReceived += null, Added(Said("The answer")));
+
+        Assert.Equal(["before", "let me think", "The answer"], chat.Messages.Select(message => message.Text));
+        Assert.Equal([false, true, false], chat.Messages.Select(message => message.IsThought));
+        Assert.Equal([false, true, false], chat.Messages.Select(message => message.IsWork));
+    }
+
+    [Fact]
+    public async Task WorkAddedWhileTheReasoningStreamsComesAfterItAndThenTheReasoningIsFinishedInPlace()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(true, Said("before"));
+        await chat.Start();
+        connection.Raise(x => x.EventReceived += null, Piece("thinking", true));
+
+        connection.Raise(x => x.EventReceived += null, Added(Thought("thinking")));
+        connection.Raise(x => x.EventReceived += null, Added(Did("Read a.txt")));
+
+        Assert.Equal(["before", "thinking", "Read a.txt"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task ReasoningThatTheWorkspaceDoesNotShowIsNotStreamedAndTheStoredOneStaysHidden()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(false, Said("before"));
+        await chat.Start();
+
+        connection.Raise(x => x.EventReceived += null, Piece("secret", true));
+        connection.Raise(x => x.EventReceived += null, Added(Thought("secret")));
+
+        Assert.Equal(["before"], chat.Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task AChunkIsMeasuredInTextSoFewLongMessagesAndManyShortOnesFillAWindowAlike()
+    {
+        ChatViewModel measured = new(connection.Object, workspaceId);
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(workspaceId, null, 100, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [.. Enumerable.Range(0, 5).Select(number => Said($"{number}{new string('x', 6000)}"))], Older = "10" });
+        await measured.Start();
+        measured.AutoScroll = false;
+
+        for (int number = 5; number < 8; number++)
+        {
+            connection.Raise(x => x.EventReceived += null, Added(Said($"{number}{new string('x', 6000)}")));
+        }
+
+        Assert.Equal(8, measured.Messages.Count);
+        Assert.True(measured.TrimToNewest());
+        Assert.Equal(Enumerable.Range(5, 3).Select(number => number.ToString()), measured.Messages.Select(message => message.Text[..1]));
+        measured.AutoScroll = true;
+
+        for (int number = 0; number < 300; number++)
+        {
+            connection.Raise(x => x.EventReceived += null, Added(Said($"→ {number}")));
+        }
+
+        Assert.Equal(100, measured.Messages.Count);
+        Assert.Equal("→ 299", measured.Messages[^1].Text);
+    }
+
+    [Fact]
+    public async Task TurningTheWorkOnReloadsTheSameStretchOfTheConversationNotJustTheNewestChunk()
+    {
+        ChatViewModel measured = new(connection.Object, workspaceId) { ChunkMessages = 3 };
+        List<ChatMessage> before = [Said("m1"), Said("m2"), Said("m3"), Said("m4"), Said("m5")];
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(workspaceId, null, 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [before[2], before[3], before[4]], Older = "2" });
+        connection.Setup(x => x.GetHistory(workspaceId, "2", 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [before[0], before[1]], Older = null });
+        await measured.Start();
+        Assert.True(await measured.LoadOlder());
+        Assert.Equal(["m1", "m2", "m3", "m4", "m5"], measured.Messages.Select(message => message.Text));
+        List<ChatMessage> withWork = [Said("m1"), Did("Read a"), Did("→ 3 lines"), Said("m2"), Did("Run x"), Did("→ done"), Said("m3"), Did("Read b"), Did("→ 9 lines"), Said("m4"), Did("Read c"), Said("m5")];
+        connection.Setup(x => x.GetHistory(workspaceId, null, 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = withWork.TakeLast(3).ToList(), Older = "9", ShowWork = true });
+        connection.Setup(x => x.GetHistory(workspaceId, "9", 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = withWork.Skip(6).Take(3).ToList(), Older = "6", ShowWork = true });
+        connection.Setup(x => x.GetHistory(workspaceId, "6", 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = withWork.Skip(3).Take(3).ToList(), Older = "3", ShowWork = true });
+        connection.Setup(x => x.GetHistory(workspaceId, "3", 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = withWork.Take(3).ToList(), Older = null, ShowWork = true });
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId, ShowWork = true });
+        for (int attempt = 0; attempt < 200 && measured.Messages.Count < withWork.Count; attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.Equal(withWork.Select(message => message.Text), measured.Messages.Select(message => message.Text));
+        Assert.False(measured.HasMore);
+    }
+
     private static ChatMessage Said(string text) => new() { Role = MessageRole.Assistant, Text = text };
 
     private static ChatMessage Did(string text) => new() { Role = MessageRole.Assistant, Text = text, IsWork = true };
 
     private RemoteEvent Added(ChatMessage message) => new() { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspaceId, Message = message };
 
-    private void History(bool show, params ChatMessage[] messages) => connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = messages, ShowWork = show });
+    private void History(bool show, params ChatMessage[] messages) => connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = messages, ShowWork = show });
 
     [Theory]
     [InlineData(false)]
@@ -744,8 +854,8 @@ public sealed class ChatViewModelTests
     private async Task WithHistory(int total, int newest, bool showWork = false)
     {
         connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Numbered(total - newest, total), Older = (total - newest).ToString(CultureInfo.InvariantCulture), ShowWork = showWork });
-        connection.Setup(x => x.GetHistory(workspaceId, It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? cursor, int? limit, CancellationToken _) =>
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Numbered(total - newest, total), Older = (total - newest).ToString(CultureInfo.InvariantCulture), ShowWork = showWork });
+        connection.Setup(x => x.GetHistory(workspaceId, It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? cursor, int? limit, int? characters, CancellationToken _) =>
         {
             int end = int.Parse(cursor!, CultureInfo.InvariantCulture);
             int begin = Math.Max(0, end - limit!.Value);
@@ -761,7 +871,7 @@ public sealed class ChatViewModelTests
 
         Assert.Equal(20, chat.Messages.Count);
         Assert.True(chat.HasMore);
-        connection.Verify(x => x.GetHistory(workspaceId, null, 20, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.GetHistory(workspaceId, null, 20, 20_000, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -783,7 +893,7 @@ public sealed class ChatViewModelTests
         Assert.True(await chat.LoadOlder());
         Assert.Equal(40, chat.Messages.Count);
         Assert.Equal(["m1010", "m1049"], new[] { chat.Messages[0].Text, chat.Messages[^1].Text });
-        connection.Verify(x => x.GetHistory(workspaceId, "1030", 20, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.GetHistory(workspaceId, "1030", 20, 20_000, It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal(Enumerable.Range(1010, 40).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
     }
 
@@ -826,7 +936,7 @@ public sealed class ChatViewModelTests
 
         Assert.True(await chat.LoadOlder());
         Assert.Equal(["m960", "m999"], new[] { chat.Messages[0].Text, chat.Messages[^1].Text });
-        connection.Verify(x => x.GetHistory(workspaceId, "980", 20, It.IsAny<CancellationToken>()), Times.Exactly(2));
+        connection.Verify(x => x.GetHistory(workspaceId, "980", 20, 20_000, It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     [Fact]
@@ -881,7 +991,7 @@ public sealed class ChatViewModelTests
     {
         await WithHistory(1000, 20);
         TaskCompletionSource<ChatHistory> slow = new();
-        connection.Setup(x => x.GetHistory(workspaceId, "980", 20, It.IsAny<CancellationToken>())).Returns(slow.Task);
+        connection.Setup(x => x.GetHistory(workspaceId, "980", 20, 20_000, It.IsAny<CancellationToken>())).Returns(slow.Task);
 
         Task<bool> loading = chat.LoadOlder();
         for (int number = 1000; number < 1005; number++)
@@ -894,7 +1004,7 @@ public sealed class ChatViewModelTests
         Assert.False(await loading);
         Assert.Equal(Enumerable.Range(985, 20).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
 
-        connection.Setup(x => x.GetHistory(workspaceId, "985", 20, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Numbered(965, 985), Older = "965" });
+        connection.Setup(x => x.GetHistory(workspaceId, "985", 20, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Numbered(965, 985), Older = "965" });
         Assert.True(await chat.LoadOlder());
         Assert.Equal(Enumerable.Range(965, 40).Select(number => $"m{number}"), chat.Messages.Select(message => message.Text));
     }
@@ -906,7 +1016,7 @@ public sealed class ChatViewModelTests
     {
         connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
         LimitPause first = Pause();
-        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], LimitPause = first });
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], LimitPause = first });
         List<string?> changed = [];
         chat.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 

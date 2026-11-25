@@ -147,7 +147,7 @@ public sealed class PromptServiceTests : IDisposable
         ChatMessage[] work = [.. published.Where(message => message.IsWork)];
 
         Assert.Equal(["go", "done"], published.Where(message => !message.IsWork).Select(message => message.Text));
-        Assert.Equal(["shell: ls -la", "a.txt", "liveai/fetch_url: {\"url\":\"https://x.test\",\"max\":5}", "Error: no such host", "idle: not json", "(no output)", $"{new string('x', 2000)}... (500 more characters)"], work.Select(message => message.Text));
+        Assert.Equal(["Run ls -la", "→ a.txt", "Fetch https://x.test", "→ Failed: no such host", "idle", "→ No output", "→ 1 line"], work.Select(message => message.Text));
         Assert.All(work, message => Assert.Equal(MessageRole.Assistant, message.Role));
         Assert.All(work, message => Assert.InRange(message.Time!.Value, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddSeconds(1)));
         Assert.Equal([MessageRole.User, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant], chats[workspace.Id].Select(message => message.Role));
@@ -171,9 +171,9 @@ public sealed class PromptServiceTests : IDisposable
             new ChatMessage { Role = MessageRole.Assistant, Text = "answer two", Time = now }
         ];
 
-        ChatHistory all = await service.History(workspace.Id, null, null, CancellationToken.None);
-        ChatHistory newest = await service.History(workspace.Id, null, 2, CancellationToken.None);
-        ChatHistory older = await service.History(workspace.Id, newest.Older, 2, CancellationToken.None);
+        ChatHistory all = await service.History(workspace.Id, null, null, null, CancellationToken.None);
+        ChatHistory newest = await service.History(workspace.Id, null, 2, null, CancellationToken.None);
+        ChatHistory older = await service.History(workspace.Id, newest.Older, 2, null, CancellationToken.None);
 
         Assert.Equal(expected, all.Messages.Select(message => message.Text));
         Assert.Equal(show, all.ShowWork);
@@ -292,7 +292,7 @@ public sealed class PromptServiceTests : IDisposable
     {
         Use(workspace with { ShowWork = true, SessionId = null });
 
-        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await service.History(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.Empty(history.Messages);
         Assert.True(history.ShowWork);
@@ -438,7 +438,7 @@ public sealed class PromptServiceTests : IDisposable
         release.SetResult();
         await Until(() => !service.IsBusy(workspace.Id));
 
-        Assert.Equal(["one", "first reply"], (await service.History(workspace.Id, null, null, CancellationToken.None)).Messages.Select(message => message.Text).ToList());
+        Assert.Equal(["one", "first reply"], (await service.History(workspace.Id, null, null, null, CancellationToken.None)).Messages.Select(message => message.Text).ToList());
     }
 
     [Fact]
@@ -521,6 +521,35 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task History_ReadsAChunkByItsTextAsWellAsByItsMessageCountAndAlwaysAtLeastOneMessage()
+    {
+        Use(workspace with { ShowWork = true });
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        chats[workspace.Id] =
+        [
+            new ChatMessage { Role = MessageRole.User, Text = new string('a', 100), Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "Read a.txt", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = "→ 3 lines", Time = now, IsWork = true },
+            new ChatMessage { Role = MessageRole.Assistant, Text = new string('b', 15_000), Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = new string('c', 15_000), Time = now },
+            new ChatMessage { Role = MessageRole.Assistant, Text = new string('d', 50_000), Time = now }
+        ];
+
+        ChatHistory huge = await service.History(workspace.Id, null, null, 20_000, CancellationToken.None);
+        ChatHistory next = await service.History(workspace.Id, huge.Older, null, 20_000, CancellationToken.None);
+        ChatHistory last = await service.History(workspace.Id, next.Older, null, 20_000, CancellationToken.None);
+        ChatHistory capped = await service.History(workspace.Id, null, 2, 1_000_000, CancellationToken.None);
+
+        Assert.Equal([50_000], huge.Messages.Select(message => message.Text.Length));
+        Assert.Equal("5", huge.Older);
+        Assert.Equal([15_000], next.Messages.Select(message => message.Text.Length));
+        Assert.Equal("4", next.Older);
+        Assert.Equal([100, "Read a.txt".Length, "→ 3 lines".Length, 15_000], last.Messages.Select(message => message.Text.Length));
+        Assert.Null(last.Older);
+        Assert.Equal(2, capped.Messages.Count);
+    }
+
+    [Fact]
     public async Task Prompt_ReportsAWorkThatEndsWithoutAReplyOrAToolCallAndStillLeavesTheWorkspaceReady()
     {
         prompter.OnCreate = session => session.ReplyWith(_ => [new PromptThinkingEvent { Text = "hmm" }]);
@@ -572,17 +601,52 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task Prompt_StreamsTheReasoningOfTheAiAsItsOwnPassageBeforeTheAnswerOnlyWhileTheWorkspaceShowsTheWork()
+    public async Task Prompt_StreamsTheReasoningAsItsOwnPassageAndKeepsItAsATimestampedWorkMessageBeforeTheAnswer()
     {
         Use(workspace with { ShowWork = true });
         PromptService streaming = Streaming(out _);
         prompter.OnCreate = session => session.ReplyWith(_ => Reasoning());
+        DateTimeOffset before = DateTimeOffset.UtcNow;
 
         await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
         await Until(() => !streaming.IsBusy(workspace.Id));
 
-        Assert.Equal("Thinking: let me think\n\nThe answer", string.Concat(Events(RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text)));
+        RemoteEvent[] pieces = [.. Events(RemoteEventKind.MessageDelta)];
+        Assert.Equal("let me think", string.Concat(pieces.Where(piece => piece.Thought == true).Select(piece => piece.Text)));
+        Assert.Equal("The answer", string.Concat(pieces.Where(piece => piece.Thought != true).Select(piece => piece.Text)));
+        ChatMessage thought = Assert.Single(chats[workspace.Id], message => message.IsThought);
+        Assert.Equal(("let me think", true, MessageRole.Assistant), (thought.Text, thought.IsWork, thought.Role));
+        Assert.InRange(thought.Time!.Value, before, DateTimeOffset.UtcNow.AddSeconds(1));
+        Assert.Equal(["go", "let me think", "The answer"], chats[workspace.Id].Select(message => message.Text));
         Assert.Equal(["The answer"], Messages(MessageRole.Assistant));
+    }
+
+    [Fact]
+    public async Task Prompt_KeepsTheReasoningEvenWhileTheWorkspaceDoesNotShowTheWorkSoShowingItLaterBringsItBack()
+    {
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptThinkingEvent { Text = "step one. " }, new PromptThinkingEvent { Text = "step two." }, new PromptToolCallEvent { Id = "1", Name = "read_file", Input = "{\"path\":\"a.txt\"}" }, new PromptMessageEvent { Text = "done" }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        Assert.Empty(Events(RemoteEventKind.MessageDelta));
+        Assert.Equal(["go", "step one. step two.", "Read a.txt", "done"], chats[workspace.Id].Select(message => message.Text));
+        Assert.Equal([false, true, true, false], chats[workspace.Id].Select(message => message.IsWork));
+        Assert.Equal([false, true, false, false], chats[workspace.Id].Select(message => message.IsThought));
+        Assert.Equal(["go", "done"], (await service.History(workspace.Id, null, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
+    }
+
+    [Fact]
+    public async Task Prompt_EndsTheReasoningWhenTheWorkEndsWithoutAnythingElse()
+    {
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptThinkingEvent { Text = "hmm" }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        await Until(() => chats.TryGetValue(workspace.Id, out List<ChatMessage>? written) && written.Any(message => message.IsThought));
+
+        Assert.Equal("hmm", Assert.Single(chats[workspace.Id], message => message.IsThought).Text);
     }
 
     [Fact]
@@ -1196,11 +1260,11 @@ public sealed class PromptServiceTests : IDisposable
             await Until(() => !service.IsBusy(workspace.Id));
         }
 
-        ChatHistory newest = await service.History(workspace.Id, null, 4, CancellationToken.None);
+        ChatHistory newest = await service.History(workspace.Id, null, 4, null, CancellationToken.None);
         Assert.Equal(["q2", "reply to q2", "q3", "reply to q3"], newest.Messages.Select(message => message.Text).ToList());
         Assert.NotNull(newest.Older);
 
-        ChatHistory earlier = await service.History(workspace.Id, newest.Older, 4, CancellationToken.None);
+        ChatHistory earlier = await service.History(workspace.Id, newest.Older, 4, null, CancellationToken.None);
         Assert.Equal(["q1", "reply to q1"], earlier.Messages.Select(message => message.Text).ToList());
         Assert.Null(earlier.Older);
         Assert.Equal([MessageRole.User, MessageRole.Assistant], earlier.Messages.Select(message => message.Role).ToList());
@@ -1218,7 +1282,7 @@ public sealed class PromptServiceTests : IDisposable
         await service.Prompt(workspace.Id, "[Request interrupted by user]", CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id));
 
-        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await service.History(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.Equal(["tools please", "used tools", "[Request interrupted by user]", "ok"], history.Messages.Select(message => message.Text).ToList());
         Assert.False(history.Working);
@@ -1233,7 +1297,7 @@ public sealed class PromptServiceTests : IDisposable
         await Until(() => !service.IsBusy(workspace.Id));
         int sessions = prompter.Sessions.Count;
 
-        ChatHistory history = await Restart().History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await Restart().History(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.Equal(["q1", "reply to q1"], history.Messages.Select(message => message.Text).ToList());
         Assert.Equal(sessions, prompter.Sessions.Count);
@@ -1255,10 +1319,10 @@ public sealed class PromptServiceTests : IDisposable
         await seeded.DisposeAsync();
         Use(workspace with { SessionId = seeded.Id });
 
-        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await service.History(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.Equal(["first question", "reply to first questi", "reply to This session", "reply to steered text", "last question", "reply to last questio"], history.Messages.Select(message => message.Text).ToList());
-        await service.History(workspace.Id, null, null, CancellationToken.None);
+        await service.History(workspace.Id, null, null, null, CancellationToken.None);
         store.Verify(x => x.SaveMessages(workspace.Id, It.IsAny<IReadOnlyList<ChatMessage>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -1274,7 +1338,7 @@ public sealed class PromptServiceTests : IDisposable
         await Until(() => !service.IsBusy(workspace.Id));
         await service.Ask(workspace.Id, "write a message", CancellationToken.None);
 
-        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await service.History(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.Equal(["one", "two", "first reply", "reply to two"], history.Messages.Select(message => message.Text).ToList());
     }
@@ -1282,12 +1346,12 @@ public sealed class PromptServiceTests : IDisposable
     [Fact]
     public async Task History_WithoutAConversationIsEmptyAndANonsenseCursorIsRefused()
     {
-        ChatHistory history = await service.History(workspace.Id, null, null, CancellationToken.None);
+        ChatHistory history = await service.History(workspace.Id, null, null, null, CancellationToken.None);
 
         Assert.Empty(history.Messages);
         Assert.Null(history.Older);
         Assert.Empty(prompter.Sessions);
-        await Assert.ThrowsAsync<RequestException>(() => service.History(workspace.Id, "nonsense", null, CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => service.History(workspace.Id, "nonsense", null, null, CancellationToken.None));
     }
 
     private IEnumerable<PromptEvent> Failing(Task gate)

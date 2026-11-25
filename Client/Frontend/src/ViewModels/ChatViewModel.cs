@@ -84,7 +84,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly List<RemoteEvent> early = [];
 
-    private readonly int chunk = 20;
+    private readonly int reachRounds = 60;
 
     private int start;
 
@@ -118,6 +118,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// Raised once the stored conversation is shown, so the view can start at its end.
     /// </summary>
     public event Action? Loaded;
+
+    /// <summary>
+    /// Gets the most messages a chunk of the conversation holds, which is both what a read asks the server for and what the window of the newest messages keeps.
+    /// </summary>
+    internal int ChunkMessages { get; init; } = 100;
+
+    /// <summary>
+    /// Gets the most characters of text a chunk of the conversation holds (a chunk always has at least one message), so a chunk of long messages and one of short tool calls are about equally heavy for the view to build.
+    /// </summary>
+    internal int ChunkCharacters { get; init; } = 20_000;
 
     /// <summary>
     /// Gets the messages in order: a window of the newest ones, with the chunks the user loaded by scrolling up in front of them until the conversation is back at its end.
@@ -504,7 +514,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         try
         {
-            if (!await Attempt(async () => history = await connection.GetHistory(workspaceId, requested.ToString(CultureInfo.InvariantCulture), chunk, CancellationToken.None)))
+            if (!await Attempt(async () => history = await connection.GetHistory(workspaceId, requested.ToString(CultureInfo.InvariantCulture), ChunkMessages, ChunkCharacters, CancellationToken.None)))
             {
                 return false;
             }
@@ -537,7 +547,23 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// <returns><see langword="true" /> if messages were dropped.</returns>
     public bool TrimToNewest()
     {
-        int drop = Messages.Count - chunk;
+        int keep = 0;
+        int weight = 0;
+
+        for (int index = Messages.Count - 1; index >= 0 && keep < ChunkMessages; index--)
+        {
+            int length = Messages[index].Text.Length;
+
+            if (keep > 0 && weight + length > ChunkCharacters)
+            {
+                break;
+            }
+
+            weight += length;
+            keep++;
+        }
+
+        int drop = Messages.Count - keep;
 
         if (drop <= 0)
         {
@@ -569,10 +595,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private async Task Reload()
     {
         loading = true;
+        ChatMessage? reach = Messages.FirstOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
 
         try
         {
-            await Load();
+            await Load(reach);
         }
         finally
         {
@@ -580,11 +607,16 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private void Stream(string piece)
+    private void Stream(string piece, bool thought)
     {
+        if (streaming is not null && streaming.IsThought != thought)
+        {
+            Unstream();
+        }
+
         if (streaming is null)
         {
-            streaming = new ChatMessage { Role = MessageRole.Assistant, Text = piece };
+            streaming = new ChatMessage { Role = MessageRole.Assistant, Text = piece, Time = DateTimeOffset.UtcNow, IsWork = thought, IsThought = thought };
             Messages.Add(streaming);
             KeepWindow();
             return;
@@ -679,7 +711,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool Same(ChatMessage first, ChatMessage second) => first.Role == second.Role && first.Text.Trim() == second.Text.Trim();
 
-    private async Task Load()
+    private async Task Load(ChatMessage? reach = null)
     {
         ChatHistory? history = null;
         IReadOnlyList<SavedInput>? saved = null;
@@ -689,11 +721,27 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             ShowSavedInputs(saved!);
         }
 
-        if (await Attempt(async () => history = await connection.GetHistory(workspaceId, null, chunk, CancellationToken.None)))
+        if (await Attempt(async () => history = await connection.GetHistory(workspaceId, null, ChunkMessages, ChunkCharacters, CancellationToken.None)))
         {
+            List<ChatMessage> window = [.. history!.Messages];
+            string? older = history.Older;
+
+            for (int round = 0; reach is not null && older is not null && !window.Any(message => Reaches(message, reach)) && round < reachRounds; round++)
+            {
+                ChatHistory? more = null;
+
+                if (!await Attempt(async () => more = await connection.GetHistory(workspaceId, older, ChunkMessages, ChunkCharacters, CancellationToken.None)))
+                {
+                    break;
+                }
+
+                window.InsertRange(0, more!.Messages);
+                older = more.Older;
+            }
+
             streaming = null;
-            Messages.Reset(history!.Messages);
-            start = Position(history.Older);
+            Messages.Reset(window);
+            start = Position(older);
             Raise(nameof(HasMore));
             IsAiWorking = history.Working;
             LimitPause = history.LimitPause;
@@ -705,6 +753,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             }
         }
     }
+
+    private bool Reaches(ChatMessage message, ChatMessage wanted) => message.Role == wanted.Role && message.Text == wanted.Text && (message.Time is null || wanted.Time is null || message.Time == wanted.Time);
 
     private void Receive(RemoteEvent remoteEvent)
     {
@@ -738,20 +788,25 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                     Error = null;
                 }
 
-                if (streaming is not null && message is { Role: MessageRole.Assistant, IsWork: false })
+                if (streaming is not null && message.Role == MessageRole.Assistant && (message.IsThought ? streaming.IsThought : !message.IsWork && !streaming.IsThought))
                 {
                     Replace(streaming, message);
                     streaming = null;
                 }
                 else
                 {
+                    if (streaming is not null && message.IsThought)
+                    {
+                        Unstream();
+                    }
+
                     Messages.Add(message);
                     KeepWindow();
                 }
 
                 break;
             case RemoteEventKind.MessageDelta when showWork && remoteEvent.Text is { Length: > 0 } piece:
-                Stream(piece);
+                Stream(piece, remoteEvent.Thought == true);
                 break;
             case RemoteEventKind.ShowWorkChanged:
                 _ = Reload();

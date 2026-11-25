@@ -72,6 +72,12 @@ public sealed partial class HomeView : UserControl
 
     private int anchorIndex;
 
+    private readonly List<(ChatMessage Message, double Top)> onScreen = [];
+
+    private List<(ChatMessage Message, double Top)>? returning;
+
+    private int returnAttempts;
+
     private bool laidOutHooked;
 
     private bool fitting;
@@ -548,6 +554,11 @@ public sealed partial class HomeView : UserControl
             return;
         }
 
+        if (args.ExtentDelta.Y == 0 && args.OffsetDelta.Y != 0)
+        {
+            CaptureOnScreen(scroller);
+        }
+
         if (args.ExtentDelta.Y > 0 && chat.AutoScroll && !GrewAboveAnchor())
         {
             scroller.ScrollToEnd();
@@ -671,6 +682,11 @@ public sealed partial class HomeView : UserControl
             return;
         }
 
+        if (returning is not null && Return(scroller))
+        {
+            return;
+        }
+
         if (anchor?.IsAttachedToVisualTree() != true)
         {
             CaptureAnchor(scroller);
@@ -678,6 +694,71 @@ public sealed partial class HomeView : UserControl
         }
 
         Compensate(scroller);
+        CaptureOnScreen(scroller);
+    }
+
+    private void OnMessagesReplaced(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
+    {
+        if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset && followed is { AutoScroll: false } && onScreen.Count > 0)
+        {
+            returning = [.. onScreen];
+            returnAttempts = 0;
+        }
+    }
+
+    private void CaptureOnScreen(ScrollViewer scroller)
+    {
+        onScreen.Clear();
+
+        if (this.FindControl<ItemsControl>("MessageList") is not { ItemsPanelRoot: { } panel } list)
+        {
+            return;
+        }
+
+        foreach (Control child in panel.Children)
+        {
+            if (child.DataContext is ChatMessage message && ContentTop(child, list) is { } top && top + child.Bounds.Height - scroller.Offset.Y > 0.5 && top - scroller.Offset.Y < scroller.Viewport.Height)
+            {
+                onScreen.Add((message, top - scroller.Offset.Y));
+
+                if (onScreen.Count >= 40)
+                {
+                    return;
+                }
+            }
+        }
+    }
+
+    private bool Return(ScrollViewer scroller)
+    {
+        if (returning is not { } wanted || this.FindControl<ItemsControl>("MessageList") is not { ItemsPanelRoot: { } panel } list)
+        {
+            returning = null;
+            return false;
+        }
+
+        foreach ((ChatMessage message, double top) in wanted)
+        {
+            foreach (Control child in panel.Children)
+            {
+                if (child.DataContext is ChatMessage shown && shown.Role == message.Role && shown.Text == message.Text && (shown.Time is null || message.Time is null || shown.Time == message.Time) && ContentTop(child, list) is { } content)
+                {
+                    returning = null;
+                    scroller.Offset = new Vector(scroller.Offset.X, Math.Max(0, content - top));
+                    anchor = child;
+                    anchorContent = content;
+                    anchorIndex = IndexOfMessage(child);
+                    return true;
+                }
+            }
+        }
+
+        if (++returnAttempts > 5)
+        {
+            returning = null;
+        }
+
+        return false;
     }
 
     private void OnMessagesChanged(object? sender, EventArgs args)
@@ -699,13 +780,17 @@ public sealed partial class HomeView : UserControl
         if (followed is not null)
         {
             followed.Loaded -= ScrollMessagesToEnd;
+            followed.Messages.CollectionChanged -= OnMessagesReplaced;
         }
 
+        onScreen.Clear();
+        returning = null;
         followed = scroller.DataContext as ChatViewModel;
 
         if (followed is not null)
         {
             followed.Loaded += ScrollMessagesToEnd;
+            followed.Messages.CollectionChanged += OnMessagesReplaced;
         }
 
         ScrollMessagesToEnd();

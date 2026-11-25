@@ -34,7 +34,7 @@ public sealed class ClientScenarios(HeadlessFixture fixture)
             }
 
             await model.Chat.Resync();
-            ChatHistory history = await connection.GetHistory(workspace.Id, null, 200, CancellationToken.None);
+            ChatHistory history = await connection.GetHistory(workspace.Id, null, 200, null, CancellationToken.None);
             return (model.Chat.Messages.Select(message => (message.Role, message.Text.Trim())).ToList(), history.Messages.Select(message => (message.Role, message.Text.Trim())).ToList());
         });
 

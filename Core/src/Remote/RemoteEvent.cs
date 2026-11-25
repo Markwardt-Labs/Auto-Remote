@@ -66,6 +66,11 @@ public sealed record RemoteEvent
     public LimitPause? LimitPause { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the piece of text of a <see cref="RemoteEventKind.MessageDelta" /> is the reasoning of the AI and not its answer; omitted for the answer.
+    /// </summary>
+    public bool? Thought { get; init; }
+
+    /// <summary>
     /// Gets the text a run wrote since the last event, for <see cref="RemoteEventKind.ScriptOutput" />; <see cref="Path" /> says which run. For <see cref="RemoteEventKind.LoopChanged" /> it says why a loop ended by itself. For <see cref="RemoteEventKind.FilesChanged" /> it is <c>all</c> when too much changed to name the folders, so every folder may have changed.
     /// </summary>
     public string? Text { get; init; }

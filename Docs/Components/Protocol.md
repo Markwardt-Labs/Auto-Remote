@@ -46,6 +46,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
 | `inputId` | GUID | `TakeSavedInput` | The saved input to take. |
 | `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. The cursor is the position, counted from the oldest message the client may be shown (work messages count only while the workspace shows its work), of the first message after it: a client that drops the oldest messages it holds adds their number to the cursor it has to read before the first message it keeps, and clients ask for 20 messages at a time. |
+| `characters` | number | no | `GetHistory`: the most characters of text to read, at least one message always; 20,000 when omitted, at most 400,000. A chunk ends at whichever of `limit` and `characters` is reached first. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
 | `offset` | number | `ShiftGroup` | How many places to move: negative is up, positive is down. |
 | `skip` | number | no | `GetGitHistory` only: how many of the newest commits to skip; zero when omitted. |
@@ -131,7 +132,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused unless the workspace is Ready. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
-| `GetHistory` | `workspaceId`, optional `before`, `limit` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
+| `GetHistory` | `workspaceId`, optional `before`, `limit`, `characters` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
 | `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes; does nothing when no loop runs. |
@@ -359,7 +360,8 @@ The client lists every window and colors each one, and the usage icon by the sho
 | --- | --- | --- |
 | `role` | string | Author: `User` (the person using the client) or `Assistant` (the AI). |
 | `text` | string | The message text. |
-| `isWork` | bool, optional | `true` for work the AI did on the way, a tool call (`name: what it was asked`, a single string argument or the `command` shown as it is, anything else as compact JSON) or its result (`Error: ` first when it failed, `(no output)` when empty); both are cut at 2000 characters. Omitted for what the user or the AI said. Always `Assistant`. Published as `MessageAdded` events whatever the workspace shows; a client that does not show the work ignores them. |
+| `isWork` | bool, optional | `true` for work the AI did on the way, a tool call as one short line made by the server from the tool and its arguments (`Read src/Program.cs`, `Run dotnet build`, `Write notes.md (12 lines)`; a tool without a wording of its own is its name with up to three short arguments), its result as a count or one short line that never carries the content (`→ 120 lines`, `→ 3 matches`, `→ Failed: no such file`, `→ No output`), or the reasoning of the AI (also `isThought`). Omitted for what the user or the AI said. Always `Assistant`. Published as `MessageAdded` events whatever the workspace shows; a client that does not show the work ignores them. |
+| `isThought` | bool, optional | `true` for the reasoning of the AI, always work too (so only shown with the work): the text it reasoned, cut at 20,000 characters, with the time it started, stored and published when the reasoning ends in the place it happened. A client that streamed `MessageDelta` pieces with `thought` replaces them with this message. Omitted for everything else. |
 | `time` | string, optional | When the message was written, ISO 8601 UTC; the time the server published it (a message taken over from an older server's conversation has the time the conversation tool stored, absent when it stored none). |
 
 **files** (`ListFiles`)
@@ -514,7 +516,8 @@ The server pushes events to every authenticated connection, as responses with `i
 | `showWork` | bool | `ShowWorkChanged`: whether the workspace shows the AI's work now. |
 | (no property) | | `ShowWorkChanged`: the workspace was set to show or hide the AI's work; a client reads the history again, which now includes or leaves out the work messages, and takes `showWork` from it. |
 | `errors` | array of error | `ErrorsChanged`: the errors of the workspace now, the newest first; sent right after the `Failed` event of the same workspace, and only for that workspace. |
-| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded`, and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |
+| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded` (for the reasoning, the message with `isThought`), and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |
+| `thought` | bool, optional | `MessageDelta`: `true` when the piece is the reasoning of the AI and not its answer; omitted for the answer. |
 | `error` | string | `Failed`: why the AI could not do its work. |
 | `time` | string (ISO 8601) | `Failed`: when the failure happened, taken by the server so every client shows the same time (the error history records the same one). A client shows the failure as the error line of the chat with this time and clears it when a user `MessageAdded` of the workspace arrives, whichever client sent that input. |
 

@@ -25,6 +25,12 @@ public sealed record ChatMessage
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsWork { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the message is the reasoning of the AI (always work too), which the server keeps like any message and streams while the AI reasons, so a client replaces the streamed text with it, in place, when the reasoning ends.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsThought { get; init; }
 }
 
 /// <summary>

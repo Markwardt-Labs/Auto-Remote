@@ -18,7 +18,7 @@ public sealed class MigrationScenarios
         WorkspaceInfo workspace = (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single();
         server.Track(workspace);
 
-        Assert.Empty((await server.Connection.GetHistory(workspace.Id, null, null, CancellationToken.None)).Messages);
+        Assert.Empty((await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).Messages);
         Assert.Contains("OK", await server.Ask(workspace, "Reply with exactly the word OK."), StringComparison.Ordinal);
         Assert.Empty(server.Failures(workspace));
         Assert.Matches("^[0-9a-f]{32}$", (await server.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Single().SessionId);
