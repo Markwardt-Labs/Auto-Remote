@@ -141,8 +141,10 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.UploadAttachment:
                 RequireAiInput(request);
                 return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
-            case RemoteCommand.Transcribe:
-                return new RemoteResponse { Id = 0, Transcript = await speech.Transcribe(Require(request.Data, "data"), cancellation) };
+            case RemoteCommand.TranscribeSavedInput:
+                return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.Transcribe(RequireWorkspace(request), Require(request.Data, "data"), cancellation) };
+            case RemoteCommand.DiscardSavedInput:
+                return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.Discard(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), cancellation) };
             case RemoteCommand.UpdateServer:
                 await updater.Update(cancellation);
                 return new RemoteResponse { Id = 0 };

@@ -166,7 +166,7 @@ public sealed record RemoteRequest
     public bool? IgnoreLimit { get; init; }
 
     /// <summary>
-    /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" /> and the base64 WAV audio for <see cref="RemoteCommand.Transcribe" />.
+    /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" /> and the base64 WAV audio for <see cref="RemoteCommand.TranscribeSavedInput" />.
     /// </summary>
     public string? Data { get; init; }
 }

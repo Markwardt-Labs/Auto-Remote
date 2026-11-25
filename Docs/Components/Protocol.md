@@ -44,7 +44,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `workspaceId` | GUID | per command | The workspace targeted. |
 | `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group; for `CreateWorkspace` and `CloneWorkspace`, the group the new workspace is filed in (omitted: the top level), refused when it no longer exists. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
-| `inputId` | GUID | `TakeSavedInput` | The saved input to take. |
+| `inputId` | GUID | `TakeSavedInput`, `DiscardSavedInput` | The saved input to take or discard. |
 | `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. The cursor is the position, counted from the oldest message the client may be shown (work messages count only while the workspace shows its work), of the first message after it: a client that drops the oldest messages it holds adds their number to the cursor it has to read before the first message it keeps, and clients ask for 20 messages at a time. |
 | `characters` | number | no | `GetHistory`: the most characters of text to read, at least one message always; 20,000 when omitted, at most 400,000. A chunk ends at whichever of `limit` and `characters` is reached first. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
@@ -56,7 +56,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `aiEnvironment` | ai environment | `SetAiEnvironment` | The environment of the server's AI. |
 | `loop` | loop settings | `StartLoop` | What the loop sends, how often and when it ends. |
 | `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
-| `data` | string | `UploadAttachment`, `Transcribe` | The file content or the WAV recording, base64 encoded. |
+| `data` | string | `UploadAttachment`, `TranscribeSavedInput` | The file content or the WAV recording, base64 encoded. |
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
 | `environment` | object, optional | `RunScript` | The client's `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY` and `XDG_SESSION_TYPE`, when it has them. |
 | `url` | string | `CloneWorkspace`, `GitSetRemote`, `ListLocalModels`, `ListImageModels` | A git repository URL; for the two list commands the optional address of the model server or image server to ask, the one of the environment when omitted. |
@@ -108,7 +108,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `gitHistory` | git history | `GetGitHistory` |
 | `gitDiff` | git diff | `GetGitDiff` |
 | `commitMessage` | string | `GenerateCommitMessage` |
-| `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput` |
+| `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput`, `TranscribeSavedInput`, `DiscardSavedInput` |
 | `savedInput` | saved input | `TakeSavedInput` |
 | `errors` | array of error | `GetErrors` |
 | `overLimit` | limit pause | `Prompt`, together with `error`: the window that made the server refuse the prompt. |
@@ -149,12 +149,13 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a git action runs). Also refused, with `overLimit` in the response, while a usage window of the workspace's provider is at or past the maximum (or the workspace is in an automatic pause), unless `ignoreLimit` is true or the text is the pause prompt (`pause current work`). |
 | `CancelLimitPause` | `workspaceId` | none | Ends the automatic pause of the workspace without telling the AI to resume, and ends the loop of the workspace if it has one; the AI is not paused again while it finishes what it is doing. Nothing happens when the workspace is not paused. |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 20 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
-| `Transcribe` | `data` (a 16 kHz, mono, 16 bit WAV recording) | `transcript` | Turns the recording (up to 4 MB) into text with the server's built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and answers the text, empty when nothing was heard. Refused when voice input is turned off on the server, or its model cannot be loaded; not tied to a workspace and allowed in any state. |
+| `TranscribeSavedInput` | `workspaceId`, `data` (a 16 kHz, mono, 16 bit WAV recording) | `savedInputs` | Adds a saved input that is `isConverting` and answers the list with it at once; the server turns the recording (up to 4 MB) into text in the background with its built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and every client gets a `SavedInputsChanged` event at each step. When the text is ready the entry keeps its `id` and `time` and gets the `text`, becoming a saved input like any other (subject to the same limits); when it fails, because nothing was heard, voice input is turned off on the server or its model cannot be loaded, it stays with the reason in `error`. Refused for an empty recording. A conversion that is not finished is not stored, so it does not survive a restart of the server. |
+| `DiscardSavedInput` | `workspaceId`, `inputId` | `savedInputs` | Removes the saved input without taking it: a conversion that is running is cancelled and its text is never saved, and an entry with an `error` is dismissed. Nothing happens when it is gone. Every client gets a `SavedInputsChanged` event. |
 | `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
 | `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; the oldest entries beyond 200 are dropped. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |
 | `SetShowWork` | `workspaceId`, `showWork` | `workspace` | Sets whether the chat of the workspace shows the AI's work, for every client: the server keeps it with the workspace (it starts as the `showWork` of `newWorkspaces`) and sends a `ShowWorkChanged` event when it changed. Nothing happens when it already is so. |
 | `GetErrors` | `workspaceId` | `errors` | The errors the AI of the workspace ended with in the last 30 days, the newest first. Entries older than that are removed by the server, when it starts, every 12 hours and whenever the list is read or an error is added. Only the errors of the workspace named are listed. |
-| `TakeSavedInput` | `workspaceId`, `inputId` | `savedInput` | Removes the saved input and answers it, so only one client gets it; refused once it is gone. Every client gets a `SavedInputsChanged` event. |
+| `TakeSavedInput` | `workspaceId`, `inputId` | `savedInput` | Removes the saved input and answers it, so only one client gets it; refused once it is gone, and for an entry that is still being converted or has an `error`. Every client gets a `SavedInputsChanged` event. |
 | `UpdateServer` | none | none | Makes the server look for the newest release on GitHub, download its server executable and restart with it, which closes every connection. Answers once the download is complete, a second before the restart. Refused when there is no newer release, GitHub cannot be reached, the server does not run from an installed executable or the folder is not writable. Not tied to a workspace and allowed in any state. |
 | `ListFiles` | `workspaceId`, optional `path` (relative to the workspace folder; empty or omitted for the folder itself), optional `showHidden` | `files` | Entries matched by a `.filehide` file are left out unless `showHidden` is true. |
 | `ReadFile` | `workspaceId`, `path` (relative to the workspace folder) | `content` | |
@@ -352,8 +353,10 @@ The client lists every window and colors each one, and the usage icon by the sho
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `id` | GUID | What `TakeSavedInput` takes it by. |
-| `text` | string | The text that was in the chat input. |
-| `time` | string | When it was saved, ISO 8601 UTC. |
+| `text` | string | The text that was in the chat input; empty while the entry is being converted from speech or when that failed. |
+| `time` | string | When it was saved (for a recording, when it was sent), ISO 8601 UTC. |
+| `isConverting` | bool, optional | `true` while the server turns the recording of the entry into text; omitted for `false`. |
+| `error` | string, optional | Why the recording could not be turned into text; omitted otherwise. |
 
 **error** (items of `errors`, and the `errors` of `ErrorsChanged` events)
 

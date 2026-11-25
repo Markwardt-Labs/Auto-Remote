@@ -46,7 +46,8 @@ internal static class Program
         IScriptRunner scripts = new ScriptRunner(events);
         IWindowGuard guard = new WindowGuard(workspaces, prompts, usage, host, events);
         IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events, null, null, null, guard);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, events), new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(new WhisperEngine()), host, loops, new WorkspaceWatcher(events, log), updater, log);
+        ISpeechService speech = new SpeechService(new WhisperEngine());
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, events, speech), new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(events, log), updater, log);
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(info), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log, new LocalListener(info, new LocalEndpoint(), new ILocalAccess.Factory(), log)), Console.Out);
         int code;
 

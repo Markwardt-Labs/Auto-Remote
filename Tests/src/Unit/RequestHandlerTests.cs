@@ -249,25 +249,31 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_Transcribe_AnswersTheTextOfTheSpeech()
+    public async Task Handle_TranscribeSavedInput_HandsTheRecordingToTheSavedInputsAndAnswersTheListWithTheEntryBeingConverted()
     {
-        speech.Setup(x => x.Transcribe("AQ==", It.IsAny<CancellationToken>())).ReturnsAsync("hello there");
+        Guid workspace = Guid.NewGuid();
+        SavedInput entry = new() { Id = Guid.NewGuid(), Text = string.Empty, Time = DateTimeOffset.UtcNow, IsConverting = true };
+        savedInputs.Setup(x => x.Transcribe(workspace, "AQ==", It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
 
-        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Transcribe, Data = "AQ==" }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.TranscribeSavedInput, WorkspaceId = workspace, Data = "AQ==" }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.TranscribeSavedInput, WorkspaceId = workspace }, owner, CancellationToken.None);
 
-        Assert.Equal("hello there", response.Transcript);
+        Assert.Equal([entry], response.SavedInputs);
+        Assert.NotNull(missing.Error);
     }
 
     [Fact]
-    public async Task Handle_Transcribe_ReportsAFailureOrMissingData()
+    public async Task Handle_DiscardSavedInput_RemovesTheEntryAndNeedsTheOneToRemove()
     {
-        speech.Setup(x => x.Transcribe("AQ==", It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("not set up"));
+        Guid workspace = Guid.NewGuid();
+        Guid input = Guid.NewGuid();
+        savedInputs.Setup(x => x.Discard(workspace, input, It.IsAny<CancellationToken>())).ReturnsAsync([]);
 
-        RemoteResponse failed = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Transcribe, Data = "AQ==" }, owner, CancellationToken.None);
-        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.Transcribe }, owner, CancellationToken.None);
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.DiscardSavedInput, WorkspaceId = workspace, InputId = input }, owner, CancellationToken.None);
+        RemoteResponse missing = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.DiscardSavedInput, WorkspaceId = workspace }, owner, CancellationToken.None);
 
-        Assert.Equal("not set up", failed.Error);
-        Assert.NotNull(missing.Error);
+        Assert.Empty(response.SavedInputs!);
+        Assert.Contains("needs a saved input", missing.Error);
     }
 
     [Fact]

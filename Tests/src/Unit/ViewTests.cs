@@ -2459,6 +2459,54 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_ShowsAScreenOfItsOwnWhileRecordingAndListsAnEntryBeingConvertedWithItsCancelButton()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        SavedInput converting = new() { Id = Guid.NewGuid(), Text = string.Empty, Time = DateTimeOffset.UtcNow, IsConverting = true };
+        SavedInput failed = new() { Id = Guid.NewGuid(), Text = string.Empty, Time = DateTimeOffset.UtcNow.AddMinutes(-1), Error = "Nothing was heard." };
+        SavedInput ready = new() { Id = Guid.NewGuid(), Text = "ready text", Time = DateTimeOffset.UtcNow.AddMinutes(-2) };
+        Mock<IVoiceRecorder> recorder = new();
+        recorder.SetupGet(x => x.SampleRate).Returns(16000);
+        recorder.Setup(x => x.Start(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+        recorder.Setup(x => x.Stop()).ReturnsAsync(new byte[16000 * 2]);
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.TranscribeSavedInput(workspace.Id, It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync([converting, failed, ready]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it" });
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+
+        (bool before, string[] recording, bool after, string[] listed) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Tabs, null, null, null, null, null, recorder.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 500, Height = 900, Content = view };
+            window.Show();
+            string[] Visible<T>(Func<T, string?> text) where T : Avalonia.Visual => [.. window.GetVisualDescendants().OfType<T>().Where(item => item.IsEffectivelyVisible).Select(text).Where(value => value is not null).Select(value => value!)];
+            bool before = Visible<TextBlock>(block => block.Text).Contains("Listening...");
+
+            model.Active!.Chat.DictateCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            string[] recording = [.. Visible<TextBlock>(block => block.Text).Where(text => text is "Listening..." or "0:00"), .. Visible<TouchButton>(button => button.Content as string).Where(text => text is "Complete" or "Cancel")];
+
+            model.Active.Chat.CompleteDictationCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            bool after = Visible<TextBlock>(block => block.Text).Contains("Listening...");
+            string[] listed = [.. Visible<TextBlock>(block => block.Text).Where(text => text is "Turning speech into text..." or "Nothing was heard." or "ready text"), .. Visible<TouchButton>(button => button.Content as string).Where(text => text is "Cancel" or "Dismiss")];
+            window.Close();
+            return (before, recording, after, listed);
+        });
+
+        Assert.False(before);
+        Assert.Equal(["Listening...", "0:00", "Complete", "Cancel"], recording);
+        Assert.False(after);
+        Assert.Equal(["Turning speech into text...", "Nothing was heard.", "ready text", "Cancel", "Dismiss"], listed);
+    }
+
+    [Fact]
     public async Task HomeView_ShowsALoopIconNextToTheNameOfEachWorkspaceWhereALoopRuns()
     {
         WorkspaceInfo quiet = new() { Id = Guid.NewGuid(), Folder = "/work/quiet", LastUpdated = DateTimeOffset.UtcNow };

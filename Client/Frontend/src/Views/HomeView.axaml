@@ -401,12 +401,26 @@
                 <ItemsControl ItemsSource="{Binding SavedInputs}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <local:TouchButton Command="{Binding $parent[ItemsControl].DataContext.LoadSavedInputCommand}" CommandParameter="{Binding}" Background="Transparent" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" CornerRadius="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,10">
-                        <StackPanel Spacing="4">
-                          <TextBlock Text="{Binding Text}" MaxLines="8" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
-                          <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
-                        </StackPanel>
-                      </local:TouchButton>
+                      <Panel>
+                        <local:TouchButton IsVisible="{Binding IsReady}" Command="{Binding $parent[ItemsControl].DataContext.LoadSavedInputCommand}" CommandParameter="{Binding}" Background="Transparent" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" CornerRadius="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,10">
+                          <StackPanel Spacing="4">
+                            <TextBlock Text="{Binding Text}" MaxLines="8" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
+                            <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
+                          </StackPanel>
+                        </local:TouchButton>
+                        <Border IsVisible="{Binding !IsReady}" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" Padding="6,10">
+                          <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                            <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+                              <TextBlock Text="Turning speech into text..." IsVisible="{Binding IsConverting}" Classes="muted" />
+                              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsConverting}" Foreground="{DynamicResource Accent}" />
+                              <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
+                              <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
+                            </StackPanel>
+                            <local:TouchButton Grid.Column="1" Content="Cancel" IsVisible="{Binding IsConverting}" Command="{Binding $parent[ItemsControl].DataContext.DiscardSavedInputCommand}" CommandParameter="{Binding}" VerticalAlignment="Center" />
+                            <local:TouchButton Grid.Column="1" Content="Dismiss" IsVisible="{Binding HasError}" Command="{Binding $parent[ItemsControl].DataContext.DiscardSavedInputCommand}" CommandParameter="{Binding}" VerticalAlignment="Center" />
+                          </Grid>
+                        </Border>
+                      </Panel>
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -974,6 +988,23 @@
         </Grid>
       </Border>
     </Grid>
+
+    <Border Name="VoiceScreen" DataContext="{Binding Active.Chat}" IsVisible="{Binding IsRecording, FallbackValue=False}" Background="{DynamicResource Background}">
+      <Grid RowDefinitions="*,Auto,*,Auto" Margin="24" MaxWidth="420" HorizontalAlignment="Stretch" VerticalAlignment="Stretch">
+        <StackPanel Grid.Row="1" Spacing="14" HorizontalAlignment="Center" VerticalAlignment="Center">
+          <Border Width="96" Height="96" CornerRadius="48" Background="{DynamicResource Selection}" BorderBrush="{DynamicResource Danger}" BorderThickness="2" HorizontalAlignment="Center">
+            <Path Classes="lineIcon" Data="{StaticResource MicIconGeometry}" Width="40" Height="40" Stretch="Uniform" Stroke="{DynamicResource Danger}" HorizontalAlignment="Center" VerticalAlignment="Center" />
+          </Border>
+          <TextBlock Text="Listening..." Classes="serif" FontSize="24" HorizontalAlignment="Center" />
+          <TextBlock Text="{Binding RecordingTime}" FontSize="32" HorizontalAlignment="Center" />
+          <TextBlock Text="Recording stops by itself after a minute." Classes="muted" FontSize="12" HorizontalAlignment="Center" TextWrapping="Wrap" />
+        </StackPanel>
+        <StackPanel Grid.Row="3" Spacing="10">
+          <local:TouchButton Content="Complete" Command="{Binding CompleteDictationCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="Cancel" Command="{Binding CancelDictationCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+      </Grid>
+    </Border>
 
     <Border Name="PromptOverlay" IsVisible="{Binding Active.Git.IsPrompting, FallbackValue=False}" Background="{DynamicResource Scrim}">
       <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">

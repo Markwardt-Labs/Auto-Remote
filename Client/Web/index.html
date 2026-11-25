@@ -345,6 +345,17 @@ button.refbtn .ref { margin: 0; }
 .saved-inputs .list button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 10px 6px; color: inherit; cursor: pointer; font-size: 13px; line-height: 1.35; }
 .saved-inputs .list button:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
 .saved-inputs .text { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
+.saved-inputs .pending { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 10px 6px; font-size: 13px; }
+.saved-inputs .pending .info { flex: 1; min-width: 0; }
+.saved-inputs .pending button { flex: none; }
+.saved-inputs .bar { height: 3px; margin-top: 6px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 40% 100% no-repeat, var(--elevated); animation: saved-bar 1.2s linear infinite; }
+@keyframes saved-bar { from { background-position: -40% 0, 0 0; } to { background-position: 140% 0, 0 0; } }
+.voice-screen { position: fixed; inset: 0; z-index: 100; background: var(--background); display: flex; flex-direction: column; padding: 24px; max-width: 460px; margin: 0 auto; }
+.voice-screen .voice-center { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; text-align: center; }
+.voice-screen .voice-mic { width: 96px; height: 96px; border-radius: 50%; border: 2px solid var(--danger); color: var(--danger); display: flex; align-items: center; justify-content: center; background: var(--elevated); }
+.voice-screen .voice-mic svg { width: 40px; height: 40px; }
+.voice-screen .voice-time { font-size: 32px; }
+.voice-screen .voice-actions { display: flex; flex-direction: column; gap: 10px; }
 .saved-inputs .when { color: var(--muted); font-size: 11px; line-height: 1.3; margin-top: 4px; }
 .git-working span { flex: 1; color: var(--muted); }
 .settings { overflow-y: auto; }
@@ -1509,7 +1520,8 @@ class Connection {
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
   promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
   cancelLimitPause(workspaceId) { return this.request("CancelLimitPause", { workspaceId }); }
-  transcribe(data) { return this.request("Transcribe", { data }).then(r => r.transcript ?? ""); }
+  transcribeSavedInput(workspaceId, data) { return this.request("TranscribeSavedInput", { workspaceId, data }).then(r => r.savedInputs); }
+  discardSavedInput(workspaceId, inputId) { return this.request("DiscardSavedInput", { workspaceId, inputId }).then(r => r.savedInputs); }
   uploadAttachment(workspaceId, name, data) { return this.request("UploadAttachment", { workspaceId, name, data }).then(r => r.attachmentPath); }
   listFiles(workspaceId, path, showHidden) { return this.request("ListFiles", { workspaceId, path, showHidden }).then(r => r.files); }
   searchFiles(workspaceId, text, content, showHidden) { return this.request("SearchFiles", { workspaceId, text, searchContent: content, showHidden }).then(r => r.searchResults); }
@@ -1953,9 +1965,19 @@ class WorkspaceView {
     this.chips = h("div", { class: "chips", hidden: true });
     this.fileInput = h("input", { type: "file", multiple: true, hidden: true, onchange: () => this.pickFiles() });
     this.attachButton = h("button", { class: "flat icon", title: "Attach files", onclick: () => this.fileInput.click() }, icon("attach"));
-    this.voiceButton = h("button", { class: "flat icon", title: "Voice input", hidden: !(navigator.mediaDevices?.getUserMedia && window.MediaRecorder), onclick: () => this.toggleVoice() }, icon("mic"));
+    this.voiceButton = h("button", { class: "flat icon", title: "Voice input", hidden: !(navigator.mediaDevices?.getUserMedia && window.MediaRecorder), onclick: () => this.startVoice() }, icon("mic"));
     this.voice = null;
     this.transcribing = false;
+    this.voiceTime = h("div", { class: "voice-time" }, "0:00");
+    this.voiceScreen = h("div", { class: "voice-screen" },
+      h("div", { class: "voice-center" },
+        h("div", { class: "voice-mic" }, icon("mic")),
+        h("h2", { class: "serif" }, "Listening..."),
+        this.voiceTime,
+        h("div", { class: "muted small" }, "Recording stops by itself after a minute.")),
+      h("div", { class: "voice-actions" },
+        h("button", { class: "primary block", onclick: () => this.completeVoice() }, "Complete"),
+        h("button", { class: "block", onclick: () => this.cancelVoice() }, "Cancel")));
     this.input.addEventListener("paste", event => this.pasted(event));
     this.grip = h("div", { class: "composer-grip", onpointerdown: event => this.resizeInput(event) });
     this.gitBar = h("div", { class: "git-working", hidden: true },
@@ -2963,10 +2985,7 @@ class WorkspaceView {
     this.stopSync();
 
     if (this.voice) {
-      clearTimeout(this.voice.limit);
-      this.voice.recorder.stop();
-      this.voice.stream.getTracks().forEach(track => track.stop());
-      this.voice = null;
+      this.releaseVoice(this.voice);
     }
   }
 
@@ -3502,13 +3521,33 @@ class WorkspaceView {
 
   renderSaved() {
     this.savedPanel.hidden = !this.savedOpen;
+    const when = entry => h("div", { class: "when", title: new Date(entry.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.time));
+    const entryElement = entry => {
+      if (entry.isConverting || entry.error) {
+        return h("div", { class: "pending" },
+          h("div", { class: "info" },
+            entry.isConverting ? h("div", { class: "muted" }, "Turning speech into text...") : h("div", { class: "error" }, entry.error),
+            entry.isConverting ? h("div", { class: "bar" }) : "",
+            when(entry)),
+          h("button", { onclick: () => this.discardSaved(entry) }, entry.isConverting ? "Cancel" : "Dismiss"));
+      }
+
+      return h("button", { onclick: () => this.takeSaved(entry) }, h("div", { class: "text" }, entry.text), when(entry));
+    };
+
     this.savedPanel.replaceChildren(
       h("div", { class: "head" }, h("h3", { class: "serif" }, "Saved inputs"), h("button", { class: "flat", onclick: () => this.toggleSaved() }, "Close")),
       h("div", { class: "list" }, ...(this.savedInputs.length === 0
         ? [h("div", { class: "none" }, "No saved inputs.")]
-        : this.savedInputs.map(entry => h("button", { onclick: () => this.takeSaved(entry) },
-          h("div", { class: "text" }, entry.text),
-          h("div", { class: "when", title: new Date(entry.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.time)))))));
+        : this.savedInputs.map(entryElement))));
+  }
+
+  async discardSaved(entry) {
+    const result = await attempt(() => this.connection.discardSavedInput(this.info.id, entry.id), this.chatError);
+
+    if (result.ok) {
+      this.setSavedInputs(result.value);
+    }
   }
 
   toggleSaved() {
@@ -3592,15 +3631,15 @@ class WorkspaceView {
     this.voiceButton.disabled = this.transcribing || (!this.voice && !this.takesAiInput());
     this.voiceButton.classList.toggle("on", this.voice !== null);
     this.voiceButton.classList.toggle("recording", this.voice !== null);
-    this.voiceButton.title = this.voice ? "Stop recording and add the text" : this.transcribing ? "Turning speech into text" : "Voice input";
+    this.voiceButton.title = this.transcribing ? "Sending the recording" : "Voice input";
     this.home.closeHaltDialogUnlessRunning(state);
   }
 
-  toggleVoice() {
-    return this.voice ? this.stopVoice() : this.startVoice();
-  }
-
   async startVoice() {
+    if (this.voice || this.transcribing) {
+      return;
+    }
+
     this.chatError.set(null);
     let stream;
 
@@ -3616,11 +3655,38 @@ class WorkspaceView {
     recorder.ondataavailable = event => chunks.push(event.data);
     const stopped = new Promise(resolve => { recorder.onstop = resolve; });
     recorder.start();
-    this.voice = { stream, recorder, chunks, stopped, limit: setTimeout(() => this.stopVoice(), 60000) };
+    const started = Date.now();
+    const tick = setInterval(() => {
+      const seconds = Math.floor((Date.now() - started) / 1000);
+      this.voiceTime.textContent = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, "0")}`;
+    }, 1000);
+    this.voiceTime.textContent = "0:00";
+    this.voice = { stream, recorder, chunks, stopped, tick, limit: setTimeout(() => this.completeVoice(), 60000) };
+    document.body.append(this.voiceScreen);
     this.updateSend();
   }
 
-  async stopVoice() {
+  releaseVoice(voice) {
+    clearTimeout(voice.limit);
+    clearInterval(voice.tick);
+    this.voice = null;
+    this.voiceScreen.remove();
+
+    if (voice.recorder.state !== "inactive") {
+      voice.recorder.stop();
+    }
+
+    voice.stream.getTracks().forEach(track => track.stop());
+  }
+
+  async cancelVoice() {
+    if (this.voice) {
+      this.releaseVoice(this.voice);
+      this.updateSend();
+    }
+  }
+
+  async completeVoice() {
     const voice = this.voice;
 
     if (!voice) {
@@ -3628,7 +3694,9 @@ class WorkspaceView {
     }
 
     clearTimeout(voice.limit);
+    clearInterval(voice.tick);
     this.voice = null;
+    this.voiceScreen.remove();
     this.transcribing = true;
     this.updateSend();
     voice.recorder.stop();
@@ -3643,15 +3711,13 @@ class WorkspaceView {
           throw new Error("Nothing was recorded.");
         }
 
-        return (await this.connection.transcribe(await this.encode(wav))).trim();
+        return await this.connection.transcribeSavedInput(this.info.id, await this.encode(wav));
       }, this.chatError);
 
-      if (result.ok && !result.value) {
-        this.chatError.set("Nothing was heard.");
-      } else if (result.ok) {
-        const before = this.input.value;
-        this.input.value = !before || /\s$/.test(before) ? before + result.value : `${before} ${result.value}`;
-        this.inputChanged();
+      if (result.ok) {
+        this.setSavedInputs(result.value);
+        this.savedOpen = true;
+        this.renderSaved();
       }
     } finally {
       this.transcribing = false;

@@ -179,4 +179,21 @@ public sealed class ServerConnectionTests
         RemoteRequest request = Assert.Single(sent);
         Assert.Equal((RemoteCommand.ConfigureOllamaService, true, "pw"), (request.Command, request.Enabled, request.Password));
     }
+
+    [Fact]
+    public async Task TranscribeSavedInputAndDiscardSavedInput_SendTheRecordingAndTheEntryAndAnswerTheList()
+    {
+        List<RemoteRequest> sent = [];
+        SavedInput entry = new() { Id = Guid.NewGuid(), Text = string.Empty, Time = DateTimeOffset.UtcNow, IsConverting = true };
+        Mock<IMessageChannel> channel = Channel(sent, out _, request => new RemoteResponse { Id = request.Id, SavedInputs = request.Command == RemoteCommand.TranscribeSavedInput ? [entry] : [] });
+        await using ServerConnection connection = new(new ClientWebSocket(), channel.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
+        Guid workspace = Guid.NewGuid();
+
+        IReadOnlyList<SavedInput> started = await connection.TranscribeSavedInput(workspace, new byte[] { 1, 2, 3 }, CancellationToken.None);
+        IReadOnlyList<SavedInput> left = await connection.DiscardSavedInput(workspace, entry.Id, CancellationToken.None);
+
+        Assert.Equal([entry], started);
+        Assert.Empty(left);
+        Assert.Equal([(RemoteCommand.TranscribeSavedInput, (Guid?)workspace, "AQID", (Guid?)null), (RemoteCommand.DiscardSavedInput, workspace, null, entry.Id)], sent.Select(request => (request.Command, request.WorkspaceId, request.Data, request.InputId)));
+    }
 }

@@ -45,7 +45,8 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = usageOf = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
         ScriptRunner scripts = new(hub);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub), new ErrorHistory(store, workspaces, hub), new WindowGuard(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) }, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), new SpeechService(Mock.Of<IWhisperEngine>()), host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
+        SpeechService speech = new(Mock.Of<IWhisperEngine>());
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub, speech), new ErrorHistory(store, workspaces, hub), new WindowGuard(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) }, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -241,9 +242,56 @@ public sealed class EndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Transcribe_SendsTheRecordingToTheSpeechCommandAndAnswersItsText()
+    public async Task TranscribeSavedInput_AddsAnEntryThatConvertsInTheBackgroundForEveryClientAndBehavesLikeAnyOtherAfterwards()
     {
-        Assert.Equal("said 3", await connection.Transcribe(new byte[] { 1, 2, 3 }, CancellationToken.None));
+        FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "voice", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
+        List<IReadOnlyList<SavedInput>> seen = [];
+        connection.EventReceived += remoteEvent =>
+        {
+            if (remoteEvent.Kind == RemoteEventKind.SavedInputsChanged && remoteEvent.SavedInputs is { } inputs)
+            {
+                lock (seen)
+                {
+                    seen.Add(inputs);
+                }
+            }
+        };
+
+        IReadOnlyList<SavedInput> started = await connection.TranscribeSavedInput(workspace.Id, new byte[] { 1, 2, 3 }, CancellationToken.None);
+
+        Assert.True(started.Single().IsConverting || started.Single().Text == "said 3");
+
+        SavedInput? done = null;
+
+        for (int attempt = 0; attempt < 200 && done is null; attempt++)
+        {
+            done = (await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).FirstOrDefault(input => input.IsReady);
+            await Task.Delay(25);
+        }
+
+        Assert.Equal("said 3", done?.Text);
+        Assert.Equal(started.Single().Id, done!.Id);
+        SavedInput taken = await connection.TakeSavedInput(workspace.Id, done.Id, CancellationToken.None);
+        Assert.Equal("said 3", taken.Text);
+        lock (seen)
+        {
+            Assert.Contains(seen, inputs => inputs.Any(input => input.Id == done.Id && input.IsReady));
+        }
+    }
+
+    [Fact]
+    public async Task DiscardSavedInput_RemovesAnEntryWithoutTakingItAndCarriesTheRefusalOfAnEmptyRecording()
+    {
+        FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "discard", CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await connection.SaveInput(workspace.Id, "keep me", CancellationToken.None);
+
+        IReadOnlyList<SavedInput> left = await connection.DiscardSavedInput(workspace.Id, saved[0].Id, CancellationToken.None);
+
+        Assert.Empty(left);
+        Assert.Empty(await connection.DiscardSavedInput(workspace.Id, saved[0].Id, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.TranscribeSavedInput(workspace.Id, ReadOnlyMemory<byte>.Empty, CancellationToken.None));
     }
 
     [Fact]

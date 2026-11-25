@@ -215,13 +215,24 @@ internal interface IServerConnection : IAsyncDisposable
     Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation);
 
     /// <summary>
-    /// Has the server turn recorded speech into text.
+    /// Has the server turn recorded speech into text as a saved input of the workspace: the entry exists at once, marked as being converted, and fills with the text when it is ready, which every client is told with an event.
     /// </summary>
+    /// <param name="id">The workspace identifier.</param>
     /// <param name="audio">The WAV recording, 16 kHz, mono, 16 bit.</param>
+    /// <param name="cancellation">Cancels the request, not the conversion.</param>
+    /// <returns>The saved inputs now, including the one being converted.</returns>
+    /// <exception cref="RemoteException">The recording was refused.</exception>
+    Task<IReadOnlyList<SavedInput>> TranscribeSavedInput(Guid id, ReadOnlyMemory<byte> audio, CancellationToken cancellation);
+
+    /// <summary>
+    /// Removes a saved input without taking it, which stops a conversion of speech that is running and dismisses one that failed.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="inputId">The saved input.</param>
     /// <param name="cancellation">Cancels the request.</param>
-    /// <returns>The text, empty when nothing was heard.</returns>
-    /// <exception cref="RemoteException">The server has no speech command set up, or it failed.</exception>
-    Task<string> Transcribe(ReadOnlyMemory<byte> audio, CancellationToken cancellation);
+    /// <returns>The saved inputs now.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<IReadOnlyList<SavedInput>> DiscardSavedInput(Guid id, Guid inputId, CancellationToken cancellation);
 
     /// <summary>
     /// Tells the server that this connection has a workspace open, in place of the one it had open before: the server then reports every change in the workspace's folder, whoever makes it, as events to all connections.
@@ -953,7 +964,10 @@ internal sealed class ServerConnection : IServerConnection
     public async Task CancelLimitPause(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelLimitPause, WorkspaceId = id }, cancellation);
 
     /// <inheritdoc />
-    public async Task<string> Transcribe(ReadOnlyMemory<byte> audio, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.Transcribe, Data = Convert.ToBase64String(audio.Span) }, cancellation)).Transcript ?? throw Malformed();
+    public async Task<IReadOnlyList<SavedInput>> TranscribeSavedInput(Guid id, ReadOnlyMemory<byte> audio, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.TranscribeSavedInput, WorkspaceId = id, Data = Convert.ToBase64String(audio.Span) }, cancellation)).SavedInputs ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> DiscardSavedInput(Guid id, Guid inputId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.DiscardSavedInput, WorkspaceId = id, InputId = inputId }, cancellation)).SavedInputs ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<string> UploadAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.UploadAttachment, WorkspaceId = id, Name = name, Data = Convert.ToBase64String(data.Span) }, cancellation)).AttachmentPath ?? throw Malformed();

@@ -317,9 +317,14 @@ public enum RemoteCommand
     UploadAttachment,
 
     /// <summary>
-    /// Turns the speech in the base64 WAV audio <see cref="RemoteRequest.Data" /> (16 kHz, mono, 16 bit) into text with the server's speech command and answers with it in <see cref="RemoteResponse.Transcript" />. Fails when the server has no speech command, the audio is larger than the limit or the command fails.
+    /// Starts turning the speech in the base64 WAV audio <see cref="RemoteRequest.Data" /> (16 kHz, mono, 16 bit) into text for <see cref="RemoteRequest.WorkspaceId" /> and answers at once with the saved inputs in <see cref="RemoteResponse.SavedInputs" />, which then include an entry that <see cref="SavedInput.IsConverting" />. When the text is ready the entry becomes a saved input like any other, and when it fails it keeps the reason in <see cref="SavedInput.Error" />; every client is told with a <see cref="RemoteEventKind.SavedInputsChanged" /> event at each step. Fails for audio that is empty.
     /// </summary>
-    Transcribe,
+    TranscribeSavedInput,
+
+    /// <summary>
+    /// Removes the saved input <see cref="RemoteRequest.InputId" /> of <see cref="RemoteRequest.WorkspaceId" /> without taking it, which cancels a conversion of speech still running and dismisses one that failed; answers the saved inputs in <see cref="RemoteResponse.SavedInputs" /> and tells every client with a <see cref="RemoteEventKind.SavedInputsChanged" /> event. Nothing happens when it is already gone.
+    /// </summary>
+    DiscardSavedInput,
 
     /// <summary>
     /// Makes the server look on GitHub for a newer release than its own, download it and restart with it, which ends every connection; answered once the download is complete and before the restart. Fails when there is no newer release, GitHub cannot be reached or the server does not run from an installed release.
@@ -337,7 +342,7 @@ public enum RemoteCommand
     SaveInput,
 
     /// <summary>
-    /// Removes the saved input <see cref="RemoteRequest.InputId" /> from <see cref="RemoteRequest.WorkspaceId" /> and answers it in <see cref="RemoteResponse.SavedInput" />, so one client alone gets it; every client is told with a <see cref="RemoteEventKind.SavedInputsChanged" /> event. Fails when it was already taken.
+    /// Removes the saved input <see cref="RemoteRequest.InputId" /> from <see cref="RemoteRequest.WorkspaceId" /> and answers it in <see cref="RemoteResponse.SavedInput" />, so one client alone gets it; every client is told with a <see cref="RemoteEventKind.SavedInputsChanged" /> event. Fails when it was already taken, and for an entry that is still being converted from speech or failed to be.
     /// </summary>
     TakeSavedInput,
 
