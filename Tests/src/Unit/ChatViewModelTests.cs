@@ -513,7 +513,7 @@ public sealed class ChatViewModelTests
     }
 
     [Fact]
-    public async Task TurningTheWorkOnReloadsTheSameStretchOfTheConversationNotJustTheNewestChunk()
+    public async Task TurningTheWorkOnAfterScrollingUpReloadsTheSameStretchOfTheConversationNotJustTheNewestChunk()
     {
         ChatViewModel measured = new(connection.Object, workspaceId) { ChunkMessages = 3 };
         List<ChatMessage> before = [Said("m1"), Said("m2"), Said("m3"), Said("m4"), Said("m5")];
@@ -523,6 +523,7 @@ public sealed class ChatViewModelTests
         await measured.Start();
         Assert.True(await measured.LoadOlder());
         Assert.Equal(["m1", "m2", "m3", "m4", "m5"], measured.Messages.Select(message => message.Text));
+        measured.AutoScroll = false;
         List<ChatMessage> withWork = [Said("m1"), Did("Read a"), Did("→ 3 lines"), Said("m2"), Did("Run x"), Did("→ done"), Said("m3"), Did("Read b"), Did("→ 9 lines"), Said("m4"), Did("Read c"), Said("m5")];
         connection.Setup(x => x.GetHistory(workspaceId, null, 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = withWork.TakeLast(3).ToList(), Older = "9", ShowWork = true });
         connection.Setup(x => x.GetHistory(workspaceId, "9", 3, 20_000, It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = withWork.Skip(6).Take(3).ToList(), Older = "6", ShowWork = true });
@@ -1148,5 +1149,102 @@ public sealed class ChatViewModelTests
 
         Assert.Equal("No such workspace.", chat.Error);
         Assert.Null(chat.Notice);
+    }
+
+    private ChatMessage Weighty(string name, int characters, bool work = false) => new() { Role = MessageRole.Assistant, Text = name + new string('x', characters - name.Length), IsWork = work };
+
+    private async Task Toggled(bool turningOn)
+    {
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspaceId, ShowWork = turningOn });
+
+        for (int attempt = 0; attempt < 100 && chat.ShowWork != turningOn; attempt++)
+        {
+            await Task.Delay(20);
+        }
+
+        await Task.Delay(50);
+    }
+
+    [Fact]
+    public async Task TurningTheWorkOnWhileFollowingTheEndReadsOnlyTheNewestChunkWithTheWorkCountedInIt()
+    {
+        await WithHistory(1000, 20);
+        Assert.True(chat.AutoScroll);
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [Said("a"), Weighty("w1", 9000, true), Weighty("w2", 9000, true), Weighty("w3", 9000, true), Said("b")], Older = "4000", ShowWork = true });
+
+        await Toggled(true);
+
+        Assert.Equal(["a", "w1", "w2", "w3", "b"], chat.Messages.Select(message => message.Text.Length > 3 ? message.Text[..2] : message.Text));
+        connection.Verify(x => x.GetHistory(workspaceId, It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(chat.HasMore);
+        Assert.True(chat.TrimToNewest());
+        Assert.Equal(["w2", "w3", "b"], chat.Messages.Select(message => message.Text.Length > 3 ? message.Text[..2] : message.Text));
+    }
+
+    [Fact]
+    public async Task TurningTheWorkOnAfterScrollingUpReadsBackOnlyAsFarAsTheTextThatWasLoadedAndFindsTheMessageWhenItIsWithinThat()
+    {
+        await WithHistory(1000, 20);
+        chat.AutoScroll = false;
+        await chat.LoadOlder();
+        string anchor = chat.Messages[0].Text;
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Enumerable.Range(1000 - 30, 30).Select(number => Said($"m{number}")).ToList(), Older = "970", ShowWork = true });
+        connection.Setup(x => x.GetHistory(workspaceId, "970", It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Enumerable.Range(950, 20).Select(number => Said($"m{number}")).ToList(), Older = "950", ShowWork = true });
+
+        await Toggled(true);
+
+        Assert.Equal("m960", anchor);
+        Assert.Equal(("m950", "m999", false), (chat.Messages[0].Text, chat.Messages[^1].Text, chat.AutoScroll));
+        Assert.Equal(50, chat.Messages.Count);
+    }
+
+    [Fact]
+    public async Task TurningTheWorkOnAfterScrollingUpGivesUpAtTheTextBudgetAndFollowsTheEndInsteadOfLoadingWithoutEnd()
+    {
+        await WithHistory(1000, 20);
+        chat.AutoScroll = false;
+        await chat.LoadOlder();
+        List<string?> asked = [];
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [Weighty("w0", 9000, true), Weighty("w1", 9000, true), Said("tail")], Older = "5000", ShowWork = true });
+        connection.Setup(x => x.GetHistory(workspaceId, It.Is<string?>(cursor => cursor != null && cursor != "980" && cursor != "960"), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? cursor, int? _, int? _, CancellationToken _) =>
+        {
+            asked.Add(cursor);
+            int end = int.Parse(cursor!, CultureInfo.InvariantCulture);
+            return new ChatHistory { Messages = [Weighty("w", 12000, true), Weighty("v", 12000, true)], Older = (end - 2).ToString(CultureInfo.InvariantCulture), ShowWork = true };
+        });
+
+        await Toggled(true);
+
+        Assert.Single(asked);
+        Assert.True(chat.AutoScroll);
+        Assert.True(chat.Messages.Sum(message => message.Text.Length) <= 20_000 + 12_000);
+        Assert.True(chat.HasMore);
+    }
+
+    [Fact]
+    public async Task TurningTheWorkOffWhileFollowingTheEndReadsOnlyTheNewestChunk()
+    {
+        await WithHistory(1000, 20, true);
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [Said("a"), Said("b")], Older = "300", ShowWork = false });
+
+        await Toggled(false);
+
+        Assert.Equal(["a", "b"], chat.Messages.Select(message => message.Text));
+        connection.Verify(x => x.GetHistory(workspaceId, It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AnAnswerStreamedLongEnoughToFillTheChunkDropsTheOldMessagesWhileFollowingTheEnd()
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(true, Said("old one"), Said("old two"), Said("old three"));
+        await chat.Start();
+
+        connection.Raise(x => x.EventReceived += null, Piece("start ", false));
+        connection.Raise(x => x.EventReceived += null, Piece(new string('y', 25_000), false));
+
+        Assert.Single(chat.Messages);
+        Assert.True(chat.HasMore);
+        Assert.Equal(25_006, chat.Messages[0].Text.Length);
     }
 }

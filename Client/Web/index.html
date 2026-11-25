@@ -416,7 +416,6 @@ const draftKey = "autoRemote.draft.";
 const historyChunk = 30;
 const chatChunkMessages = 100;
 const chatChunkCharacters = 20000;
-const chatReachRounds = 60;
 const messagePosition = cursor => (/^\d+$/.test(cursor ?? "") ? Number(cursor) : 0);
 const maxAttachment = 20 * 1024 * 1024;
 const paceOf = (period, now = Date.now()) => {
@@ -2981,7 +2980,11 @@ class WorkspaceView {
     this.applyState();
   }
 
-  async loadChat(reach = null) {
+  weight(messages) {
+    return messages.reduce((sum, message) => sum + message.text.length, 0);
+  }
+
+  async loadChat(reach = null, characters = 0) {
     this.loading = true;
     const saved = await attempt(() => this.connection.getSavedInputs(this.info.id), this.chatError);
 
@@ -2990,12 +2993,13 @@ class WorkspaceView {
     }
 
     const result = await attempt(() => this.connection.getHistory(this.info.id, null, chatChunkMessages, chatChunkCharacters), this.chatError);
+    let lost = false;
 
     if (result.ok) {
       const window = [...result.value.messages];
       let older = result.value.older;
 
-      for (let round = 0; reach && older && !window.some(message => this.reaches(message, reach)) && round < chatReachRounds; round++) {
+      while (reach && older && !window.some(message => this.reaches(message, reach)) && this.weight(window) < characters) {
         const more = await attempt(() => this.connection.getHistory(this.info.id, older, chatChunkMessages, chatChunkCharacters), this.chatError);
 
         if (!more.ok) {
@@ -3006,6 +3010,7 @@ class WorkspaceView {
         older = more.value.older;
       }
 
+      lost = !!reach && !window.some(message => this.reaches(message, reach));
       this.streaming = null;
       this.messages = window;
       this.start = messagePosition(older);
@@ -3013,9 +3018,17 @@ class WorkspaceView {
       this.setWorking(result.value.working === true);
       this.setLimitPause(result.value.limitPause ?? null);
       this.renderMessages();
+
+      if (lost) {
+        this.chatAuto = true;
+        this.chatAutoButton.classList.add("on");
+        this.trimToNewest();
+        this.scrollToEnd(true);
+      }
     }
 
     this.flushEarly();
+    return lost;
   }
 
   reaches(message, wanted) {
@@ -3023,7 +3036,7 @@ class WorkspaceView {
   }
 
   async reloadChat() {
-    const reach = this.messages.find(message => !message.isWork && message !== this.streaming?.message) ?? null;
+    const reach = this.chatAuto ? null : this.messages.find(message => !message.isWork && message !== this.streaming?.message) ?? null;
     const visible = [];
 
     if (!this.chatAuto && this.scroller.clientHeight > 0) {
@@ -3040,13 +3053,15 @@ class WorkspaceView {
 
     this.reloading = true;
 
+    let lost = false;
+
     try {
-      await this.loadChat(reach);
+      lost = await this.loadChat(reach, Math.max(chatChunkCharacters, this.weight(this.messages)));
     } finally {
       this.reloading = false;
     }
 
-    if (visible.length > 0) {
+    if (visible.length > 0 && !lost) {
       this.returnTo(visible);
     }
   }
@@ -3303,6 +3318,7 @@ class WorkspaceView {
       const element = this.messageElement(message);
       this.streaming.element.replaceWith(element);
       this.streaming = { message, element };
+      this.keepWindow();
     }
 
     this.scrollToEnd();

@@ -84,8 +84,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly List<RemoteEvent> early = [];
 
-    private readonly int reachRounds = 60;
-
     private int start;
 
     private bool loading;
@@ -595,11 +593,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private async Task Reload()
     {
         loading = true;
-        ChatMessage? reach = Messages.FirstOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
+        bool following = autoScroll;
+        ChatMessage? reach = following ? null : Messages.FirstOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
 
         try
         {
-            await Load(reach);
+            await Load(reach, Math.Max(ChunkCharacters, Weight(Messages)));
         }
         finally
         {
@@ -625,6 +624,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         ChatMessage updated = streaming with { Text = streaming.Text + piece };
         Replace(streaming, updated);
         streaming = updated;
+        KeepWindow();
     }
 
     private void Unstream()
@@ -711,7 +711,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool Same(ChatMessage first, ChatMessage second) => first.Role == second.Role && first.Text.Trim() == second.Text.Trim();
 
-    private async Task Load(ChatMessage? reach = null)
+    private int Weight(IEnumerable<ChatMessage> messages) => messages.Sum(message => message.Text.Length);
+
+    private async Task Load(ChatMessage? reach = null, int characters = 0)
     {
         ChatHistory? history = null;
         IReadOnlyList<SavedInput>? saved = null;
@@ -726,7 +728,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             List<ChatMessage> window = [.. history!.Messages];
             string? older = history.Older;
 
-            for (int round = 0; reach is not null && older is not null && !window.Any(message => Reaches(message, reach)) && round < reachRounds; round++)
+            while (reach is not null && older is not null && !window.Any(message => Reaches(message, reach)) && Weight(window) < characters)
             {
                 ChatHistory? more = null;
 
@@ -739,10 +741,17 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 older = more.Older;
             }
 
+            bool lost = reach is not null && !window.Any(message => Reaches(message, reach));
             streaming = null;
             Messages.Reset(window);
             start = Position(older);
             Raise(nameof(HasMore));
+
+            if (lost)
+            {
+                AutoScroll = true;
+            }
+
             IsAiWorking = history.Working;
             LimitPause = history.LimitPause;
 
