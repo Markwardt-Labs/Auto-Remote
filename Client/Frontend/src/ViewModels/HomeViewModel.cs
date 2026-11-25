@@ -841,6 +841,7 @@ internal sealed class HomeViewModel : ViewModelBase
             if (previous == WorkspaceState.Ready)
             {
                 busySince = time.GetUtcNow();
+                notifier?.Clear(workspace.Id);
             }
             else if (created.State == WorkspaceState.Ready)
             {

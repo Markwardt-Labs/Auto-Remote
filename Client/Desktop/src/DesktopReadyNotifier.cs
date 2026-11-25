@@ -22,6 +22,22 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
     public event Action<Guid>? Opened;
 
     /// <inheritdoc />
+    public void Clear(Guid workspaceId)
+    {
+        Process? older;
+
+        lock (running)
+        {
+            running.Remove(workspaceId, out older);
+        }
+
+        if (older is not null)
+        {
+            Kill(older);
+        }
+    }
+
+    /// <inheritdoc />
     public void Notify(Guid workspaceId, string workspace) => _ = Task.Run(() => Run(workspaceId, $"{workspace} is ready"));
 
     private async Task Run(Guid workspaceId, string text)

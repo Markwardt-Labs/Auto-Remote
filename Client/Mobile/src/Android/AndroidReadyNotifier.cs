@@ -10,6 +10,9 @@ internal sealed class AndroidReadyNotifier : IReadyNotifier
     private readonly Context context = global::Android.App.Application.Context;
 
     /// <inheritdoc />
+    public void Clear(Guid workspaceId) => (context.GetSystemService(Context.NotificationService) as NotificationManager)?.Cancel(workspaceId.GetHashCode());
+
+    /// <inheritdoc />
     public void Notify(Guid workspaceId, string workspace)
     {
         if (context.GetSystemService(Context.NotificationService) is not NotificationManager manager)

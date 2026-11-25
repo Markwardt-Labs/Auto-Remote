@@ -11,4 +11,10 @@ public interface IReadyNotifier
     /// <param name="workspaceId">The workspace identifier.</param>
     /// <param name="workspace">The workspace's name.</param>
     void Notify(Guid workspaceId, string workspace);
+
+    /// <summary>
+    /// Withdraws the notification of the workspace, if it is still there, because the workspace is working again: a workspace is either working or ready, never both, so a notification that says it is ready must not outlive the start of the next work. Does nothing when there is none.
+    /// </summary>
+    /// <param name="workspaceId">The workspace identifier.</param>
+    void Clear(Guid workspaceId);
 }

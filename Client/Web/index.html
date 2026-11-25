@@ -1923,6 +1923,7 @@ class WorkspaceView {
     this.localBusy = false;
     this.forced = null;
     this.notifyWhenReady = false;
+    this.readyNote = null;
     this.lastState = "Ready";
     this.loop = null;
     this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
@@ -2944,6 +2945,7 @@ class WorkspaceView {
       try {
         if ("Notification" in window && Notification.permission === "granted") {
           const note = new Notification(`${folderName(this.info.folder)} is ready`, { tag: `ready-${this.info.id}` });
+          this.readyNote = note;
           note.onclick = () => {
             window.focus();
 
@@ -2960,6 +2962,13 @@ class WorkspaceView {
     }
   }
 
+  clearReady() {
+    if (this.readyNote) {
+      this.readyNote.close();
+      this.readyNote = null;
+    }
+  }
+
   applyState() {
     const state = this.state();
     this.announceReady(state);
@@ -2968,6 +2977,7 @@ class WorkspaceView {
 
     if (previous === "Ready" && state !== "Ready") {
       this.busySince = Date.now();
+      this.clearReady();
     } else if (previous !== "Ready" && state === "Ready" && Date.now() - this.busySince >= 2000) {
       ding();
     }
@@ -3788,6 +3798,7 @@ class WorkspaceView {
   async deliver(text, sending) {
     this.chatNotice.hidden = true;
     this.notifyWhenReady = true;
+    this.clearReady();
 
     try {
       if ("Notification" in window && Notification.permission === "default") {
@@ -3846,6 +3857,7 @@ class WorkspaceView {
       }
 
       this.notifyWhenReady = true;
+      this.clearReady();
 
       if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
         this.notifyWhenReady = false;
