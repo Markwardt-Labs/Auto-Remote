@@ -4,9 +4,9 @@
     "net10.0": {
       "Markwardt.LiveAi": {
         "type": "Direct",
-        "requested": "[2.3.0-dev.3, )",
-        "resolved": "2.3.0-dev.3",
-        "contentHash": "/Rt5gFiMA9dis5HqASVW5ALblOuoC/+q0DPwvw5qOer3P8czNRvChwhs52takiD3HaKMaV5z2HFu+8Fb5LcAxw==",
+        "requested": "[2.2.3, )",
+        "resolved": "2.2.3",
+        "contentHash": "1T189spwsxKgSGMpWp0bddVEB1mFfbbBNpgKp3OhJ44uUZzcIlRpL4b+huiNjJzlZaGe0Q0TFycL43DpV2F4dg==",
         "dependencies": {
           "Microsoft.Extensions.Logging.Abstractions": "10.0.0"
         }
