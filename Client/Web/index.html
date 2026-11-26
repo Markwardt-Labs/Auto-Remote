@@ -138,6 +138,22 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .row.running .name { font-weight: 700; }
 .topbar .title .loop-indicator { display: inline-flex; vertical-align: middle; margin-left: 8px; }
 .topbar .title .limit-indicator { color: var(--warning); }
+.selectable { user-select: text; }
+.swarm-code { font-family: monospace; font-size: 16px; overflow-wrap: anywhere; }
+.swarm-pairing { border: 1px solid var(--accent); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+.swarm-tasks button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 10px 6px; color: inherit; cursor: pointer; }
+.swarm-tasks button:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
+.swarm-detail-view { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.swarm-detail-view[hidden] { display: none; }
+.swarm-detail-view header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.swarm-detail { display: flex; flex-direction: column; gap: 8px; }
+.swarm-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.swarm-work { opacity: 0.6; font-size: 12px; }
+.swarm-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
+.queue-banner { display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); border-bottom: 1px solid var(--accent); flex: none; }
+.queue-banner[hidden] { display: none; }
+.queue-banner .info { flex: 1; min-width: 0; }
+.queue-banner .prompt { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
 .limit-banner { display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); border-bottom: 1px solid var(--warning); flex: none; }
 .limit-banner svg { flex: none; margin-top: 1px; color: var(--warning); }
 .limit-banner > div { flex: 1; }
@@ -513,13 +529,30 @@ function h(tag, props = {}, ...children) {
   return element;
 }
 
-const inlinePattern = /\\([\\`*_{}\[\]()#+\-.!~|>])|(`+)([\s\S]*?[^`])\2(?!`)|!\[([^\]]*)\]\(([^)\s]*)[^)]*\)|\[([^\]]+)\]\(([^)\s]*)[^)]*\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])|\*\*(?=\S)([\s\S]*?\S)\*\*|__(?=\S)([\s\S]*?\S)__|~~(?=\S)([\s\S]*?\S)~~|\*(?=\S)([\s\S]*?\S)\*|\b_(?=\S)([\s\S]*?\S)_\b|( {2,}\n|\\\n|<[bB][rR]\s*\/?>)/g;
+// The Latin-1 names are listed in the order of their code points, from U+00A0.
+const namedEntities = new Map([
+  ..."nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml".split(" ").map((name, index) => [name, String.fromCharCode(160 + index)]),
+  ...Object.entries({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", ensp: "\u2002", emsp: "\u2003", thinsp: "\u2009", ndash: "\u2013", mdash: "\u2014", lsquo: "\u2018", rsquo: "\u2019", sbquo: "\u201A", ldquo: "\u201C", rdquo: "\u201D", bdquo: "\u201E", dagger: "\u2020", Dagger: "\u2021", bull: "\u2022", hellip: "\u2026", permil: "\u2030", prime: "\u2032", Prime: "\u2033", lsaquo: "\u2039", rsaquo: "\u203A", euro: "\u20AC", trade: "\u2122", larr: "\u2190", uarr: "\u2191", rarr: "\u2192", darr: "\u2193", harr: "\u2194", lArr: "\u21D0", rArr: "\u21D2", hArr: "\u21D4", forall: "\u2200", part: "\u2202", exist: "\u2203", empty: "\u2205", nabla: "\u2207", isin: "\u2208", notin: "\u2209", prod: "\u220F", sum: "\u2211", minus: "\u2212", radic: "\u221A", infin: "\u221E", and: "\u2227", or: "\u2228", cap: "\u2229", cup: "\u222A", int: "\u222B", asymp: "\u2248", ne: "\u2260", equiv: "\u2261", le: "\u2264", ge: "\u2265", sub: "\u2282", sup: "\u2283", alpha: "\u03B1", beta: "\u03B2", gamma: "\u03B3", delta: "\u03B4", epsilon: "\u03B5", theta: "\u03B8", lambda: "\u03BB", mu: "\u03BC", pi: "\u03C0", sigma: "\u03C3", phi: "\u03C6", omega: "\u03C9", Gamma: "\u0393", Delta: "\u0394", Theta: "\u0398", Lambda: "\u039B", Pi: "\u03A0", Sigma: "\u03A3", Phi: "\u03A6", Omega: "\u03A9", spades: "\u2660", clubs: "\u2663", hearts: "\u2665", diams: "\u2666", check: "\u2713", cross: "\u2717" })]);
+
+// Decoded as plain characters, never by parsing markup, since the text is not trusted; an unknown reference stays as typed.
+function decodeEntities(text) {
+  return text.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([A-Za-z][A-Za-z0-9]*));/g, (whole, decimal, hex, name) => {
+    if (name !== undefined) {
+      return namedEntities.get(name) ?? whole;
+    }
+
+    const code = decimal !== undefined ? parseInt(decimal, 10) : parseInt(hex, 16);
+    return code === 0 || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF) ? "\uFFFD" : String.fromCodePoint(code);
+  });
+}
+
+const inlinePattern = /\\([\\`*_{}\[\]()#+\-.!~|>&])|(`+)([\s\S]*?[^`])\2(?!`)|!\[([^\]]*)\]\(([^)\s]*)[^)]*\)|\[([^\]]+)\]\(([^)\s]*)[^)]*\)|<(https?:\/\/[^>\s]+)>|(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"])|\*\*(?=\S)([\s\S]*?\S)\*\*|__(?=\S)([\s\S]*?\S)__|~~(?=\S)([\s\S]*?\S)~~|\*(?=\S)([\s\S]*?\S)\*|\b_(?=\S)([\s\S]*?\S)_\b|( {2,}\n|\\\n|<[bB][rR]\s*\/?>)/g;
 
 function markdownInline(text) {
   const nodes = [];
   let last = 0;
 
-  const plain = value => value.replace(/\n/g, " ");
+  const plain = value => decodeEntities(value.replace(/\n/g, " "));
   const link = value => h("span", { class: "link" }, value);
 
   for (const m of text.matchAll(inlinePattern)) {
@@ -534,13 +567,13 @@ function markdownInline(text) {
     } else if (m[3] !== undefined) {
       nodes.push(h("code", {}, m[3].trim()));
     } else if (m[4] !== undefined) {
-      nodes.push(h("em", {}, `[image: ${m[4]}]`));
+      nodes.push(h("em", {}, `[image: ${decodeEntities(m[4])}]`));
     } else if (m[6] !== undefined) {
       nodes.push(link(markdownInline(m[6])));
     } else if (m[8] !== undefined) {
-      nodes.push(link(m[8]));
+      nodes.push(link(decodeEntities(m[8])));
     } else if (m[9] !== undefined) {
-      nodes.push(link(m[9]));
+      nodes.push(link(decodeEntities(m[9])));
     } else if (m[10] !== undefined || m[11] !== undefined) {
       nodes.push(h("strong", {}, markdownInline(m[10] ?? m[11])));
     } else if (m[12] !== undefined) {
@@ -1520,6 +1553,10 @@ class Connection {
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
   promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
   cancelLimitPause(workspaceId) { return this.request("CancelLimitPause", { workspaceId }); }
+  swarm(command, fields = {}) { return this.request(command, fields).then(r => r.swarm); }
+  getSwarmTask(taskId) { return this.request("GetSwarmTask", { taskId }).then(r => r.swarmTask); }
+  getQueuedWork(workspaceId) { return this.request("GetQueuedWork", { workspaceId }).then(r => r.queue ?? null); }
+  cancelQueuedWork(workspaceId, keep) { return this.request("CancelQueuedWork", { workspaceId, keep }).then(r => r.queue ?? null); }
   transcribeSavedInput(workspaceId, data) { return this.request("TranscribeSavedInput", { workspaceId, data }).then(r => r.savedInputs); }
   discardSavedInput(workspaceId, inputId) { return this.request("DiscardSavedInput", { workspaceId, inputId }).then(r => r.savedInputs); }
   uploadAttachment(workspaceId, name, data) { return this.request("UploadAttachment", { workspaceId, name, data }).then(r => r.attachmentPath); }
@@ -1703,6 +1740,15 @@ const icons = {
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
 };
 
+function requestNotifications() {
+  try {
+    if ("Notification" in window && Notification.permission === "default") {
+      Notification.requestPermission();
+    }
+  } catch (exception) {
+  }
+}
+
 function splitAttachments(text) {
   const prefix = "Attached file: ";
   const lines = text.split("\n").map(line => line.replace(/\r$/, ""));
@@ -1714,6 +1760,17 @@ function splitAttachments(text) {
   }
 
   return { body: lines.join("\n").trimEnd(), files };
+}
+
+const activeTaskStates = ["Waiting", "Pending", "InTransit", "Queued", "Running"];
+
+function taskStateText(task) {
+  const names = { InTransit: "In transit", Pending: "Waiting for a worker", Waiting: "Waiting for other tasks" };
+  return task.state === "Done" && task.isApplied ? "Done, applied" : names[task.state] ?? task.state;
+}
+
+function taskLine(task) {
+  return [taskStateText(task), task.peerName ? `${task.isIncoming ? "from" : "on"} ${task.peerName}` : null, !task.isIncoming && task.workspaceName ? task.workspaceName : null].filter(part => part).join(" - ");
 }
 
 function section(name, ...children) {
@@ -1901,6 +1958,7 @@ class WorkspaceView {
     this.nodes = [];
     this.previewRead = 0;
     this.previewWaiting = false;
+    this.previewRequest = 0;
     this.preview = null;
     this.tokens = [];
     this.find = { open: false, query: "", matchCase: false, wholeWord: false, starts: [], current: -1 };
@@ -1931,6 +1989,7 @@ class WorkspaceView {
     this.errorsError = new ErrorLine();
     this.syncTimer = null;
     this.build();
+    this.applyState();
     this.listener = event => this.receive(event);
     connection.listeners.add(this.listener);
     this.loadChat();
@@ -1968,6 +2027,7 @@ class WorkspaceView {
     this.attachButton = h("button", { class: "flat icon", title: "Attach files", onclick: () => this.fileInput.click() }, icon("attach"));
     this.voiceButton = h("button", { class: "flat icon", title: "Voice input", hidden: !(navigator.mediaDevices?.getUserMedia && window.MediaRecorder), onclick: () => this.startVoice() }, icon("mic"));
     this.voice = null;
+    this.voiceStarting = null;
     this.transcribing = false;
     this.voiceTime = h("div", { class: "voice-time" }, "0:00");
     this.voiceScreen = h("div", { class: "voice-screen" },
@@ -1990,8 +2050,14 @@ class WorkspaceView {
     this.workButton = h("button", { class: "flat icon worktoggle", title: "Show the work of the AI (tool calls and results, dimmed) and stream its answer as it is written", onclick: () => this.toggleWork() }, icon("work"));
     this.limitText = h("div", {});
     this.limitBanner = h("div", { class: "limit-banner", hidden: true }, icon("pause"), this.limitText, h("button", { class: "flat", title: "End the automatic pause without resuming the work and the loop", onclick: () => this.cancelLimitPause() }, "Cancel Auto Resume"));
+    this.queue = null;
+    this.submitted = [];
+    this.queueText = h("div", {});
+    this.queuePrompt = h("div", { class: "prompt" });
+    this.queueBanner = h("div", { class: "queue-banner", hidden: true }, h("div", { class: "info" }, this.queueText, this.queuePrompt), h("button", { class: "flat", onclick: () => this.cancelQueued() }, "Cancel Queued Work"));
     this.chatBody = h("div", { class: "pane-body chat" },
       this.limitBanner,
+      this.queueBanner,
       h("div", { class: "messages-wrap" }, this.scroller, this.workButton, this.chatAutoButton),
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
@@ -2131,10 +2197,10 @@ class WorkspaceView {
     this.capabilitySelect = h("select", {}, capabilities.map(name => h("option", { value: name }, name)));
     this.effortSelect = h("select", {}, efforts.map(name => h("option", { value: name }, name)));
     this.switches = {};
-    const switchRow = (key, label) => {
+    const switchRow = (key, label, title = "") => {
       const box = h("input", { type: "checkbox" });
       this.switches[key] = box;
-      return h("label", { class: "check", style: "margin-top:4px" }, box, label);
+      return h("label", { class: "check", style: "margin-top:4px", title }, box, label);
     };
     this.instructionsBox = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
     this.statusBox = h("input", { type: "number", min: "1", max: "1440", step: "1" });
@@ -2152,29 +2218,38 @@ class WorkspaceView {
     this.formShown = false;
     this.settingsEdits = 0;
     this.syncSettings();
+    const lockedSections = [
+      section("AI",
+        h("div", { class: "muted" }, "AI provider"), this.providerLabel,
+        h("div", { class: "muted", style: "margin-top:8px" }, "Capability"), this.capabilitySelect,
+        h("div", { class: "muted", style: "margin-top:8px" }, "Effort"), this.effortSelect),
+      section("Access",
+        switchRow("isShellAllowed", "Run shell commands"),
+        switchRow("isSystemAccessAllowed", "Allow files outside the workspace"),
+        switchRow("isWebAllowed", "Use the web"),
+        switchRow("isImageGenerationAllowed", "Generate images"),
+        switchRow("isDelegationAllowed", "Let the AI delegate work", "The AI may send tasks, with the code of this workspace, to the paired servers that receive work, and decides what to delegate without asking about each task.")),
+      section("Instructions and prompts",
+        h("div", { class: "muted" }, "Instructions"), this.instructionsBox,
+        h("div", { class: "muted", style: "margin-top:8px" }, "Status interval (minutes)"),
+        h("div", { style: "display:flex;gap:6px;align-items:flex-start" }, this.statusBox, h("button", { class: "flat icon", title: "Use the status interval of the global settings", onclick: () => { this.statusBox.value = ""; this.settingsEdits++; } }, icon("close"))),
+        ...promptRow("Review prompt", this.reviewPromptBox, "Use the review prompt of the global settings"),
+        ...promptRow("Expand prompt", this.expandPromptBox, "Use the expand prompt of the global settings"))
+    ];
+    this.lockedControls = lockedSections.flatMap(item => [...item.querySelectorAll("input, select, textarea, button")]);
+    this.lockedNote = h("div", { class: "muted", hidden: true }, "This workspace runs a task delegated by another server, so its settings cannot be changed.");
+    this.renameButton = h("button", { class: "block", onclick: () => this.home.beginRename() }, "Rename Workspace");
+    this.relocateButton = h("button", { class: "block", onclick: () => this.home.beginRelocate() }, "Move Workspace to Folder");
     this.settingsPane = h("div", { class: "pane settings" },
       h("div", { class: "inner stack tight" },
-        section("AI",
-          h("div", { class: "muted" }, "AI provider"), this.providerLabel,
-          h("div", { class: "muted", style: "margin-top:8px" }, "Capability"), this.capabilitySelect,
-          h("div", { class: "muted", style: "margin-top:8px" }, "Effort"), this.effortSelect),
-        section("Access",
-          switchRow("isShellAllowed", "Run shell commands"),
-          switchRow("isSystemAccessAllowed", "Allow files outside the workspace"),
-          switchRow("isWebAllowed", "Use the web"),
-          switchRow("isImageGenerationAllowed", "Generate images")),
-        section("Instructions and prompts",
-          h("div", { class: "muted" }, "Instructions"), this.instructionsBox,
-          h("div", { class: "muted", style: "margin-top:8px" }, "Status interval (minutes)"),
-          h("div", { style: "display:flex;gap:6px;align-items:flex-start" }, this.statusBox, h("button", { class: "flat icon", title: "Use the status interval of the global settings", onclick: () => { this.statusBox.value = ""; this.settingsEdits++; } }, icon("close"))),
-          ...promptRow("Review prompt", this.reviewPromptBox, "Use the review prompt of the global settings"),
-          ...promptRow("Expand prompt", this.expandPromptBox, "Use the expand prompt of the global settings")),
+        this.lockedNote,
+        ...lockedSections,
         this.detailsSection,
         section("Errors", this.errorsError.element, this.errorsBox),
         this.settingsError.element,
         section("Workspace",
-          h("button", { class: "block", onclick: () => this.home.beginRename() }, "Rename Workspace"),
-          h("button", { class: "block", onclick: () => this.home.beginRelocate() }, "Move Workspace to Folder"),
+          this.renameButton,
+          this.relocateButton,
           h("button", { class: "block danger", onclick: () => this.home.beginDelete() }, "Delete Workspace"))));
 
     this.settingsPane.hidden = true;
@@ -2300,7 +2375,7 @@ class WorkspaceView {
     const edited = this.editedSettings();
     return edited.capability !== this.current.capability
       || edited.effort !== this.current.effort
-      || ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed"].some(key => !!edited[key] !== !!this.current[key])
+      || ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed", "isDelegationAllowed"].some(key => !!edited[key] !== !!this.current[key])
       || edited.instructions !== (this.current.instructions ?? "").trim()
       || (edited.statusMinutes ?? null) !== (this.current.statusMinutes ?? null)
       || (edited.reviewPrompt ?? "") !== (this.current.reviewPrompt ?? "").trim()
@@ -2308,7 +2383,7 @@ class WorkspaceView {
   }
 
   async applySettings() {
-    if (!this.hasPendingSettings()) {
+    if (this.delegation() || !this.hasPendingSettings()) {
       return true;
     }
 
@@ -2387,6 +2462,7 @@ class WorkspaceView {
   reconnected(connection) {
     this.connection.listeners.delete(this.listener);
     this.connection = connection;
+    this.diagrams.connection = connection;
     connection.listeners.add(this.listener);
     this.watch();
     this.loadChat();
@@ -2555,9 +2631,18 @@ class WorkspaceView {
     } catch (exception) {
     }
 
+    if (this.home.active !== this) {
+      return;
+    }
+
     try {
       windows = ((await this.connection.getUsage(this.info.service))?.windows ?? []).map(window => window.name);
     } catch (exception) {
+    }
+
+    // A dialog that opens after another workspace was chosen would be taken as one about that workspace.
+    if (this.home.active !== this) {
+      return;
     }
 
     const field = (label, ...controls) => h("div", { class: "stack tight", style: "margin-top:6px" }, h("div", { class: "muted" }, label), ...controls);
@@ -2936,6 +3021,13 @@ class WorkspaceView {
 
   announceReady(state) {
     if (state === "Ready" && this.lastState !== "Ready" && this.notifyWhenReady) {
+      // While the AI waits for delegated tasks its work is not over, so the user is told once it has dealt with them.
+      if (this.home.swarmTasks.some(task => task.workspaceId === this.info.id && !task.isManual && this.home.isUnderWay(task))) {
+        this.home.held.add(this.info.id);
+        return;
+      }
+
+      this.home.held.delete(this.info.id);
       this.notifyWhenReady = false;
 
       if (this.loop !== null) {
@@ -2948,12 +3040,7 @@ class WorkspaceView {
           this.readyNote = note;
           note.onclick = () => {
             window.focus();
-
-            if (this.home.selected?.id !== this.info.id) {
-              this.home.select(this.info);
-            }
-
-            this.home.setDrawer(false);
+            this.home.app.showWorkspace(this.home, this.info.id);
             note.close();
           };
         }
@@ -2983,9 +3070,29 @@ class WorkspaceView {
     }
 
     this.gitBar.hidden = state !== "Managing";
-    this.input.placeholder = { Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
+    const delegated = this.delegation();
+    this.input.placeholder = delegated ? `This workspace runs a task delegated by ${delegated.from}` : { Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
+    this.showDelegation(delegated);
     this.updateSend();
     this.home.updateWorking(this);
+  }
+
+  showDelegation(delegation) {
+    const delegated = delegation !== null;
+
+    for (const control of [this.input, this.attachButton, this.loadInputButton, this.renameButton, this.relocateButton, ...this.lockedControls]) {
+      control.disabled = delegated;
+    }
+
+    this.lockedNote.hidden = !delegated;
+
+    if (delegated !== this.treeDelegated) {
+      this.treeDelegated = delegated;
+      this.renderTree();
+    }
+
+    this.stopButton.title = delegated ? "Cancel the delegated task" : "Stop the work and keep what it did";
+    this.home.updateHaltNote(this);
   }
 
   dispose() {
@@ -2993,6 +3100,7 @@ class WorkspaceView {
     document.removeEventListener("keydown", this.keyListener);
     document.removeEventListener("click", this.menuListener);
     this.stopSync();
+    this.voiceStarting = null;
 
     if (this.voice) {
       this.releaseVoice(this.voice);
@@ -3000,6 +3108,11 @@ class WorkspaceView {
   }
 
   setWorking(value) {
+    // What was sent before the work began is in it or done with it, so none of it can be what waits later.
+    if (value && !this.working) {
+      this.submitted = [];
+    }
+
     this.working = value;
 
     if (value && this.gitWorking()) {
@@ -3047,6 +3160,11 @@ class WorkspaceView {
       this.setWorking(result.value.working === true);
       this.setLimitPause(result.value.limitPause ?? null);
       this.renderMessages();
+      const waiting = await attempt(() => this.connection.getQueuedWork(this.info.id), this.chatError);
+
+      if (waiting.ok) {
+        this.setQueue(waiting.value);
+      }
 
       if (lost) {
         this.chatAuto = true;
@@ -3230,6 +3348,17 @@ class WorkspaceView {
 
     if (event.kind === "LimitPauseChanged") {
       this.setLimitPause(event.limitPause ?? null);
+      return;
+    }
+
+    if (event.kind === "QueueChanged") {
+      this.setQueue(event.queue ?? null);
+
+      // A queue emptied as "dropped" means the waiting prompt never starts.
+      if (!event.queue && event.text === "dropped" && !this.working) {
+        this.notifyWhenReady = false;
+      }
+
       return;
     }
 
@@ -3605,7 +3734,15 @@ class WorkspaceView {
     this.saveDraft();
   }
 
+  delegation() {
+    return this.home.delegations.get(this.info.id) ?? null;
+  }
+
   takesAiInput() {
+    if (this.delegation()) {
+      return false;
+    }
+
     const state = this.state();
     return state === "Ready" || state === "Working";
   }
@@ -3632,7 +3769,7 @@ class WorkspaceView {
     this.saveInputButton.hidden = !typed;
     this.loadInputButton.hidden = typed;
 
-    if (typed && this.savedOpen) {
+    if ((typed || this.delegation()) && this.savedOpen) {
       this.toggleSaved();
     }
 
@@ -3642,24 +3779,39 @@ class WorkspaceView {
     this.voiceButton.classList.toggle("on", this.voice !== null);
     this.voiceButton.classList.toggle("recording", this.voice !== null);
     this.voiceButton.title = this.transcribing ? "Sending the recording" : "Voice input";
-    this.home.closeHaltDialogUnlessRunning(state);
+
+    if (this === this.home.active) {
+      this.home.closeHaltDialogUnlessRunning(state);
+    }
   }
 
   async startVoice() {
-    if (this.voice || this.transcribing) {
+    if (this.voice || this.voiceStarting || this.transcribing) {
       return;
     }
 
     this.chatError.set(null);
+    const starting = {};
+    this.voiceStarting = starting;
     let stream;
 
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch (exception) {
-      this.chatError.set(`Voice input needs the microphone: ${exception.message || exception.name}`);
+      if (this.voiceStarting === starting) {
+        this.voiceStarting = null;
+        this.chatError.set(`Voice input needs the microphone: ${exception.message || exception.name}`);
+      }
+
       return;
     }
 
+    if (this.voiceStarting !== starting) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+
+    this.voiceStarting = null;
     const recorder = new MediaRecorder(stream);
     const chunks = [];
     recorder.ondataavailable = event => chunks.push(event.data);
@@ -3690,6 +3842,8 @@ class WorkspaceView {
   }
 
   async cancelVoice() {
+    this.voiceStarting = null;
+
     if (this.voice) {
       this.releaseVoice(this.voice);
       this.updateSend();
@@ -3756,13 +3910,19 @@ class WorkspaceView {
     this.attachments = [];
     this.renderAttachments();
 
-    if (!await this.deliver(text, sending) && this.input.value.length === 0 && this.attachments.length === 0) {
-      this.input.value = text;
-      this.saveDraft();
-      this.fitInput();
-      this.attachments = sending;
-      this.renderAttachments();
+    if (!await this.deliver(text, sending, true)) {
+      this.giveBack(text, sending);
     }
+  }
+
+  // What was not sent goes back in front of what was typed and attached meanwhile.
+  giveBack(text, attachments) {
+    if (text) {
+      this.input.value = this.input.value ? `${text}\n${this.input.value}` : text;
+    }
+
+    this.attachments = [...attachments, ...this.attachments];
+    this.renderAttachments();
   }
 
   async preset(kind) {
@@ -3795,48 +3955,43 @@ class WorkspaceView {
     await this.deliver(prompt, []);
   }
 
-  async deliver(text, sending) {
+  async deliver(text, sending, fromBox = false) {
     this.chatNotice.hidden = true;
+    const waited = this.notifyWhenReady;
     this.notifyWhenReady = true;
     this.clearReady();
-
-    try {
-      if ("Notification" in window && Notification.permission === "default") {
-        Notification.requestPermission();
-      }
-    } catch (exception) {
-    }
-
+    requestNotifications();
     let refused = null;
 
     const result = await attempt(async () => {
       const lines = text ? [text] : [];
 
       for (const attachment of sending) {
-        lines.push(`Attached file: ${await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file))}`);
+        lines.push(`Attached file: ${attachment.serverPath ?? await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file))}`);
       }
 
       const prompt = lines.join("\n");
 
       try {
+        this.submitted.push(splitAttachments(prompt));
         await this.connection.prompt(this.info.id, prompt);
       } catch (exception) {
         if (!exception.overLimit) {
           throw exception;
         }
 
-        refused = { pause: exception.overLimit, prompt, typed: text, attachments: sending.length };
+        refused = { pause: exception.overLimit, prompt, typed: fromBox ? text : "", attachments: sending };
       }
     }, this.chatError);
 
-    if (refused) {
-      this.notifyWhenReady = false;
-      this.askOverLimit(refused);
-      return false;
+    // A prompt that was not taken leaves the wait for earlier work as it was, unless that work was announced meanwhile.
+    if (refused || !result.ok) {
+      this.notifyWhenReady &&= waited;
     }
 
-    if (!result.ok) {
-      this.notifyWhenReady = false;
+    if (refused) {
+      this.askOverLimit(refused);
+      return false;
     }
 
     return result.ok;
@@ -3845,24 +4000,33 @@ class WorkspaceView {
   askOverLimit(ask) {
     const percent = value => String(Math.round(value * 10) / 10);
     const text = `The ${ask.pause.window} usage window is at ${percent(ask.pause.percentUsed)}%, at or past the maximum of ${percent(ask.pause.maxPercent)}%. Start the work anyway? The workspace ignores the maximum until this work is done.`;
+
+    if (this.home.active !== this) {
+      this.chatError.set(`The prompt was not sent. The ${ask.pause.window} usage window is at ${percent(ask.pause.percentUsed)}%, at or past the maximum of ${percent(ask.pause.maxPercent)}%.`);
+      return;
+    }
+
     const go = async () => {
       this.home.closeDialog();
+      const boxed = !!ask.typed && this.input.value.trim() === ask.typed;
+      const taken = this.attachments.filter(attachment => ask.attachments.includes(attachment));
 
-      if (ask.typed && this.input.value.trim() === ask.typed && this.attachments.length === ask.attachments) {
+      if (boxed) {
         this.input.value = "";
-        this.fitInput();
-        this.saveDraft();
-        this.attachments = [];
-        this.renderAttachments();
       }
 
+      this.attachments = this.attachments.filter(attachment => !taken.includes(attachment));
+      this.renderAttachments();
+      const waited = this.notifyWhenReady;
       this.notifyWhenReady = true;
       this.clearReady();
 
       if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
-        this.notifyWhenReady = false;
+        this.notifyWhenReady &&= waited;
+        this.giveBack(boxed ? ask.typed : "", taken);
       }
     };
+
     this.home.dialogError.set(null);
     this.home.dialogHost.replaceChildren(h("div", { class: "dialog" },
       h("h3", { class: "serif" }, "Over the usage limit"),
@@ -3870,6 +4034,80 @@ class WorkspaceView {
       h("button", { class: "primary block", onclick: go }, "Start Anyway"),
       h("button", { class: "block", onclick: () => this.home.closeDialog() }, "Cancel")));
     this.home.dialogHost.hidden = false;
+  }
+
+  setQueue(queue) {
+    if (this.queue && !queue) {
+      this.submitted = [];
+    }
+
+    this.queue = queue;
+    this.queueBanner.hidden = !queue;
+
+    if (!queue) {
+      return;
+    }
+
+    const running = queue.running ?? [];
+    this.queueText.textContent = `Queued (position ${queue.position})${running.length > 0 ? `, waiting for ${running.join(", ")}` : ""}.`;
+    const parts = splitAttachments(queue.text ?? "");
+    this.queuePrompt.textContent = [parts.body, parts.files.map(file => file.name).join(", ")].filter(part => part).join("\n");
+    this.queuePrompt.hidden = !queue.text;
+
+    if (this.gitWorking()) {
+      this.showSide("chat");
+    }
+  }
+
+  // The server joins waiting prompts as paragraphs and keeps their attachment lines at the end.
+  wasSubmitted(queued) {
+    return this.submitted.some(sent => sent.body
+      ? `\n\n${queued.body}\n\n`.includes(`\n\n${sent.body}\n\n`)
+      : sent.files.some(file => queued.files.some(other => other.path === file.path)));
+  }
+
+  async cancelQueued() {
+    const waiting = this.queue;
+
+    if (!waiting) {
+      return;
+    }
+
+    const own = this.wasSubmitted(splitAttachments(waiting.text ?? ""));
+    const result = await attempt(() => this.connection.cancelQueuedWork(this.info.id, !own), this.chatError);
+
+    if (!result.ok) {
+      return;
+    }
+
+    this.setQueue(null);
+
+    if (waiting.delegated) {
+      this.chatNotice.textContent = "The delegated task was cancelled.";
+      this.chatNotice.hidden = false;
+      return;
+    }
+
+    const removed = result.value;
+
+    if (!removed?.text) {
+      return;
+    }
+
+    if (!own) {
+      this.chatNotice.textContent = "The queued prompt was kept as a saved input.";
+      this.chatNotice.hidden = false;
+      return;
+    }
+
+    const parts = splitAttachments(removed.text);
+    this.attachments = [...this.attachments, ...parts.files.map(file => ({ name: file.name, serverPath: file.path }))];
+
+    if (parts.body) {
+      this.input.value = this.input.value.trim() ? `${parts.body}\n${this.input.value}` : parts.body;
+    }
+
+    this.renderAttachments();
   }
 
   async cancelLimitPause() {
@@ -3978,11 +4216,12 @@ class WorkspaceView {
     const scroll = this.fileList.scrollTop;
     const open = this.openPath();
     const active = new Set(this.scriptList().filter(entry => this.scriptActive(entry)).map(entry => entry.path));
-    const runnable = node => !node.entry.isFolder && /\.(cs|task)$/i.test(node.entry.name);
+    const script = node => !node.entry.isFolder && /\.(cs|task)$/i.test(node.entry.name);
+    const runnable = node => !this.delegation() && script(node);
     const touch = () => matchMedia("(pointer: coarse)").matches;
     const rows = (nodes, depth) => nodes.flatMap(node => [
       h("div", {
-        class: `row${this.statusClass(this.statusOf(node.entry.path, node.entry.isFolder))}${!node.entry.isFolder && node.entry.path === open ? " on" : ""}${runnable(node) && active.has(node.entry.path) ? " running" : ""}`,
+        class: `row${this.statusClass(this.statusOf(node.entry.path, node.entry.isFolder))}${!node.entry.isFolder && node.entry.path === open ? " on" : ""}${script(node) && active.has(node.entry.path) ? " running" : ""}`,
         style: `padding-left:${8 + depth * 16}px`,
         onclick: () => this.choose(node),
         ondblclick: () => runnable(node) && !touch() && this.runScript(node.entry.path),
@@ -4024,7 +4263,12 @@ class WorkspaceView {
   }
 
   async openFile(path) {
+    const request = ++this.previewRequest;
     const result = await attempt(() => this.connection.readFile(this.info.id, path), this.filesError);
+
+    if (request !== this.previewRequest) {
+      return false;
+    }
 
     if (result.ok) {
       this.showPreview(result.value);
@@ -4132,6 +4376,7 @@ class WorkspaceView {
     this.diffState = null;
 
     if (forget) {
+      this.previewRequest++;
       this.visited = [];
       this.visitPosition = -1;
       this.updateNavigation();
@@ -4485,8 +4730,17 @@ class WorkspaceView {
         return;
       }
 
-      const result = await attempt(() => this.connection.readFile(this.info.id, open.path), this.filesError);
+      // A background read does not count as a request of its own, so it never supersedes what the user is opening.
+      const request = this.previewRequest;
+      const errors = new ErrorLine();
+      const result = await attempt(() => this.connection.readFile(this.info.id, open.path), errors);
       this.previewRead = Date.now();
+
+      if (request !== this.previewRequest || this.preview?.path !== open.path) {
+        return;
+      }
+
+      this.filesError.set(errors.element.textContent);
 
       if (!result.ok) {
         this.closePreview();
@@ -4654,9 +4908,10 @@ class WorkspaceView {
 
   async chooseHit(hit, text) {
     this.setSearch(false);
+    const request = ++this.previewRequest;
     const result = await attempt(() => this.connection.readFile(this.info.id, hit.path), this.filesError);
 
-    if (!result.ok) {
+    if (!result.ok || request !== this.previewRequest) {
       return;
     }
 
@@ -4756,8 +5011,14 @@ class WorkspaceView {
     this.changeList.scrollTop = scroll;
   }
 
+  // A quiet open only reads the shown diff again.
   async openDiff(path, commit, quiet = false, remember = true) {
+    const request = quiet ? this.previewRequest : ++this.previewRequest;
     const result = await attempt(() => this.connection.getGitDiff(this.info.id, path, commit), quiet ? new ErrorLine() : this.filesError);
+
+    if (request !== this.previewRequest || quiet && (this.diffState?.path !== path || this.diffState.commit !== (commit ?? null))) {
+      return false;
+    }
 
     if (result.ok) {
       this.showDiff(result.value, path, commit);
@@ -4911,6 +5172,10 @@ class WorkspaceView {
   }
 
   askGit({ title, body = null, confirm, input = null, text = "", email = false, destructive = false, empty = "", capitalize = true, action, then }) {
+    if (this.home.active !== this) {
+      return;
+    }
+
     if (this.refuseWork()) {
       return;
     }
@@ -5022,7 +5287,7 @@ class WorkspaceView {
       const id = this.info.id;
       await this.connection.gitCommit(id, await this.connection.generateCommitMessage(id));
     } catch (exception) {
-      this.home.notice("Auto Commit", exception.message);
+      this.gitNotice("Auto Commit", exception.message);
     } finally {
       this.localBusy = false;
       this.refreshGit(true);
@@ -5049,6 +5314,14 @@ class WorkspaceView {
     this.askGit({ title: "Delete tag", body: `Delete tag '${name}'? This cannot be undone.`, confirm: "Delete", destructive: true, action: () => this.connection.gitDeleteTag(this.info.id, name) });
   }
 
+  gitNotice(title, message) {
+    if (this.home.active === this) {
+      this.home.notice(title, message);
+    } else {
+      this.historyError.set(message);
+    }
+  }
+
   async compare(branch, base) {
     this.localBusy = true;
     this.renderGit();
@@ -5056,7 +5329,7 @@ class WorkspaceView {
     try {
       return await this.connection.getGitBranchState(this.info.id, branch, base);
     } catch (exception) {
-      this.home.notice("Git", exception.message);
+      this.gitNotice("Git", exception.message);
       return null;
     } finally {
       this.localBusy = false;
@@ -5073,7 +5346,7 @@ class WorkspaceView {
     this.withIdentity(async () => {
       const state = await this.compare(branch, base);
 
-      if (!state) {
+      if (!state || this.home.active !== this) {
         return;
       }
 
@@ -5095,7 +5368,7 @@ class WorkspaceView {
 
       const state = await this.compare(branch, onto);
 
-      if (!state) {
+      if (!state || this.home.active !== this) {
         return;
       }
 
@@ -5118,7 +5391,7 @@ class WorkspaceView {
 
       const state = await this.compare(source, target);
 
-      if (!state) {
+      if (!state || this.home.active !== this) {
         return;
       }
 
@@ -5205,9 +5478,29 @@ class Home {
     this.error = new ErrorLine();
     this.dialogError = new ErrorLine();
     this.looping = new Set();
+    this.queued = new Set();
+    this.delegations = new Map();
+    this.swarmTasks = [];
+    this.followed = new Set();
+    this.held = new Set();
     this.catalogListener = event => {
       if (event.kind === "WorkspacesChanged") {
         this.refreshCatalog();
+      } else if (event.kind === "SwarmChanged") {
+        this.refreshSwarm();
+      } else if (event.kind === "QueueChanged") {
+        const had = this.queued.has(event.workspaceId);
+
+        if (event.queue) {
+          this.queued.add(event.workspaceId);
+        } else {
+          this.queued.delete(event.workspaceId);
+        }
+
+        if (had !== this.queued.has(event.workspaceId)) {
+          this.buildEntries();
+          this.renderDrawer();
+        }
       } else if (event.kind === "LoopChanged") {
         const had = this.looping.has(event.workspaceId);
 
@@ -5260,6 +5553,7 @@ class Home {
         h("button", { class: "block", onclick: () => this.app.showNewWorkspace(this.connection, this) }, "New Workspace"),
         h("button", { class: "block", onclick: () => this.app.showCloneWorkspace(this.connection, this) }, "Clone Workspace"),
         h("button", { class: "block", onclick: () => this.beginNewGroup() }, "New Group"),
+        h("button", { class: "block", onclick: () => this.app.showSwarm(this.connection, this, null, this.selected?.id ?? null) }, "Swarm"),
         h("button", { class: "block", onclick: () => this.app.changeServer() }, "Change Server")));
     this.scrim = h("div", { class: "overlay", hidden: true, onclick: () => this.setDrawer(false) });
     this.dialogHost = h("div", { class: "dialog-wrap", hidden: true });
@@ -5303,11 +5597,90 @@ class Home {
     }
   }
 
+  // The AI is told about a job whose remaining tasks wait on a lost one, so nothing of it is under way any more.
+  isUnderWay(task) {
+    return activeTaskStates.includes(task.state) && !(task.state === "Waiting" && this.swarmTasks.some(other => other.jobId === task.jobId && other.state === "Lost"));
+  }
+
+  async refreshSwarm() {
+    if (this.refreshingSwarm) {
+      this.refreshSwarmAgain = true;
+      return;
+    }
+
+    this.refreshingSwarm = true;
+
+    try {
+      do {
+        this.refreshSwarmAgain = false;
+        let status;
+
+        try {
+          status = await this.connection.swarm("GetSwarm");
+        } catch (exception) {
+          return;
+        }
+
+        for (const task of status.tasks ?? []) {
+          if (!activeTaskStates.includes(task.state) && this.followed.delete(task.id)) {
+            this.announce(task.workspaceId, `Delegated task "${task.title}": ${task.state}`);
+          }
+        }
+
+        this.swarmTasks = (status.tasks ?? []).filter(task => !task.isIncoming);
+
+        // Tasks that were all discarded are never reported to the AI, so nothing more would end the wait.
+        for (const id of [...this.held].filter(held => !this.swarmTasks.some(task => task.workspaceId === held && !task.isManual))) {
+          this.held.delete(id);
+          const view = this.opened.get(id);
+
+          if (view) {
+            view.notifyWhenReady = false;
+          }
+        }
+
+        this.buildEntries();
+        this.renderDrawer();
+      } while (this.refreshSwarmAgain);
+    } finally {
+      this.refreshingSwarm = false;
+    }
+  }
+
+  follow(taskIds) {
+    taskIds.forEach(id => this.followed.add(id));
+    this.refreshSwarm();
+  }
+
+  announce(workspaceId, message) {
+    try {
+      if ("Notification" in window && Notification.permission === "granted") {
+        const note = new Notification(message);
+        note.onclick = () => {
+          window.focus();
+          this.app.showWorkspace(this, workspaceId);
+          note.close();
+        };
+      }
+    } catch (exception) {
+    }
+  }
+
+  setDelegations(delegations) {
+    this.delegations = new Map((delegations ?? []).map(delegation => [delegation.workspaceId, delegation]));
+
+    for (const view of this.opened.values()) {
+      view.applyState();
+    }
+  }
+
   applyCatalog(catalog) {
     const before = this.selected;
     this.workspaces = catalog.workspaces;
     this.groups = catalog.groups;
     this.looping = new Set(catalog.looping ?? []);
+    this.queued = new Set(catalog.queued ?? []);
+    this.setDelegations(catalog.delegations);
 
     for (const id of [...this.expanded]) {
       if (!this.groups.some(group => group.id === id)) {
@@ -5359,6 +5732,7 @@ class Home {
     connection.listeners.add(this.catalogListener);
     this.setOffline(false);
     this.refreshCatalog();
+    this.refreshSwarm();
 
     for (const view of this.opened.values()) {
       view.reconnected(connection);
@@ -5499,6 +5873,9 @@ class Home {
     this.workspaces = result.value.workspaces;
     this.groups = result.value.groups;
     this.looping = new Set(result.value.looping ?? []);
+    this.queued = new Set(result.value.queued ?? []);
+    this.setDelegations(result.value.delegations);
+    this.refreshSwarm();
 
     for (const id of [...this.expanded]) {
       if (!this.groups.some(group => group.id === id)) {
@@ -5630,6 +6007,10 @@ class Home {
 
     for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => this.looping.has(right.id) - this.looping.has(left.id) || (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
       this.entries.push({ workspace, depth });
+
+      for (const task of this.swarmTasks.filter(item => item.workspaceId === workspace.id && (activeTaskStates.includes(item.state) || item.state === "Lost")).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))) {
+        this.entries.push({ task, depth: depth + 1 });
+      }
     }
   }
 
@@ -5654,9 +6035,16 @@ class Home {
           tool("✕", "Delete group", () => this.beginDeleteGroup(group)));
       }
 
+      if (entry.task) {
+        return h("div", { class: "row", style: indent, onclick: () => this.app.showSwarm(this.connection, this, entry.task.id, entry.task.workspaceId) },
+          h("div", { class: "name" }, `\u21B3 ${entry.task.title}`, h("small", {}, taskLine(entry.task))));
+      }
+
       const workspace = entry.workspace;
+      const delegatedBy = this.delegations.get(workspace.id)?.from;
+      const detail = [this.queued.has(workspace.id) ? "Queued" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
       return h("div", { class: `row${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
-        h("div", { class: "name" }, folderName(workspace.folder), ...(this.looping.has(workspace.id) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, workspace.folder)),
+        h("div", { class: "name" }, folderName(workspace.folder), ...(this.looping.has(workspace.id) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail)),
         h("button", { class: "flat", title: "Move to a group", onclick: event => { event.stopPropagation(); this.beginMove(workspace, null); } }, "↪"));
     }));
   }
@@ -5680,13 +6068,25 @@ class Home {
       this.closeDialog();
       view.halt(() => view.connection.stopWorkspace(view.info.id));
     };
+    this.haltView = view;
+    this.haltNote = h("div", { class: "muted" });
+    this.updateHaltNote(view);
     this.haltDialog = h("div", { class: "dialog" },
       h("h3", { class: "serif" }, "Stop the work?"),
+      this.haltNote,
       h("button", { class: "primary block", onclick: go }, "Stop"),
       this.dialogError.element,
       h("button", { class: "block", onclick: () => this.closeDialog() }, "Keep Working"));
     this.dialogHost.replaceChildren(this.haltDialog);
     this.dialogHost.hidden = false;
+  }
+
+  updateHaltNote(view) {
+    if (view === this.haltView) {
+      const delegation = view.delegation();
+      this.haltNote.textContent = delegation ? `This cancels the task delegated by ${delegation.from}, which is told.` : "";
+      this.haltNote.hidden = !delegation;
+    }
   }
 
   closeHaltDialogUnlessRunning(state) {
@@ -5760,6 +6160,8 @@ class Home {
       this.workspaces = result.value.workspaces;
       this.groups = result.value.groups;
       this.looping = new Set(result.value.looping ?? []);
+      this.queued = new Set(result.value.queued ?? []);
+      this.setDelegations(result.value.delegations);
       this.buildEntries();
       this.renderDrawer();
     }
@@ -5920,7 +6322,11 @@ function providerPicker(connection) {
   const select = h("select", {}, Object.entries(services).map(([key, service]) => h("option", { value: key }, service.label)));
   const key = h("input", { type: "password", placeholder: "API key for just this workspace (optional)", autocomplete: "off", autocapitalize: "off", spellcheck: false });
   const sync = () => { key.hidden = !services[select.value].takesKey; };
-  select.onchange = sync;
+  let chosen = false;
+  select.onchange = () => {
+    chosen = true;
+    sync();
+  };
   sync();
 
   return {
@@ -5932,9 +6338,9 @@ function providerPicker(connection) {
     key: () => services[select.value].takesKey && key.value.trim() ? key.value.trim() : undefined,
     async load() {
       try {
-        const environment = await connection.getAiEnvironment();
+        const environment = await connection().getAiEnvironment();
 
-        if (environment?.defaultService in services) {
+        if (!chosen && environment?.defaultService in services) {
           select.value = environment.defaultService;
           sync();
         }
@@ -5952,11 +6358,20 @@ class NewWorkspace {
     this.listing = null;
     this.folderError = new ErrorLine();
     this.error = new ErrorLine();
-    this.provider = providerPicker(connection);
+    this.provider = providerPicker(() => this.connection);
     this.group = groupPicker(home.groups);
     this.build();
     this.provider.load();
     this.open(null);
+  }
+
+  reconnected(connection) {
+    this.connection = connection;
+
+    if (!this.listing) {
+      this.provider.load();
+      this.open(null);
+    }
   }
 
   build() {
@@ -6041,13 +6456,25 @@ class MoveWorkspace {
     this.folderError = new ErrorLine();
     this.error = new ErrorLine();
     this.build();
-    const trimmed = workspace.folder.replace(/[\\/]+$/, "");
+    this.openParent();
+  }
+
+  reconnected(connection) {
+    this.connection = connection;
+
+    if (!this.listing) {
+      this.openParent();
+    }
+  }
+
+  async openParent() {
+    const trimmed = this.workspace.folder.replace(/[\\/]+$/, "");
     const cut = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
-    this.open(cut > 0 ? trimmed.slice(0, cut) : cut === 0 ? "/" : null).then(() => {
-      if (!this.listing) {
-        return this.open(null);
-      }
-    });
+    await this.open(cut > 0 ? trimmed.slice(0, cut) : cut === 0 ? "/" : null);
+
+    if (!this.listing) {
+      await this.open(null);
+    }
   }
 
   build() {
@@ -6129,11 +6556,20 @@ class CloneWorkspace {
     this.listing = null;
     this.folderError = new ErrorLine();
     this.error = new ErrorLine();
-    this.provider = providerPicker(connection);
+    this.provider = providerPicker(() => this.connection);
     this.group = groupPicker(home.groups);
     this.build();
     this.provider.load();
     this.open(null);
+  }
+
+  reconnected(connection) {
+    this.connection = connection;
+
+    if (!this.listing) {
+      this.provider.load();
+      this.open(null);
+    }
   }
 
   build() {
@@ -6259,15 +6695,24 @@ class AiEnvironmentScreen {
     });
   }
 
+  // A screen that could not be read gets another try.
+  reconnected(connection) {
+    this.connection = connection;
+
+    if (this.baseline === null) {
+      this.load();
+    }
+  }
+
   build() {
     this.defaultSelect = h("select", {}, Object.entries(services).map(([key, service]) => h("option", { value: key }, service.label)));
     this.newCapability = h("select", {}, capabilities.map(name => h("option", { value: name }, name)));
     this.newEffort = h("select", {}, efforts.map(name => h("option", { value: name }, name)));
     this.newSwitches = {};
-    const newSwitch = (key, label) => {
+    const newSwitch = (key, label, title = "") => {
       const box = h("input", { type: "checkbox" });
       this.newSwitches[key] = box;
-      return h("label", { class: "check" }, box, label);
+      return h("label", { class: "check", title }, box, label);
     };
     this.newInstructions = h("textarea", { rows: 4, placeholder: "Standing instructions for the AI..." });
     this.statusMinutes = h("input", { type: "number", min: "1", max: "1440", step: "1" });
@@ -6285,6 +6730,8 @@ class AiEnvironmentScreen {
     this.localCommand = this.text();
     this.localServer = this.text();
     this.ollamaCommand = this.text();
+    this.workMode = h("select", { title: "Yield runs one local AI session at a time: other work waits in a queue, your own before delegated work. Simultaneous runs work side by side.", onchange: () => this.syncWorkMode() }, h("option", { value: "Yield" }, "Yield: one at a time, mine first"), h("option", { value: "Simultaneous" }, "Simultaneous: side by side"));
+    this.delegatedLimit = h("input", { type: "number", min: "1", max: "16", step: "1" });
     this.localOptimize = h("input", { type: "checkbox", onchange: () => this.askService() });
     this.serviceControl = false;
     this.serviceNeedsPassword = false;
@@ -6324,6 +6771,7 @@ class AiEnvironmentScreen {
             newSwitch("isSystemAccessAllowed", "Allow files outside the workspace"),
             newSwitch("isWebAllowed", "Use the web"),
             newSwitch("isImageGenerationAllowed", "Generate images"),
+            newSwitch("isDelegationAllowed", "Let the AI delegate work", "The AI may send tasks, with the code of the workspace, to the paired servers that receive work."),
             newSwitch("showWork", "Show the work of the AI in the chat"),
             this.field("Instructions", this.newInstructions)),
           section("Status and prompts",
@@ -6341,6 +6789,8 @@ class AiEnvironmentScreen {
             this.codexKey.element,
             this.field("Max usage window limit (%)", this.codexMax)),
           section("Local models",
+            this.field("When busy", this.workMode),
+            (this.delegatedBox = this.field("Delegated tasks at once", this.delegatedLimit)),
             this.field("OpenCode command", this.localCommand),
             this.field("Model server address", this.localServer),
             this.field("Ollama command", this.ollamaCommand),
@@ -6414,6 +6864,10 @@ class AiEnvironmentScreen {
     this.localNote.hidden = !environment.localServerNote;
   }
 
+  syncWorkMode() {
+    this.delegatedBox.hidden = this.workMode.value !== "Simultaneous";
+  }
+
   syncImage() {
     this.openAiBox.hidden = this.imageSelect.value !== "OpenAi";
     this.imageBox.hidden = this.imageSelect.value !== "Local";
@@ -6428,6 +6882,9 @@ class AiEnvironmentScreen {
     this.localCommand.value = environment.localCommand ?? "";
     this.localServer.value = environment.localServer ?? "";
     this.ollamaCommand.value = environment.ollamaCommand ?? "ollama";
+    this.workMode.value = environment.localWorkMode ?? "Yield";
+    this.delegatedLimit.value = environment.delegatedTaskLimit ?? 1;
+    this.syncWorkMode();
     this.localOptimize.checked = environment.localOptimizeContext === true;
     this.showServiceState(environment);
     this.imageSelect.value = environment.imageGeneration ?? "None";
@@ -6487,6 +6944,8 @@ class AiEnvironmentScreen {
       localCommand: this.localCommand.value.trim(),
       localServer: this.localServer.value.trim(),
       ollamaCommand: this.ollamaCommand.value.trim(),
+      localWorkMode: this.workMode.value,
+      delegatedTaskLimit: this.delegatedLimit.value.trim() === "" ? 1 : Math.min(16, Math.max(1, Math.round(Number(this.delegatedLimit.value)))),
       localOptimizeContext: this.localOptimize.checked,
       localModels: this.names(this.localRows),
       localContexts: Object.keys(contexts).length > 0 ? contexts : undefined,
@@ -6516,18 +6975,25 @@ class AiEnvironmentScreen {
     }
   }
 
-  async close() {
+  async apply() {
     this.notice.hidden = true;
 
-    if (this.baseline !== null && JSON.stringify(this.collect()) !== this.baseline) {
-      const result = await attempt(() => this.connection.setAiEnvironment(this.collect()), this.error);
-
-      if (!result.ok) {
-        return;
-      }
+    // A change of the system service that was not confirmed is not part of the edits.
+    if (!this.serviceDialog.hidden) {
+      this.cancelService();
     }
 
-    this.app.showHome(this.home);
+    if (this.baseline === null || JSON.stringify(this.collect()) === this.baseline) {
+      return true;
+    }
+
+    return (await attempt(() => this.connection.setAiEnvironment(this.collect()), this.error)).ok;
+  }
+
+  async close() {
+    if (await this.apply()) {
+      this.app.showHome(this.home);
+    }
   }
 
   say(text) {
@@ -6556,6 +7022,621 @@ class AiEnvironmentScreen {
     if (result.ok) {
       this.fill(this.imageNames, result.value);
       this.say(result.value.length === 0 ? "The server offers no checkpoints." : `Found ${result.value.length} checkpoint${result.value.length === 1 ? "" : "s"}.`);
+    }
+  }
+}
+
+// Only an element that is new or out of order is inserted, since inserting one again takes the focus from what is in it.
+function arrange(container, elements) {
+  for (const child of [...container.children].filter(item => !elements.includes(item))) {
+    child.remove();
+  }
+
+  elements.forEach((element, index) => {
+    if (container.children[index] !== element) {
+      container.insertBefore(element, container.children[index] ?? null);
+    }
+  });
+}
+
+class SwarmScreen {
+  constructor(app, connection, home, taskId, workspaceId) {
+    this.app = app;
+    this.connection = connection;
+    this.home = home;
+    this.initialTask = taskId;
+    this.initialWorkspace = workspaceId;
+    this.error = new ErrorLine();
+    this.outcome = h("div", { class: "muted small", hidden: true });
+    this.status = null;
+    this.missed = false;
+    this.peerCards = new Map();
+    this.pairingCards = new Map();
+    this.workerChoices = "";
+    this.detail = null;
+    this.reading = false;
+    this.readAgain = false;
+    this.refreshing = false;
+    this.refreshAgain = false;
+    this.build();
+    this.listener = event => this.receive(event);
+    this.connection.listeners.add(this.listener);
+    this.load();
+  }
+
+  input(placeholder = "", type = "text") {
+    return h("input", { type, placeholder, autocomplete: "off", autocapitalize: "off", spellcheck: false });
+  }
+
+  field(label, control) {
+    return h("div", { class: "stack tight" }, h("div", { class: "muted" }, label), control);
+  }
+
+  toggle(label, onchange, title = "") {
+    const box = h("input", { type: "checkbox", onchange });
+    return { box, element: h("label", { class: "check", title }, box, label) };
+  }
+
+  // The button stays disabled while its request runs, so a second click cannot send it again.
+  actionButton(label, classes, action, ready = () => true) {
+    const button = h("button", {
+      class: classes,
+      onclick: async () => {
+        if (button.running) {
+          return;
+        }
+
+        button.running = true;
+        button.disabled = true;
+
+        try {
+          await action();
+        } finally {
+          button.running = false;
+          button.disabled = !ready();
+        }
+      }
+    }, label);
+    return button;
+  }
+
+  openSection(name, ...children) {
+    const element = section(name, ...children);
+    element.open = true;
+    return element;
+  }
+
+  build() {
+    this.serverName = this.input();
+    this.fingerprint = h("div", { class: "muted small selectable" });
+    this.accept = this.toggle("Accept delegated work", () => this.setAccept(this.accept.box.checked));
+    this.delegatedFolder = this.input();
+    this.maxTasks = h("input", { type: "number", min: "1", max: "100", step: "1" });
+    this.driveFolder = this.input("/media/you/drive");
+    this.codeText = h("div", { class: "swarm-code selectable" });
+    this.codeHint = h("div", { class: "muted small" });
+    this.codeBox = h("div", { class: "stack tight", hidden: true }, this.codeText, this.codeHint);
+    this.pairAddress = this.input("Address of the other server (host:port)");
+    this.pairCode = this.input("Its pairing code");
+    this.pairAddress.addEventListener("input", () => this.syncPair());
+    this.pairCode.addEventListener("input", () => this.syncPair());
+    this.pairButton = this.actionButton("Pair Server", "primary block", () => this.pair(), () => this.pairReady());
+    this.pairButton.disabled = true;
+    this.pairings = h("div", { class: "stack tight" });
+    this.noPeers = h("div", { class: "muted", hidden: true }, "No paired servers.");
+    this.peers = h("div", { class: "stack tight" });
+    this.workspaceSelect = h("select", { onchange: () => this.syncDelegate() });
+    this.taskTitle = this.input("Title");
+    this.taskInstructions = h("textarea", { rows: 4, placeholder: "Instructions, complete on their own" });
+    this.taskExpected = h("textarea", { rows: 2, placeholder: "Expected result and how to check it (optional)" });
+    this.taskCapability = h("select", {}, capabilities.map(name => h("option", { value: name }, name)));
+    this.taskCapability.value = "Balanced";
+    this.taskWorker = h("select", {}, h("option", { value: "" }, "Any networked worker"));
+    this.delegateButton = this.actionButton("Delegate Task", "primary block", () => this.delegate(), () => this.delegateReady());
+    this.delegateButton.disabled = true;
+    this.taskTitle.addEventListener("input", () => this.syncDelegate());
+    this.taskInstructions.addEventListener("input", () => this.syncDelegate());
+    this.noTasks = h("div", { class: "muted", hidden: true }, "No delegated tasks.");
+    this.tasks = h("div", { class: "swarm-tasks" });
+    this.lists = h("div", { class: "settings", style: "flex:1;min-height:0;overflow-y:auto" },
+      h("div", { class: "stack tight", style: "padding:8px 0 12px" },
+        this.openSection("This server",
+          this.field("Server name", this.serverName),
+          this.fingerprint,
+          this.accept.element,
+          this.field("Folder for delegated workspaces (empty uses the data folder)", this.delegatedFolder),
+          this.field("Maximum tasks per delegated job", this.maxTasks)),
+        section("Pair a server",
+          h("div", { class: "muted" }, "Over a network, make a code on one server and enter it on the other. For an air gapped server, write an invitation to the drive. Compare the fingerprints."),
+          this.actionButton("Create Pairing Code", "block", () => this.act(() => this.connection.swarm("CreatePairingCode"))),
+          this.codeBox,
+          h("h3", { class: "serif" }, "Pair with Code"),
+          this.pairAddress,
+          this.pairCode,
+          this.pairButton,
+          this.actionButton("Write Drive Invitation", "block", () => this.act(() => this.connection.swarm("WriteDriveInvitation")))),
+        this.pairings,
+        this.openSection("Paired servers", this.noPeers, this.peers),
+        section("Drive",
+          h("div", { class: "muted" }, "Folder of the drive on the machine of the server. Plug in and mount the drive there, not on this device."),
+          this.driveFolder,
+          this.actionButton("Sync Drive", "primary block", () => this.act(() => this.connection.swarm("SyncDrive")))),
+        section("Delegate a task",
+          this.field("Workspace", this.workspaceSelect),
+          this.taskTitle,
+          this.taskInstructions,
+          this.taskExpected,
+          this.field("Capability", this.taskCapability),
+          this.field("Worker", this.taskWorker),
+          this.delegateButton),
+        this.openSection("Delegated tasks", this.noTasks, this.tasks)));
+    this.detailTitle = h("h2", { class: "serif" });
+    this.detailStatus = h("div", { class: "muted small" });
+    this.detailBody = h("div", { class: "settings swarm-detail", style: "flex:1;min-height:0;overflow-y:auto" });
+    this.detailActions = h("div", { class: "swarm-actions" });
+    this.applyButton = this.actionButton("Apply Changes", "primary", () => this.onTask("ApplySwarmTask"));
+    this.retryButton = this.actionButton("Retry Task", "", () => this.onTask("RetrySwarmTask"));
+    this.cancelTaskButton = this.actionButton("Cancel Task", "danger", () => this.onTask("CancelSwarmTask"));
+    this.discardButton = this.actionButton("Discard Task", "", () => this.onTask("DiscardSwarmTask", () => this.showDetail(null)));
+    this.detailView = h("div", { class: "swarm-detail-view", hidden: true },
+      h("header", {}, h("div", {}, this.detailTitle, this.detailStatus), h("button", { class: "flat", onclick: () => this.showDetail(null) }, "Back to Swarm")),
+      this.detailBody,
+      this.detailActions);
+    this.revokeText = h("div", { class: "muted" });
+    this.revokeDialog = h("div", { class: "dialog-wrap", hidden: true },
+      h("div", { class: "dialog" },
+        h("h3", { class: "serif" }, "Revoke this server?"),
+        this.revokeText,
+        this.actionButton("Revoke Server", "danger block", () => this.confirmRevoke()),
+        h("button", { class: "block", onclick: () => { this.revokeDialog.hidden = true; } }, "Cancel")));
+    this.listHeader = h("header", {}, h("h1", { class: "serif" }, "Swarm"), h("button", { class: "flat", onclick: () => this.close() }, "Close"));
+    this.element = h("div", { class: "newws" },
+      this.listHeader,
+      this.lists,
+      this.detailView,
+      h("div", { class: "foot" }, this.error.element, this.outcome),
+      this.revokeDialog);
+  }
+
+  server() {
+    return {
+      ...this.status.server,
+      name: this.serverName.value.trim(),
+      delegatedFolder: this.delegatedFolder.value.trim(),
+      driveFolder: this.driveFolder.value.trim(),
+      maxTasksPerJob: this.maxTasks.value.trim() === "" ? 10 : Math.min(100, Math.max(1, Math.round(Number(this.maxTasks.value))))
+    };
+  }
+
+  serverEdited() {
+    const wanted = this.server();
+    return ["name", "delegatedFolder", "driveFolder", "maxTasksPerJob"].some(key => (wanted[key] ?? "") !== (this.status.server[key] ?? ""));
+  }
+
+  // Compared as typed with what was shown, so a refresh does not take away a space the user has just typed.
+  serverTyped() {
+    const shown = this.status.server;
+    return this.serverName.value !== (shown.name ?? "")
+      || this.delegatedFolder.value !== (shown.delegatedFolder ?? "")
+      || this.driveFolder.value !== (shown.driveFolder ?? "")
+      || this.maxTasks.value !== String(shown.maxTasksPerJob ?? 10);
+  }
+
+  async load() {
+    const result = await attempt(async () => [await this.connection.swarm("GetSwarm"), await this.connection.listWorkspaces()], this.error);
+
+    if (!result.ok) {
+      return;
+    }
+
+    const [status, catalog] = result.value;
+    const delegated = new Set((catalog.delegations ?? []).map(delegation => delegation.workspaceId));
+    const workspaces = catalog.workspaces.filter(workspace => !delegated.has(workspace.id)).sort((left, right) => folderName(left.folder).localeCompare(folderName(right.folder)));
+    this.workspaceSelect.replaceChildren(h("option", { value: "" }, "Choose a workspace"), ...workspaces.map(workspace => h("option", { value: workspace.id }, folderName(workspace.folder))));
+    this.workspaceSelect.value = workspaces.some(workspace => workspace.id === this.initialWorkspace) ? this.initialWorkspace : "";
+    this.show(status, true);
+    this.syncDelegate();
+
+    if (this.missed) {
+      this.missed = false;
+      this.refresh();
+    }
+
+    if (this.initialTask) {
+      await this.openTask(this.initialTask);
+    }
+  }
+
+  async apply() {
+    if (!this.status) {
+      return true;
+    }
+
+    if (this.serverEdited() && !(await this.send(() => this.connection.swarm("SetSwarm", { swarmServer: this.server() }), true))) {
+      return false;
+    }
+
+    for (const card of this.peerCards.values()) {
+      if (card.address.value.trim() !== (card.peer.address ?? "")) {
+        if (!(await this.send(() => this.connection.swarm("SetSwarmPeer", { swarmPeer: { ...card.peer, address: card.address.value.trim() } }), false))) {
+          return false;
+        }
+      }
+    }
+
+    return true;
+  }
+
+  // Edits waiting to be sent go first, so an action such as syncing uses the folder that is typed.
+  async act(action) {
+    this.outcome.hidden = true;
+    return await this.apply() && await this.send(action, false);
+  }
+
+  // The wanted value is taken first, since sending typed edits shows the old one again. A failure reads the swarm again, which puts the real one back.
+  async setAccept(wanted) {
+    await this.act(() => this.connection.swarm("SetSwarm", { swarmServer: { ...this.server(), acceptDelegatedWork: wanted } }));
+  }
+
+  async send(action, serverSent) {
+    const result = await attempt(action, this.error);
+
+    if (!result.ok) {
+      await this.refresh();
+      return false;
+    }
+
+    this.say(result.value.report);
+    this.show(result.value, serverSent);
+    return true;
+  }
+
+  say(text) {
+    this.outcome.textContent = text ?? "";
+    this.outcome.hidden = !text;
+  }
+
+  async pair() {
+    if (await this.act(() => this.connection.swarm("PairWithCode", { address: this.pairAddress.value.trim(), code: this.pairCode.value.trim() }))) {
+      this.pairAddress.value = "";
+      this.pairCode.value = "";
+      this.syncPair();
+    }
+  }
+
+  pairReady() {
+    return !!this.pairAddress.value.trim() && !!this.pairCode.value.trim();
+  }
+
+  syncPair() {
+    this.pairButton.disabled = !!this.pairButton.running || !this.pairReady();
+  }
+
+  delegateReady() {
+    return !!this.workspaceSelect.value && !!this.taskTitle.value.trim() && !!this.taskInstructions.value.trim();
+  }
+
+  syncDelegate() {
+    this.delegateButton.disabled = !!this.delegateButton.running || !this.delegateReady();
+  }
+
+  async delegate() {
+    requestNotifications();
+    const workspaceId = this.workspaceSelect.value;
+    const task = { title: this.taskTitle.value.trim(), instructions: this.taskInstructions.value.trim(), expectedResult: this.taskExpected.value.trim(), capability: this.taskCapability.value, peerId: this.taskWorker.value || undefined, dependsOn: [] };
+    const before = new Set((this.status?.tasks ?? []).map(item => item.id));
+
+    if (await this.act(() => this.connection.swarm("DelegateTask", { workspaceId, task }))) {
+      this.taskTitle.value = "";
+      this.taskInstructions.value = "";
+      this.taskExpected.value = "";
+      this.syncDelegate();
+      this.say("The task was delegated.");
+      this.home.follow((this.status.tasks ?? []).filter(item => !before.has(item.id) && !item.isIncoming).map(item => item.id));
+    }
+  }
+
+  show(status, takeServer) {
+    const editing = !takeServer && this.status !== null && this.serverTyped();
+    this.status = status;
+    const server = status.server;
+
+    if (!editing) {
+      this.serverName.value = server.name ?? "";
+      this.delegatedFolder.value = server.delegatedFolder ?? "";
+      this.driveFolder.value = server.driveFolder ?? "";
+      this.maxTasks.value = server.maxTasksPerJob ?? 10;
+    }
+
+    this.fingerprint.textContent = `Fingerprint ${server.fingerprint}`;
+    this.accept.box.checked = server.acceptDelegatedWork === true;
+    const code = status.pairingCode;
+    this.codeBox.hidden = !code;
+    this.codeText.textContent = code?.code ?? "";
+    this.codeHint.textContent = code ? `On the other server, enter this server's address and this code under Pair with Code before ${new Date(code.expiresAt).toLocaleTimeString([], { timeStyle: "short" })}. It works once.` : "";
+    this.pairingCards = new Map((status.drivePairings ?? []).map(pairing => {
+      const key = JSON.stringify(pairing);
+      return [key, this.pairingCards.get(key) ?? this.pairingCard(pairing)];
+    }));
+    arrange(this.pairings, [...this.pairingCards.values()]);
+    const peers = status.peers ?? [];
+
+    for (const [id, card] of [...this.peerCards]) {
+      if (!peers.some(peer => peer.id === id)) {
+        card.element.remove();
+        this.peerCards.delete(id);
+      }
+    }
+
+    for (const peer of peers) {
+      let card = this.peerCards.get(peer.id);
+
+      if (!card) {
+        card = this.peerCard(peer);
+        this.peerCards.set(peer.id, card);
+      }
+
+      card.update(peer);
+    }
+
+    arrange(this.peers, peers.map(peer => this.peerCards.get(peer.id).element));
+    this.noPeers.hidden = peers.length > 0;
+    const workers = peers.filter(peer => peer.sendWork);
+    const workerChoices = JSON.stringify(workers.map(peer => [peer.id, peer.name]));
+
+    if (workerChoices !== this.workerChoices) {
+      this.workerChoices = workerChoices;
+      const chosen = this.taskWorker.value;
+      this.taskWorker.replaceChildren(h("option", { value: "" }, "Any networked worker"), ...workers.map(peer => h("option", { value: peer.id }, peer.name)));
+      this.taskWorker.value = workers.some(peer => peer.id === chosen) ? chosen : "";
+    }
+
+    const tasks = status.tasks ?? [];
+    this.noTasks.hidden = tasks.length > 0;
+    this.tasks.replaceChildren(...tasks.map(task => h("button", { onclick: () => this.openTask(task.id) },
+      h("div", {}, `${task.isIncoming ? "\u2190" : "\u2192"} ${task.title}`),
+      h("div", { class: "muted small" }, taskLine(task)))));
+  }
+
+  pairingCard(pairing) {
+    return h("div", { class: "swarm-pairing" },
+      h("div", {}, pairing.kind === "Invitation" ? `${pairing.name} invites this server to pair` : `${pairing.name} accepted your invitation`),
+      h("div", { class: "muted small selectable" }, `Pair only if its fingerprint is ${pairing.fingerprint}.`),
+      this.actionButton("Pair Server", "primary block", () => this.act(() => this.connection.swarm("ConfirmDrivePairing", { peerId: pairing.id }))));
+  }
+
+  peerCard(peer) {
+    const card = { peer };
+    const change = settings => {
+      const next = { ...card.peer, ...settings, address: card.address.value.trim() };
+      card.peer = { ...card.peer, ...settings };
+      this.send(() => this.connection.swarm("SetSwarmPeer", { swarmPeer: next }), false);
+    };
+    const permission = key => change({ permissions: { ...card.peer.permissions, [key]: card[key].box.checked } });
+    card.name = h("summary", { class: "serif" });
+    card.state = h("div", { class: "muted small" });
+    card.problem = h("div", { class: "error", hidden: true });
+    card.models = h("div", { class: "muted small" });
+    card.print = h("div", { class: "muted small selectable" });
+    card.send = this.toggle("Send work to this server", () => change({ sendWork: card.send.box.checked }));
+    card.accept = this.toggle("Accept work from this server", () => change({ acceptWork: card.accept.box.checked }));
+    card.mode = h("select", { onchange: () => change({ mode: card.mode.value }) }, h("option", { value: "GitRemote" }, "Git remote"), h("option", { value: "Direct" }, "Direct"), h("option", { value: "AirGapped" }, "Air gapped"));
+    card.modeText = h("div", { class: "muted small" });
+    card.address = this.input("host:port");
+    card.address.value = peer.address ?? "";
+    card.addressBox = this.field("Address to connect to (empty waits for it to connect here)", card.address);
+    card.isShellAllowed = this.toggle("Run shell commands", () => permission("isShellAllowed"), "A shell can reach anything the server's account can, whatever else is off.");
+    card.isSystemAccessAllowed = this.toggle("Allow files outside the workspace", () => permission("isSystemAccessAllowed"));
+    card.isWebAllowed = this.toggle("Use the web", () => permission("isWebAllowed"));
+    card.isImageGenerationAllowed = this.toggle("Generate images", () => permission("isImageGenerationAllowed"));
+    card.element = h("details", { class: "section swarm-peer", open: true }, card.name, h("div", { class: "stack tight" },
+      card.state, card.problem, card.models, card.print, card.send.element, card.accept.element,
+      this.field("Delivery mode", card.mode), card.modeText, card.addressBox,
+      h("h3", { class: "serif" }, "What its tasks may do here"),
+      card.isShellAllowed.element, card.isSystemAccessAllowed.element, card.isWebAllowed.element, card.isImageGenerationAllowed.element,
+      h("button", { class: "danger block", onclick: () => this.askRevoke(card.peer) }, "Revoke Server")));
+    card.element.open = true;
+    card.update = next => {
+      const editing = card.address.value !== (card.peer.address ?? "");
+      card.peer = next;
+      card.name.textContent = next.name;
+      const parts = [next.isConnected ? "Connected" : next.lastSeen ? `Last heard from ${messageStamp(next.lastSeen)}` : "Never heard from"];
+
+      if (next.profileAt) {
+        parts.push(next.acceptsOurWork ? `accepts your work, ${next.freeSlots ?? 0} free` : "does not accept your work");
+
+        if (next.mode === "AirGapped") {
+          parts.push(`as of ${messageStamp(next.profileAt)}`);
+        }
+      }
+
+      card.state.textContent = parts.join(" - ");
+      card.problem.textContent = next.problem ?? "";
+      card.problem.hidden = !next.problem;
+      card.models.textContent = (next.capabilities ?? []).length === 0 ? "No models known yet." : next.capabilities.map(item => `${item.capability}: ${item.model}`).join(", ");
+      card.print.textContent = `Fingerprint ${next.fingerprint}`;
+      card.send.box.checked = next.sendWork === true;
+      card.accept.box.checked = next.acceptWork === true;
+      card.mode.value = next.mode;
+      card.modeText.textContent = { GitRemote: "Code travels through the project's origin remote, which both must reach; tasks and results go over the connection.", Direct: "Code, tasks and results go over the connection.", AirGapped: "Everything is carried on a drive with Sync Drive; nothing goes over a network." }[next.mode];
+      card.addressBox.hidden = next.mode === "AirGapped";
+
+      if (!editing) {
+        card.address.value = next.address ?? "";
+      }
+
+      for (const key of ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed"]) {
+        card[key].box.checked = next.permissions?.[key] === true;
+      }
+    };
+    return card;
+  }
+
+  askRevoke(peer) {
+    this.revoking = peer;
+    this.revokeText.textContent = `Revoke ${peer.name}? Nothing can then be sent between the two until they pair again, and the tasks between them end.`;
+    this.revokeDialog.hidden = false;
+  }
+
+  async confirmRevoke() {
+    this.revokeDialog.hidden = true;
+    await this.act(() => this.connection.swarm("RevokeSwarmPeer", { peerId: this.revoking.id }));
+  }
+
+  async openTask(taskId) {
+    const result = await attempt(() => this.connection.getSwarmTask(taskId), this.error);
+
+    if (result.ok) {
+      this.showDetail(result.value);
+    }
+  }
+
+  showDetail(detail) {
+    const scroll = this.detail?.task.id === detail?.task.id ? this.detailBody.scrollTop : 0;
+    this.detail = detail;
+    this.detailView.hidden = !detail;
+    this.lists.hidden = !!detail;
+    this.listHeader.hidden = !!detail;
+
+    if (!detail) {
+      return;
+    }
+
+    const task = detail.task;
+    this.detailTitle.textContent = task.title;
+    this.detailStatus.textContent = [taskLine(task), task.capability, task.branch].filter(part => part).join(" - ");
+    const heading = text => h("h3", { class: "serif" }, text);
+    const block = text => h("div", { class: "swarm-text selectable" }, text);
+    const messages = detail.messages ?? [];
+    this.detailBody.replaceChildren(
+      ...(task.error ? [h("div", { class: "error" }, task.error)] : []),
+      heading("Instructions"), block(detail.instructions),
+      ...(detail.expectedResult ? [heading("Expected result"), block(detail.expectedResult)] : []),
+      ...(detail.report ? [heading("Report"), block(detail.report)] : []),
+      ...(messages.length > 0 ? [heading("Conversation"), ...messages.map(message => message.isWork
+        ? h("div", { class: "swarm-text swarm-work selectable" }, message.text)
+        : h("div", {}, h("div", { class: "muted small" }, message.role), block(message.text)))] : []));
+    this.detailBody.scrollTop = scroll;
+    const active = activeTaskStates.includes(task.state);
+    this.detailActions.replaceChildren(...[
+      !task.isIncoming && task.state === "Done" && task.branch && !task.isApplied ? this.applyButton : null,
+      !task.isIncoming && ["Failed", "Cancelled", "Lost"].includes(task.state) ? this.retryButton : null,
+      active || task.state === "Lost" ? this.cancelTaskButton : null,
+      !active ? this.discardButton : null
+    ].filter(item => item));
+  }
+
+  async onTask(command, afterwards) {
+    const taskId = this.detail?.task.id;
+
+    if (!taskId || !(await this.act(() => this.connection.swarm(command, { taskId })))) {
+      return;
+    }
+
+    if (afterwards) {
+      afterwards();
+    } else {
+      await this.readDetail();
+    }
+  }
+
+  // A task that can no longer be read was removed, so the list shows again.
+  async readDetail() {
+    if (this.reading) {
+      this.readAgain = true;
+      return;
+    }
+
+    this.reading = true;
+
+    try {
+      do {
+        this.readAgain = false;
+        // Another task may have been opened while the last one was read.
+        const taskId = this.detail?.task.id;
+
+        if (!taskId) {
+          break;
+        }
+
+        try {
+          const detail = await this.connection.getSwarmTask(taskId);
+
+          if (this.detail?.task.id === taskId) {
+            this.showDetail(detail);
+          }
+        } catch (exception) {
+          if (this.detail?.task.id === taskId && exception instanceof RemoteError) {
+            this.showDetail(null);
+          }
+        }
+      } while (this.readAgain);
+    } finally {
+      this.reading = false;
+    }
+  }
+
+  async refresh() {
+    if (this.refreshing) {
+      this.refreshAgain = true;
+      return;
+    }
+
+    this.refreshing = true;
+
+    try {
+      do {
+        this.refreshAgain = false;
+
+        try {
+          this.show(await this.connection.swarm("GetSwarm"), false);
+        } catch (exception) {
+        }
+      } while (this.refreshAgain);
+    } finally {
+      this.refreshing = false;
+    }
+  }
+
+  receive(event) {
+    if (!this.status) {
+      this.missed ||= event.kind === "SwarmChanged";
+      return;
+    }
+
+    if (event.kind === "SwarmChanged") {
+      this.refresh();
+    } else if (event.kind === "SwarmTaskChanged" && this.detail?.task.id === event.taskId) {
+      this.readDetail();
+    }
+  }
+
+  // What changed while the connection was gone was not told, and a screen that could not be read gets another try.
+  reconnected(connection) {
+    this.dispose();
+    this.connection = connection;
+    connection.listeners.add(this.listener);
+
+    if (!this.status) {
+      this.load();
+      return;
+    }
+
+    this.refresh();
+
+    if (this.detail) {
+      this.readDetail();
+    }
+  }
+
+  dispose() {
+    this.connection.listeners.delete(this.listener);
+  }
+
+  async close() {
+    if (await this.apply()) {
+      this.dispose();
+      this.app.showHome(this.home);
     }
   }
 }
@@ -6636,6 +7717,8 @@ class App {
     this.root = root;
     this.connection = null;
     this.home = null;
+    this.swarm = null;
+    this.screen = null;
     let hiddenAt = 0;
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "hidden") {
@@ -6647,7 +7730,9 @@ class App {
     });
   }
 
-  show(element) {
+  // A screen that covers the main one is told of a new connection, so it stays through a reconnect as the main one does.
+  show(element, screen = null) {
+    this.screen = screen;
     this.root.replaceChildren(element);
   }
 
@@ -6693,7 +7778,7 @@ class App {
         return;
       }
 
-      if (this.home && this.root.firstChild === this.home.element) {
+      if (this.home && (this.screen || this.root.firstChild === this.home.element)) {
         this.home.setOffline(true);
         this.recover(connection);
       } else {
@@ -6724,6 +7809,7 @@ class App {
         this.connection = fresh;
         this.watch(fresh);
         this.home.reconnected(fresh);
+        this.screen?.reconnected(fresh);
         return;
       } catch (exception) {
         if (/refused/.test(exception.message)) {
@@ -6744,19 +7830,65 @@ class App {
   }
 
   showNewWorkspace(connection, home) {
-    this.show(new NewWorkspace(this, connection, home).element);
+    const screen = new NewWorkspace(this, connection, home);
+    this.show(screen.element, screen);
+  }
+
+  showSwarm(connection, home, taskId, workspaceId) {
+    this.swarm = new SwarmScreen(this, connection, home, taskId, workspaceId);
+    this.show(this.swarm.element, this.swarm);
+  }
+
+  // A notification can be clicked while another screen shows, which then gives way to the main one.
+  async showWorkspace(home, workspaceId) {
+    if (this.home !== home) {
+      return;
+    }
+
+    const screen = this.screen;
+
+    // Edits are sent as closing the screen would send them, and it stays when that fails.
+    if (screen?.apply) {
+      if (!(await screen.apply())) {
+        return;
+      }
+
+      if (this.home !== home || this.screen !== screen && this.screen !== null) {
+        return;
+      }
+    }
+
+    const covered = this.root.firstChild !== home.element;
+
+    if (covered) {
+      this.swarm?.dispose();
+      this.show(home.element);
+    }
+
+    const workspace = home.workspaces.find(item => item.id === workspaceId);
+
+    if (workspace) {
+      if (covered || home.selected?.id !== workspaceId) {
+        home.select(workspace);
+      }
+
+      home.setDrawer(false);
+    }
   }
 
   showEnvironment(connection, home) {
-    this.show(new AiEnvironmentScreen(this, connection, home).element);
+    const screen = new AiEnvironmentScreen(this, connection, home);
+    this.show(screen.element, screen);
   }
 
   showMoveWorkspace(connection, home, workspace) {
-    this.show(new MoveWorkspace(this, connection, home, workspace).element);
+    const screen = new MoveWorkspace(this, connection, home, workspace);
+    this.show(screen.element, screen);
   }
 
   showCloneWorkspace(connection, home) {
-    this.show(new CloneWorkspace(this, connection, home).element);
+    const screen = new CloneWorkspace(this, connection, home);
+    this.show(screen.element, screen);
   }
 
   changeServer() {

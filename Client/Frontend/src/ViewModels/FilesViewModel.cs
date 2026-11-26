@@ -48,6 +48,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         ForwardCommand = new AsyncCommand(_ => Go(1), () => position < history.Count - 1);
         ClosePreviewCommand = new AsyncCommand(_ =>
         {
+            previewRequest++;
             Preview = null;
             Diff = null;
             diffPath = null;
@@ -116,10 +117,18 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
     private bool showHidden;
 
+    // Replies arrive in any order, so only the one to the latest thing asked for is shown.
+    private int previewRequest;
+
     /// <summary>
     /// Raised with the path of a script or task file that was activated to run it.
     /// </summary>
     public event Action<string>? ScriptRequested;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether script and task files can be run, which they cannot in a workspace that runs a delegated task; it is set before the tree is first read.
+    /// </summary>
+    public bool RunsScripts { get; set; } = true;
 
     /// <summary>
     /// Gets the git state of the workspace.
@@ -418,6 +427,8 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     /// </summary>
     public AsyncCommand ClosePreviewCommand { get; }
 
+    private string? OpenPath => preview?.Path ?? (diff is not null ? diffPath : null);
+
     /// <summary>
     /// Shows the root folder shown last, or the workspace folder at first, up to date, and asks the server to report its changes.
     /// </summary>
@@ -483,11 +494,17 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         Git.Updated -= ApplyGit;
     }
 
-    private async Task<bool> OpenDiff(string path, string? commit, bool remember = true)
+    private async Task<bool> OpenDiff(string path, string? commit, bool remember = true, bool refresh = false)
     {
         GitDiff? result = null;
+        int request = refresh ? previewRequest : ++previewRequest;
 
         if (!await Attempt(async () => result = await connection.GetGitDiff(workspaceId, path, commit, CancellationToken.None)))
+        {
+            return false;
+        }
+
+        if (request != previewRequest || refresh && (diffPath != path || diffCommit != commit))
         {
             return false;
         }
@@ -510,8 +527,9 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     private async Task<bool> ShowFile(string path)
     {
         FileContent? content = null;
+        int request = ++previewRequest;
 
-        if (!await Attempt(async () => content = await connection.ReadFile(workspaceId, path, CancellationToken.None)))
+        if (!await Attempt(async () => content = await connection.ReadFile(workspaceId, path, CancellationToken.None)) || request != previewRequest)
         {
             return false;
         }
@@ -573,7 +591,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
 
         if (diffPath is not null && diffCommit is null && diff is not null)
         {
-            _ = OpenDiff(diffPath, null, false);
+            _ = OpenDiff(diffPath, null, false, true);
         }
     }
 
@@ -586,7 +604,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private bool CanRun(FileEntry entry) => !entry.IsFolder && (entry.Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".task", StringComparison.OrdinalIgnoreCase));
+    private bool CanRun(FileEntry entry) => RunsScripts && !entry.IsFolder && (entry.Name.EndsWith(".cs", StringComparison.OrdinalIgnoreCase) || entry.Name.EndsWith(".task", StringComparison.OrdinalIgnoreCase));
 
     private void Apply(IEnumerable<FileNode> nodes)
     {
@@ -596,8 +614,6 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             Apply(node.Children);
         }
     }
-
-    private string? OpenPath => preview?.Path ?? (diff is not null ? diffPath : null);
 
     private async Task Reveal(bool expand)
     {
@@ -871,8 +887,14 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
             }
 
             FileContent? content = null;
+            int request = previewRequest;
             bool read = await Attempt(async () => content = await connection.ReadFile(workspaceId, open.Path, CancellationToken.None));
             previewRead = DateTimeOffset.UtcNow;
+
+            if (request != previewRequest || !ReferenceEquals(preview, open))
+            {
+                return;
+            }
 
             if (!read)
             {

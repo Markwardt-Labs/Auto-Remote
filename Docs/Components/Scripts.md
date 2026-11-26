@@ -10,12 +10,14 @@ A `.task` file lists one script path per line. A line with only `-` is a wait: t
 
 ## Beside everything else
 
-A script is a process of its own, so running one never locks the workspace: scripts are not a workspace state and need none. Any number of scripts and tasks run at once, beside each other, beside AI work (the AI can be prompted while scripts run and scripts can start while it works) and beside git actions, and the header stays as it is for the AI and git alone. A running script does not stop loops from sending their next prompt either, and the Stop button of a workspace ends the AI's work or the git action, never a script: a script is stopped from the Script tab.
+A script is a process of its own, so running one never locks the workspace: scripts are not a workspace state and need none. Any number of scripts and tasks run at once, beside each other, beside AI work (the AI can be prompted while scripts run and scripts can start while it works) and beside git actions, and the header stays as it is for the AI and git alone. A running script does not stop loops from sending their next prompt either, and the Stop button of a workspace ends the AI's work or the git action, never a script: a script is stopped from the Script tab. The one exception is a workspace that runs a task another server delegated, which refuses to run scripts.
 
 Runs are told apart by the path of their file, and a script's path is also the name of its entry in a task, so a file can only be in one run at a time. `RunScript` is refused when the file, or a script a task lists, is already running or is still waiting its turn in a task that runs, with a message naming the file; once a run ended, running its file again replaces the kept run. Concurrent runs can of course change the same files, which is for the person starting them to weigh, and the server leaves it alone.
 
 Changing the folder of a workspace under a running script would break the script, so renaming, moving or deleting a workspace first stops its scripts and waits for their processes to end; every other request ignores them.
 
 ## Runs are kept in memory
+
+A run ends when its process does. A process the script left behind may keep the output open for as long as it lives; the server reads on for a few seconds and then stops listening to it, without ending it.
 
 The server keeps the runs of each workspace, with their output, until a client removes them or a new run of the same file replaces them, so a client that connects or reconnects reads the runs with `GetScripts` and follows the rest as events. Nothing is written to disk: runs do not survive a server restart, and stopping the server kills running scripts. Output is cut at its start beyond 500000 characters per script, and every client shows only the last 100000 of what it holds (copying gives all of it) because laying out a very long text block again on every update is what makes long outputs slow. Output events are batched about every 100 milliseconds for the same reason.

@@ -204,6 +204,158 @@ internal interface IServerConnection : IAsyncDisposable
     Task CancelLimitPause(Guid id, CancellationToken cancellation);
 
     /// <summary>
+    /// Reads the work of a workspace that waits for the local AI.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The waiting work, or <see langword="null" /> when nothing waits.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<QueueStatus?> GetQueuedWork(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Removes the work of a workspace that waits for the local AI.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="keep">Whether the server keeps the text of the removed prompt as a saved input.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>What was removed, or <see langword="null" /> when nothing waited.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<QueueStatus?> CancelQueuedWork(Guid id, bool keep, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads the swarm of the server.
+    /// </summary>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> GetSwarm(CancellationToken cancellation);
+
+    /// <summary>
+    /// Changes the swarm settings of the server.
+    /// </summary>
+    /// <param name="settings">The settings.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> SetSwarm(SwarmServer settings, CancellationToken cancellation);
+
+    /// <summary>
+    /// Changes the settings of a paired server.
+    /// </summary>
+    /// <param name="peer">The settings.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> SetSwarmPeer(SwarmPeer peer, CancellationToken cancellation);
+
+    /// <summary>
+    /// Forgets a paired server.
+    /// </summary>
+    /// <param name="peerId">The server.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> RevokeSwarmPeer(string peerId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Makes a pairing code another server can pair with.
+    /// </summary>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> CreatePairingCode(CancellationToken cancellation);
+
+    /// <summary>
+    /// Pairs with the server that made a code.
+    /// </summary>
+    /// <param name="address">Its host and port.</param>
+    /// <param name="code">The code.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> PairWithCode(string address, string code, CancellationToken cancellation);
+
+    /// <summary>
+    /// Writes a pairing invitation to the drive of the server.
+    /// </summary>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> WriteDriveInvitation(CancellationToken cancellation);
+
+    /// <summary>
+    /// Pairs with the server of a pairing on the drive.
+    /// </summary>
+    /// <param name="peerId">The server.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> ConfirmDrivePairing(string peerId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads from and writes to the drive of the server.
+    /// </summary>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> SyncDrive(CancellationToken cancellation);
+
+    /// <summary>
+    /// Delegates a task from a workspace by hand.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="task">The task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> DelegateTask(Guid id, SwarmTaskRequest task, CancellationToken cancellation);
+
+    /// <summary>
+    /// Cancels a delegated task.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> CancelSwarmTask(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Delegates an ended task again.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> RetrySwarmTask(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Applies the changes of a finished task to its workspace.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> ApplySwarmTask(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Removes an ended task.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> DiscardSwarmTask(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads everything about a delegated task.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The task.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmTaskDetail> GetSwarmTask(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
     /// Stores a file on the server so that a prompt can refer to it.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -779,7 +931,17 @@ internal interface IServerConnection : IAsyncDisposable
                     return settings.Fingerprint is null || string.Equals(fingerprint, settings.Fingerprint, StringComparison.OrdinalIgnoreCase);
                 };
 
-                Uri address = new UriBuilder("wss", settings.Host, settings.Port).Uri;
+                Uri address;
+
+                try
+                {
+                    address = new UriBuilder("wss", settings.Host, settings.Port).Uri;
+                }
+                catch (UriFormatException exception)
+                {
+                    throw new IOException($"'{settings.Host}' is not a host name or address; leave out wss:// and the port.", exception);
+                }
+
                 log.Write($"Connecting to {address}");
 
                 try
@@ -962,6 +1124,57 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task CancelLimitPause(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelLimitPause, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> GetSwarm(CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.GetSwarm }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> SetSwarm(SwarmServer settings, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.SetSwarm, SwarmServer = settings }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> SetSwarmPeer(SwarmPeer peer, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.SetSwarmPeer, SwarmPeer = peer }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> RevokeSwarmPeer(string peerId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.RevokeSwarmPeer, PeerId = peerId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> CreatePairingCode(CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.CreatePairingCode }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> PairWithCode(string address, string code, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.PairWithCode, Address = address, Code = code }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> WriteDriveInvitation(CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.WriteDriveInvitation }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> ConfirmDrivePairing(string peerId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.ConfirmDrivePairing, PeerId = peerId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> SyncDrive(CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.SyncDrive }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> DelegateTask(Guid id, SwarmTaskRequest task, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.DelegateTask, WorkspaceId = id, Task = task }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> CancelSwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.CancelSwarmTask, TaskId = taskId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> RetrySwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.RetrySwarmTask, TaskId = taskId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> ApplySwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.ApplySwarmTask, TaskId = taskId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> DiscardSwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.DiscardSwarmTask, TaskId = taskId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmTaskDetail> GetSwarmTask(Guid taskId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetSwarmTask, TaskId = taskId }, cancellation)).SwarmTask ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<QueueStatus?> GetQueuedWork(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetQueuedWork, WorkspaceId = id }, cancellation)).Queue;
+
+    /// <inheritdoc />
+    public async Task<QueueStatus?> CancelQueuedWork(Guid id, bool keep, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CancelQueuedWork, WorkspaceId = id, Keep = keep }, cancellation)).Queue;
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> TranscribeSavedInput(Guid id, ReadOnlyMemory<byte> audio, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.TranscribeSavedInput, WorkspaceId = id, Data = Convert.ToBase64String(audio.Span) }, cancellation)).SavedInputs ?? throw Malformed();
@@ -1149,6 +1362,8 @@ internal sealed class ServerConnection : IServerConnection
 
         return display.Count == 0 ? null : display;
     }
+
+    private async Task<SwarmStatus> Swarm(RemoteRequest request, CancellationToken cancellation) => (await Send(request, cancellation)).Swarm ?? throw Malformed();
 
     private InvalidDataException Malformed() => new("The server sent an incomplete response.");
 

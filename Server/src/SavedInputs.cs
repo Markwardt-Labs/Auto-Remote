@@ -25,6 +25,16 @@ internal interface ISavedInputs
     Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Saves a prompt that will not run, whatever its length, since waiting prompts joined together can be longer than a saved input a client may send.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="cancellation">Cancels the save.</param>
+    /// <returns>The saved inputs now, the last saved first.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or the text is empty.</exception>
+    Task<IReadOnlyList<SavedInput>> Keep(Guid id, string text, CancellationToken cancellation);
+
+    /// <summary>
     /// Removes a saved input and tells every client, so only one caller gets it.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -84,16 +94,16 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
     }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, CancellationToken cancellation)
+    public Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, CancellationToken cancellation) => text.Length > maxLength
+        ? Task.FromException<IReadOnlyList<SavedInput>>(new RequestException($"The input is longer than {maxLength} characters."))
+        : Keep(id, text, cancellation);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> Keep(Guid id, string text, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
             throw new RequestException("There is nothing to save.");
-        }
-
-        if (text.Length > maxLength)
-        {
-            throw new RequestException($"The input is longer than {maxLength} characters.");
         }
 
         await workspaces.Get(id, cancellation);

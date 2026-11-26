@@ -44,4 +44,9 @@ public sealed record WorkspaceDefaults
     /// Gets a value indicating whether the chat of a new workspace shows the AI's work (tool calls and their results, dimmed); each workspace can change it afterwards.
     /// </summary>
     public bool ShowWork { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the AI of a new workspace may delegate tasks to paired servers.
+    /// </summary>
+    public bool IsDelegationAllowed { get; init; }
 }

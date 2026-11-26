@@ -126,6 +126,16 @@ public sealed record AiEnvironment
     public WorkspaceDefaults NewWorkspaces { get; init; } = new();
 
     /// <summary>
+    /// Gets how the local AI runs the work of several workspaces: one at a time with a queue, which is the default, or side by side.
+    /// </summary>
+    public LocalWorkMode LocalWorkMode { get; init; }
+
+    /// <summary>
+    /// Gets how many delegated tasks the local AI works on at once when <see cref="LocalWorkMode" /> is <see cref="AutoRemote.LocalWorkMode.Simultaneous" />. From 1 to 16.
+    /// </summary>
+    public int DelegatedTaskLimit { get; init; } = 1;
+
+    /// <summary>
     /// Gets how often, in minutes, the AI is told to report its status while it works, in every workspace that has no interval of its own. From 1 to 1440.
     /// </summary>
     public int StatusMinutes { get; init; } = 5;

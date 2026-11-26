@@ -56,6 +56,78 @@ public sealed class WorkspaceSnapshotsTests : IDisposable
     }
 
     [Fact]
+    public async Task Revert_KeepsAFileThatWasIgnoredWhenTheWorkBeganEvenOnceTheWorkStopsIgnoringIt()
+    {
+        Write(".gitignore", ".env\nbuild/\n");
+        G("add", "-A");
+        G("commit", "-m", "ignore");
+        Write(".env", "SECRET");
+        Write("build/out.bin", "built");
+        await snapshots.Capture(workspace, CancellationToken.None);
+        Write(".gitignore", "nothing\n");
+
+        await snapshots.Revert(workspace.Id);
+
+        Assert.Equal(("SECRET", "built", ".env\nbuild/\n"), (Read(".env"), Read("build/out.bin"), Read(".gitignore")));
+    }
+
+    [Fact]
+    public async Task Revert_RemovesWhatTheWorkMadeInAFolderThatHeldOnlyIgnoredFiles()
+    {
+        Write(".gitignore", "*.log\n");
+        G("add", "-A");
+        G("commit", "-m", "ignore");
+        Write("sub/deep/a.log", "kept");
+        await snapshots.Capture(workspace, CancellationToken.None);
+        Write("sub/new.txt", "made by the work");
+
+        await snapshots.Revert(workspace.Id);
+
+        Assert.False(File.Exists(Path.Combine(work, "sub", "new.txt")));
+        Assert.Equal("kept", Read("sub/deep/a.log"));
+    }
+
+    [Fact]
+    public async Task Revert_NeverRemovesIgnoredFilesThatTookThePlaceOfWhatItWouldRestore()
+    {
+        Write("thing", "tracked\n");
+        Write("folder/x.txt", "x\n");
+        G("add", "-A");
+        G("commit", "-m", "more");
+        File.WriteAllText(Path.Combine(work, ".git", "info", "exclude"), "keys.secret\n/folder\n");
+        await snapshots.Capture(workspace, CancellationToken.None);
+        File.Delete(Path.Combine(work, "thing"));
+        Write("thing/keys.secret", "KEYS");
+        Directory.Delete(Path.Combine(work, "folder"), true);
+        Write("folder", "IGNORED FILE");
+        Write("a.txt", "changed\n");
+
+        RequestException partly = await Assert.ThrowsAsync<RequestException>(() => snapshots.Revert(workspace.Id));
+
+        Assert.Contains("thing", partly.Message);
+        Assert.Equal(("KEYS", "IGNORED FILE", "one\n"), (Read("thing/keys.secret"), Read("folder"), Read("a.txt")));
+    }
+
+    [Fact]
+    public async Task Revert_LeavesARepositoryTheWorkMadeInsideTheWorkspaceAndStillPutsTheRestBack()
+    {
+        await snapshots.Capture(workspace, CancellationToken.None);
+        Directory.CreateDirectory(Path.Combine(work, "cloned"));
+        Write("cloned/x.txt", "x");
+        G("-C", "cloned", "init", "-b", "main");
+        G("-C", "cloned", "add", "-A");
+        G("-C", "cloned", "commit", "-m", "inner");
+        Write("a.txt", "changed\n");
+        Write("added.txt", "added");
+
+        await snapshots.Revert(workspace.Id);
+
+        Assert.Equal("one\n", Read("a.txt"));
+        Assert.False(File.Exists(Path.Combine(work, "added.txt")));
+        Assert.Equal("x", Read("cloned/x.txt"));
+    }
+
+    [Fact]
     public async Task Revert_PutsBackEditedDeletedAndAddedFilesCommitsBranchesAndTheIndex()
     {
         Write("a.txt", "one edited before\n");

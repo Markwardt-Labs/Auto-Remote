@@ -5,6 +5,9 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 internal sealed class DesktopChime : IChime
 {
+    [DllImport("winmm.dll", EntryPoint = "PlaySoundW")]
+    private static extern bool PlaySound(nint sound, nint module, uint flags);
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DesktopChime" /> class.
     /// </summary>
@@ -25,9 +28,6 @@ internal sealed class DesktopChime : IChime
 
     /// <inheritdoc />
     public void Play() => _ = Task.Run(Run);
-
-    [DllImport("winmm.dll", EntryPoint = "PlaySoundW")]
-    private static extern bool PlaySound(nint sound, nint module, uint flags);
 
     private async Task Run()
     {

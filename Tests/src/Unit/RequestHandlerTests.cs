@@ -44,6 +44,10 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<ILog> log = new();
 
+    private readonly Mock<IWorkQueue> queue = new();
+
+    private readonly Mock<ISwarmService> swarm = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -53,9 +57,16 @@ public sealed class RequestHandlerTests
     public RequestHandlerTests()
     {
         activity = new WorkspaceActivity(events.Object);
+        queue.Setup(x => x.Submit(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<WorkSource>(), It.IsAny<CancellationToken>())).Returns(async (Guid id, string text, WorkSource _, CancellationToken cancellation) =>
+        {
+            await prompts.Object.Prompt(id, text, cancellation);
+            return new WorkTicket(false, Task.FromResult(true));
+        });
+        queue.SetupGet(x => x.Waiting).Returns([]);
+        swarm.SetupGet(x => x.Delegations).Returns([]);
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken token, bool _) => action(token));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object);
+        versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken cancellation, bool _) => action(cancellation));
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object);
     }
 
     [Fact]
@@ -283,6 +294,67 @@ public sealed class RequestHandlerTests
 
         Assert.Null(response.Error);
         prompts.Verify(x => x.Prompt(workspace.Id, "go", It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(RemoteCommand.Prompt)]
+    [InlineData(RemoteCommand.SetWorkspaceSettings)]
+    [InlineData(RemoteCommand.StartLoop)]
+    [InlineData(RemoteCommand.RunScript)]
+    [InlineData(RemoteCommand.UploadAttachment)]
+    [InlineData(RemoteCommand.GitCommit)]
+    [InlineData(RemoteCommand.GetGitDiff)]
+    [InlineData(RemoteCommand.DelegateTask)]
+    public async Task Handle_ADelegatedWorkspaceTakesNoWorkSettingsScriptsOrGit(RemoteCommand command)
+    {
+        swarm.Setup(x => x.IsDelegated(workspace.Id)).Returns(true);
+
+        RemoteResponse refused = await handler.Handle(new RemoteRequest { Id = 1, Command = command, WorkspaceId = workspace.Id, Text = "go" }, owner, CancellationToken.None);
+
+        Assert.Equal("This workspace runs a task delegated by another server, so it takes nothing else.", refused.Error);
+        prompts.VerifyNoOtherCalls();
+        scripts.VerifyNoOtherCalls();
+        git.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task Handle_ADelegatedWorkspaceShowsNoRepositoryWithoutRunningGit()
+    {
+        swarm.Setup(x => x.IsDelegated(workspace.Id)).Returns(true);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetGitStatus, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.False(response.Git?.IsRepo);
+        git.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(RemoteCommand.StopWorkspace)]
+    [InlineData(RemoteCommand.CancelWorkspace)]
+    [InlineData(RemoteCommand.CancelQueuedWork)]
+    public async Task Handle_StoppingADelegatedWorkspaceCancelsItsTaskSoTheSenderIsTold(RemoteCommand command)
+    {
+        swarm.Setup(x => x.IsDelegated(workspace.Id)).Returns(true);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = command, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        swarm.Verify(x => x.CancelByOwner(workspace.Id), Times.Once);
+        control.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Handle_CancelQueuedWork_AnswersWhatWaitedAndKeepsItAsASavedInputOnlyWhenAsked(bool keep)
+    {
+        QueueStatus waiting = new() { Position = 1, Text = "later" };
+        queue.Setup(x => x.Cancel(workspace.Id)).ReturnsAsync(waiting);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CancelQueuedWork, WorkspaceId = workspace.Id, Keep = keep }, owner, CancellationToken.None);
+
+        Assert.Equal(waiting, response.Queue);
+        savedInputs.Verify(x => x.Keep(workspace.Id, "later", It.IsAny<CancellationToken>()), keep ? Times.Once() : Times.Never());
     }
 
     private LimitPause Pause() => new() { Window = "5h", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow.AddMinutes(15) };

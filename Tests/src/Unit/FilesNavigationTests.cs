@@ -31,6 +31,39 @@ public sealed class FilesNavigationTests
     private string Showing => files.Preview?.Path ?? files.PreviewTitle;
 
     [Fact]
+    public async Task AReplyThatArrivesAfterAnotherFileWasOpenedIsDropped()
+    {
+        await files.Start();
+        TaskCompletionSource<FileContent> slow = new();
+        connection.Setup(x => x.ReadFile(id, "a.txt", It.IsAny<CancellationToken>())).Returns(slow.Task);
+
+        Task first = files.Choose(Node("a.txt"));
+        await files.Choose(Node("b.txt"));
+        slow.SetResult(new FileContent { Path = "a.txt", Text = "late" });
+        await first;
+
+        Assert.Equal("b.txt", Showing);
+        Assert.False(files.BackCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task ARereadOfAChangedFileNeverReplacesTheOneOpenedMeanwhile()
+    {
+        await files.Start();
+        await files.Choose(Node("a.txt"));
+        TaskCompletionSource<FileContent> slow = new();
+        connection.Setup(x => x.ReadFile(id, "a.txt", It.IsAny<CancellationToken>())).Returns(slow.Task);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.FilesChanged, WorkspaceId = id, Path = string.Empty });
+        await Settle();
+
+        await files.Choose(Node("b.txt"));
+        slow.SetResult(new FileContent { Path = "a.txt", Text = "changed" });
+        await Settle();
+
+        Assert.Equal("b.txt", Showing);
+    }
+
+    [Fact]
     public async Task Back_And_Forward_AreUnavailableUntilThereIsSomewhereToGo()
     {
         await files.Start();

@@ -92,12 +92,12 @@ public enum RemoteCommand
     ShiftGroup,
 
     /// <summary>
-    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling; it works for the AI, a script and a git action, which it undoes.
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> at once, keeping what it did, and returns the workspace to ready; refused when nothing runs or the workspace is already stopping or canceling; it works for the AI and for a git action, which it undoes. Scripts are not affected.
     /// </summary>
     StopWorkspace,
 
     /// <summary>
-    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused unless the AI is working, and when its work cannot be reverted because the workspace is not a git repository. Scripts and git actions are stopped, not cancelled.
+    /// Stops the work running in <see cref="RemoteRequest.WorkspaceId" /> and reverts what it did, returning the workspace to ready once reverted; refused unless the AI is working, and when its work cannot be reverted because the workspace is not a git repository. Git actions are stopped, not cancelled, and scripts are not affected.
     /// </summary>
     CancelWorkspace,
 
@@ -364,5 +364,90 @@ public enum RemoteCommand
     /// <summary>
     /// Draws the Mermaid diagram in <see cref="RemoteRequest.Text" /> as SVG, answered in <see cref="RemoteResponse.Diagram" />, so a client can show the diagram a markdown file describes without a diagram engine of its own.
     /// </summary>
-    RenderDiagram
+    RenderDiagram,
+
+    /// <summary>
+    /// Reads the work of <see cref="RemoteRequest.WorkspaceId" /> that waits for the local AI; answered in <see cref="RemoteResponse.Queue" />, which is omitted when nothing waits.
+    /// </summary>
+    GetQueuedWork,
+
+    /// <summary>
+    /// Removes the work of <see cref="RemoteRequest.WorkspaceId" /> that waits for the local AI, without touching work that runs, and answers what was removed in <see cref="RemoteResponse.Queue" /> (omitted when nothing waited). With <see cref="RemoteRequest.Keep" /> the server keeps the text of the removed prompt as a saved input of the workspace.
+    /// </summary>
+    CancelQueuedWork,
+
+    /// <summary>
+    /// Reads the swarm of the server: its settings, the paired servers, the pairings waiting on the drive and the delegated tasks; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    GetSwarm,
+
+    /// <summary>
+    /// Changes the swarm settings of the server to <see cref="RemoteRequest.SwarmServer" />, ignoring what is read only; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    SetSwarm,
+
+    /// <summary>
+    /// Changes the settings of the paired server <see cref="RemoteRequest.SwarmPeer" />: whether to send work to it and accept its work, the delivery mode, the address and the permissions of its tasks; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    SetSwarmPeer,
+
+    /// <summary>
+    /// Forgets the paired server <see cref="RemoteRequest.PeerId" />, which can then neither send nor receive anything, and ends the tasks given to it and those it gave; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    RevokeSwarmPeer,
+
+    /// <summary>
+    /// Makes a code another server can pair with over the network once within fifteen minutes; answered in <see cref="RemoteResponse.Swarm" /> with <see cref="SwarmStatus.PairingCode" />.
+    /// </summary>
+    CreatePairingCode,
+
+    /// <summary>
+    /// Pairs with the server at <see cref="RemoteRequest.Address" /> that made the code <see cref="RemoteRequest.Code" />; answered in <see cref="RemoteResponse.Swarm" />. Refused when it cannot be reached or does not accept the code.
+    /// </summary>
+    PairWithCode,
+
+    /// <summary>
+    /// Writes an invitation to pair into the drive folder; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    WriteDriveInvitation,
+
+    /// <summary>
+    /// Pairs with the server <see cref="RemoteRequest.PeerId" /> of a pairing found on the drive, after a person compared its fingerprint, and writes the acceptance of an invitation to the drive; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    ConfirmDrivePairing,
+
+    /// <summary>
+    /// Reads everything on the drive addressed to this server and writes what waits for the air gapped servers; answered in <see cref="RemoteResponse.Swarm" /> with what happened in <see cref="SwarmStatus.Report" />.
+    /// </summary>
+    SyncDrive,
+
+    /// <summary>
+    /// Delegates the task <see cref="RemoteRequest.Task" /> from <see cref="RemoteRequest.WorkspaceId" /> by hand; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    DelegateTask,
+
+    /// <summary>
+    /// Reads everything about the delegated task <see cref="RemoteRequest.TaskId" />; answered in <see cref="RemoteResponse.SwarmTask" />.
+    /// </summary>
+    GetSwarmTask,
+
+    /// <summary>
+    /// Cancels the delegated task <see cref="RemoteRequest.TaskId" />, outgoing or incoming; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    CancelSwarmTask,
+
+    /// <summary>
+    /// Delegates the failed, cancelled or lost outgoing task <see cref="RemoteRequest.TaskId" /> again from the same instructions and code; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    RetrySwarmTask,
+
+    /// <summary>
+    /// Applies the changes of the finished task <see cref="RemoteRequest.TaskId" /> to the files of its workspace without committing them; answered in <see cref="RemoteResponse.Swarm" /> with what happened in <see cref="SwarmStatus.Report" />.
+    /// </summary>
+    ApplySwarmTask,
+
+    /// <summary>
+    /// Removes the ended task <see cref="RemoteRequest.TaskId" /> from the list, with its result branch; answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    DiscardSwarmTask
 }

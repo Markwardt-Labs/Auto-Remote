@@ -1,6 +1,6 @@
 # Syntax highlighting
 
-Previewed text files are colored by a small tokenizer instead of a grammar engine such as TextMate. A grammar engine would add a large dependency to the Avalonia clients (including Android) and could not be shared with the dependency free web client; a tokenizer of a few hundred lines covers what a read-only preview needs. It lives in `Frontend/src/Syntax/` and is mirrored line for line in `WebClient/index.html` (`syntaxLanguages` through `syntaxNodes`), so the clients color a file identically.
+Previewed text files are colored by a small tokenizer instead of a grammar engine such as TextMate. A grammar engine would add a large dependency to the Avalonia clients (including Android) and could not be shared with the dependency free web client; a tokenizer of a few hundred lines covers what a read-only preview needs. It lives in `Client/Frontend/src/Syntax/` and is mirrored line for line in `Client/Web/index.html` (`syntaxLanguages` through `syntaxNodes`), so the clients color a file identically.
 
 ## Languages are data
 

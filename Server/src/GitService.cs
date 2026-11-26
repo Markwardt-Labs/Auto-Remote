@@ -471,15 +471,33 @@ internal sealed class GitService : IGitService
             throw new RequestException($"'{folderName}' already exists in '{parent}'.");
         }
 
-        GitOutput result = await Run(parent, ["clone", "--", url, folderName], cancellation, cloneTimeout);
+        // Cloned into a folder of its own first, so cleaning up after a clone that failed, ran out of time or was cancelled never removes what something else made under the name.
+        string staging = $".auto-remote-clone-{Guid.NewGuid():N}";
 
-        if (result.ExitCode != 0)
+        try
         {
-            TryDelete(target);
-            throw new RequestException(Message(result));
-        }
+            GitOutput result = await Run(parent, ["clone", "--", url, staging], cancellation, cloneTimeout);
 
-        return target;
+            if (result.ExitCode != 0)
+            {
+                throw new RequestException(Message(result));
+            }
+
+            try
+            {
+                Directory.Move(Path.Combine(parent, staging), target);
+            }
+            catch (IOException)
+            {
+                throw new RequestException($"'{folderName}' already exists in '{parent}'.");
+            }
+
+            return target;
+        }
+        finally
+        {
+            TryDelete(Path.Combine(parent, staging));
+        }
     }
 
     private async Task<string> WorkingTreeDiff(string folder, string path, CancellationToken cancellation)
@@ -781,7 +799,7 @@ internal sealed class GitService : IGitService
         {
             process.Kill(true);
             cancellation.ThrowIfCancellationRequested();
-            throw new RequestException("Git took too long.");
+            throw new RequestException("Git took too long.") { IsTemporary = true };
         }
     }
 }

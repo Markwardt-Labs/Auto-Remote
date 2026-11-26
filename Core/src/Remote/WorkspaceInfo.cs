@@ -56,6 +56,11 @@ public sealed record WorkspaceInfo
     public bool ShowWork { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the AI of the workspace may delegate tasks to paired servers.
+    /// </summary>
+    public bool AllowDelegation { get; init; }
+
+    /// <summary>
     /// Gets the workspace's display name, which is the name of <see cref="Folder" />.
     /// </summary>
     [JsonIgnore]

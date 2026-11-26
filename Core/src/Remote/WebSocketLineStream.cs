@@ -7,13 +7,16 @@ namespace Markwardt.AutoRemote;
 /// <param name="firstMessageLength">The most bytes the first message may have; it is the key handshake on the server's side.</param>
 public sealed class WebSocketLineStream(WebSocket socket, int firstMessageLength = 40 * 1024 * 1024) : Stream
 {
-    private readonly int maxMessageLength = 40 * 1024 * 1024;
-
-    private int limit = firstMessageLength;
+    private bool isFirst = true;
 
     private readonly List<byte> pending = [];
 
     private int position;
+
+    /// <summary>
+    /// Gets or sets the longest message taken after the first one, from the next message on; a longer one ends the stream with an <see cref="InvalidDataException" />.
+    /// </summary>
+    public int MaxMessageLength { get; set; } = 40 * 1024 * 1024;
 
     /// <inheritdoc />
     public override bool CanRead => true;
@@ -122,7 +125,7 @@ public sealed class WebSocketLineStream(WebSocket socket, int firstMessageLength
 
             pending.AddRange(chunk.AsSpan(0, result.Count));
 
-            if (pending.Count > limit)
+            if (pending.Count > (isFirst ? firstMessageLength : MaxMessageLength))
             {
                 throw new InvalidDataException("The message is too long.");
             }
@@ -134,7 +137,7 @@ public sealed class WebSocketLineStream(WebSocket socket, int firstMessageLength
                     pending.Add((byte)'\n');
                 }
 
-                limit = maxMessageLength;
+                isFirst = false;
                 return true;
             }
         }

@@ -41,12 +41,14 @@ public sealed class EndToEndTests : IAsyncLifetime
         PrompterHost host = new(_ => prompter);
         WorkspaceManager workspaces = new(store, folders, hub, host);
         PromptService prompts = new(workspaces, store, host, hub, activity, snapshots);
-        WorkspaceVersioning versioning = new(git, prompts, hub, activity);
-        Mock<IUsageService> usage = usageOf = new();
-        WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub);
-        ScriptRunner scripts = new(hub);
         SpeechService speech = new(Mock.Of<IWhisperEngine>());
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, hub, speech), new ErrorHistory(store, workspaces, hub), new WindowGuard(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) }, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>());
+        SavedInputs savedInputs = new(store, workspaces, hub, speech);
+        WorkQueue queue = new(workspaces, prompts, host, activity, savedInputs, hub);
+        WorkspaceVersioning versioning = new(git, prompts, hub, activity, queue);
+        Mock<IUsageService> usage = usageOf = new();
+        WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub, null, null, null, null, queue);
+        ScriptRunner scripts = new(hub);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), new WindowGuard(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) }, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()));
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -130,6 +132,13 @@ public sealed class EndToEndTests : IAsyncLifetime
         await running;
         temp.Dispose();
     }
+
+    [Theory]
+    [InlineData("wss://myserver")]
+    [InlineData("192.168.1.5:52679")]
+    [InlineData("my server")]
+    public async Task Connect_ToAHostThatCannotBeOneFailsLikeAnyServerThatCannotBeReached(string host)
+        => await Assert.ThrowsAsync<IOException>(() => new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>()).Connect(new ConnectionSettings { Host = host, Port = 5, AccessKey = "k" }, CancellationToken.None));
 
     [Fact]
     public async Task Git_AllActionsRunOnTheServerThroughProtocolMessages()

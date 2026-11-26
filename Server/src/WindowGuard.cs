@@ -8,8 +8,8 @@ internal interface IWindowGuard
     /// <summary>
     /// Starts following the work of every workspace and checking the windows of the providers it uses.
     /// </summary>
-    /// <param name="stopping">Stops the checks.</param>
-    void Open(CancellationToken stopping);
+    /// <param name="cancellation">Stops the checks.</param>
+    void Open(CancellationToken cancellation);
 
     /// <summary>
     /// Holds a workspace whose AI is idle when a usage window of its provider is at or past the maximum, which a loop asks before it sends its next prompt: the workspace is paused like one whose AI was told to pause, except that nothing is sent, and the pause ends by itself, without a resume, once no window is at or past the maximum.
@@ -93,11 +93,11 @@ internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService p
     internal TimeSpan RecheckEvery { get; init; } = TimeSpan.FromMinutes(15);
 
     /// <inheritdoc />
-    public void Open(CancellationToken stopping)
+    public void Open(CancellationToken cancellation)
     {
         subscription?.Dispose();
         subscription = events.Subscribe(Follow);
-        _ = Repeat(stopping);
+        _ = Repeat(cancellation);
     }
 
     /// <inheritdoc />
@@ -212,14 +212,14 @@ internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService p
         }
     }
 
-    private async Task Repeat(CancellationToken stopping)
+    private async Task Repeat(CancellationToken cancellation)
     {
         try
         {
-            while (!stopping.IsCancellationRequested)
+            while (!cancellation.IsCancellationRequested)
             {
-                await Task.Delay(CheckEvery, clock, stopping);
-                await Sweep(stopping);
+                await Task.Delay(CheckEvery, clock, cancellation);
+                await Sweep(cancellation);
             }
         }
         catch (OperationCanceledException)

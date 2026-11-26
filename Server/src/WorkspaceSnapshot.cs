@@ -29,4 +29,9 @@ internal sealed record WorkspaceSnapshot
     /// Gets the tree object holding every file git does not ignore, untracked ones included.
     /// </summary>
     public required string Tree { get; init; }
+
+    /// <summary>
+    /// Gets the files git ignored and did not track, with a folder ignored whole listed as the folder, ending in a slash.
+    /// </summary>
+    public required IReadOnlyList<string> Ignored { get; init; }
 }

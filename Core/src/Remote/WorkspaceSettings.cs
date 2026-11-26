@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote;
 
 /// <summary>
-/// How the AI of one workspace is run: everything the configuration of its Live AI session holds, and the provider it was made with, which cannot change.
+/// How the AI of one workspace is run: what the configuration of its Live AI session holds, the choices the server keeps for the workspace itself and the provider it was made with, which cannot change.
 /// </summary>
 public sealed record WorkspaceSettings
 {
@@ -39,6 +39,11 @@ public sealed record WorkspaceSettings
     /// Gets a value indicating whether the AI may make images, which needs image generation in the environment.
     /// </summary>
     public bool IsImageGenerationAllowed { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the AI may delegate tasks to paired servers, which sends them the code of the workspace.
+    /// </summary>
+    public bool IsDelegationAllowed { get; init; }
 
     /// <summary>
     /// Gets custom instructions for the AI, or <see langword="null" /> for none.

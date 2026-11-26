@@ -1,36 +1,10 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// A file a user message refers to with an <c>Attached file: path</c> line.
-/// </summary>
-internal sealed record AttachedFile
-{
-    /// <summary>
-    /// Gets the file name as the user attached it.
-    /// </summary>
-    public required string Name { get; init; }
-
-    /// <summary>
-    /// Gets the file's path on the server.
-    /// </summary>
-    public required string Path { get; init; }
-}
-
-/// <summary>
 /// A user message split into what the user typed and the files attached to it.
 /// </summary>
 internal sealed record MessageParts
 {
-    /// <summary>
-    /// Gets the text the user typed, without the attachment lines.
-    /// </summary>
-    public required string Body { get; init; }
-
-    /// <summary>
-    /// Gets the attached files, in the order they were sent.
-    /// </summary>
-    public required IReadOnlyList<AttachedFile> Files { get; init; }
-
     /// <summary>
     /// Splits a prompt into its text and the trailing <c>Attached file: path</c> lines the clients add for each attachment.
     /// </summary>
@@ -52,4 +26,14 @@ internal sealed record MessageParts
 
         return new MessageParts { Body = string.Join('\n', lines).TrimEnd(), Files = files };
     }
+
+    /// <summary>
+    /// Gets the text the user typed, without the attachment lines.
+    /// </summary>
+    public required string Body { get; init; }
+
+    /// <summary>
+    /// Gets the attached files, in the order they were sent.
+    /// </summary>
+    public required IReadOnlyList<AttachedFile> Files { get; init; }
 }

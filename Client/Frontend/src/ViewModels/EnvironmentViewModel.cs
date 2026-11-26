@@ -16,6 +16,7 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         Update = update;
         selectedDefault = Services[0];
         selectedImage = ImageKinds[0];
+        selectedWorkMode = WorkModes[0];
         CloseCommand = new AsyncCommand(async _ =>
         {
             if (await Apply())
@@ -93,6 +94,10 @@ internal sealed class EnvironmentViewModel : ViewModelBase
 
     private decimal? statusMinutes = 5;
 
+    private Choice<LocalWorkMode> selectedWorkMode;
+
+    private decimal? delegatedTaskLimit = 1;
+
     private decimal? claudeMaxWindowPercent = 95;
 
     private decimal? codexMaxWindowPercent = 95;
@@ -130,6 +135,44 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         new(ImageGenerationKind.OpenAi, "OpenAI"),
         new(ImageGenerationKind.Local, "Local Stable Diffusion server")
     ];
+
+    /// <summary>
+    /// Gets the ways local AI work can run when several workspaces have work.
+    /// </summary>
+    public IReadOnlyList<Choice<LocalWorkMode>> WorkModes { get; } =
+    [
+        new(LocalWorkMode.Yield, "Yield: one at a time, mine first"),
+        new(LocalWorkMode.Simultaneous, "Simultaneous: side by side")
+    ];
+
+    /// <summary>
+    /// Gets or sets how local AI work runs when several workspaces have work.
+    /// </summary>
+    public Choice<LocalWorkMode> SelectedWorkMode
+    {
+        get => selectedWorkMode;
+        set
+        {
+            if (value is not null && Set(ref selectedWorkMode, value))
+            {
+                Raise(nameof(RunsSimultaneously));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether local AI work runs side by side, which is when the number of delegated tasks at once can be set.
+    /// </summary>
+    public bool RunsSimultaneously => selectedWorkMode.Value == LocalWorkMode.Simultaneous;
+
+    /// <summary>
+    /// Gets or sets how many delegated tasks run at once when work runs side by side; empty restores 1.
+    /// </summary>
+    public decimal? DelegatedTaskLimit
+    {
+        get => delegatedTaskLimit;
+        set => Set(ref delegatedTaskLimit, value);
+    }
 
     /// <summary>
     /// Gets the capabilities to choose from for new workspaces.
@@ -292,6 +335,19 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         {
             defaults = defaults with { IsImageGenerationAllowed = value };
             Raise(nameof(NewIsImageGenerationAllowed));
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets whether the AI of new workspaces may delegate tasks to paired servers.
+    /// </summary>
+    public bool NewIsDelegationAllowed
+    {
+        get => defaults.IsDelegationAllowed;
+        set
+        {
+            defaults = defaults with { IsDelegationAllowed = value };
+            Raise(nameof(NewIsDelegationAllowed));
         }
     }
 
@@ -664,6 +720,12 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         }
     }
 
+    /// <summary>
+    /// Sends the edits still pending, as is done before the screen gives way to another.
+    /// </summary>
+    /// <returns><see langword="true" /> if there were none or the server took them; <see langword="false" /> when the screen should stay to show why not.</returns>
+    public Task<bool> Leave() => Apply();
+
     private double Percent(decimal? percent) => percent is { } value ? (double)Math.Clamp(Math.Round(value, 1), 1, 100) : 95;
 
     private string? KeyUpdate(string entered, bool clear) => clear ? string.Empty : entered.Trim().Length > 0 ? entered.Trim() : null;
@@ -698,6 +760,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
             LocalImageModels = Names(ImageRows),
             NewWorkspaces = defaults with { Instructions = defaults.Instructions.Trim() },
             StatusMinutes = statusMinutes is { } minutes ? (int)Math.Clamp(Math.Round(minutes), 1, 1440) : 5,
+            LocalWorkMode = selectedWorkMode.Value,
+            DelegatedTaskLimit = delegatedTaskLimit is { } tasks ? (int)Math.Clamp(Math.Round(tasks), 1, 16) : 1,
             ClaudeMaxWindowPercent = Percent(claudeMaxWindowPercent),
             CodexMaxWindowPercent = Percent(codexMaxWindowPercent),
             ReviewPrompt = reviewPrompt.Trim(),
@@ -731,6 +795,8 @@ internal sealed class EnvironmentViewModel : ViewModelBase
         clearOpenAiApiKey = false;
         localImageServer = environment.LocalImageServer;
         statusMinutes = environment.StatusMinutes;
+        selectedWorkMode = WorkModes.First(choice => choice.Value == environment.LocalWorkMode);
+        delegatedTaskLimit = environment.DelegatedTaskLimit;
         claudeMaxWindowPercent = (decimal)environment.ClaudeMaxWindowPercent;
         codexMaxWindowPercent = (decimal)environment.CodexMaxWindowPercent;
         reviewPrompt = environment.ReviewPrompt;

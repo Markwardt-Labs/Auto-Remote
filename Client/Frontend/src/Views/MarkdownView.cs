@@ -191,7 +191,21 @@ internal sealed class MarkdownView : ContentControl
         block = null;
         sections.Clear();
         containing = -1;
-        Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0, Collapsible);
+        try
+        {
+            Content = Source is null ? null : Blocks(Markdig.Markdown.Parse(Source, pipeline), 0, Collapsible);
+        }
+        catch (Exception exception) when (exception is ArgumentException or InvalidOperationException)
+        {
+            // Text the parser or a block cannot take, such as very deep nesting, still has to show; a binding would swallow the error and leave nothing.
+            plain.Clear();
+            sections.Clear();
+            matchIndex = 0;
+            current = null;
+            block = null;
+            containing = -1;
+            Content = Plain(Source!, 14);
+        }
         PlainText = plain.ToString();
         Annotate();
 
@@ -530,7 +544,7 @@ internal sealed class MarkdownView : ContentControl
 
     private Border Diagram(FencedCodeBlock block)
     {
-        string source = string.Join('\n', block.Lines.Lines.Take(block.Lines.Count).Select(line => line.ToString()));
+        string source = Body(block);
         Border host = new() { Background = Brush("Elevated", Brushes.DimGray), CornerRadius = new CornerRadius(8), Padding = new Thickness(12) };
         IDiagramSource diagrams = Diagrams!;
 
@@ -623,9 +637,12 @@ internal sealed class MarkdownView : ContentControl
         return button;
     }
 
+    // A block with no lines has no line array at all.
+    private string Body(LeafBlock leaf) => string.Join('\n', (leaf.Lines.Lines ?? []).Take(leaf.Lines.Count).Select(line => line.ToString()));
+
     private Border Code(Block source)
     {
-        string text = string.Join('\n', ((LeafBlock)source).Lines.Lines.Take(((LeafBlock)source).Lines.Count).Select(line => line.ToString()));
+        string text = Body((LeafBlock)source);
         ScrollSafeTextBlock result = new() { FontFamily = mono, FontSize = 12 };
         Begin(result);
         Emit(result.Inlines!, text);
@@ -730,6 +747,13 @@ internal sealed class MarkdownView : ContentControl
         {
             switch (node)
             {
+                case HtmlEntityInline entity:
+                    Emit(target, entity.Transcoded.ToString());
+                    break;
+                case Markdig.Extensions.Mathematics.MathInline math:
+                    // No math is typeset, so what was written shows as it was, dollar signs and all.
+                    Emit(target, Source!.Substring(math.Span.Start, math.Span.Length));
+                    break;
                 case LiteralInline literal:
                     Emit(target, literal.Content.ToString());
                     break;

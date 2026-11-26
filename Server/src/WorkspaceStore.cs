@@ -359,7 +359,11 @@ internal sealed class WorkspaceStore : IWorkspaceStore
         {
             if (inputs.Count == 0)
             {
-                File.Delete(InputsPath(id));
+                if (File.Exists(InputsPath(id)))
+                {
+                    File.Delete(InputsPath(id));
+                }
+
                 return;
             }
 
@@ -419,7 +423,11 @@ internal sealed class WorkspaceStore : IWorkspaceStore
         {
             if (errors.Count == 0)
             {
-                File.Delete(ErrorsPath(id));
+                if (File.Exists(ErrorsPath(id)))
+                {
+                    File.Delete(ErrorsPath(id));
+                }
+
                 return;
             }
 

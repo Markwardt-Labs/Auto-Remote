@@ -5,6 +5,22 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 internal sealed class DiffView : ContentControl
 {
+    static DiffView()
+    {
+        DiffProperty.Changed.AddClassHandler<DiffView>((view, _) => view.Render());
+        WrapProperty.Changed.AddClassHandler<DiffView>((view, _) => view.Rewrap());
+    }
+
+    /// <summary>
+    /// Identifies the <see cref="Diff" /> property.
+    /// </summary>
+    public static readonly StyledProperty<GitDiff?> DiffProperty = AvaloniaProperty.Register<DiffView, GitDiff?>(nameof(Diff));
+
+    /// <summary>
+    /// Identifies the <see cref="Wrap" /> property.
+    /// </summary>
+    public static readonly StyledProperty<bool> WrapProperty = AvaloniaProperty.Register<DiffView, bool>(nameof(Wrap));
+
     /// <summary>
     /// Initializes a new instance of the <see cref="DiffView" /> class.
     /// </summary>
@@ -23,22 +39,6 @@ internal sealed class DiffView : ContentControl
         grid.Children.Add(block);
         grid.Children.Add(numbers);
         Content = scroller;
-    }
-
-    /// <summary>
-    /// Identifies the <see cref="Diff" /> property.
-    /// </summary>
-    public static readonly StyledProperty<GitDiff?> DiffProperty = AvaloniaProperty.Register<DiffView, GitDiff?>(nameof(Diff));
-
-    /// <summary>
-    /// Identifies the <see cref="Wrap" /> property.
-    /// </summary>
-    public static readonly StyledProperty<bool> WrapProperty = AvaloniaProperty.Register<DiffView, bool>(nameof(Wrap));
-
-    static DiffView()
-    {
-        DiffProperty.Changed.AddClassHandler<DiffView>((view, _) => view.Render());
-        WrapProperty.Changed.AddClassHandler<DiffView>((view, _) => view.Rewrap());
     }
 
     private readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");

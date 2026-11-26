@@ -17,4 +17,11 @@ public interface IReadyNotifier
     /// </summary>
     /// <param name="workspaceId">The workspace identifier.</param>
     void Clear(Guid workspaceId);
+
+    /// <summary>
+    /// Shows a notification with a message of its own, such as that a task the user delegated ended; activating it is meant to open the workspace.
+    /// </summary>
+    /// <param name="workspaceId">The workspace it is about.</param>
+    /// <param name="message">What it says.</param>
+    void Announce(Guid workspaceId, string message);
 }

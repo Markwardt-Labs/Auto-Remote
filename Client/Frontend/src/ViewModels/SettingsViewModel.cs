@@ -49,10 +49,32 @@ internal sealed class SettingsViewModel : ViewModelBase
 
     private bool loaded;
 
+    private bool isLocked;
+
     /// <summary>
     /// Gets the name of the provider the workspace runs on, which never changes.
     /// </summary>
     public string ProviderName { get; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the settings can only be read, which is the case while the workspace runs a task another server delegated; closing them then sends nothing.
+    /// </summary>
+    public bool IsLocked
+    {
+        get => isLocked;
+        set
+        {
+            if (Set(ref isLocked, value))
+            {
+                Raise(nameof(CanEdit));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the settings can be changed.
+    /// </summary>
+    public bool CanEdit => !isLocked;
 
     /// <summary>
     /// Gets the capabilities to choose from.
@@ -134,6 +156,15 @@ internal sealed class SettingsViewModel : ViewModelBase
     {
         get => pending.IsWebAllowed;
         set => Edit(settings => settings with { IsWebAllowed = value });
+    }
+
+    /// <summary>
+    /// Gets or sets whether the AI may delegate tasks to paired servers, which sends them the code of the workspace.
+    /// </summary>
+    public bool IsDelegationAllowed
+    {
+        get => pending.IsDelegationAllowed;
+        set => Edit(settings => settings with { IsDelegationAllowed = value });
     }
 
     /// <summary>
@@ -235,7 +266,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     /// <returns><see langword="true" /> when there was nothing to send or the server took the edits; <see langword="false" /> when it refused, which <see cref="ViewModelBase.Error" /> says, and the edits stay pending.</returns>
     public async Task<bool> Apply()
     {
-        if (!loaded || !HasPending)
+        if (!loaded || !HasPending || isLocked)
         {
             return true;
         }
@@ -253,7 +284,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     private bool Differs(WorkspaceSettings first, WorkspaceSettings second)
-        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes);
+        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, first.IsDelegationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, second.IsDelegationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes);
 
     private string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
@@ -310,6 +341,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         Raise(nameof(IsSystemAccessAllowed));
         Raise(nameof(IsWebAllowed));
         Raise(nameof(IsImageGenerationAllowed));
+        Raise(nameof(IsDelegationAllowed));
         Raise(nameof(Instructions));
         Raise(nameof(ReviewPrompt));
         Raise(nameof(ExpandPrompt));

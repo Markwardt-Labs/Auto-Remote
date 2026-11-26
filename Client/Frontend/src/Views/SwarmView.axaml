@@ -1,0 +1,220 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.SwarmView"
+             x:CompileBindings="False">
+  <Grid>
+    <Grid RowDefinitions="Auto,*,Auto" Margin="16" IsVisible="{Binding !HasDetail}">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+        <TextBlock Grid.Column="0" Text="Swarm" Classes="serif" FontSize="26" VerticalAlignment="Center" />
+        <local:TouchButton Grid.Column="1" Content="Close" Command="{Binding CloseCommand}" Classes="flat" />
+      </Grid>
+
+      <ScrollViewer Grid.Row="1" Name="SwarmScroller">
+        <StackPanel Spacing="8" Margin="0,8,0,12">
+          <Expander Classes="section" Header="This server" IsExpanded="True">
+            <StackPanel Spacing="8" Margin="0,4,0,8">
+              <TextBlock Text="Server name" Classes="muted" />
+              <TextBox Text="{Binding ServerName}" />
+              <SelectableTextBlock Text="{Binding Fingerprint}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              <ToggleSwitch IsChecked="{Binding AcceptDelegatedWork}" Content="Accept delegated work" OnContent="" OffContent="" />
+              <TextBlock Text="Folder for delegated workspaces (empty uses the data folder)" Classes="muted" TextWrapping="Wrap" />
+              <TextBox Text="{Binding DelegatedFolder}" TextInputOptions.AutoCapitalization="False" />
+              <TextBlock Text="Maximum tasks per delegated job" Classes="muted" />
+              <NumericUpDown Value="{Binding MaxTasks}" Minimum="1" Maximum="100" Increment="1" FormatString="0" HorizontalAlignment="Stretch" />
+            </StackPanel>
+          </Expander>
+
+          <Expander Classes="section" Header="Pair a server" IsExpanded="False">
+            <StackPanel Spacing="8" Margin="0,4,0,8">
+              <TextBlock Text="Over a network, make a code on one server and enter it on the other. For an air gapped server, write an invitation to the drive. Compare the fingerprints." Classes="muted" TextWrapping="Wrap" />
+              <local:TouchButton Content="Create Pairing Code" Command="{Binding CreateCodeCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+              <StackPanel Spacing="4" IsVisible="{Binding HasPairingCode}">
+                <SelectableTextBlock Text="{Binding PairingCodeText}" FontFamily="monospace" FontSize="16" TextWrapping="Wrap" />
+                <TextBlock Text="{Binding PairingCodeHint}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              </StackPanel>
+              <TextBlock Text="Pair with Code" Classes="serif" FontSize="15" Margin="0,8,0,0" />
+              <TextBox Text="{Binding PairAddress}" PlaceholderText="Address of the other server (host:port)" TextInputOptions.AutoCapitalization="False" />
+              <TextBox Text="{Binding PairCode}" PlaceholderText="Its pairing code" TextInputOptions.AutoCapitalization="False" />
+              <local:TouchButton Content="Pair Server" Command="{Binding PairCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+              <local:TouchButton Content="Write Drive Invitation" Command="{Binding InviteCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
+            </StackPanel>
+          </Expander>
+
+          <ItemsControl ItemsSource="{Binding Pairings}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <Border BorderBrush="{DynamicResource Accent}" BorderThickness="1" CornerRadius="6" Padding="12" Margin="0,2">
+                  <StackPanel Spacing="6">
+                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                    <SelectableTextBlock Text="{Binding Fingerprint}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                    <local:TouchButton Content="Pair Server" Command="{Binding ConfirmCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                  </StackPanel>
+                </Border>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+
+          <Expander Classes="section" Header="Paired servers" IsExpanded="True">
+            <StackPanel Spacing="8" Margin="0,4,0,8">
+              <TextBlock Text="No paired servers." Classes="muted" IsVisible="{Binding HasNoPeers}" />
+              <ItemsControl ItemsSource="{Binding Peers}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}" Header="{Binding Name}" HorizontalAlignment="Stretch" Margin="0,2">
+                      <StackPanel Spacing="8">
+                        <TextBlock Text="{Binding Status}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Problem}" IsVisible="{Binding HasProblem}" Classes="error" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Capabilities}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <SelectableTextBlock Text="{Binding Fingerprint}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <ToggleSwitch IsChecked="{Binding SendWork}" Content="Send work to this server" OnContent="" OffContent="" />
+                        <ToggleSwitch IsChecked="{Binding AcceptWork}" Content="Accept work from this server" OnContent="" OffContent="" />
+                        <TextBlock Text="Delivery mode" Classes="muted" />
+                        <ComboBox ItemsSource="{Binding Modes}" SelectedItem="{Binding SelectedMode}" HorizontalAlignment="Stretch">
+                          <ComboBox.ItemTemplate>
+                            <DataTemplate>
+                              <TextBlock Text="{Binding Name}" />
+                            </DataTemplate>
+                          </ComboBox.ItemTemplate>
+                        </ComboBox>
+                        <TextBlock Text="{Binding ModeText}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                        <StackPanel Spacing="4" IsVisible="{Binding IsNetworked}">
+                          <TextBlock Text="Address to connect to (empty waits for it to connect here)" Classes="muted" TextWrapping="Wrap" />
+                          <TextBox Text="{Binding Address}" PlaceholderText="host:port" TextInputOptions.AutoCapitalization="False" />
+                        </StackPanel>
+                        <TextBlock Text="What its tasks may do here" Classes="serif" FontSize="15" Margin="0,6,0,0" />
+                        <ToggleSwitch IsChecked="{Binding IsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" ToolTip.Tip="A shell can reach anything the server's account can, whatever else is off." />
+                        <ToggleSwitch IsChecked="{Binding IsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
+                        <ToggleSwitch IsChecked="{Binding IsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
+                        <ToggleSwitch IsChecked="{Binding IsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
+                        <local:TouchButton Content="Revoke Server" Command="{Binding RevokeCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+                      </StackPanel>
+                    </Expander>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Expander>
+
+          <Expander Classes="section" Header="Drive" IsExpanded="False">
+            <StackPanel Spacing="8" Margin="0,4,0,8">
+              <TextBlock Text="Folder of the drive on the machine of the server. Plug in and mount the drive there, not on this device." Classes="muted" TextWrapping="Wrap" />
+              <TextBox Text="{Binding DriveFolder}" PlaceholderText="/media/you/drive" TextInputOptions.AutoCapitalization="False" />
+              <local:TouchButton Content="Sync Drive" Command="{Binding SyncCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            </StackPanel>
+          </Expander>
+
+          <Expander Classes="section" Header="Delegate a task" IsExpanded="False">
+            <StackPanel Spacing="8" Margin="0,4,0,8">
+              <TextBlock Text="Workspace" Classes="muted" />
+              <ComboBox ItemsSource="{Binding Workspaces}" SelectedItem="{Binding SelectedWorkspace}" HorizontalAlignment="Stretch" PlaceholderText="Choose a workspace">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBox Text="{Binding TaskTitle}" PlaceholderText="Title" />
+              <TextBox Text="{Binding TaskInstructions}" PlaceholderText="Instructions, complete on their own" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="80" />
+              <TextBox Text="{Binding TaskExpected}" PlaceholderText="Expected result and how to check it (optional)" AcceptsReturn="True" TextWrapping="Wrap" />
+              <TextBlock Text="Capability" Classes="muted" />
+              <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding SelectedCapability}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Text="Worker" Classes="muted" />
+              <ComboBox ItemsSource="{Binding Workers}" SelectedItem="{Binding SelectedWorker}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <local:TouchButton Content="Delegate Task" Command="{Binding DelegateCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            </StackPanel>
+          </Expander>
+
+          <Expander Classes="section" Header="Delegated tasks" IsExpanded="True">
+            <StackPanel Spacing="4" Margin="0,4,0,8">
+              <TextBlock Text="No delegated tasks." Classes="muted" IsVisible="{Binding HasNoTasks}" />
+              <ItemsControl ItemsSource="{Binding Tasks}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <local:TouchButton Command="{Binding $parent[ItemsControl].DataContext.OpenTaskCommand}" CommandParameter="{Binding}" Background="Transparent" BorderBrush="{DynamicResource Border}" BorderThickness="0,0,0,1" CornerRadius="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,10">
+                      <StackPanel Spacing="4">
+                        <TextBlock Text="{Binding Title}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </local:TouchButton>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Expander>
+        </StackPanel>
+      </ScrollViewer>
+
+      <StackPanel Grid.Row="2" Spacing="4">
+        <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Outcome}" IsVisible="{Binding HasOutcome}" Classes="muted" TextWrapping="Wrap" />
+      </StackPanel>
+    </Grid>
+
+    <Grid Name="SwarmTaskDetail" RowDefinitions="Auto,*,Auto,Auto" Margin="16" IsVisible="{Binding HasDetail}">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+        <StackPanel Grid.Column="0" Spacing="2">
+          <TextBlock Text="{Binding DetailTitle}" Classes="serif" FontSize="20" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding DetailStatus}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+        </StackPanel>
+        <local:TouchButton Grid.Column="1" Content="Back to Swarm" Command="{Binding BackCommand}" Classes="flat" VerticalAlignment="Top" />
+      </Grid>
+      <ScrollViewer Grid.Row="1">
+        <StackPanel Spacing="10" Margin="0,4,0,8">
+          <TextBlock Text="{Binding DetailError}" IsVisible="{Binding HasDetailError}" Classes="error" TextWrapping="Wrap" />
+          <TextBlock Text="Instructions" Classes="serif" FontSize="15" />
+          <SelectableTextBlock Text="{Binding Detail.Instructions, FallbackValue=''}" TextWrapping="Wrap" />
+          <TextBlock Text="Expected result" Classes="serif" FontSize="15" IsVisible="{Binding HasDetailExpected}" />
+          <SelectableTextBlock Text="{Binding Detail.ExpectedResult, FallbackValue=''}" TextWrapping="Wrap" IsVisible="{Binding HasDetailExpected}" />
+          <TextBlock Text="Report" Classes="serif" FontSize="15" IsVisible="{Binding HasDetailReport}" />
+          <SelectableTextBlock Text="{Binding Detail.Report, FallbackValue=''}" TextWrapping="Wrap" IsVisible="{Binding HasDetailReport}" />
+          <TextBlock Text="Conversation" Classes="serif" FontSize="15" IsVisible="{Binding HasDetailMessages}" />
+          <ItemsControl ItemsSource="{Binding Detail.Messages, FallbackValue={x:Null}}">
+            <ItemsControl.ItemTemplate>
+              <DataTemplate>
+                <StackPanel Margin="0,3" Spacing="2">
+                  <TextBlock Text="{Binding Role}" Classes="muted" FontSize="11" IsVisible="{Binding !IsWork}" />
+                  <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Opacity="0.6" FontSize="12" IsVisible="{Binding IsWork}" />
+                  <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" IsVisible="{Binding !IsWork}" />
+                </StackPanel>
+              </DataTemplate>
+            </ItemsControl.ItemTemplate>
+          </ItemsControl>
+        </StackPanel>
+      </ScrollViewer>
+      <WrapPanel Grid.Row="2" Orientation="Horizontal">
+        <local:TouchButton Content="Apply Changes" Command="{Binding ApplyTaskCommand}" IsVisible="{Binding CanApplyTask}" Classes="primary" Margin="0,4,8,0" />
+        <local:TouchButton Content="Retry Task" Command="{Binding RetryTaskCommand}" IsVisible="{Binding CanRetryTask}" Margin="0,4,8,0" />
+        <local:TouchButton Content="Cancel Task" Command="{Binding CancelTaskCommand}" IsVisible="{Binding CanCancelTask}" Classes="danger" Margin="0,4,8,0" />
+        <local:TouchButton Content="Discard Task" Command="{Binding DiscardTaskCommand}" IsVisible="{Binding CanDiscardTask}" Margin="0,4,8,0" />
+      </WrapPanel>
+      <StackPanel Grid.Row="3" Spacing="4" Margin="0,6,0,0">
+        <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
+        <TextBlock Text="{Binding Outcome}" IsVisible="{Binding HasOutcome}" Classes="muted" TextWrapping="Wrap" />
+      </StackPanel>
+    </Grid>
+
+    <Border IsVisible="{Binding IsConfirmingRevoke}" Background="{DynamicResource Scrim}">
+      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+        <StackPanel Spacing="12">
+          <TextBlock Text="Revoke this server?" Classes="serif" FontSize="20" />
+          <TextBlock Text="{Binding RevokeText}" Classes="muted" TextWrapping="Wrap" />
+          <local:TouchButton Content="Revoke Server" Command="{Binding ConfirmRevokeCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          <local:TouchButton Content="Cancel" Command="{Binding CancelRevokeCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+        </StackPanel>
+      </Border>
+    </Border>
+  </Grid>
+</UserControl>

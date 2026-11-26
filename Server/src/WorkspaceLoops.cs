@@ -30,7 +30,7 @@ internal interface IWorkspaceLoops
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null) : IWorkspaceLoops
+internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null, IWorkQueue? queue = null) : IWorkspaceLoops
 {
     private readonly ConcurrentDictionary<Guid, LoopRun> loops = new();
 
@@ -151,7 +151,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
             while (!run.Over)
             {
                 run.LastWindowCheck = DateTimeOffset.MinValue;
-                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && guard?.IsPaused(id) != true);
+                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && queue?.Get(id) is null && guard?.IsPaused(id) != true);
 
                 if (run.Over || reason is not null)
                 {
@@ -165,12 +165,19 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                     continue;
                 }
 
-                DateTimeOffset started = DateTimeOffset.UtcNow;
                 run.Failure = null;
+                WorkTicket? ticket = null;
 
                 try
                 {
-                    await prompts.Prompt(id, run.Settings.Prompt, true, CancellationToken.None);
+                    if (queue is null)
+                    {
+                        await prompts.Prompt(id, run.Settings.Prompt, true, CancellationToken.None);
+                    }
+                    else
+                    {
+                        ticket = await queue.Submit(id, run.Settings.Prompt, WorkSource.Loop, CancellationToken.None);
+                    }
                 }
                 catch (RequestException exception)
                 {
@@ -184,6 +191,24 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                     continue;
                 }
 
+                if (ticket is { Queued: true })
+                {
+                    reason = await Wait(run, () => ticket.Started.IsCompleted);
+
+                    if (run.Over || reason is not null)
+                    {
+                        End(id, run, reason);
+                        return;
+                    }
+
+                    if (!await ticket.Started)
+                    {
+                        End(id, run, "The loop stopped: its waiting run was cancelled.");
+                        return;
+                    }
+                }
+
+                DateTimeOffset started = DateTimeOffset.UtcNow;
                 run.Schedule(started + TimeSpan.FromSeconds(run.Settings.IntervalSeconds));
                 Interlocked.Increment(ref run.Runs);
                 events.Publish(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = id, Loop = run.Info() });
@@ -344,6 +369,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
         }
 
         run.Over = true;
+        _ = queue?.CancelLoop(id);
         prompts.Hold(id, false);
         events.Publish(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = id, Text = reason });
     }

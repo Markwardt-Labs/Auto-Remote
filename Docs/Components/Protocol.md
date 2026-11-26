@@ -18,7 +18,8 @@ The client opens the WebSocket connection and sends one JSON line (at most 1024 
 
 | Direction | Property | Type | Meaning |
 | --- | --- | --- | --- |
-| Client to server | `accessKey` | string | The access key the client was configured with. |
+| Client to server | `accessKey` | string | The access key the client was configured with; empty for a paired server. |
+| Client to server | `peer` | bool, optional | `true` for a paired server of the swarm. |
 | Server to client | `accepted` | bool | `true` if the key was correct. |
 | Server to client | `version` | string | The server's version (`major.minor.patch`), sent only with an acceptance and left out by a server that predates version checks. The Avalonia clients compare it with their own on every connect and reconnect. |
 
@@ -26,6 +27,8 @@ The client opens the WebSocket connection and sends one JSON line (at most 1024 
 {"accessKey": "change-me"}
 {"accepted": true, "version": "1.2.3"}
 ```
+
+A paired server of the swarm connects to the same port with `peer: true` and an empty `accessKey`; the server answers `accepted: true` without a version. Such a connection gets no events and takes no requests: what follows are the swarm's own frames, in which a peer pairs with a one-time code or, after a signed hello, exchanges sealed packages.
 
 ## Message formats
 
@@ -45,7 +48,7 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group; for `CreateWorkspace` and `CloneWorkspace`, the group the new workspace is filed in (omitted: the top level), refused when it no longer exists. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
 | `inputId` | GUID | `TakeSavedInput`, `DiscardSavedInput` | The saved input to take or discard. |
-| `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. The cursor is the position, counted from the oldest message the client may be shown (work messages count only while the workspace shows its work), of the first message after it: a client that drops the oldest messages it holds adds their number to the cursor it has to read before the first message it keeps, and clients ask for 20 messages at a time. |
+| `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. The cursor is the position, counted from the oldest message the client may be shown (work messages count only while the workspace shows its work), of the first message after it: a client that drops the oldest messages it holds adds their number to the cursor it has to read before the first message it keeps, and clients ask for 100 messages at a time. |
 | `characters` | number | no | `GetHistory`: the most characters of text to read, at least one message always; 20,000 when omitted, at most 400,000. A chunk ends at whichever of `limit` and `characters` is reached first. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
 | `offset` | number | `ShiftGroup` | How many places to move: negative is up, positive is down. |
@@ -66,10 +69,17 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
-| `text` | string | `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles` | The prompt text, the commit message, the chat input to save, the line written to a script, or the text to search for. |
+| `text` | string | `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles`, `RenderDiagram`, `GitSquash`, `GitRebase`, `GitMerge` | The prompt text, the commit message (of the squashed commit for the last three, optional for `GitRebase` and `GitMerge`), the chat input to save, the line written to a script, the text to search for or the Mermaid source. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
 | `showWork` | bool | `SetShowWork` | Whether the chat of the workspace shows the AI's work (required for that command). |
 | `ignoreLimit` | bool | no | `Prompt` only: the user confirmed that the work starts although a usage window is at or past the maximum; the workspace then ignores the maximum until the work is done. |
+| `keep` | bool | no | `CancelQueuedWork`: keep the text of the removed prompt as a saved input. |
+| `swarmServer` | swarm server | `SetSwarm` | The swarm settings of the server. |
+| `swarmPeer` | swarm peer | `SetSwarmPeer` | The settings for a paired server. |
+| `peerId` | string | `RevokeSwarmPeer`, `ConfirmDrivePairing` | A server of the swarm. |
+| `address`, `code` | string | `PairWithCode` | The `host:port` of the server that made the code, and the code. |
+| `task` | swarm task request | `DelegateTask` | The task to delegate. |
+| `taskId` | GUID | the swarm task commands | The delegated task. |
 | `showHidden` | bool | no | `ListFiles` and `SearchFiles`; includes the entries a `.filehide` file hides. |
 | `searchContent` | bool | no | `SearchFiles` only; searches the contents of the files instead of their names. |
 
@@ -81,14 +91,14 @@ Properties a command does not use are omitted.
 {"id": 7, "history": {"messages": [{"role": "Assistant", "text": "Done."}], "older": "48"}}
 ```
 
-Exactly one payload property is set on success (none for `DeleteWorkspace`, `DeleteGroup`, `Prompt`, `WatchWorkspace` and the git actions: every `Git...` command except the `GetGit...` reads); on failure only `error` is set (see Errors). A response with `id` zero answers no request and carries `event` instead (see Events).
+Exactly one payload property is set on success (commands whose response column below says none have none, such as `DeleteWorkspace` and the git actions, every `Git...` command except the `GetGit...` reads; a `Prompt` has `queue` only when it had to wait); on failure only `error` is set (see Errors). A response with `id` zero answers no request and carries `event` instead (see Events).
 
 | Property | Type | Set for |
 | --- | --- | --- |
 | `id` | number | Always; the request's `id`. |
 | `error` | string | Failure only. |
 | `catalog` | catalog | `ListWorkspaces` |
-| `workspace` | workspace | `CreateWorkspace`, `CloneWorkspace`, `RenameWorkspace`, `MoveWorkspace` |
+| `workspace` | workspace | `CreateWorkspace`, `CloneWorkspace`, `RenameWorkspace`, `MoveWorkspace`, `MoveWorkspaceToFolder`, `SetShowWork` |
 | `group` | group | `CreateGroup`, `RenameGroup`, `MoveGroup` |
 | `listing` | listing | `ListFolders`, `CreateFolder` |
 | `history` | history | `GetHistory` |
@@ -101,6 +111,7 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `searchResults` | array of search result | `SearchFiles` |
 | `content` | content | `ReadFile` |
 | `diagram` | string | `RenderDiagram`: the SVG document. |
+| `attachmentPath` | string | `UploadAttachment`: the path of the stored file on the server. |
 | `state` | string | `GetWorkspaceState`: the workspace's state, as in the `StateChanged` event. |
 | `git` | git status | `GetGitStatus` |
 | `gitBranch` | branch state | `GetGitBranchState` |
@@ -113,9 +124,14 @@ Exactly one payload property is set on success (none for `DeleteWorkspace`, `Del
 | `errors` | array of error | `GetErrors` |
 | `overLimit` | limit pause | `Prompt`, together with `error`: the window that made the server refuse the prompt. |
 | `scripts` | script runs | `GetScripts` |
+| `queue` | queued work, optional | `GetQueuedWork`, `CancelQueuedWork` (what was removed), and a `Prompt` that had to wait; omitted when nothing waits. |
+| `swarm` | swarm status | Every swarm command except `GetSwarmTask`. |
+| `swarmTask` | swarm task detail | `GetSwarmTask` |
 | `event` | event | Pushed by the server, with `id` zero (see Events). |
 
 ### Commands
+
+While a workspace runs a delegated task, `Prompt`, `UploadAttachment`, `StartLoop`, `RenameWorkspace`, `MoveWorkspaceToFolder`, `SetWorkspaceSettings`, `GenerateCommitMessage`, `RunScript`, `DelegateTask` and every git command except `GetGitStatus` (which answers that it is not a repository) and `GitCancel` are refused, and `StopWorkspace` and `CancelWorkspace` cancel the task.
 
 A missing required property fails with `The request needs a <field>.` (`workspaceId` reports `a workspace` and `groupId` reports `a group`).
 
@@ -131,22 +147,22 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `MoveGroup` | `groupId`, optional `parentId` | `group` | Omitting `parentId` moves it to the top level. Refused into itself or anything inside it, and when the name is taken in the new place. It goes to the end of its new parent. |
 | `ShiftGroup` | `groupId`, `offset` | none | Moves the group among the groups with the same parent; it stops at the first or last place. |
 | `DeleteGroup` | `groupId` | none | Its workspaces and groups are kept and move into its parent. |
-| `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Refused unless the workspace is Ready. |
+| `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Also removes the workspace's waiting work and ends its delegated tasks. Refused unless the workspace is Ready. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
 | `GetHistory` | `workspaceId`, optional `before`, `limit`, `characters` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. Clients ask once a minute for the focused workspace's service. |
 | `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
-| `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes; does nothing when no loop runs. |
+| `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes, and removes a run that waits for the local AI unless a message of the user joined it; does nothing when no loop runs. |
 | `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
 | `GetWorkspaceSettings` | `workspaceId` | `settings` | How the workspace's AI session is run, as the session stores it (the server keeps none of its own): the provider, capability, effort, whether the shell, files outside the workspace, the web and image generation are on, the instructions, the workspace's own review and expand prompts next to the global ones, and descriptors, which are lines the session writes about how it runs (the model it chose and so on). Makes the session when the workspace has none yet. |
-| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider, the descriptors and the global prompts in it are ignored) from its next prompt on; the session stores them. The review and expand prompts are stored with the workspace instead, and an omitted or blank one clears the override. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
+| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider, the descriptors and the global prompts in it are ignored) from its next prompt on; the session stores them. The review and expand prompts, the status interval and whether the AI may delegate are stored with the workspace instead, and an omitted or blank prompt clears the override. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
 | `GetAiEnvironment` | none | `aiEnvironment` | The environment of the server's AI. API keys are never sent, only whether one is set. |
-| `SetAiEnvironment` | `aiEnvironment` | `aiEnvironment` | Replaces the environment and applies it to every workspace from the next session on. A key left out stays as it is and an empty one is removed. Refused for an empty command, an address that is not http or https, a context size below one, local models for some capabilities but not all, OpenAI image generation without a key and local image generation without a checkpoint for every capability. |
+| `SetAiEnvironment` | `aiEnvironment` | `aiEnvironment` | Replaces the environment and applies it to every workspace from the next session on. A key left out stays as it is and an empty one is removed. Refused for an empty command, an address that is not http or https, a context size below one, local models for some capabilities but not all, OpenAI image generation without a key, local image generation without a checkpoint for every capability, an unknown `localWorkMode` and a `delegatedTaskLimit` outside 1 to 16. A change of the mode or the limit applies to waiting work at once. |
 | `ConfigureOllamaService` | `enabled`, optional `password` | `aiEnvironment` | Only when `ollamaServiceControl` is `true`: writes (or removes) the systemd drop-in with the Ollama variables of the optimized context, restarts the service and waits for it to answer, with root rights through `sudo`, then stores `localOptimizeContext` as `enabled`. Refused with the reason when the password is not accepted, the account may not use `sudo` or the service did not come back. Nothing changes in the rest of the environment. |
 | `ListLocalModels` | optional `url` | `names` | The models the local model server offers (Ollama by default). Refused when the server cannot be reached. |
 | `ListImageModels` | optional `url` | `names` | The checkpoints the Stable Diffusion server offers. Refused when the server cannot be reached. |
-| `Prompt` | `workspaceId`, `text` | none | Answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a git action runs). Also refused, with `overLimit` in the response, while a usage window of the workspace's provider is at or past the maximum (or the workspace is in an automatic pause), unless `ignoreLimit` is true or the text is the pause prompt (`pause current work`). |
+| `Prompt` | `workspaceId`, `text` | none, or `queue` | In a workspace on a local model the prompt may have to wait for the local AI: the answer then carries `queue`, its `MessageAdded` arrives once it starts, and further prompts join the waiting one. Otherwise answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a git action runs). Also refused, with `overLimit` in the response, while a usage window of the workspace's provider is at or past the maximum (or the workspace is in an automatic pause), unless `ignoreLimit` is true or the text is the pause prompt (`pause current work`). |
 | `CancelLimitPause` | `workspaceId` | none | Ends the automatic pause of the workspace without telling the AI to resume, and ends the loop of the workspace if it has one; the AI is not paused again while it finishes what it is doing. Nothing happens when the workspace is not paused. |
 | `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 20 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
 | `TranscribeSavedInput` | `workspaceId`, `data` (a 16 kHz, mono, 16 bit WAV recording) | `savedInputs` | Adds a saved input that is `isConverting` and answers the list with it at once; the server turns the recording (up to 4 MB) into text in the background with its built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and every client gets a `SavedInputsChanged` event at each step. When the text is ready the entry keeps its `id` and `time` and gets the `text`, becoming a saved input like any other (subject to the same limits); when it fails, because nothing was heard, voice input is turned off on the server or its model cannot be loaded, it stays with the reason in `error`. Refused for an empty recording. A conversion that is not finished is not stored, so it does not survive a restart of the server. |
@@ -169,7 +185,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GetGitCommitChanges` | `workspaceId`, `commit` | `gitChanges` | The paths a commit changed relative to its first parent. |
 | `GetGitDiff` | `workspaceId`, `path`, optional `commit` | `gitDiff` | The whole file with its changes marked: the commit against its first parent, or without `commit` the working tree against the head. |
 | `GitCommit` | `workspaceId`, `text` | none | Stages everything, commits, then pushes the branch to `origin` when there is one; a failing push is ignored. Refused unless the workspace is Ready, when there is nothing to commit, when the AI gives no message and when the message it ends with has twelve words or more. |
-| `GenerateCommitMessage` | `workspaceId` | `commitMessage` | Asks the AI for a message of eight words or less for the pending changes (the changed paths and the diff of tracked files, cut at 30000 characters). Refused unless the workspace is Ready, and when there is nothing to commit. |
+| `GenerateCommitMessage` | `workspaceId` | `commitMessage` | Asks the AI for a message of eight words or less for the pending changes (the changed paths and the diff of tracked files, cut at 30000 characters). On a local model it first waits for the local AI, and it fails when the AI has not answered 20 minutes after that. Refused unless the workspace is Ready, and when there is nothing to commit. |
 | `GitReset` | `workspaceId` | none | Discards every change that is not committed, new files included. Refused unless the workspace is Ready. |
 | `GitCreateBranch` | `workspaceId`, `name` | none | Creates the branch at the head and checks it out. Refused unless the workspace is Ready, and for an invalid or taken name. |
 | `GitCreateTag` | `workspaceId`, `name` | none | Creates an annotated tag at the head; refused unless the workspace is Ready, for an invalid or taken name or before the first commit. |
@@ -184,12 +200,29 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GitFetch` | `workspaceId` | none | Fetches `origin` with tags and pruning, moves local branches that have no commits of their own to match the remote, and detaches and deletes the checked out branch when its remote counterpart was deleted. Refused unless the workspace is Ready; does nothing without a remote. |
 | `GitSync` | `workspaceId` | none | `GitFetch`, then fast-forwards the checked out branch onto its remote counterpart, stashing changes that are not committed and restoring them (the AI resolves conflicts of the restore). Does nothing unless the workspace is Ready, without a remote, or when the branch has diverged. |
 | `GitSetIdentity` | `workspaceId`, `name`, `email` | none | Sets the git user name and email in the server user's global git configuration. |
-| `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone. While the workspace is Managing it is the same as `CancelWorkspace`. |
+| `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone (an automatic Sync stopped while restoring changes keeps them in the stash and says so). While the workspace is Managing it is the same as `StopWorkspace`. |
 | `StopWorkspace` | `workspaceId` | none | Ends the work of the AI or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
 | `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. None of the clients sends it. Only for the AI's work: refused for a git action (stop it), when nothing runs, when it is already Stopping or Canceling, and in a workspace that is not a git repository. |
+| `GetQueuedWork` | `workspaceId` | `queue` | The work of the workspace that waits for the local AI. |
+| `CancelQueuedWork` | `workspaceId`, optional `keep` | `queue` | Removes what waits, never touching what runs, and answers what was removed; with `keep` its text becomes a saved input. For a delegated workspace it cancels the task. |
+| `GetSwarm` | none | `swarm` | The swarm settings, paired servers, pairings waiting on the drive and delegated tasks. |
+| `SetSwarm` | `swarmServer` | `swarm` | Changes the settings; `fingerprint` is ignored. Refused for a blank name, folders that are not full paths or a task limit outside 1 to 100. |
+| `SetSwarmPeer` | `swarmPeer` | `swarm` | Changes whether work is sent and accepted, the mode, the address and the permissions; the read only properties are ignored. A worker uses a sender's git remote only while its own mode for that sender is `GitRemote`. |
+| `RevokeSwarmPeer` | `peerId` | `swarm` | Forgets the server; tasks given to it fail and tasks it gave are cancelled. |
+| `CreatePairingCode` | none | `swarm` | A code another server can pair with once within 15 minutes (`pairingCode`). |
+| `PairWithCode` | `address`, `code` | `swarm` | Pairs with the server that made the code; everything starts turned off. |
+| `WriteDriveInvitation` | none | `swarm` | Writes an invitation into the drive folder. |
+| `ConfirmDrivePairing` | `peerId` | `swarm` | Pairs with the server of a pairing on the drive, writing the acceptance of an invitation. |
+| `SyncDrive` | none | `swarm` | Reads from and writes to the drive; `report` says what happened. |
+| `DelegateTask` | `workspaceId`, `task` | `swarm` | Delegates a task by hand. Refused for a delegated workspace, a workspace that is not a git repository with a commit, or no suitable worker. |
+| `GetSwarmTask` | `taskId` | `swarmTask` | Everything about a task, with the newest part of its conversation. |
+| `CancelSwarmTask` | `taskId` | `swarm` | Cancels an outgoing or incoming task. |
+| `RetrySwarmTask` | `taskId` | `swarm` | Delegates a failed, cancelled or lost task again. |
+| `ApplySwarmTask` | `taskId` | `swarm` | Applies a finished task's changes to the files of its workspace, which must be Ready, without committing; `report` says what happened and names any conflicts. |
+| `DiscardSwarmTask` | `taskId` | `swarm` | Removes an ended task with its result branch. |
 | `GetWorkspaceState` | `workspaceId` | `state` | Reads the state, which a client does when it opens a workspace and then follows with `StateChanged` events. |
 | `GetScripts` | `workspaceId` | `scripts` | The runs the server holds for the workspace, with their output. |
-| `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Accepted in every state of the workspace, since scripts run beside any work; refused for a file that is already running (or that a running task lists), for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. The `environment` is added to the environment of the scripts only when the connection comes from the server's own machine (a loopback address, or the address the server is listening on), and only the four display variables are taken from it. |
+| `RunScript` | `workspaceId`, `path` (a `.cs` or `.task` file) | none | Starts the run and answers once it started; progress arrives as events. Accepted in every state of the workspace, since scripts run beside any work (except in a workspace that runs a delegated task); refused for a file that is already running (or that a running task lists), for a path outside the workspace folder or that is missing, and for a task that lists anything but existing `.cs` files. A kept run of the same file is replaced. The `environment` is added to the environment of the scripts only when the connection comes from the server's own machine (a loopback address, or the address the server is listening on), and only the four display variables are taken from it. |
 | `StopScript` | `workspaceId`, `path` | none | Kills the script, or every script of the task, and the task stops. Does nothing when the run is not in progress. |
 | `SendScriptInput` | `workspaceId`, `path`, `text` | none | Writes the line to the standard input of the running script and adds it, with a newline, to the output. Refused when the script is not running. |
 | `RemoveScript` | `workspaceId`, `path` | none | Forgets a finished run, and the runs of a task's scripts. Refused while it is in progress. |
@@ -209,7 +242,8 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `lastUpdated` | timestamp, optional | When the workspace's AI session was last loaded, which is what workspaces are ordered by in their group (the latest first, after the ones a loop runs in); refreshed whenever the workspaces are listed. |
 | `service` | string | The provider the workspace's prompts run on, chosen when the workspace is created and never changed; `ClaudeCode`, `Codex` or `Local`. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts of the workspace's own that its review and expand buttons send; omitted when it uses the environment's. |
-| `showWork` | bool, optional | `true` when the chat of the workspace shows the AI's work (see `SetShowWork`); omitted for `false`. |
+| `showWork` | bool | Whether the chat of the workspace shows the AI's work (see `SetShowWork`). |
+| `allowDelegation` | bool | Whether its AI may delegate tasks to other servers. |
 | `statusMinutes` | number, optional | The status interval the workspace has of its own; omitted when it uses the environment's. |
 
 **catalog** (`ListWorkspaces`)
@@ -219,6 +253,8 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `groups` | array of group | The groups in their custom order. |
 | `workspaces` | array of workspace | The workspaces in their custom order. |
 | `looping` | array of GUID | The workspaces a loop of the AI runs in right now; `LoopChanged` events keep it current. |
+| `queued` | array of GUID | The workspaces with work waiting for the local AI; `QueueChanged` events keep it current. |
+| `delegations` | array of delegation | The workspaces that run a task another server delegated: `workspaceId`, `from` (the sender's name) and `title`. |
 
 **group** (also the items of `catalog.groups`)
 
@@ -298,6 +334,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `isSystemAccessAllowed` | bool | Whether the AI's file tools may use any path on the server's machine and not only the ones inside the workspace folder (the shell is not confined either way). |
 | `isWebAllowed` | bool | Whether the AI may use the web. |
 | `isImageGenerationAllowed` | bool | Whether the AI may generate images; needs an image service in the environment. |
+| `isDelegationAllowed` | bool | Whether the AI may delegate tasks to paired servers. It belongs to the workspace, not the session. |
 | `instructions` | string, optional | Standing instructions for the AI. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts the workspace's review and expand buttons send instead of the ones of the environment; omitted (or blank when setting) means the environment's. They belong to the workspace, not to the session. |
 | `statusMinutes` | number, optional | The status interval of the workspace itself, 1 to 1440; omitted (or omitted when setting) means the environment's. It belongs to the workspace, not to the session. |
@@ -325,10 +362,12 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `imageGeneration` | string | `None`, `OpenAi` or `Local`. |
 | `localImageServer` | string | Address of the Stable Diffusion server. |
 | `localImageModels` | capability names | The checkpoint for each capability; all four when `imageGeneration` is `Local`. |
+| `localWorkMode` | string | `Yield` (default: one local AI session at a time) or `Simultaneous`. |
+| `delegatedTaskLimit` | number | Delegated tasks at once under `Simultaneous`, 1 to 16 (default 1). |
 | `statusMinutes` | number | How often, in minutes (1 to 1440, default 5), the AI is told to report its status in every workspace that has no interval of its own. |
-| `claudeMaxWindowPercent`, `codexMaxWindowPercent` | number | The share of a usage window of Claude Code and of OpenAI Codex, the providers that report usage windows, from 1 to 100 (default 95, fractions allowed, one number for each provider), at which the server tells the AI of a workspace that uses it to pause (see Workspaces). There is no single maximum, and the local models, which report none, have no such setting; omitted by an older server and then 95. |
+| `claudeMaxWindowPercent`, `codexMaxWindowPercent` | number | The share of a usage window of Claude Code and of OpenAI Codex, the providers that report usage windows, from 1 to 100 (default 95, fractions allowed, one number for each provider), at which the server tells the AI of a workspace that uses it to pause. There is no single maximum, and the local models, which report none, have no such setting; omitted by an older server and then 95. |
 | `reviewPrompt`, `expandPrompt` | string | The prompts the review and expand buttons send in every workspace that has none of its own; trimmed, and a blank one is replaced by the default (`review workspace and fix any problems or inconsistencies`, `expand upon content in workspace in areas that make sense`). |
-| `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. `showWork` says whether the chat of a new workspace shows the AI's work (tool calls and results, dimmed), off by default. A workspace keeps the values it was created with whatever this says later. |
+| `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isDelegationAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. `showWork` says whether the chat of a new workspace shows the AI's work (tool calls and results, dimmed), off by default. A workspace keeps the values it was created with whatever this says later. |
 
 **usage** (`GetUsage`)
 
@@ -506,6 +545,59 @@ The client lists every window and colors each one, and the usage icon by the sho
 | `oldNumber` | number, optional | The line number before the change; absent for an added line. |
 | `newNumber` | number, optional | The line number after the change; absent for a removed line. |
 
+**queued work** (`queue`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `position` | number | Its place in the queue, 1 being next. |
+| `text` | string | The waiting prompt, with its attachment lines at the end; empty for other waiting work such as a commit message. |
+| `running` | array of string | The names of the workspaces whose local AI work runs. |
+| `delegated` | bool | Whether it is a delegated task. |
+
+**swarm status** (`swarm`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `server` | swarm server | `name`, `fingerprint` (read only), `acceptDelegatedWork`, `delegatedFolder` (empty: inside the data folder), `maxTasksPerJob` and `driveFolder`. |
+| `peers` | array of swarm peer | The paired servers. |
+| `drivePairings` | array | Pairings on the drive to confirm: `id`, `name`, `fingerprint` and `kind` (`Invitation` or `Acceptance`). |
+| `pairingCode` | object, optional | The working pairing code: `code` and `expiresAt`. |
+| `tasks` | array of swarm task | Outgoing and incoming tasks, newest first. |
+| `report` | string, optional | What the command did, to show. |
+
+**swarm peer**
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `id`, `name`, `fingerprint` | string | The server; the identifier and fingerprint come from its keys. |
+| `sendWork`, `acceptWork` | bool | Whether tasks are delegated to it and its tasks accepted. |
+| `mode` | string | `GitRemote`, `Direct` or `AirGapped`. |
+| `address` | string | The `host:port` this server connects to; empty to wait for it. |
+| `permissions` | object | `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isImageGenerationAllowed` for its tasks. |
+| `capabilities` | array | From its last profile: `capability`, `model`, optional `context`. Read only, as are the rest. |
+| `acceptsOurWork`, `freeSlots` | bool, number | What its profile says about this server's tasks. |
+| `profileAt`, `lastSeen` | timestamp, optional | When its profile was made and anything last arrived. |
+| `isConnected` | bool | Whether a connection is open. |
+| `problem` | string, optional | Why the last connection or delivery failed. |
+
+**swarm task** (items of `tasks`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `id`, `jobId` | GUID | The task and its job. |
+| `isIncoming` | bool | Whether another server delegated it here. |
+| `title`, `peerName` | string | The title and the other server. |
+| `workspaceId`, `workspaceName` | GUID (optional), string | The workspace delegating it, or for an incoming one the workspace running it, which it only has while it has one. |
+| `capability` | string | The capability it needs. |
+| `state` | string | `Waiting`, `Pending`, `InTransit`, `Queued`, `Running`, `Done`, `Failed`, `Cancelled` or `Lost`. |
+| `error`, `summary`, `branch` | string, optional | Why it did not succeed, the start of the report and the result branch. |
+| `isApplied`, `isManual` | bool | Whether its changes were applied and whether the user delegated it. |
+| `createdAt`, `updatedAt` | timestamp | When it was made and last changed. |
+
+**swarm task detail** (`swarmTask`): `task` (as above), `instructions`, `expectedResult`, optional `report` and `messages` (the newest part of the worker's conversation).
+
+**swarm task request** (`task` of `DelegateTask`): `title`, `instructions`, optional `expectedResult`, `capability`, optional `peerId` (omitted: any networked worker) and `dependsOn` (identifiers of earlier tasks of the workspace).
+
 ## Events
 
 The server pushes events to every authenticated connection, as responses with `id` zero and the `event` property set. Client request ids start at one, so zero never collides. Events of one connection are delivered in order.
@@ -514,8 +606,8 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged`, `ShowWorkChanged` or `LimitPauseChanged`. |
-| `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged`, `ShowWorkChanged`, `LimitPauseChanged`, `MessageDelta`, `QueueChanged`, `SwarmChanged` or `SwarmTaskChanged`. |
+| `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them, and for `SwarmChanged` and `SwarmTaskChanged`. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
 | `limitPause` | limit pause | `LimitPauseChanged`: the automatic pause the workspace is in now, sent when it starts and each time the server reads the windows again and they are still past the maximum; omitted when the pause ended. |
@@ -524,17 +616,20 @@ The server pushes events to every authenticated connection, as responses with `i
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
 | `savedInputs` | array of saved input | `SavedInputsChanged`: the saved inputs of the workspace now, the last saved first. |
-| `showWork` | bool | `ShowWorkChanged`: whether the workspace shows the AI's work now. |
-| (no property) | | `ShowWorkChanged`: the workspace was set to show or hide the AI's work; a client reads the history again, which now includes or leaves out the work messages, and takes `showWork` from it. |
+| `showWork` | bool | `ShowWorkChanged`: whether the workspace shows the AI's work now; a client reads the history again, which includes or leaves out the work messages. |
 | `errors` | array of error | `ErrorsChanged`: the errors of the workspace now, the newest first; sent right after the `Failed` event of the same workspace, and only for that workspace. |
-| `text` | string | `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded` (for the reasoning, the message with `isThought`), and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |
+| `text` | string | `FilesChanged`: `all` when too much changed to say where, so everything is read again. `QueueChanged`: `dropped` when a waiting prompt was removed or could not start, as opposed to starting, so a client that sent it stops waiting for its result. `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded` (for the reasoning, the message with `isThought`), and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |
 | `thought` | bool, optional | `MessageDelta`: `true` when the piece is the reasoning of the AI and not its answer; omitted for the answer. |
 | `error` | string | `Failed`: why the AI could not do its work. |
+| `queue` | queued work, optional | `QueueChanged`: what of the workspace waits now, omitted once nothing does; sent for every waiting workspace whenever the queue changes, since positions move. |
+| `taskId` | GUID | `SwarmTaskChanged`: the delegated task whose state or conversation changed. |
 | `time` | string (ISO 8601) | `Failed`: when the failure happened, taken by the server so every client shows the same time (the error history records the same one). A client shows the failure as the error line of the chat with this time and clears it when a user `MessageAdded` of the workspace arrives, whichever client sent that input. |
 
 `ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.
 
 `WorkspacesChanged` says the workspaces or groups changed on the server (one was created, deleted, renamed, moved, reordered or configured, by any client); it carries no details, so a client lists the workspaces again with `ListWorkspaces`, which it also does after reconnecting. A new AI session being attached to a workspace is not announced. The client keeps what it has open: the focused workspace stays open untouched unless it was deleted (the view clears and the drawer opens) or its folder or AI settings changed (it is reopened).
+
+`SwarmChanged` says the swarm's settings, paired servers or tasks changed, and `SwarmTaskChanged` that one task did; both have the empty workspace GUID and carry no details, so a client that shows them reads them again.
 
 `GitChanged` says a git action started or finished in the workspace (the automatic fetch and pull only say it when they changed something), so a client reads the git state again; the server also sends it when the head, the index or the refs of the repository change outside Auto Remote, and a client does the same when a `FilesChanged` event arrives, when a `WorkingChanged` event says the AI stopped, and after its own git actions.
 

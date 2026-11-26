@@ -65,7 +65,8 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
                 return;
             }
 
-            snapshots[workspace.Id] = new WorkspaceSnapshot { Folder = folder, Head = await Text(folder, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellation), Branch = await Text(folder, ["symbolic-ref", "--quiet", "HEAD"], cancellation), IndexTree = indexTree, Tree = tree };
+            IReadOnlyList<string> ignored = await Ignored(folder, cancellation);
+            snapshots[workspace.Id] = new WorkspaceSnapshot { Ignored = ignored, Folder = folder, Head = await Text(folder, ["rev-parse", "--verify", "--quiet", "HEAD"], cancellation), Branch = await Text(folder, ["symbolic-ref", "--quiet", "HEAD"], cancellation), IndexTree = indexTree, Tree = tree };
         }
         catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException or Win32Exception)
         {
@@ -90,7 +91,11 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
         {
             if (changes[index] == "A")
             {
-                Remove(folder, changes[index + 1]);
+                // A file that was ignored then only counts as new because the work changed what git ignores; it is not the work's to remove.
+                if (!WasIgnored(snapshot, changes[index + 1]))
+                {
+                    Remove(folder, changes[index + 1]);
+                }
             }
             else
             {
@@ -98,7 +103,10 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
             }
         }
 
-        foreach (string[] paths in restore.Chunk(batch))
+        // What is left in the way once the added files are gone is ignored, and restoring over it would remove it.
+        List<string> blocked = [.. restore.Where(path => IsBlocked(folder, path))];
+
+        foreach (string[] paths in restore.Except(blocked).Chunk(batch))
         {
             Check(await Run(folder, ["restore", $"--source={snapshot.Tree}", "--worktree", "--no-overlay", "--", .. paths], literal));
         }
@@ -117,12 +125,60 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
         }
 
         Check(await Run(folder, ["read-tree", snapshot.IndexTree], literal));
+
+        if (blocked.Count > 0)
+        {
+            throw new RequestException($"Reverted, except for what files git ignores are in the way of: {string.Join(", ", blocked)}.");
+        }
     }
 
     /// <inheritdoc />
     public void Discard(Guid id) => snapshots.TryRemove(id, out _);
 
     private bool SameFolder(string top, string folder) => string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(top)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
+
+    private bool IsBlocked(string folder, string relative)
+    {
+        string full = Path.Combine(folder, relative);
+
+        if (Directory.Exists(full) && Directory.EnumerateFiles(full, "*", SearchOption.AllDirectories).Any())
+        {
+            return true;
+        }
+
+        for (int at = relative.LastIndexOf('/'); at > 0; at = relative.LastIndexOf('/', at - 1))
+        {
+            if (File.Exists(Path.Combine(folder, relative[..at])))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A folder git ignores whole stays one entry, with a slash at its end. Git also lists a folder as one while all it holds happens to be ignored, in which case only those files are.
+    private async Task<IReadOnlyList<string>> Ignored(string folder, CancellationToken cancellation)
+    {
+        string[] list = ["ls-files", "--others", "--ignored", "--exclude-standard", "-z"];
+        List<string> ignored = [];
+
+        foreach (string entry in (await git.Run(folder, [.. list, "--directory"], cancellation)).Output.Split('\0', StringSplitOptions.RemoveEmptyEntries))
+        {
+            if (!entry.EndsWith('/') || (await git.Run(folder, ["check-ignore", "--quiet", "--", entry.TrimEnd('/')], cancellation)).ExitCode == 0)
+            {
+                ignored.Add(entry);
+            }
+            else
+            {
+                ignored.AddRange((await git.Run(folder, [.. list, "--", $":(literal){entry}"], cancellation)).Output.Split('\0', StringSplitOptions.RemoveEmptyEntries));
+            }
+        }
+
+        return ignored;
+    }
+
+    private bool WasIgnored(WorkspaceSnapshot snapshot, string path) => snapshot.Ignored.Any(entry => entry.EndsWith('/') ? path.StartsWith(entry, StringComparison.Ordinal) : path == entry);
 
     private async Task<string?> WorkingTree(string folder, CancellationToken cancellation)
     {
@@ -158,6 +214,12 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
         string full = Path.GetFullPath(Path.Combine(root, relative));
 
         if (!full.StartsWith(root + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        // A repository made inside the workspace shows as one added entry; its history is left alone.
+        if (Directory.Exists(full))
         {
             return;
         }

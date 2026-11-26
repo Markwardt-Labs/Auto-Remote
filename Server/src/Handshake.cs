@@ -36,6 +36,11 @@ internal enum HandshakeOutcome
     Invalid,
 
     /// <summary>
+    /// The client is a paired server, which sends no key and gets only the exchange of signed packages.
+    /// </summary>
+    Peer,
+
+    /// <summary>
     /// No complete handshake line arrived in time.
     /// </summary>
     TimedOut
@@ -60,19 +65,19 @@ internal sealed class Handshake(IAppInfo info) : IHandshake
 
         try
         {
-            outcome = Parse(await ReadLine(stream, limit.Token)) is not { } supplied ? HandshakeOutcome.Invalid : CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(accessKey)) ? HandshakeOutcome.Accepted : HandshakeOutcome.WrongKey;
+            outcome = Parse(await ReadLine(stream, limit.Token)) is not { } supplied ? HandshakeOutcome.Invalid : supplied.Peer == true ? HandshakeOutcome.Peer : CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(supplied.AccessKey), Encoding.UTF8.GetBytes(accessKey)) ? HandshakeOutcome.Accepted : HandshakeOutcome.WrongKey;
         }
         catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
         {
             return HandshakeOutcome.TimedOut;
         }
 
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new HandshakeResponse { Accepted = outcome == HandshakeOutcome.Accepted, Version = outcome == HandshakeOutcome.Accepted ? info.Version : null }, options) + "\n"), cancellation);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new HandshakeResponse { Accepted = outcome is HandshakeOutcome.Accepted or HandshakeOutcome.Peer, Version = outcome == HandshakeOutcome.Accepted ? info.Version : null }, options) + "\n"), cancellation);
         await stream.FlushAsync(cancellation);
         return outcome;
     }
 
-    private string? Parse(byte[]? line)
+    private HandshakeRequest? Parse(byte[]? line)
     {
         if (line is null)
         {
@@ -81,7 +86,7 @@ internal sealed class Handshake(IAppInfo info) : IHandshake
 
         try
         {
-            return JsonSerializer.Deserialize<HandshakeRequest>(line, options)?.AccessKey;
+            return JsonSerializer.Deserialize<HandshakeRequest>(line, options) is { AccessKey: not null } request ? request : null;
         }
         catch (JsonException)
         {

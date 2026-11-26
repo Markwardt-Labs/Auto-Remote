@@ -13,7 +13,12 @@ internal sealed class AndroidReadyNotifier : IReadyNotifier
     public void Clear(Guid workspaceId) => (context.GetSystemService(Context.NotificationService) as NotificationManager)?.Cancel(workspaceId.GetHashCode());
 
     /// <inheritdoc />
-    public void Notify(Guid workspaceId, string workspace)
+    public void Notify(Guid workspaceId, string workspace) => Show(workspaceId, workspaceId.GetHashCode(), $"{workspace} is ready");
+
+    /// <inheritdoc />
+    public void Announce(Guid workspaceId, string message) => Show(workspaceId, message.GetHashCode(StringComparison.Ordinal), message);
+
+    private void Show(Guid workspaceId, int id, string title)
     {
         if (context.GetSystemService(Context.NotificationService) is not NotificationManager manager)
         {
@@ -41,10 +46,10 @@ internal sealed class AndroidReadyNotifier : IReadyNotifier
         PendingIntent? open = PendingIntent.GetActivity(context, workspaceId.GetHashCode(), launch, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         Notification notification = builder
             .SetSmallIcon(context.ApplicationInfo?.Icon ?? 0)!
-            .SetContentTitle($"{workspace} is ready")!
+            .SetContentTitle(title)!
             .SetAutoCancel(true)!
             .SetContentIntent(open)!
             .Build()!;
-        manager.Notify(workspaceId.GetHashCode(), notification);
+        manager.Notify(id, notification);
     }
 }

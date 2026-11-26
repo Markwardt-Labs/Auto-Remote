@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// Shows a desktop notification saying a workspace is ready: a Windows toast through PowerShell on Windows, otherwise <c>notify-send</c>. Activating it, by clicking the notification, raises <see cref="Opened" />. Where neither tool is available the notification is dropped, and a notification server that has no actions can only show it. The tool waits for the user to act on the notification and a notification server may never tell it that the notification went away, so every process is ended after the notification's lifetime, when a newer notification of the same workspace replaces it, and when the app exits, which keeps unanswered notifications from piling up as processes.
+/// Shows a desktop notification saying a workspace is ready: a Windows toast through PowerShell on Windows, otherwise <c>notify-send</c>. Activating it, by clicking the notification, raises <see cref="Opened" />. Where neither tool is available the notification is dropped, and a notification server that has no actions can only show it. The tool waits for the user to act on the notification and a notification server may never tell it that the notification went away, so every process is ended after the notification's lifetime, when a newer ready notification of the same workspace replaces it, and when the app exits, which keeps unanswered notifications from piling up as processes.
 /// </summary>
 internal sealed class DesktopReadyNotifier : IReadyNotifier
 {
@@ -38,9 +38,12 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
     }
 
     /// <inheritdoc />
-    public void Notify(Guid workspaceId, string workspace) => _ = Task.Run(() => Run(workspaceId, $"{workspace} is ready"));
+    public void Notify(Guid workspaceId, string workspace) => _ = Task.Run(() => Run(workspaceId, workspaceId, $"{workspace} is ready"));
 
-    private async Task Run(Guid workspaceId, string text)
+    /// <inheritdoc />
+    public void Announce(Guid workspaceId, string message) => _ = Task.Run(() => Run(Guid.NewGuid(), workspaceId, message));
+
+    private async Task Run(Guid key, Guid workspaceId, string text)
     {
         ProcessStartInfo start = OperatingSystem.IsWindows()
             ? new ProcessStartInfo("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", toast])
@@ -62,7 +65,7 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
                 return;
             }
 
-            Replace(workspaceId, process);
+            Replace(key, process);
 
             try
             {
@@ -85,7 +88,7 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
             }
             finally
             {
-                Forget(workspaceId, process);
+                Forget(key, process);
             }
 
             if (output.Trim() is "default" or "activated")
@@ -98,14 +101,14 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
         }
     }
 
-    private void Replace(Guid workspaceId, Process process)
+    private void Replace(Guid key, Process process)
     {
         Process? older;
 
         lock (running)
         {
-            running.Remove(workspaceId, out older);
-            running[workspaceId] = process;
+            running.Remove(key, out older);
+            running[key] = process;
         }
 
         if (older is not null)
@@ -114,13 +117,13 @@ internal sealed class DesktopReadyNotifier : IReadyNotifier
         }
     }
 
-    private void Forget(Guid workspaceId, Process process)
+    private void Forget(Guid key, Process process)
     {
         lock (running)
         {
-            if (running.TryGetValue(workspaceId, out Process? current) && ReferenceEquals(current, process))
+            if (running.TryGetValue(key, out Process? current) && ReferenceEquals(current, process))
             {
-                running.Remove(workspaceId);
+                running.Remove(key);
             }
         }
     }

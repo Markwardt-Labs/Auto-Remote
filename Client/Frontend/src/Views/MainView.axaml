@@ -21,6 +21,9 @@
         <DataTemplate DataType="local:EnvironmentViewModel">
           <local:EnvironmentView />
         </DataTemplate>
+        <DataTemplate DataType="local:SwarmViewModel">
+          <local:SwarmView />
+        </DataTemplate>
         <DataTemplate DataType="local:CloneWorkspaceViewModel">
           <local:CloneWorkspaceView />
         </DataTemplate>

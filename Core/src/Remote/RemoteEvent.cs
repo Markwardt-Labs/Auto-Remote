@@ -11,7 +11,7 @@ public sealed record RemoteEvent
     public required RemoteEventKind Kind { get; init; }
 
     /// <summary>
-    /// Gets the workspace the event is about, or <see cref="Guid.Empty" /> for <see cref="RemoteEventKind.WorkspacesChanged" />, which is about all of them.
+    /// Gets the workspace the event is about, or <see cref="Guid.Empty" /> for <see cref="RemoteEventKind.WorkspacesChanged" />, which is about all of them, and for <see cref="RemoteEventKind.SwarmChanged" /> and <see cref="RemoteEventKind.SwarmTaskChanged" />.
     /// </summary>
     public required Guid WorkspaceId { get; init; }
 
@@ -64,6 +64,16 @@ public sealed record RemoteEvent
     /// Gets the automatic pause the workspace is in, for <see cref="RemoteEventKind.LimitPauseChanged" />; <see langword="null" /> when the pause ended.
     /// </summary>
     public LimitPause? LimitPause { get; init; }
+
+    /// <summary>
+    /// Gets the work of the workspace that waits for the local AI, for <see cref="RemoteEventKind.QueueChanged" />; <see langword="null" /> when nothing waits any more.
+    /// </summary>
+    public QueueStatus? Queue { get; init; }
+
+    /// <summary>
+    /// Gets the delegated task <see cref="RemoteEventKind.SwarmTaskChanged" /> is about.
+    /// </summary>
+    public Guid? TaskId { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the piece of text of a <see cref="RemoteEventKind.MessageDelta" /> is the reasoning of the AI and not its answer; omitted for the answer.
@@ -170,5 +180,20 @@ public enum RemoteEventKind
     /// <summary>
     /// The AI wrote a piece of a message it has not finished, which <see cref="RemoteEvent.Text" /> holds; only sent for a workspace that shows the AI's work. Pieces follow each other in order, and the finished message arrives as a <see cref="MessageAdded" /> event that replaces them. Pieces of a message that is never finished, because the AI stopped or failed, are dropped.
     /// </summary>
-    MessageDelta
+    MessageDelta,
+
+    /// <summary>
+    /// The work of the workspace that waits for the local AI changed: it started waiting, moved up, changed or no longer waits.
+    /// </summary>
+    QueueChanged,
+
+    /// <summary>
+    /// The swarm changed: its settings, paired servers or tasks; clients that show them read it again. The workspace identifier is empty.
+    /// </summary>
+    SwarmChanged,
+
+    /// <summary>
+    /// The conversation or the state of the delegated task <see cref="RemoteEvent.TaskId" /> changed. The workspace identifier is empty.
+    /// </summary>
+    SwarmTaskChanged
 }

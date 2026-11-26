@@ -27,7 +27,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Errors = new ErrorHistoryViewModel(connection, workspace.Id);
         Loop = new LoopViewModel(connection, workspace);
         Loop.Started += () => Chat.Notice = null;
-        OpenLoopCommand = new AsyncCommand(_ => Loop.Open());
+        OpenLoopCommand = new AsyncCommand(_ => Loop.Open(), () => delegation is null);
         CancelLoopCommand = new AsyncCommand(_ => CancelLoop());
         Chat.PropertyChanged += (_, args) =>
         {
@@ -49,7 +49,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             }
         };
         Chat.PromptStarted += () => NotifyWhenReady = true;
-        Chat.PromptFailed += () => NotifyWhenReady = false;
+        // One that fails beside work still running leaves that work waited for.
+        Chat.PromptFailed += () => NotifyWhenReady &= Chat.IsAiWorking;
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
@@ -61,6 +62,13 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 {
                     Tab = WorkspaceTab.Chat;
                 }
+            }
+        };
+        Chat.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(ChatViewModel.IsQueued) && Chat.IsQueued && Git.IsWorking && tab is WorkspaceTab.Files or WorkspaceTab.History)
+            {
+                Tab = WorkspaceTab.Chat;
             }
         };
         Scripts.PropertyChanged += (_, args) =>
@@ -138,6 +146,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         });
     }
 
+    private WorkspaceDelegation? delegation;
+
     private readonly ClientLayout layout;
 
     private readonly IServerConnection connection;
@@ -158,6 +168,26 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the workspace as it was when it was focused.
     /// </summary>
     public WorkspaceInfo Workspace { get; }
+
+    /// <summary>
+    /// Gets or sets the task another server delegated that the workspace runs, which keeps the user from giving it other work, or <see langword="null" />.
+    /// </summary>
+    public WorkspaceDelegation? Delegation
+    {
+        get => delegation;
+        set
+        {
+            if (Set(ref delegation, value))
+            {
+                UpdateState();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets what the stop button does, which in a delegated workspace is to cancel its task.
+    /// </summary>
+    public string StopTip => delegation is null ? "Stop the work and keep what it did" : "Cancel the delegated task";
 
     /// <summary>
     /// Gets or sets a value indicating whether the user should be told once the workspace is ready again, which is the case while work this client gave it is running.
@@ -193,18 +223,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the errors the AI of the workspace ended with, which the error panel of its settings lists.
     /// </summary>
     public ErrorHistoryViewModel Errors { get; }
-
-    /// <summary>
-    /// Gets the absolute path on the server of a path relative to the workspace folder.
-    /// </summary>
-    /// <param name="relative">The path relative to the workspace folder, with <c>/</c> separators.</param>
-    /// <returns>The absolute path, written with the separator the server's paths use.</returns>
-    public string AbsolutePath(string relative)
-    {
-        string folder = Workspace.Folder.TrimEnd('/', '\\');
-        char separator = Workspace.Folder.Contains('\\') && !Workspace.Folder.Contains('/') ? '\\' : '/';
-        return relative.Length == 0 ? folder : folder + separator + relative.Replace('/', separator);
-    }
 
     /// <summary>
     /// Gets a value indicating whether the AI is working in the workspace.
@@ -459,6 +477,18 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public AsyncCommand ToggleSettingsCommand { get; }
 
     /// <summary>
+    /// Gets the absolute path on the server of a path relative to the workspace folder.
+    /// </summary>
+    /// <param name="relative">The path relative to the workspace folder, with <c>/</c> separators.</param>
+    /// <returns>The absolute path, written with the separator the server's paths use.</returns>
+    public string AbsolutePath(string relative)
+    {
+        string folder = Workspace.Folder.TrimEnd('/', '\\');
+        char separator = Workspace.Folder.Contains('\\') && !Workspace.Folder.Contains('/') ? '\\' : '/';
+        return relative.Length == 0 ? folder : folder + separator + relative.Replace('/', separator);
+    }
+
+    /// <summary>
     /// Loads the conversation.
     /// </summary>
     /// <returns>A task that completes once the conversation is shown.</returns>
@@ -523,7 +553,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     private void UpdateState()
     {
         WorkspaceState state = State;
-        Chat.BlockReason = state switch
+        Chat.IsDelegated = delegation is not null;
+        Files.RunsScripts = delegation is null;
+        Settings.IsLocked = delegation is not null;
+        OpenLoopCommand.Refresh();
+        Raise(nameof(StopTip));
+        Chat.BlockReason = delegation is { } task ? $"This workspace runs a task delegated by {task.From}" : state switch
         {
             WorkspaceState.Managing => "Git is working, wait for it to finish",
             WorkspaceState.Stopping => "Stopping, wait for it to finish",

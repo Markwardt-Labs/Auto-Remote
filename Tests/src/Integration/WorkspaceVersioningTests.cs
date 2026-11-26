@@ -489,7 +489,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
     }
 
     [Fact]
-    public async Task Sync_HasTheAiResolveAStashConflictAndDropsTheStash()
+    public async Task Sync_HasTheAiResolveAStashConflictAndKeepsTheStashSinceTheResolutionMayHaveLostSomething()
     {
         string other = temp.Combine("other");
         G(temp.Path, "clone", remote, "other");
@@ -509,7 +509,7 @@ public sealed class WorkspaceVersioningTests : IDisposable
 
         Assert.Contains("stashed pending changes", instruction);
         Assert.Equal("one\nREMOTE and MINE\nthree\n", File.ReadAllText(Path.Combine(work, "a.txt")).Replace("\r\n", "\n"));
-        Assert.Equal(string.Empty, G(work, "stash", "list"));
+        Assert.Contains("one\nMINE", G(work, "show", "stash@{0}:a.txt").Replace("\r\n", "\n"));
     }
 
     [Fact]

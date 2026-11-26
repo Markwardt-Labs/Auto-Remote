@@ -33,12 +33,17 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         get => current;
         private set
         {
+            if (ReferenceEquals(current, value))
+            {
+                return;
+            }
+
             if (current is HomeViewModel previous)
             {
                 previous.PropertyChanged -= HomeChanged;
             }
 
-            if (current is ConnectViewModel leaving && !ReferenceEquals(current, value))
+            if (current is ConnectViewModel leaving)
             {
                 leaving.Stop();
             }
@@ -118,6 +123,22 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
     {
         if (home is { } shown && connection is not null && update is not { IsUpdating: true })
         {
+            // Leaving a settings screen this way sends its edits as closing it would, and it stays when they are refused.
+            if (current is EnvironmentViewModel environment && !await environment.Leave())
+            {
+                return;
+            }
+
+            if (current is SwarmViewModel swarm)
+            {
+                if (!await swarm.Leave())
+                {
+                    return;
+                }
+
+                swarm.Dispose();
+            }
+
             Current = shown;
             await shown.Show(workspaceId);
         }
@@ -313,10 +334,19 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
 
         if (IsMismatched(opened))
         {
-            home = null;
             VersionMismatchViewModel mismatch = new(info, opened, updating);
             mismatch.ChangeServerRequested += () => _ = ChangeServer();
             Current = mismatch;
+            home?.Dispose();
+            home = null;
+            return;
+        }
+
+        // The same connection keeps its main screen: another one would follow the server beside it and know nothing of the work it waits for.
+        if (home is { } kept)
+        {
+            Current = kept;
+            await kept.Start(Target(focus), false);
             return;
         }
 
@@ -347,6 +377,18 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             Current = moving;
             await moving.Open();
         };
+        opening.SwarmRequested += async (task, workspace) =>
+        {
+            SwarmViewModel swarm = new(opened, task, workspace);
+            swarm.Delegated += opening.Follow;
+            swarm.Closed += () =>
+            {
+                swarm.Dispose();
+                Current = opening;
+            };
+            Current = swarm;
+            await swarm.Load();
+        };
         opening.EnvironmentRequested += async () =>
         {
             EnvironmentViewModel configuring = new(opened, update);
@@ -355,9 +397,14 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             await configuring.Load();
         };
         Current = opening;
+        await opening.Start(Target(focus), false);
+    }
+
+    private Guid? Target(Guid? focus)
+    {
         Guid? target = requested ?? focus;
         requested = null;
-        await opening.Start(target, false);
+        return target;
     }
 
     private UpdateViewModel Track(IServerConnection opened)
@@ -428,6 +475,7 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         if (connection is { } old)
         {
             connection = null;
+            home?.Dispose();
             home = null;
             beforeUpdate = null;
             update?.Dispose();

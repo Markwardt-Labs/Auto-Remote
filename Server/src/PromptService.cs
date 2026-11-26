@@ -8,8 +8,8 @@ internal interface IPromptService
     /// <summary>
     /// Supplies what ends every session when the server stops.
     /// </summary>
-    /// <param name="stopping">Ends every session when cancelled.</param>
-    void Configure(CancellationToken stopping);
+    /// <param name="cancellation">Ends every session when cancelled.</param>
+    void Configure(CancellationToken cancellation);
 
     /// <summary>
     /// Checks whether the AI is currently working in a workspace.
@@ -133,7 +133,7 @@ internal interface IPromptService
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null, Func<ISessionTools?>? tools = null) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
 
@@ -187,9 +187,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     internal TimeSpan StreamInterval { get; init; } = TimeSpan.FromMilliseconds(100);
 
     /// <inheritdoc />
-    public void Configure(CancellationToken stopping)
+    public void Configure(CancellationToken cancellation)
     {
-        this.stopping = stopping;
+        this.stopping = cancellation;
         subscription?.Dispose();
         subscription = events.Subscribe(Follow);
     }
@@ -310,6 +310,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 throw new RequestException("The AI is working.");
             }
 
+            if (started && onlyWhenIdle && activity.Get(id) != WorkspaceState.Ready)
+            {
+                throw new RequestException(activity.Describe(id));
+            }
+
             if (started && !activity.TryEnter(id, WorkspaceState.Working))
             {
                 throw new RequestException(activity.Describe(id));
@@ -322,7 +327,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling)
             {
-                throw new RequestException(activity.Describe(id));
+                throw new RequestException(activity.Describe(id)) { IsHalted = true };
             }
 
             lock (live.Sync)
@@ -331,6 +336,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             }
 
             IPromptSession session = await Session(id, workspace, live, cancellation);
+
+            if (tools?.Invoke() is { } offered)
+            {
+                await offered.Offer(workspace, session, cancellation);
+            }
+
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkspacesChanged, WorkspaceId = Guid.Empty });
             PromptSendOptions options = await Options(text, cancellation);
 
@@ -548,7 +559,19 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 throw new RequestException(exception.Message);
             }
 
-            WorkspaceSettings described = Describe(await workspaces.SetOverrides(id, settings.ReviewPrompt, settings.ExpandPrompt, settings.StatusMinutes, cancellation), session);
+            WorkspaceInfo overridden = await workspaces.SetOverrides(id, settings.ReviewPrompt, settings.ExpandPrompt, settings.StatusMinutes, cancellation);
+
+            if (overridden.AllowDelegation != settings.IsDelegationAllowed)
+            {
+                overridden = await workspaces.SetDelegation(id, settings.IsDelegationAllowed, cancellation);
+            }
+
+            if (tools?.Invoke() is { } offered)
+            {
+                await offered.Offer(overridden, session, cancellation);
+            }
+
+            WorkspaceSettings described = Describe(overridden, session);
 
             if (!live.Working)
             {
@@ -798,6 +821,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             IsSystemAccessAllowed = session.Configuration.IsSystemAccessAllowed,
             IsWebAllowed = session.Configuration.IsWebAllowed,
             IsImageGenerationAllowed = session.Configuration.IsImageGenerationAllowed,
+            IsDelegationAllowed = workspace.AllowDelegation,
             Instructions = host.UserInstructions(session.Configuration.Instructions),
             StatusMinutes = workspace.StatusMinutes,
             GlobalStatusMinutes = environment.StatusMinutes,
@@ -890,6 +914,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                     await loaded.DisposeAsync();
                 }
             }
+        }
+
+        if (workspace.SessionId is not null && tools?.Invoke()?.Keeps(workspace.Id) == true)
+        {
+            throw new RequestException("The AI session of the delegated task cannot be loaded, and a new one would not be limited to what the task may do.");
         }
 
         return await Replace(workspace, cancellation);

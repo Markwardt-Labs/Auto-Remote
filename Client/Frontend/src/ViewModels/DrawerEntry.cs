@@ -16,6 +16,21 @@ internal sealed record DrawerEntry
     public WorkspaceInfo? Workspace { get; init; }
 
     /// <summary>
+    /// Gets the delegated task when this row is one, shown under the workspace that delegated it while it has not ended.
+    /// </summary>
+    public SwarmTaskInfo? DelegatedTask { get; init; }
+
+    /// <summary>
+    /// Gets who delegated the task the workspace runs, when it runs one.
+    /// </summary>
+    public string? DelegatedBy { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether this row is a delegated task.
+    /// </summary>
+    public bool IsTask => DelegatedTask is not null;
+
+    /// <summary>
     /// Gets a value indicating whether a header's workspaces are hidden.
     /// </summary>
     public bool IsCollapsed { get; init; }
@@ -31,6 +46,11 @@ internal sealed record DrawerEntry
     public bool IsLooping { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether work of the workspace waits for the local AI.
+    /// </summary>
+    public bool IsQueued { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether this row is a group header.
     /// </summary>
     public bool IsGroup => Group is not null;
@@ -43,12 +63,12 @@ internal sealed record DrawerEntry
     /// <summary>
     /// Gets the row's title: the workspace name, or the group name with a collapse marker.
     /// </summary>
-    public string Text => Group is { } group ? $"{(IsCollapsed ? "▸" : "▾")} {group.Name}" : Workspace?.Name ?? string.Empty;
+    public string Text => Group is { } group ? $"{(IsCollapsed ? "▸" : "▾")} {group.Name}" : DelegatedTask is { } task ? $"\u21B3 {task.Title}" : Workspace?.Name ?? string.Empty;
 
     /// <summary>
-    /// Gets the secondary line of a workspace row: its folder on the server.
+    /// Gets the secondary line of a row: for a workspace its folder on the server, after notes that its work waits for the local AI or that another server delegated it, and for a delegated task where it stands.
     /// </summary>
-    public string Detail => Workspace?.Folder ?? string.Empty;
+    public string Detail => DelegatedTask is { } task ? new SwarmTaskViewModel(task).Detail : Workspace is null ? string.Empty : string.Join(" - ", new[] { IsQueued ? "Queued" : null, DelegatedBy is { } from ? $"Delegated by {from}" : null, Workspace.Folder }.Where(part => part is not null));
 
     /// <summary>
     /// Gets the row's left margin.

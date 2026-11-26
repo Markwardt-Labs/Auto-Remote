@@ -76,6 +76,16 @@ public sealed class SavedInputsTests
     }
 
     [Fact]
+    public async Task Keep_SavesAPromptThatWillNotRunHoweverLongItIs()
+    {
+        string text = new('a', 150_000);
+
+        IReadOnlyList<SavedInput> saved = await inputs.Keep(id, text, CancellationToken.None);
+
+        Assert.Equal(text, Assert.Single(saved).Text);
+    }
+
+    [Fact]
     public async Task Save_DropsTheOldestEntriesBeyondTheLimit()
     {
         for (int number = 1; number <= 202; number++)

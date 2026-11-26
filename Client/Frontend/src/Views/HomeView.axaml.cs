@@ -151,6 +151,20 @@ public sealed partial class HomeView : UserControl
 
     private static FileNode? NodeOf(object? source) => (source as StyledElement)?.DataContext as FileNode;
 
+    // A file that cannot be read must not take the app down, which an exception out of the click would.
+    private async Task AttachFile(ChatViewModel chat, Avalonia.Platform.Storage.IStorageFile file)
+    {
+        try
+        {
+            await using Stream stream = await file.OpenReadAsync();
+            await AttachFile(chat, file.Name, stream);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            chat.FailAttachment(exception.Message);
+        }
+    }
+
     private async Task AttachFile(ChatViewModel chat, string name, Stream stream)
     {
         using MemoryStream buffer = new();
@@ -175,8 +189,7 @@ public sealed partial class HomeView : UserControl
 
         foreach (Avalonia.Platform.Storage.IStorageFile file in files)
         {
-            await using Stream stream = await file.OpenReadAsync();
-            await AttachFile(chat, file.Name, stream);
+            await AttachFile(chat, file);
         }
     }
 
@@ -226,8 +239,7 @@ public sealed partial class HomeView : UserControl
             {
                 if (item is Avalonia.Platform.Storage.IStorageFile file)
                 {
-                    await using Stream stream = await file.OpenReadAsync();
-                    await AttachFile(chat, file.Name, stream);
+                    await AttachFile(chat, file);
                 }
             }
 

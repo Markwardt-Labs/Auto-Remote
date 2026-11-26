@@ -9,6 +9,11 @@ public sealed record HandshakeRequest
     /// Gets the access key the client was configured with.
     /// </summary>
     public required string AccessKey { get; init; }
+
+    /// <summary>
+    /// Gets whether the client is a paired server, which sends no key: it proves who it is with signed messages and may only exchange those.
+    /// </summary>
+    public bool? Peer { get; init; }
 }
 
 /// <summary>

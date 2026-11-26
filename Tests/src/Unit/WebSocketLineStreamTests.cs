@@ -33,6 +33,19 @@ public sealed class WebSocketLineStreamTests
     }
 
     [Fact]
+    public async Task MaxMessageLength_AppliesFromTheNextMessageEvenWhenLoweredAfterTheFirst()
+    {
+        string big = new('x', 3000);
+        WebSocketLineStream stream = new(Socket(("hi", true), (big, true)).Object);
+        using StreamReader reader = new(stream);
+        Assert.Equal("hi", await reader.ReadLineAsync());
+
+        stream.MaxMessageLength = 1000;
+
+        await Assert.ThrowsAsync<InvalidDataException>(() => reader.ReadLineAsync());
+    }
+
+    [Fact]
     public async Task Write_SendsOneTextMessagePerWrite()
     {
         Mock<WebSocket> socket = Socket();

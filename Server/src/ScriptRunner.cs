@@ -9,8 +9,8 @@ internal interface IScriptRunner
     /// Supplies the settings used to run scripts.
     /// </summary>
     /// <param name="config">The server settings.</param>
-    /// <param name="stopping">Stops every run when cancelled.</param>
-    void Configure(ServerConfig config, CancellationToken stopping);
+    /// <param name="cancellation">Stops every run when cancelled.</param>
+    void Configure(ServerConfig config, CancellationToken cancellation);
 
     /// <summary>
     /// Checks whether any script or task is running in a workspace.
@@ -76,6 +76,8 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
 
     private readonly int maxOutput = 500_000;
 
+    private readonly TimeSpan outputGrace = TimeSpan.FromSeconds(3);
+
     private readonly TimeSpan flushInterval = TimeSpan.FromMilliseconds(100);
 
     private ServerConfig config = new() { Port = 0, Key = string.Empty };
@@ -83,10 +85,10 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
     private CancellationToken stopping;
 
     /// <inheritdoc />
-    public void Configure(ServerConfig config, CancellationToken stopping)
+    public void Configure(ServerConfig config, CancellationToken cancellation)
     {
         this.config = config;
-        this.stopping = stopping;
+        this.stopping = cancellation;
     }
 
     /// <inheritdoc />
@@ -492,12 +494,19 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
         entry.Attach(process);
 
         using CancellationTokenRegistration registration = cancellation.Register(() => Kill(process));
-        Task pumps = Task.WhenAll(Pump(id, state, entry, process.StandardOutput), Pump(id, state, entry, process.StandardError));
+        using CancellationTokenSource reading = new();
+        Task pumps = Task.WhenAll(Pump(id, state, entry, process.StandardOutput, reading.Token), Pump(id, state, entry, process.StandardError, reading.Token));
 
         try
         {
             await process.WaitForExitAsync(CancellationToken.None);
-            await pumps;
+
+            // A process the script left behind keeps the output open for as long as it lives, which the run does not wait for.
+            if (await Task.WhenAny(pumps, Task.Delay(outputGrace)) != pumps)
+            {
+                await reading.CancelAsync();
+                await Task.WhenAny(pumps, Task.Delay(outputGrace));
+            }
         }
         finally
         {
@@ -518,14 +527,20 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
         }
     }
 
-    private async Task Pump(Guid id, Workspace state, Entry entry, StreamReader reader)
+    private async Task Pump(Guid id, Workspace state, Entry entry, StreamReader reader, CancellationToken cancellation)
     {
         char[] buffer = new char[4096];
         int read;
 
-        while ((read = await reader.ReadAsync(buffer)) > 0)
+        try
         {
-            Append(id, state, entry, new string(buffer, 0, read));
+            while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellation)) > 0 && !cancellation.IsCancellationRequested)
+            {
+                Append(id, state, entry, new string(buffer, 0, read));
+            }
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or IOException or ObjectDisposedException)
+        {
         }
     }
 
@@ -591,7 +606,7 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
 
         public void Detach() => process = null;
 
-        public async Task WriteInput(string text, CancellationToken token)
+        public async Task WriteInput(string text, CancellationToken cancellation)
         {
             Process? current = process;
 
@@ -600,12 +615,12 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
                 throw new RequestException("That script is not running.");
             }
 
-            await writing.WaitAsync(token);
+            await writing.WaitAsync(cancellation);
 
             try
             {
-                await current.StandardInput.WriteLineAsync(text.AsMemory(), token);
-                await current.StandardInput.FlushAsync(token);
+                await current.StandardInput.WriteLineAsync(text.AsMemory(), cancellation);
+                await current.StandardInput.FlushAsync(cancellation);
             }
             catch (Exception exception) when (exception is IOException or ObjectDisposedException or InvalidOperationException)
             {

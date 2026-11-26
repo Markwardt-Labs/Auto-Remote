@@ -11,6 +11,51 @@ public sealed class ChatViewModelTests
     public ChatViewModelTests() => chat = new ChatViewModel(connection.Object, workspaceId) { ChunkMessages = 20 };
 
     [Fact]
+    public async Task APromptThatFailsAfterMoreWasTypedComesBackBeforeItWithItsAttachments()
+    {
+        TaskCompletionSource sending = new();
+        connection.Setup(x => x.UploadAttachment(workspaceId, "a.txt", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync("/data/a.txt");
+        connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(sending.Task);
+        chat.Input = "long prompt";
+        chat.Attach("a.txt", new byte[] { 1 });
+        chat.SendCommand.Execute(null);
+        chat.Input = "n";
+        chat.Attach("b.txt", new byte[] { 2 });
+
+        sending.SetException(new RemoteException("The connection was lost."));
+        await Until(() => chat.Error is not null && chat.Input.Length > 1);
+
+        Assert.Equal("long prompt\nn", chat.Input);
+        Assert.Equal(["a.txt", "b.txt"], chat.Attachments.Select(attachment => attachment.Name));
+    }
+
+    [Theory]
+    [InlineData("keep going", false)]
+    [InlineData("keep going", true)]
+    [InlineData("", false)]
+    [InlineData("", true)]
+    public async Task APromptConfirmedOverTheLimitTakesItsAttachmentsOutOfTheBoxAndPutsEverythingBackWhenItFails(string text, bool fails)
+    {
+        connection.Setup(x => x.UploadAttachment(workspaceId, "a.txt", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync("/data/a.txt");
+        Refuse(text.Length == 0 ? "Attached file: /data/a.txt" : $"{text}\nAttached file: /data/a.txt");
+
+        if (fails)
+        {
+            connection.Setup(x => x.PromptOverLimit(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("No."));
+        }
+
+        chat.Input = text;
+        chat.Attach("a.txt", new byte[] { 1 });
+        chat.SendCommand.Execute(null);
+        await Until(() => chat.IsAskingOverLimit);
+
+        chat.ConfirmOverLimitCommand.Execute(null);
+
+        Assert.Equal(fails ? text : string.Empty, chat.Input);
+        Assert.Equal(fails ? 1 : 0, chat.Attachments.Count);
+    }
+
+    [Fact]
     public void AutoScroll_IsOnUntilTurnedOff()
     {
         List<string?> changed = [];

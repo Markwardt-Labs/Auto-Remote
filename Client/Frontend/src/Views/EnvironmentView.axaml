@@ -43,6 +43,7 @@
             <ToggleSwitch IsChecked="{Binding NewIsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
             <ToggleSwitch IsChecked="{Binding NewIsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
             <ToggleSwitch IsChecked="{Binding NewIsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
+            <ToggleSwitch IsChecked="{Binding NewIsDelegationAllowed}" Content="Let the AI delegate work" OnContent="" OffContent="" ToolTip.Tip="The AI may send tasks, with the code of the workspace, to the paired servers that receive work." />
             <ToggleSwitch IsChecked="{Binding NewShowWork}" Content="Show the work of the AI in the chat" OnContent="" OffContent="" />
             <TextBlock Text="Instructions" Classes="muted" />
             <TextBox Text="{Binding NewInstructions}" PlaceholderText="Standing instructions for the AI..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="90" MaxHeight="220" />
@@ -90,6 +91,18 @@
 
         <Expander Classes="section" Header="Local models" IsExpanded="False">
           <StackPanel Spacing="8" Margin="0,4,0,8">
+            <TextBlock Text="When busy" Classes="muted" />
+            <ComboBox ItemsSource="{Binding WorkModes}" SelectedItem="{Binding SelectedWorkMode}" HorizontalAlignment="Stretch" ToolTip.Tip="Yield runs one local AI session at a time: other work waits in a queue, your own before delegated work. Simultaneous runs work side by side.">
+              <ComboBox.ItemTemplate>
+                <DataTemplate>
+                  <TextBlock Text="{Binding Name}" />
+                </DataTemplate>
+              </ComboBox.ItemTemplate>
+            </ComboBox>
+            <StackPanel Spacing="8" IsVisible="{Binding RunsSimultaneously}">
+              <TextBlock Text="Delegated tasks at once" Classes="muted" />
+              <NumericUpDown Value="{Binding DelegatedTaskLimit}" Minimum="1" Maximum="16" Increment="1" FormatString="0" HorizontalAlignment="Stretch" />
+            </StackPanel>
             <TextBlock Text="OpenCode command" Classes="muted" />
             <TextBox Text="{Binding LocalCommand}" TextInputOptions.AutoCapitalization="False" />
             <TextBlock Text="Model server address" Classes="muted" />

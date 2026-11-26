@@ -41,14 +41,27 @@ internal static class Program
         IWorkspaceActivity activity = new WorkspaceActivity(events);
         IWorkspaceSnapshots snapshots = new WorkspaceSnapshots(git);
         IUsageService usage = new UsageService(host);
-        IPromptService prompts = new PromptService(workspaces, store, host, events, activity, snapshots, usage);
-        IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity);
+        ISessionTools? delegation = null;
+        IPromptService prompts = new PromptService(workspaces, store, host, events, activity, snapshots, usage, () => delegation);
+        ISpeechService speech = new SpeechService(new WhisperEngine());
+        ISavedInputs savedInputs = new SavedInputs(store, workspaces, events, speech);
+        IWorkQueue queue = new WorkQueue(workspaces, prompts, host, activity, savedInputs, events);
+        IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity, queue);
         IScriptRunner scripts = new ScriptRunner(events);
         IWindowGuard guard = new WindowGuard(workspaces, prompts, usage, host, events);
-        IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events, null, null, null, guard);
-        ISpeechService speech = new SpeechService(new WhisperEngine());
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, new SavedInputs(store, workspaces, events, speech), new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(events, log), updater, log);
-        IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(info), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log, new LocalListener(info, new LocalEndpoint(), new ILocalAccess.Factory(), log)), Console.Out);
+        IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events, null, null, null, guard, queue);
+        ISwarmBook swarmBook = new SwarmBook(events, new ISwarmIdentity.Factory());
+        ISwarmCourier courier = new SwarmCourier(swarmBook, new SwarmSealer());
+        ISwarmRepository repository = new SwarmRepository(git);
+        ISwarmWorker worker = new SwarmWorker(swarmBook, courier, repository, workspaces, prompts, queue, store, host, events);
+        ISwarmCoordinator coordinator = new SwarmCoordinator(swarmBook, courier, repository, workspaces, queue, activity, guard, log);
+        delegation = new DelegationTools(swarmBook, coordinator, worker, workspaces);
+        ISwarmExchange exchange = new SwarmExchange(swarmBook, courier, worker, coordinator);
+        ISwarmDialer dialer = new SwarmDialer(new IMessageChannel.Factory());
+        ISwarmLink link = new SwarmLink(swarmBook, courier, exchange, dialer, log);
+        ISwarmService swarm = new SwarmService(swarmBook, courier, worker, coordinator, new SwarmDrive(swarmBook, exchange), link, dialer, workspaces, activity, store, log);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(events, log), updater, log, queue, swarm);
+        IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(info), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log, new LocalListener(info, new LocalEndpoint(), new ILocalAccess.Factory(), log), link), Console.Out);
         int code;
 
         try

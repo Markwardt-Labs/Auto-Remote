@@ -362,6 +362,11 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
 
     private void Check(AiEnvironment environment)
     {
+        if (!Enum.IsDefined(environment.LocalWorkMode) || environment.DelegatedTaskLimit is < 1 or > 16)
+        {
+            throw new RequestException("Choose how local AI work runs, with from 1 to 16 delegated tasks at once.");
+        }
+
         if (environment.StatusMinutes is < 1 or > 1440)
         {
             throw new RequestException("The status interval must be from 1 to 1440 minutes.");

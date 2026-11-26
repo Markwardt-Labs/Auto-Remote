@@ -14,4 +14,9 @@ internal sealed record ChatAttachment
     /// Gets the file content.
     /// </summary>
     public required ReadOnlyMemory<byte> Data { get; init; }
+
+    /// <summary>
+    /// Gets where the server already has the file, for one that was uploaded for work that waited and was cancelled, so it is not uploaded again; <see langword="null" /> for a file of this client, whose content is <see cref="Data" />.
+    /// </summary>
+    public string? ServerPath { get; init; }
 }

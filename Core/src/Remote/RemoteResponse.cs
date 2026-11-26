@@ -21,7 +21,7 @@ public sealed record RemoteResponse
     public WorkspaceCatalog? Catalog { get; init; }
 
     /// <summary>
-    /// Gets the workspace answering <see cref="RemoteCommand.CreateWorkspace" />, <see cref="RemoteCommand.CloneWorkspace" />, <see cref="RemoteCommand.RenameWorkspace" /> or <see cref="RemoteCommand.MoveWorkspace" />.
+    /// Gets the workspace answering <see cref="RemoteCommand.CreateWorkspace" />, <see cref="RemoteCommand.CloneWorkspace" />, <see cref="RemoteCommand.RenameWorkspace" />, <see cref="RemoteCommand.MoveWorkspace" />, <see cref="RemoteCommand.MoveWorkspaceToFolder" /> or <see cref="RemoteCommand.SetShowWork" />.
     /// </summary>
     public WorkspaceInfo? Workspace { get; init; }
 
@@ -154,4 +154,19 @@ public sealed record RemoteResponse
     /// Gets the SVG of the diagram, answering <see cref="RemoteCommand.RenderDiagram" />.
     /// </summary>
     public string? Diagram { get; init; }
+
+    /// <summary>
+    /// Gets the work waiting for the local AI, answering <see cref="RemoteCommand.GetQueuedWork" /> and a <see cref="RemoteCommand.Prompt" /> that had to wait, and the work <see cref="RemoteCommand.CancelQueuedWork" /> removed; <see langword="null" /> when nothing waits.
+    /// </summary>
+    public QueueStatus? Queue { get; init; }
+
+    /// <summary>
+    /// Gets the swarm answering the swarm commands.
+    /// </summary>
+    public SwarmStatus? Swarm { get; init; }
+
+    /// <summary>
+    /// Gets the task answering <see cref="RemoteCommand.GetSwarmTask" />.
+    /// </summary>
+    public SwarmTaskDetail? SwarmTask { get; init; }
 }

@@ -30,9 +30,16 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
+
+    // A delegated task runs code another server sent, under permissions its sender was given, so its workspace takes nothing else: no further prompts or settings, and no git, which would run whatever configuration the AI wrote into a repository it made there.
+    private readonly HashSet<RemoteCommand> refusedWhenDelegated =
+    [
+        RemoteCommand.Prompt, RemoteCommand.UploadAttachment, RemoteCommand.StartLoop, RemoteCommand.RenameWorkspace, RemoteCommand.MoveWorkspaceToFolder, RemoteCommand.SetWorkspaceSettings, RemoteCommand.GenerateCommitMessage, RemoteCommand.RunScript, RemoteCommand.DelegateTask,
+        RemoteCommand.GetGitChanges, RemoteCommand.GetGitHistory, RemoteCommand.GetGitCommitChanges, RemoteCommand.GetGitDiff, RemoteCommand.GetGitBranchState, RemoteCommand.GitCommit, RemoteCommand.GitReset, RemoteCommand.GitCreateBranch, RemoteCommand.GitCreateTag, RemoteCommand.GitSetRemote, RemoteCommand.GitCheckout, RemoteCommand.GitDeleteBranch, RemoteCommand.GitDeleteTag, RemoteCommand.GitSquash, RemoteCommand.GitRebase, RemoteCommand.GitMerge, RemoteCommand.GitFetch, RemoteCommand.GitSync, RemoteCommand.GitSetIdentity
+    ];
 
     private readonly HashSet<string> displayVariables = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_SESSION_TYPE"];
 
@@ -47,6 +54,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         await workspaces.Open(Path.Combine(config.DataFolder, "workspaces.json"), cancellation);
         await errors.Open(cancellation);
         guard.Open(cancellation);
+        await queue.Open(config.DataFolder, cancellation);
+        await swarm.Open(config, cancellation);
     }
 
     /// <inheritdoc />
@@ -67,6 +76,25 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
 
     private async Task<RemoteResponse> Dispatch(RemoteRequest request, object owner, CancellationToken cancellation)
     {
+        if (request.WorkspaceId is { } target && swarm.IsDelegated(target))
+        {
+            if (refusedWhenDelegated.Contains(request.Command))
+            {
+                throw new RequestException("This workspace runs a task delegated by another server, so it takes nothing else.");
+            }
+
+            if (request.Command == RemoteCommand.GetGitStatus)
+            {
+                return new RemoteResponse { Id = 0, Git = new GitStatus { IsRepo = false } };
+            }
+
+            if (request.Command is RemoteCommand.StopWorkspace or RemoteCommand.CancelWorkspace)
+            {
+                await swarm.CancelByOwner(target);
+                return new RemoteResponse { Id = 0 };
+            }
+        }
+
         switch (request.Command)
         {
             case RemoteCommand.ListWorkspaces:
@@ -99,6 +127,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.SetAiEnvironment:
                 AiEnvironment changed = await host.Set(request.AiEnvironment ?? throw new RequestException("The request needs an environment."), cancellation);
                 await prompts.RefreshInstructions(cancellation);
+                queue.Pump();
                 return new RemoteResponse { Id = 0, AiEnvironment = changed };
             case RemoteCommand.ConfigureOllamaService:
                 return new RemoteResponse { Id = 0, AiEnvironment = await host.ConfigureOllamaService(request.Enabled ?? throw new RequestException("The request needs enabled."), request.Password, cancellation) };
@@ -126,6 +155,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await RequireIdle(request);
                 WorkspaceInfo deleting = await workspaces.Get(RequireWorkspace(request), cancellation);
                 watcher.Forget(deleting.Id);
+                await swarm.Forget(deleting.Id);
+                await queue.Cancel(deleting.Id);
                 await workspaces.Delete(deleting.Id, request.DeleteFolder, cancellation);
                 await prompts.Forget(deleting, request.DeleteFolder);
                 return new RemoteResponse { Id = 0 };
@@ -185,6 +216,45 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GetErrors:
                 return new RemoteResponse { Id = 0, Errors = await errors.List(RequireWorkspace(request), cancellation) };
+            case RemoteCommand.GetSwarm:
+                return await Swarm(() => Task.CompletedTask, cancellation);
+            case RemoteCommand.SetSwarm:
+                return await Swarm(() => swarm.SetServer(request.SwarmServer ?? throw new RequestException("The request needs swarm settings.")), cancellation);
+            case RemoteCommand.SetSwarmPeer:
+                return await Swarm(() => swarm.SetPeer(request.SwarmPeer ?? throw new RequestException("The request needs a paired server.")), cancellation);
+            case RemoteCommand.RevokeSwarmPeer:
+                return await Swarm(() => swarm.Revoke(Require(request.PeerId, "peer")), cancellation);
+            case RemoteCommand.CreatePairingCode:
+                return await Swarm(() =>
+                {
+                    swarm.CreateCode();
+                    return Task.CompletedTask;
+                }, cancellation);
+            case RemoteCommand.PairWithCode:
+                return await Swarm(async () => await swarm.PairWithCode(Require(request.Address, "address"), Require(request.Code, "code"), cancellation), cancellation);
+            case RemoteCommand.WriteDriveInvitation:
+                return await Swarm(async () => await swarm.WriteInvitation(cancellation), cancellation);
+            case RemoteCommand.ConfirmDrivePairing:
+                return await Swarm(() => swarm.ConfirmDrivePairing(Require(request.PeerId, "peer"), cancellation), cancellation);
+            case RemoteCommand.SyncDrive:
+                return await Swarm(async () => await swarm.SyncDrive(cancellation), cancellation);
+            case RemoteCommand.DelegateTask:
+                return await Swarm(() => swarm.Delegate(RequireWorkspace(request), request.Task ?? throw new RequestException("The request needs a task."), cancellation), cancellation);
+            case RemoteCommand.GetSwarmTask:
+                return new RemoteResponse { Id = 0, SwarmTask = await swarm.Detail(RequireTask(request), cancellation) };
+            case RemoteCommand.CancelSwarmTask:
+                return await Swarm(() => swarm.Cancel(RequireTask(request)), cancellation);
+            case RemoteCommand.RetrySwarmTask:
+                return await Swarm(() => swarm.Retry(RequireTask(request), cancellation), cancellation);
+            case RemoteCommand.ApplySwarmTask:
+                return await Swarm(async () => await swarm.Apply(RequireTask(request), cancellation), cancellation);
+            case RemoteCommand.DiscardSwarmTask:
+                return await Swarm(() => swarm.Discard(RequireTask(request), cancellation), cancellation);
+            case RemoteCommand.GetQueuedWork:
+                await workspaces.Get(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, Queue = queue.Get(RequireWorkspace(request)) };
+            case RemoteCommand.CancelQueuedWork:
+                return new RemoteResponse { Id = 0, Queue = await CancelQueued(RequireWorkspace(request), request.Keep == true, cancellation) };
             case RemoteCommand.GetSavedInputs:
                 return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.List(RequireWorkspace(request), cancellation) };
             case RemoteCommand.SaveInput:
@@ -326,9 +396,11 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             return new RemoteResponse { Id = 0, Error = $"The {over.Window} usage window is at {over.PercentUsed:0.#}%, at or past the maximum of {over.MaxPercent:0.#}%. Confirm to start the work anyway.", OverLimit = over };
         }
 
+        WorkTicket ticket;
+
         try
         {
-            await prompts.Prompt(id, text, cancellation);
+            ticket = await queue.Submit(id, text, WorkSource.Direct, cancellation);
         }
         catch (RequestException)
         {
@@ -340,7 +412,42 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             throw;
         }
 
-        return new RemoteResponse { Id = 0 };
+        return new RemoteResponse { Id = 0, Queue = ticket.Queued ? queue.Get(id) : null };
+    }
+
+    private async Task<RemoteResponse> Swarm(Func<Task<string?>> action, CancellationToken cancellation)
+    {
+        string? report = await action();
+        return new RemoteResponse { Id = 0, Swarm = await swarm.Status(report, cancellation) };
+    }
+
+    private Task<RemoteResponse> Swarm(Func<Task> action, CancellationToken cancellation) => Swarm(async () =>
+    {
+        await action();
+        return (string?)null;
+    }, cancellation);
+
+    private Guid RequireTask(RemoteRequest request) => request.TaskId ?? throw new RequestException("The request needs a task.");
+
+    private async Task<QueueStatus?> CancelQueued(Guid id, bool keep, CancellationToken cancellation)
+    {
+        await workspaces.Get(id, cancellation);
+
+        if (swarm.IsDelegated(id))
+        {
+            QueueStatus? waiting = queue.Get(id);
+            await swarm.CancelByOwner(id);
+            return waiting;
+        }
+
+        QueueStatus? removed = await queue.Cancel(id);
+
+        if (keep && removed is { Text.Length: > 0 })
+        {
+            await savedInputs.Keep(id, removed.Text, cancellation);
+        }
+
+        return removed;
     }
 
     private void RequireAiInput(RemoteRequest request)
@@ -420,6 +527,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         Note("files outside the workspace", before.IsSystemAccessAllowed, after.IsSystemAccessAllowed);
         Note("web", before.IsWebAllowed, after.IsWebAllowed);
         Note("images", before.IsImageGenerationAllowed, after.IsImageGenerationAllowed);
+        Note("delegation", before.IsDelegationAllowed, after.IsDelegationAllowed);
         Note("instructions", before.Instructions ?? string.Empty, after.Instructions ?? string.Empty);
         Note("status interval", before.StatusMinutes, after.StatusMinutes);
         Note("review prompt", before.ReviewPrompt ?? string.Empty, after.ReviewPrompt ?? string.Empty);
@@ -437,7 +545,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     private async Task<WorkspaceCatalog> Catalog(CancellationToken cancellation)
     {
         WorkspaceCatalog catalog = await workspaces.List(cancellation);
-        return catalog with { Looping = [.. catalog.Workspaces.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)] };
+        return catalog with { Looping = [.. catalog.Workspaces.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)], Queued = queue.Waiting, Delegations = swarm.Delegations };
     }
 
     private Guid RequireWorkspace(RemoteRequest request) => request.WorkspaceId ?? throw new RequestException("The request needs a workspace.");

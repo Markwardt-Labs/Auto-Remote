@@ -8,9 +8,9 @@ internal interface IErrorHistory
     /// <summary>
     /// Starts recording every failure the server publishes, removes the entries that are too old from every workspace and goes on doing that every few hours until stopped.
     /// </summary>
-    /// <param name="stopping">Stops the periodic removal.</param>
+    /// <param name="cancellation">Stops the periodic removal.</param>
     /// <returns>A task that completes once the first removal is done.</returns>
-    Task Open(CancellationToken stopping);
+    Task Open(CancellationToken cancellation);
 
     /// <summary>
     /// Lists the errors of a workspace, removing the ones that are too old.
@@ -44,12 +44,12 @@ internal sealed class ErrorHistory(IWorkspaceStore store, IWorkspaceManager work
     internal int MaxEntries { get; init; } = 500;
 
     /// <inheritdoc />
-    public async Task Open(CancellationToken stopping)
+    public async Task Open(CancellationToken cancellation)
     {
         subscription?.Dispose();
         subscription = events.Subscribe(Receive);
-        await Sweep(stopping);
-        _ = Repeat(stopping);
+        await Sweep(cancellation);
+        _ = Repeat(cancellation);
     }
 
     /// <inheritdoc />
@@ -115,13 +115,13 @@ internal sealed class ErrorHistory(IWorkspaceStore store, IWorkspaceManager work
         }
     }
 
-    private async Task Sweep(CancellationToken stopping)
+    private async Task Sweep(CancellationToken cancellation)
     {
         try
         {
-            foreach (WorkspaceInfo workspace in (await workspaces.List(stopping)).Workspaces)
+            foreach (WorkspaceInfo workspace in (await workspaces.List(cancellation)).Workspaces)
             {
-                await Prune(workspace.Id, stopping);
+                await Prune(workspace.Id, cancellation);
             }
         }
         catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException)
@@ -129,14 +129,14 @@ internal sealed class ErrorHistory(IWorkspaceStore store, IWorkspaceManager work
         }
     }
 
-    private async Task Repeat(CancellationToken stopping)
+    private async Task Repeat(CancellationToken cancellation)
     {
         try
         {
-            while (!stopping.IsCancellationRequested)
+            while (!cancellation.IsCancellationRequested)
             {
-                await Task.Delay(SweepEvery, clock, stopping);
-                await Sweep(stopping);
+                await Task.Delay(SweepEvery, clock, cancellation);
+                await Sweep(cancellation);
             }
         }
         catch (OperationCanceledException)

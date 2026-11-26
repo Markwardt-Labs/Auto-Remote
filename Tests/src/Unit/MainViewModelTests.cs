@@ -1,6 +1,6 @@
 namespace Markwardt.AutoRemote.Tests.Unit;
 
-public sealed class MainViewModelTests
+public sealed class MainViewModelTests : IDisposable
 {
     private readonly Mock<IAppInfo> info = new();
 
@@ -22,6 +22,9 @@ public sealed class MainViewModelTests
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
         model = new MainViewModel(info.Object, factory.Object, store.Object);
     }
+
+    // A server that never answers is tried again long after its test ended. The mock rethrows one exception, whose stack trace grows with every throw, and keeps every attempt, which took gigabytes, so the attempts end with the test.
+    public void Dispose() => factory.Setup(x => x.Connect(It.IsAny<ConnectionSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new UnauthorizedAccessException("The test has ended."));
 
     [Fact]
     public async Task Start_WithoutSavedSettings_AsksForServer()

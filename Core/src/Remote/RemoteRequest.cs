@@ -61,6 +61,46 @@ public sealed record RemoteRequest
     public AiEnvironment? AiEnvironment { get; init; }
 
     /// <summary>
+    /// Gets the settings for <see cref="RemoteCommand.SetSwarm" />.
+    /// </summary>
+    public SwarmServer? SwarmServer { get; init; }
+
+    /// <summary>
+    /// Gets the settings of a paired server for <see cref="RemoteCommand.SetSwarmPeer" />.
+    /// </summary>
+    public SwarmPeer? SwarmPeer { get; init; }
+
+    /// <summary>
+    /// Gets the paired server of <see cref="RemoteCommand.RevokeSwarmPeer" /> and <see cref="RemoteCommand.ConfirmDrivePairing" />.
+    /// </summary>
+    public string? PeerId { get; init; }
+
+    /// <summary>
+    /// Gets the pairing code of <see cref="RemoteCommand.PairWithCode" />.
+    /// </summary>
+    public string? Code { get; init; }
+
+    /// <summary>
+    /// Gets the <c>host:port</c> of the server <see cref="RemoteCommand.PairWithCode" /> pairs with.
+    /// </summary>
+    public string? Address { get; init; }
+
+    /// <summary>
+    /// Gets the task of <see cref="RemoteCommand.DelegateTask" />.
+    /// </summary>
+    public SwarmTaskRequest? Task { get; init; }
+
+    /// <summary>
+    /// Gets the delegated task the task commands name.
+    /// </summary>
+    public Guid? TaskId { get; init; }
+
+    /// <summary>
+    /// Gets whether <see cref="RemoteCommand.CancelQueuedWork" /> keeps the text of the removed prompt as a saved input, as a client does that did not send it.
+    /// </summary>
+    public bool? Keep { get; init; }
+
+    /// <summary>
     /// Gets whether <see cref="RemoteCommand.ConfigureOllamaService" /> turns the optimized context on (<see langword="true" />) or off.
     /// </summary>
     public bool? Enabled { get; init; }

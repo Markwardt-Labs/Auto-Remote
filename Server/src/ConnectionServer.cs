@@ -25,7 +25,7 @@ internal interface IConnectionServer
 }
 
 /// <inheritdoc />
-internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFactory channels, IWebSocketUpgrade upgrade, ICertificateProvider certificates, IRequestHandler handler, IEventHub events, ILog log, ILocalListener? local = null) : IConnectionServer
+internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFactory channels, IWebSocketUpgrade upgrade, ICertificateProvider certificates, IRequestHandler handler, IEventHub events, ILog log, ILocalListener? local = null, IPeerListener? peers = null) : IConnectionServer
 {
     private readonly TimeSpan timeout = TimeSpan.FromSeconds(5);
 
@@ -101,10 +101,22 @@ internal sealed class ConnectionServer(IHandshake handshake, IMessageChannel.IFa
                 log.Write(outcome switch
                 {
                     HandshakeOutcome.Accepted => $"Accepted {remote}",
+                    HandshakeOutcome.Peer => $"Swarm connection from {remote}",
                     HandshakeOutcome.WrongKey => $"Refused {remote}: wrong key",
                     HandshakeOutcome.TimedOut => $"Refused {remote}: no handshake line within {timeout.TotalSeconds:0} seconds, connection closed without a reply",
                     _ => $"Refused {remote}: the connection closed or sent something that is not a handshake line"
                 });
+
+                if (outcome == HandshakeOutcome.Peer && peers is not null)
+                {
+                    await peers.Serve(channels.Create(stream), length =>
+                    {
+                        if (stream is WebSocketLineStream lines)
+                        {
+                            lines.MaxMessageLength = length;
+                        }
+                    }, remote, cancellation);
+                }
 
                 if (outcome == HandshakeOutcome.Accepted)
                 {

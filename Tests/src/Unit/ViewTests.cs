@@ -115,6 +115,120 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.False(after);
     }
 
+    [Fact]
+    public async Task HomeView_ShowsABannerForQueuedWorkWithAButtonThatCancelsItUntilNothingWaits()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app", Service = AiService.Local };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace], Queued = [workspace.Id] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetQueuedWork(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new QueueStatus { Position = 1, Text = "fix the build", Running = ["web"] });
+
+        (bool shown, bool button, bool marked, bool gone) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(workspace.Id).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 390, Height = 800, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            Border Banner() => window.GetVisualDescendants().OfType<Border>().Single(border => border.Name == "QueueBanner");
+            bool shown = Banner().IsEffectivelyVisible && Banner().GetVisualDescendants().OfType<TextBlock>().Any(block => block.Text == "Queued (position 1), waiting for web.") && Banner().GetVisualDescendants().OfType<TextBlock>().Any(block => block.Text == "fix the build");
+            bool button = Banner().GetVisualDescendants().OfType<Button>().Any(candidate => Equals(candidate.Content, "Cancel Queued Work"));
+            bool marked = model.Entries.Any(entry => entry.IsQueued && entry.Detail.StartsWith("Queued", StringComparison.Ordinal));
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = workspace.Id });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            bool gone = !Banner().IsEffectivelyVisible;
+            window.Close();
+            return (shown, button, marked, gone);
+        });
+
+        Assert.True(shown);
+        Assert.True(button);
+        Assert.True(marked);
+        Assert.True(gone);
+    }
+
+    [Theory]
+    [InlineData(390)]
+    [InlineData(1000)]
+    public async Task SwarmView_ShowsThePeerItsSwitchesAndAnOpenedTaskWithItsActions(int width)
+    {
+        SwarmTaskInfo task = new() { Id = Guid.NewGuid(), Title = "fix", State = SwarmTaskState.Done, PeerName = "there", Branch = "swarm/x" };
+        connection.Setup(x => x.GetSwarm(It.IsAny<CancellationToken>())).ReturnsAsync(new SwarmStatus { Server = new SwarmServer { Name = "here", Fingerprint = "AAAA-BBBB" }, Peers = [new SwarmPeer { Id = "peer", Name = "there", Fingerprint = "CCCC-DDDD", Mode = SwarmMode.Direct }], Tasks = [task] });
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [] });
+        connection.Setup(x => x.GetSwarmTask(task.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new SwarmTaskDetail { Task = task, Instructions = "do it", Report = "done it" });
+
+        (string[] switches, bool revoke, string[] actions, bool report) = await fixture.Run(() =>
+        {
+            SwarmViewModel model = new(connection.Object);
+            model.Load().GetAwaiter().GetResult();
+            Window window = new() { Width = width, Height = 2400, Content = new SwarmView { DataContext = model } };
+            window.Show();
+            Expand(window);
+            Expand(window);
+            window.UpdateLayout();
+            string[] switches = [.. window.GetVisualDescendants().OfType<ToggleSwitch>().Where(toggle => toggle.IsEffectivelyVisible).Select(toggle => toggle.Content?.ToString() ?? string.Empty)];
+            bool revoke = window.GetVisualDescendants().OfType<Button>().Any(button => button.IsEffectivelyVisible && Equals(button.Content, "Revoke Server"));
+            model.OpenTaskCommand.Execute(model.Tasks[0]);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            string[] actions = [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Content?.ToString() ?? string.Empty).Where(content => content.EndsWith("Task", StringComparison.Ordinal) || content.EndsWith("Changes", StringComparison.Ordinal))];
+            bool report = window.GetVisualDescendants().OfType<SelectableTextBlock>().Any(block => block.IsEffectivelyVisible && block.Text == "done it");
+            window.Close();
+            model.Dispose();
+            return (switches, revoke, actions, report);
+        });
+
+        Assert.Equal(["Accept delegated work", "Send work to this server", "Accept work from this server", "Run shell commands", "Allow files outside the workspace", "Use the web", "Generate images"], switches);
+        Assert.True(revoke);
+        Assert.Equal(["Apply Changes", "Discard Task"], actions);
+        Assert.True(report);
+    }
+
+    [Fact]
+    public async Task HomeView_DisablesTheMessageBoxAndTheSettingsOfADelegatedWorkspaceAndSaysWhatStoppingItDoes()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/data/task", Service = AiService.Local };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace], Delegations = [new WorkspaceDelegation { WorkspaceId = workspace.Id, From = "laptop", Title = "t" }] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = true });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Service = AiService.Local });
+
+        (bool box, string? stopTip, bool stopNote, bool lockedNote, int switches, int enabledSwitches) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(workspace.Id).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 1600, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            bool box = window.GetVisualDescendants().OfType<TextBox>().Single(item => item.Name == "ChatInput").IsEffectivelyEnabled;
+            string? stopTip = window.GetVisualDescendants().OfType<Button>().Select(button => ToolTip.GetTip(button) as string).FirstOrDefault(tip => tip is "Cancel the delegated task" or "Stop the work and keep what it did");
+            model.BeginStopCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            bool stopNote = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.IsEffectivelyVisible && block.Text == "This cancels the task delegated by laptop, which is told.");
+            model.CancelEditCommand.Execute(null);
+            model.Active!.ToggleSettingsCommand.Execute(null);
+            Expand(window);
+            window.UpdateLayout();
+            bool lockedNote = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.IsEffectivelyVisible && block.Text == "This workspace runs a task delegated by another server, so its settings cannot be changed.");
+            List<ToggleSwitch> found = [.. window.GetVisualDescendants().OfType<ToggleSwitch>().Where(item => item.IsEffectivelyVisible)];
+            window.Close();
+            return (box, stopTip, stopNote, lockedNote, found.Count, found.Count(item => item.IsEffectivelyEnabled));
+        });
+
+        Assert.False(box);
+        Assert.Equal("Cancel the delegated task", stopTip);
+        Assert.True(stopNote);
+        Assert.True(lockedNote);
+        Assert.Equal((5, 0), (switches, enabledSwitches));
+    }
+
     private void Expand(Window window)
     {
         Avalonia.Threading.Dispatcher.UIThread.RunJobs();
@@ -252,6 +366,36 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Contains("italic", text);
         Assert.Contains("nested", text);
         Assert.Contains("second", text);
+    }
+
+    [Theory]
+    [InlineData("before\n\n```\n```")]
+    [InlineData("before\n\n```bash")]
+    [InlineData("before\n\n~~~\n~~~")]
+    [InlineData("before\n\n$$")]
+    public async Task Source_ShowsTheRestOfADocumentWithAnEmptyCodeBlock(string source)
+    {
+        (int _, int _, string text) = await RenderMarkdown(source);
+
+        Assert.Contains("before", text);
+    }
+
+    [Fact]
+    public async Task Source_ShowsEntitiesAsTheirCharactersAndDollarSignsAsWritten()
+    {
+        (int _, int _, string text) = await RenderMarkdown("a &lt; b &amp;&amp; 5&nbsp;MB, use $PATH$ or pay $5$ now");
+
+        Assert.Contains("a < b && 5\u00a0MB, use $PATH$ or pay $5$ now", text.Replace("|", string.Empty));
+    }
+
+    [Fact]
+    public async Task Source_ShowsTextNestedTooDeeplyToLayOutAsItIs()
+    {
+        string source = new string('>', 300) + " deep";
+
+        (int _, int _, string text) = await RenderMarkdown(source);
+
+        Assert.Contains("deep", text);
     }
 
     [Fact]
@@ -446,7 +590,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Service = AiService.Codex, Capability = AiCapability.Strong, Effort = AiEffort.Low, IsShellAllowed = true, Instructions = "be brief", Descriptors = new Dictionary<string, string> { ["Model"] = "GPT 5.6" } });
 
-        (int choiceBoxes, int toggles, int numbers, bool providerShown, bool instructionsShown, bool detailShown, string capability) = await fixture.Run(() =>
+        (int choiceBoxes, int toggles, bool delegationShown, int numbers, bool providerShown, bool instructionsShown, bool detailShown, string capability) = await fixture.Run(() =>
         {
             HomeViewModel model = new(connection.Object);
             model.Start().GetAwaiter().GetResult();
@@ -471,12 +615,14 @@ public sealed class ViewTests(HeadlessFixture fixture)
             bool instructionsShown = window.GetVisualDescendants().OfType<TextBox>().Any(box => box.IsEffectivelyVisible && box.Text == "be brief");
             bool detailShown = texts.Any(block => block.Text == "GPT 5.6");
             string capability = model.Active.Settings.SelectedCapability.Name;
+            bool delegationShown = window.GetVisualDescendants().OfType<ToggleSwitch>().Any(item => item.IsEffectivelyVisible && Equals(item.Content, "Let the AI delegate work"));
             window.Close();
-            return (choiceBoxes, toggles, numbers, providerShown, instructionsShown, detailShown, capability);
+            return (choiceBoxes, toggles, delegationShown, numbers, providerShown, instructionsShown, detailShown, capability);
         });
 
         Assert.Equal(2, choiceBoxes);
-        Assert.Equal(4, toggles);
+        Assert.Equal(5, toggles);
+        Assert.True(delegationShown);
         Assert.Equal(1, numbers);
         Assert.True(providerShown);
         Assert.True(instructionsShown);
@@ -938,7 +1084,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
 
         Assert.Equal(1, refreshButtons);
         Assert.Equal(2, refreshWithLocal);
-        Assert.Equal(5, switchesAndDefaults);
+        Assert.Equal(6, switchesAndDefaults);
         Assert.True(defaultsShown);
         Assert.Equal(8, rowBoxes);
         Assert.Equal(1, clearBoxes);

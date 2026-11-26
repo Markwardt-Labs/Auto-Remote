@@ -21,8 +21,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && HasContent);
         ReviewCommand = new AsyncCommand(_ => Preset(settings => settings.ReviewPrompt ?? settings.GlobalReviewPrompt), () => blockReason is null && !HasContent);
         ExpandCommand = new AsyncCommand(_ => Preset(settings => settings.ExpandPrompt ?? settings.GlobalExpandPrompt), () => blockReason is null && !HasContent);
-        PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, []), () => blockReason is null && !HasContent);
-        ResumeCommand = new AsyncCommand(_ => Deliver(ResumePrompt, []), () => blockReason is null && !HasContent);
+        PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, [], false), () => blockReason is null && !HasContent);
+        ResumeCommand = new AsyncCommand(_ => Deliver(ResumePrompt, [], false), () => blockReason is null && !HasContent);
         ConfirmOverLimitCommand = new AsyncCommand(_ => ConfirmOverLimit());
         CancelOverLimitCommand = new AsyncCommand(_ =>
         {
@@ -30,13 +30,14 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             return Task.CompletedTask;
         });
         CancelLimitPauseCommand = new AsyncCommand(_ => CancelLimitPause());
+        CancelQueuedCommand = new AsyncCommand(_ => CancelQueued());
         RemoveAttachmentCommand = new AsyncCommand(parameter => Remove(parameter), null);
         SaveInputCommand = new AsyncCommand(_ => SaveInput(), () => HasText);
         ToggleSavedInputsCommand = new AsyncCommand(_ =>
         {
             IsSavedInputsOpen = !IsSavedInputsOpen;
             return Task.CompletedTask;
-        });
+        }, () => !isDelegated);
         LoadSavedInputCommand = new AsyncCommand(parameter => LoadSavedInput(parameter), null, false);
         DictateCommand = new AsyncCommand(_ => StartDictation(), () => !recording && !sending && blockReason is null);
         CompleteDictationCommand = new AsyncCommand(_ => CompleteDictation(), () => recording);
@@ -75,16 +76,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private readonly TimeSpan recordingTick = TimeSpan.FromSeconds(1);
 
-    /// <summary>
-    /// Raised when the user submits a prompt, before it is sent, so work this client gave can be told apart from work another client gave.
-    /// </summary>
-    public event Action? PromptStarted;
-
-    /// <summary>
-    /// Raised when a submitted prompt could not be sent, so no work started.
-    /// </summary>
-    public event Action? PromptFailed;
-
     private readonly Guid workspaceId;
 
     private readonly IDraftStore? drafts;
@@ -117,11 +108,27 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private LimitPause? limitPause;
 
+    private QueueStatus? queue;
+
+    private readonly List<MessageParts> submitted = [];
+
+    private bool isDelegated;
+
     private OverLimitAsk? overLimit;
 
     private ChatMessage? streaming;
 
     private bool isSavedInputsOpen;
+
+    /// <summary>
+    /// Raised when the user submits a prompt, before it is sent, so work this client gave can be told apart from work another client gave.
+    /// </summary>
+    public event Action? PromptStarted;
+
+    /// <summary>
+    /// Raised when a submitted prompt could not be sent, so no work started.
+    /// </summary>
+    public event Action? PromptFailed;
 
     /// <summary>
     /// Raised once the stored conversation is shown, so the view can start at its end.
@@ -149,8 +156,41 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool IsAiWorking
     {
         get => isAiWorking;
-        private set => Set(ref isAiWorking, value);
+        private set
+        {
+            // What was sent before the work began is in it or done with it, so none of it can be what waits later.
+            if (Set(ref isAiWorking, value) && value)
+            {
+                submitted.Clear();
+            }
+        }
     }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the workspace runs a task another server delegated, which closes the message box altogether.
+    /// </summary>
+    public bool IsDelegated
+    {
+        get => isDelegated;
+        set
+        {
+            if (Set(ref isDelegated, value))
+            {
+                if (value)
+                {
+                    IsSavedInputsOpen = false;
+                }
+
+                Raise(nameof(TakesTyping));
+                ToggleSavedInputsCommand.Refresh();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the message box and its attach button can be used, which they cannot while <see cref="IsDelegated" />.
+    /// </summary>
+    public bool TakesTyping => !isDelegated;
 
     /// <summary>
     /// Gets or sets why the AI cannot be given work now, such as git running in the workspace, or <see langword="null" /> when it can; it is shown as the hint of the message box.
@@ -317,6 +357,66 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool HasLimitPause => limitPause is not null;
 
     /// <summary>
+    /// Gets or sets the work of the workspace that waits for the local AI, or <see langword="null" />.
+    /// </summary>
+    public QueueStatus? Queue
+    {
+        get => queue;
+        private set
+        {
+            if (queue is not null && value is null)
+            {
+                submitted.Clear();
+            }
+
+            if (Set(ref queue, value))
+            {
+                Raise(nameof(IsQueued));
+                Raise(nameof(QueueText));
+                Raise(nameof(QueuedPrompt));
+                Raise(nameof(HasQueuedPrompt));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether work of the workspace waits for the local AI.
+    /// </summary>
+    public bool IsQueued => queue is not null;
+
+    /// <summary>
+    /// Gets what the banner of the waiting work says: its place in the queue and what it waits for.
+    /// </summary>
+    public string QueueText => queue is null ? string.Empty : $"Queued (position {queue.Position}){(queue.Running.Count > 0 ? $", waiting for {string.Join(", ", queue.Running)}" : string.Empty)}.";
+
+    /// <summary>
+    /// Gets the text of the waiting prompt, with the names of its attachments, or an empty text when what waits is not a prompt.
+    /// </summary>
+    public string QueuedPrompt
+    {
+        get
+        {
+            if (queue is not { Text.Length: > 0 })
+            {
+                return string.Empty;
+            }
+
+            MessageParts parts = MessageParts.Parse(queue.Text);
+            return string.Join('\n', new[] { parts.Body, string.Join(", ", parts.Files.Select(file => file.Name)) }.Where(part => part.Length > 0));
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether what waits is a prompt, whose text is shown.
+    /// </summary>
+    public bool HasQueuedPrompt => queue is { Text.Length: > 0 };
+
+    /// <summary>
+    /// Gets the command that removes the waiting work. A prompt this client sent comes back to the message box without replacing what is typed there; one sent from elsewhere is kept as a saved input.
+    /// </summary>
+    public AsyncCommand CancelQueuedCommand { get; }
+
+    /// <summary>
     /// Gets what the automatic pause says: which window is at what share of its limit, what the maximum is and when the server looks again.
     /// </summary>
     public string LimitPauseText => limitPause is { } pause ? $"Paused automatically: the {pause.Window} usage window is at {pause.PercentUsed:0.#}%, at or past the maximum of {pause.MaxPercent:0.#}%. The AI resumes once it is below the maximum; the server checks again at {pause.NextCheckAt.ToLocalTime():t}." : string.Empty;
@@ -434,6 +534,26 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public AsyncCommand ResumeCommand { get; }
 
     /// <summary>
+    /// Gets or sets a note under the conversation that is not a failure, such as why a loop ended by itself; it goes away when the next prompt is sent.
+    /// </summary>
+    public string? Notice
+    {
+        get => notice;
+        set
+        {
+            if (Set(ref notice, value))
+            {
+                Raise(nameof(HasNotice));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="Notice" /> is set.
+    /// </summary>
+    public bool HasNotice => notice is not null;
+
+    /// <summary>
     /// Adds a file to send with the next prompt, unless it is empty or larger than the server accepts.
     /// </summary>
     /// <param name="name">The file name.</param>
@@ -455,26 +575,6 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <returns>A task that completes once the conversation is up to date.</returns>
     public Task Resync() => loaded ? Reload() : Task.CompletedTask;
-
-    /// <summary>
-    /// Gets or sets a note under the conversation that is not a failure, such as why a loop ended by itself; it goes away when the next prompt is sent.
-    /// </summary>
-    public string? Notice
-    {
-        get => notice;
-        set
-        {
-            if (Set(ref notice, value))
-            {
-                Raise(nameof(HasNotice));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets a value indicating whether <see cref="Notice" /> is set.
-    /// </summary>
-    public bool HasNotice => notice is not null;
 
     /// <summary>
     /// Shows a failure that happened outside the conversation, such as a refused stop, where the conversation shows its own.
@@ -605,6 +705,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         return true;
     }
+
+    /// <summary>
+    /// Shows why a file chosen or pasted could not be attached.
+    /// </summary>
+    /// <param name="reason">Why it could not be read.</param>
+    public void FailAttachment(string reason) => Error = $"The file could not be attached: {reason}";
 
     private int Position(string? cursor) => cursor is not null && int.TryParse(cursor, NumberStyles.None, CultureInfo.InvariantCulture, out int position) ? position : 0;
 
@@ -780,6 +886,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
             IsAiWorking = history.Working;
             LimitPause = history.LimitPause;
+            QueueStatus? waiting = null;
+
+            if (await Attempt(async () => waiting = await connection.GetQueuedWork(workspaceId, CancellationToken.None)))
+            {
+                Queue = waiting;
+            }
 
             if (showWork != history.ShowWork)
             {
@@ -858,6 +970,15 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             case RemoteEventKind.Failed:
                 Report(remoteEvent.Error ?? "The AI failed.", remoteEvent.Time ?? DateTimeOffset.UtcNow);
                 Unstream();
+                break;
+            case RemoteEventKind.QueueChanged:
+                Queue = remoteEvent.Queue;
+
+                if (remoteEvent is { Queue: null, Text: "dropped" } && !IsAiWorking)
+                {
+                    PromptFailed?.Invoke();
+                }
+
                 break;
             case RemoteEventKind.LimitPauseChanged:
                 LimitPause = remoteEvent.LimitPause;
@@ -1144,14 +1265,23 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Input = string.Empty;
         Attachments.Clear();
 
-        if (!await Deliver(text, sending) && input.Length == 0 && Attachments.Count == 0)
+        if (!await Deliver(text, sending, true))
         {
-            Input = text;
+            PutBack(text, sending);
+        }
+    }
 
-            foreach (ChatAttachment attachment in sending)
-            {
-                Attachments.Add(attachment);
-            }
+    // What was typed or attached while the prompt was on its way stays, after what comes back.
+    private void PutBack(string text, IReadOnlyList<ChatAttachment> attached)
+    {
+        if (text.Length > 0)
+        {
+            Input = input.Length == 0 ? text : $"{text}\n{input}";
+        }
+
+        foreach ((ChatAttachment attachment, int index) in attached.Select((attachment, index) => (attachment, index)))
+        {
+            Attachments.Insert(Math.Min(index, Attachments.Count), attachment);
         }
     }
 
@@ -1175,11 +1305,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 return;
             }
 
-            await Deliver(text, []);
+            await Deliver(text, [], false);
         }
     }
 
-    private async Task<bool> Deliver(string text, List<ChatAttachment> sending)
+    private async Task<bool> Deliver(string text, List<ChatAttachment> sending, bool typed)
     {
         Notice = null;
         PromptStarted?.Invoke();
@@ -1192,18 +1322,19 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
             foreach (ChatAttachment attachment in sending)
             {
-                lines.Add($"Attached file: {await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None)}");
+                lines.Add($"Attached file: {attachment.ServerPath ?? await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None)}");
             }
 
             string prompt = string.Join('\n', lines);
 
             try
             {
+                submitted.Add(MessageParts.Parse(prompt));
                 await connection.Prompt(workspaceId, prompt, CancellationToken.None);
             }
             catch (RemoteException exception) when (exception.OverLimit is { } pause)
             {
-                refused = new OverLimitAsk(pause, prompt, text, sending.Count);
+                refused = new OverLimitAsk(pause, prompt, typed ? text : null, typed ? sending : []);
             }
         });
 
@@ -1240,19 +1371,80 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         ClearOverLimit();
 
-        if (ask.Typed.Length > 0 && input.Trim() == ask.Typed && Attachments.Count == ask.Attachments)
+        // What the prompt took from the message box leaves it, unless it was edited since.
+        List<ChatAttachment> taken = [.. ask.Attached.Where(Attachments.Contains)];
+        bool cleared = ask.Typed is { Length: > 0 } && input.Trim() == ask.Typed;
+
+        if (cleared)
         {
             Input = string.Empty;
-            Attachments.Clear();
+        }
+
+        foreach (ChatAttachment attachment in taken)
+        {
+            Attachments.Remove(attachment);
         }
 
         PromptStarted?.Invoke();
 
         if (!await Attempt(() => connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
         {
+            PutBack(cleared ? ask.Typed! : string.Empty, taken);
             PromptFailed?.Invoke();
         }
     }
+
+    private async Task CancelQueued()
+    {
+        if (queue is not { } waiting)
+        {
+            return;
+        }
+
+        bool own = Submitted(MessageParts.Parse(waiting.Text));
+        QueueStatus? removed = null;
+
+        if (!await Attempt(async () => removed = await connection.CancelQueuedWork(workspaceId, !own, CancellationToken.None)))
+        {
+            return;
+        }
+
+        Queue = null;
+
+        if (waiting.Delegated)
+        {
+            Notice = "The delegated task was cancelled.";
+            return;
+        }
+
+        if (removed is not { Text.Length: > 0 })
+        {
+            return;
+        }
+
+        if (!own)
+        {
+            Notice = "The queued prompt was kept as a saved input.";
+            return;
+        }
+
+        MessageParts parts = MessageParts.Parse(removed.Text);
+
+        foreach (AttachedFile file in parts.Files)
+        {
+            Attachments.Add(new ChatAttachment { Name = file.Name, Data = ReadOnlyMemory<byte>.Empty, ServerPath = file.Path });
+        }
+
+        if (parts.Body.Length > 0)
+        {
+            Input = HasText ? parts.Body + "\n" + input : parts.Body;
+        }
+    }
+
+    // The server joins waiting prompts as paragraphs and keeps their attachment lines at the end.
+    private bool Submitted(MessageParts queued) => submitted.Any(sent => sent.Body.Length > 0
+        ? $"\n\n{queued.Body}\n\n".Contains($"\n\n{sent.Body}\n\n", StringComparison.Ordinal)
+        : sent.Files.Any(file => queued.Files.Any(other => other.Path == file.Path)));
 
     private async Task CancelLimitPause()
     {
@@ -1262,5 +1454,5 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private sealed record OverLimitAsk(LimitPause Pause, string Prompt, string Typed, int Attachments);
+    private sealed record OverLimitAsk(LimitPause Pause, string Prompt, string? Typed, IReadOnlyList<ChatAttachment> Attached);
 }

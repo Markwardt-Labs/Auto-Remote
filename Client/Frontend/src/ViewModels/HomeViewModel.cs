@@ -3,7 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The main screen: the workspace list organized as a tree of groups, the focused workspace, and the dialogs that rename, delete or create things.
 /// </summary>
-internal sealed class HomeViewModel : ViewModelBase
+internal sealed class HomeViewModel : ViewModelBase, IDisposable
 {
     /// <summary>
     /// Initializes a new instance of the <see cref="HomeViewModel" /> class.
@@ -32,23 +32,9 @@ internal sealed class HomeViewModel : ViewModelBase
         this.layout = layout;
         this.drafts = drafts;
         this.preferences = preferences;
-        connection.Lost += () => IsOffline = true;
-        connection.Reconnected += () =>
-        {
-            IsOffline = false;
-            _ = Refresh();
-        };
-        connection.EventReceived += remoteEvent =>
-        {
-            if (remoteEvent.Kind == RemoteEventKind.WorkspacesChanged)
-            {
-                _ = Refresh();
-            }
-            else if (remoteEvent.Kind == RemoteEventKind.LoopChanged && (remoteEvent.Loop is not null ? looping.Add(remoteEvent.WorkspaceId) : looping.Remove(remoteEvent.WorkspaceId)))
-            {
-                BuildEntries();
-            }
-        };
+        connection.Lost += Lose;
+        connection.Reconnected += Return;
+        connection.EventReceived += Receive;
         Usage = new UsageViewModel(connection);
         ToggleUsageCommand = new AsyncCommand(_ =>
         {
@@ -68,6 +54,11 @@ internal sealed class HomeViewModel : ViewModelBase
         CloneWorkspaceCommand = new AsyncCommand(_ =>
         {
             CloneWorkspaceRequested?.Invoke();
+            return Task.CompletedTask;
+        });
+        SwarmCommand = new AsyncCommand(_ =>
+        {
+            SwarmRequested?.Invoke(null, selected?.Id);
             return Task.CompletedTask;
         });
         EnvironmentCommand = new AsyncCommand(_ =>
@@ -91,8 +82,8 @@ internal sealed class HomeViewModel : ViewModelBase
                     MoveWorkspaceRequested?.Invoke(selected);
                 }
             },
-            () => CanEditSelected);
-        BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => CanEditSelected);
+            () => CanChangeSelected);
+        BeginRenameCommand = new AsyncCommand(_ => Begin(EditMode.RenameWorkspace, selected?.Name ?? string.Empty), () => CanChangeSelected);
         ConfirmRenameCommand = new AsyncCommand(_ => Rename());
         BeginDeleteCommand = new AsyncCommand(
             _ =>
@@ -153,6 +144,20 @@ internal sealed class HomeViewModel : ViewModelBase
 
     private readonly HashSet<Guid> looping = [];
 
+    private readonly HashSet<Guid> waiting = [];
+
+    private readonly Dictionary<Guid, WorkspaceDelegation> delegations = [];
+
+    private readonly List<SwarmTaskInfo> swarmTasks = [];
+
+    private readonly HashSet<Guid> followed = [];
+
+    private readonly HashSet<Guid> held = [];
+
+    private bool refreshingSwarm;
+
+    private bool refreshSwarmAgain;
+
     private readonly Dictionary<Guid, WorkspaceViewModel> opened = [];
 
     private WorkspaceInfo? selected;
@@ -199,6 +204,11 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Raised when the user opens the environment settings of the server's AI.
     /// </summary>
     public event Action? EnvironmentRequested;
+
+    /// <summary>
+    /// Raised when the swarm screen should show, with a delegated task to open or <see langword="null" />, and the focused workspace.
+    /// </summary>
+    public event Action<Guid?, Guid?>? SwarmRequested;
 
     /// <summary>
     /// Raised with the selected workspace when the user asks to move it to another folder.
@@ -263,6 +273,14 @@ internal sealed class HomeViewModel : ViewModelBase
                 }
 
                 BuildEntries();
+            }
+            else if (value.DelegatedTask is { } task)
+            {
+                // The task opens on the swarm screen, and the list keeps the focused workspace selected.
+                building = true;
+                Raise(nameof(SelectedEntry));
+                building = false;
+                SwarmRequested?.Invoke(task.Id, task.WorkspaceId);
             }
             else if (value.Workspace is { } workspace)
             {
@@ -376,6 +394,21 @@ internal sealed class HomeViewModel : ViewModelBase
     public bool CanEditSelected => selected is not null && (active?.State ?? WorkspaceState.Ready) == WorkspaceState.Ready;
 
     /// <summary>
+    /// Gets a value indicating whether the focused workspace can be renamed or moved: <see cref="CanEditSelected" />, and it runs no task another server delegated, which still lets it be deleted.
+    /// </summary>
+    public bool CanChangeSelected => CanEditSelected && active?.Delegation is null;
+
+    /// <summary>
+    /// Gets what stopping the work of a delegated workspace means, or <see langword="null" /> for any other workspace.
+    /// </summary>
+    public string? StopNote => active?.Delegation is { } task ? $"This cancels the task delegated by {task.From}, which is told." : null;
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="StopNote" /> has something to say.
+    /// </summary>
+    public bool HasStopNote => StopNote is not null;
+
+    /// <summary>
     /// Gets a value indicating whether a workspace is focused.
     /// </summary>
     public bool HasSelection => selected is not null;
@@ -430,6 +463,8 @@ internal sealed class HomeViewModel : ViewModelBase
                 Raise(nameof(IsEditing));
                 Raise(nameof(IsHalting));
                 Raise(nameof(IsStoppingWork));
+                Raise(nameof(StopNote));
+                Raise(nameof(HasStopNote));
                 Raise(nameof(CancelEditText));
                 Raise(nameof(NeedsName));
             }
@@ -567,6 +602,11 @@ internal sealed class HomeViewModel : ViewModelBase
     /// Gets the command that opens the environment settings of the server's AI.
     /// </summary>
     public AsyncCommand EnvironmentCommand { get; }
+
+    /// <summary>
+    /// Gets the command that shows the swarm screen.
+    /// </summary>
+    public AsyncCommand SwarmCommand { get; }
 
     /// <summary>
     /// Gets the command that asks to change server.
@@ -716,7 +756,7 @@ internal sealed class HomeViewModel : ViewModelBase
         {
             Fill(catalog!);
 
-            foreach (Guid stale in opened.Keys.Where(key => workspaces.All(workspace => workspace.Id != key)).ToList())
+            foreach (Guid stale in opened.Where(pair => !workspaces.Any(workspace => Same(workspace, pair.Value.Workspace))).Select(pair => pair.Key).ToList())
             {
                 opened[stale].Dispose();
                 opened.Remove(stale);
@@ -727,6 +767,132 @@ internal sealed class HomeViewModel : ViewModelBase
             Selected = null;
             Selected = workspaces.FirstOrDefault(workspace => workspace.Id == focus) ?? (focusFirst ? Entries.FirstOrDefault(entry => entry.IsWorkspace)?.Workspace : null);
             IsDrawerOpen = Selected is null;
+            await RefreshSwarm();
+        }
+    }
+
+    /// <summary>
+    /// Notifies the user when each of these tasks, delegated by hand from this client, ends.
+    /// </summary>
+    /// <param name="tasks">The tasks.</param>
+    public void Follow(IReadOnlyList<Guid> tasks)
+    {
+        followed.UnionWith(tasks);
+        _ = RefreshSwarm();
+    }
+
+    // The AI is told about a job whose remaining tasks wait on a lost one, so nothing of it is under way any more.
+    private bool IsUnderWay(SwarmTaskInfo task) => task.IsActive && !(task.State == SwarmTaskState.Waiting && swarmTasks.Any(other => other.JobId == task.JobId && other.State == SwarmTaskState.Lost));
+
+    /// <summary>
+    /// Stops following the server and lets go of everything the screen opened, once it is replaced for good.
+    /// </summary>
+    public void Dispose()
+    {
+        connection.Lost -= Lose;
+        connection.Reconnected -= Return;
+        connection.EventReceived -= Receive;
+
+        foreach ((Guid id, WorkspaceViewModel view) in opened)
+        {
+            keeper?.Release(id);
+            view.Dispose();
+        }
+
+        opened.Clear();
+        held.Clear();
+        followed.Clear();
+        Usage.Dispose();
+    }
+
+    private void Lose() => IsOffline = true;
+
+    private void Return()
+    {
+        IsOffline = false;
+        _ = Refresh();
+        _ = RefreshSwarm();
+    }
+
+    private void Receive(RemoteEvent remoteEvent)
+    {
+        if (remoteEvent.Kind == RemoteEventKind.WorkspacesChanged)
+        {
+            _ = Refresh();
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.LoopChanged && (remoteEvent.Loop is not null ? looping.Add(remoteEvent.WorkspaceId) : looping.Remove(remoteEvent.WorkspaceId)))
+        {
+            BuildEntries();
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.SwarmChanged)
+        {
+            _ = RefreshSwarm();
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.QueueChanged && (remoteEvent.Queue is not null ? waiting.Add(remoteEvent.WorkspaceId) : waiting.Remove(remoteEvent.WorkspaceId)))
+        {
+            BuildEntries();
+        }
+    }
+
+    private async Task RefreshSwarm()
+    {
+        if (refreshingSwarm)
+        {
+            refreshSwarmAgain = true;
+            return;
+        }
+
+        refreshingSwarm = true;
+
+        try
+        {
+            do
+            {
+                refreshSwarmAgain = false;
+                SwarmStatus? status;
+
+                try
+                {
+                    status = await connection.GetSwarm(CancellationToken.None);
+                }
+                catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
+                {
+                    return;
+                }
+
+                if (status is null)
+                {
+                    return;
+                }
+
+                foreach (SwarmTaskInfo task in status.Tasks.Where(task => !task.IsActive && followed.Contains(task.Id)))
+                {
+                    followed.Remove(task.Id);
+                    notifier?.Announce(task.WorkspaceId ?? Guid.Empty, $"Delegated task \"{task.Title}\": {task.State}");
+                }
+
+                swarmTasks.Clear();
+                swarmTasks.AddRange(status.Tasks.Where(task => !task.IsIncoming));
+
+                // Tasks that were all discarded are never reported to the AI, so nothing more would end the wait.
+                foreach (Guid id in held.Where(id => !swarmTasks.Any(task => task.WorkspaceId == id && !task.IsManual)).ToList())
+                {
+                    held.Remove(id);
+                    keeper?.Release(id);
+
+                    if (opened.TryGetValue(id, out WorkspaceViewModel? view))
+                    {
+                        view.NotifyWhenReady = false;
+                    }
+                }
+
+                BuildEntries();
+            }
+            while (refreshSwarmAgain);
+        }
+        finally
+        {
+            refreshingSwarm = false;
         }
     }
 
@@ -774,9 +940,7 @@ internal sealed class HomeViewModel : ViewModelBase
 
         foreach ((Guid id, WorkspaceViewModel view) in opened.ToList())
         {
-            WorkspaceInfo? now = workspaces.FirstOrDefault(workspace => workspace.Id == id);
-
-            if (now is null || now.Folder != view.Workspace.Folder || now.Service != view.Workspace.Service)
+            if (!workspaces.Any(workspace => Same(workspace, view.Workspace)))
             {
                 view.Dispose();
                 opened.Remove(id);
@@ -808,6 +972,9 @@ internal sealed class HomeViewModel : ViewModelBase
         }
     }
 
+    // A view reads one folder through one provider, so a workspace that changed either needs a new one.
+    private bool Same(WorkspaceInfo now, WorkspaceInfo shown) => now.Id == shown.Id && now.Folder == shown.Folder && now.Service == shown.Service;
+
     private void Fill(WorkspaceCatalog catalog)
     {
         workspaces.Clear();
@@ -817,6 +984,19 @@ internal sealed class HomeViewModel : ViewModelBase
         expanded.IntersectWith(groups.Select(group => group.Id));
         looping.Clear();
         looping.UnionWith(catalog.Looping);
+        waiting.Clear();
+        waiting.UnionWith(catalog.Queued);
+        delegations.Clear();
+
+        foreach (WorkspaceDelegation delegation in catalog.Delegations)
+        {
+            delegations[delegation.WorkspaceId] = delegation;
+        }
+
+        foreach ((Guid id, WorkspaceViewModel view) in opened)
+        {
+            view.Delegation = delegations.GetValueOrDefault(id);
+        }
     }
 
     private WorkspaceViewModel Open(WorkspaceInfo workspace)
@@ -826,9 +1006,22 @@ internal sealed class HomeViewModel : ViewModelBase
             return existing;
         }
 
-        WorkspaceViewModel created = new(connection, workspace, layout, drafts, recorder, preferences);
+        WorkspaceViewModel created = new(connection, workspace, layout, drafts, recorder, preferences)
+        {
+            Delegation = delegations.GetValueOrDefault(workspace.Id)
+        };
         created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, workspace.Name);
-        created.Chat.PromptFailed += () => keeper?.Release(workspace.Id);
+        created.Chat.PromptFailed += () =>
+        {
+            if (held.Contains(workspace.Id))
+            {
+                created.NotifyWhenReady = true;
+            }
+            else if (!created.NotifyWhenReady)
+            {
+                keeper?.Release(workspace.Id);
+            }
+        };
         WorkspaceState previous = created.State;
         DateTimeOffset busySince = time.GetUtcNow();
         created.PropertyChanged += (_, args) =>
@@ -847,12 +1040,21 @@ internal sealed class HomeViewModel : ViewModelBase
             {
                 if (created.NotifyWhenReady)
                 {
-                    created.NotifyWhenReady = false;
-                    keeper?.Release(workspace.Id);
-
-                    if (!created.IsLooping)
+                    // While the AI waits for delegated tasks its work is not over, so the app stays kept alive and the user is told once it has dealt with them.
+                    if (swarmTasks.Any(task => task.WorkspaceId == workspace.Id && !task.IsManual && IsUnderWay(task)))
                     {
-                        notifier?.Notify(workspace.Id, workspace.Name);
+                        held.Add(workspace.Id);
+                    }
+                    else
+                    {
+                        held.Remove(workspace.Id);
+                        keeper?.Release(workspace.Id);
+                        created.NotifyWhenReady = false;
+
+                        if (!created.IsLooping)
+                        {
+                            notifier?.Notify(workspace.Id, workspace.Name);
+                        }
                     }
                 }
 
@@ -1039,7 +1241,12 @@ internal sealed class HomeViewModel : ViewModelBase
 
         foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => looping.Contains(workspace.Id)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
         {
-            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsLooping = looping.Contains(workspace.Id) });
+            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsLooping = looping.Contains(workspace.Id), IsQueued = waiting.Contains(workspace.Id), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
+
+            foreach (SwarmTaskInfo task in swarmTasks.Where(task => task.WorkspaceId == workspace.Id && (task.IsActive || task.State == SwarmTaskState.Lost)).OrderBy(task => task.CreatedAt))
+            {
+                into.Add(new DrawerEntry { DelegatedTask = task, Depth = depth + 1 });
+            }
         }
     }
 

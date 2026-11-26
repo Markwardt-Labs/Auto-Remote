@@ -1,3 +1,6 @@
+global using System.Runtime.CompilerServices;
+global using System.Text.RegularExpressions;
+global using System.Collections.Concurrent;
 global using System.ComponentModel;
 global using System.Collections.ObjectModel;
 global using System.Collections.Specialized;
