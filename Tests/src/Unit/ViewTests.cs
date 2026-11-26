@@ -2048,9 +2048,9 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task ScrollSafeTextBlock_ATouchAnywhereDropsTheSelectionAHoldMade()
+    public async Task ScrollSafeTextBlock_ATapElsewhereDropsTheSelectionAHoldMadeButTouchingDownDoesNot()
     {
-        (string held, string after) = await fixture.Run(() =>
+        (string held, string touched, string after) = await fixture.Run(() =>
         {
             ScrollSafeTextBlock first = new() { Text = "some text to select", HoldDelay = TimeSpan.FromMilliseconds(30) };
             ScrollSafeTextBlock second = new() { Text = "other text", HoldDelay = TimeSpan.FromMilliseconds(30) };
@@ -2062,13 +2062,16 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Thread.Sleep(150);
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             string held = first.SelectedText;
-            second.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(second, new Avalonia.Input.Pointer(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true), window, new Avalonia.Point(5, 25), 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+            Avalonia.Input.Pointer other = new(Avalonia.Input.Pointer.GetNextFreeId(), Avalonia.Input.PointerType.Touch, true);
+            second.RaiseEvent(new Avalonia.Input.PointerPressedEventArgs(second, other, window, new Avalonia.Point(5, 25), 0, properties, Avalonia.Input.KeyModifiers.None, 1) { RoutedEvent = Avalonia.Input.InputElement.PointerPressedEvent });
+            string touched = first.SelectedText;
+            second.RaiseEvent(new Avalonia.Input.PointerReleasedEventArgs(second, other, window, new Avalonia.Point(5, 25), 1, properties, Avalonia.Input.KeyModifiers.None, Avalonia.Input.MouseButton.Left) { RoutedEvent = Avalonia.Input.InputElement.PointerReleasedEvent });
             string after = first.SelectedText;
             window.Close();
-            return (held, after);
+            return (held, touched, after);
         });
 
-        Assert.Equal("some", held);
+        Assert.Equal(("some", "some"), (held, touched));
         Assert.Equal(string.Empty, after);
     }
 
