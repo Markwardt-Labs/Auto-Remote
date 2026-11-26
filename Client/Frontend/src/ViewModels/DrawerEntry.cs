@@ -41,7 +41,7 @@ internal sealed record DrawerEntry
     public int Depth { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the workspace is working (in any state but <see cref="WorkspaceState.Ready" />), which highlights its row.
+    /// Gets a value indicating whether the row is highlighted as working: a workspace in any state but <see cref="WorkspaceState.Ready" />, or a group holding one, however deep.
     /// </summary>
     public bool IsWorking { get; init; }
 

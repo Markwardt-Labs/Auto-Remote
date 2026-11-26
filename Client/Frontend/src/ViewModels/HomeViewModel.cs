@@ -1241,6 +1241,8 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
     private bool HoldsMatch(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && Matches(workspace)) || Children(group).Any(child => Matches(child) || HoldsMatch(child.Id));
 
+    private bool HoldsBusy(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && busy.Contains(workspace.Id)) || Children(group).Any(child => HoldsBusy(child.Id));
+
     private void AddEntries(Guid? parent, int depth, bool showAll, List<DrawerEntry> into)
     {
         foreach (WorkspaceGroup group in Children(parent))
@@ -1253,7 +1255,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             }
 
             bool isCollapsed = !IsFiltering && !expanded.Contains(group.Id);
-            into.Add(new DrawerEntry { Group = group, IsCollapsed = isCollapsed, Depth = depth });
+            into.Add(new DrawerEntry { Group = group, IsCollapsed = isCollapsed, Depth = depth, IsWorking = HoldsBusy(group.Id) });
 
             if (!isCollapsed)
             {

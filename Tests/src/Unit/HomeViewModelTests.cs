@@ -22,7 +22,7 @@ public sealed class HomeViewModelTests
 
     private void State(WorkspaceInfo workspace, WorkspaceState state) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = workspace.Id, State = state });
 
-    private string[] Rows() => [.. model.Entries.Select(entry => entry.IsGroup ? entry.Group!.Name : $"{new string('>', entry.Depth)}{entry.Workspace!.Name}{(entry.IsWorking ? "*" : string.Empty)}")];
+    private string[] Rows() => [.. model.Entries.Select(entry => $"{new string('>', entry.Depth)}{(entry.IsGroup ? entry.Group!.Name : entry.Workspace!.Name)}{(entry.IsWorking ? "*" : string.Empty)}")];
 
     [Fact]
     public async Task WorkingWorkspaces_AreMarkedAndSortedToTheTopOfTheirOwnGroup()
@@ -39,21 +39,48 @@ public sealed class HomeViewModelTests
         await model.Start(focusFirst: false);
         model.SelectedEntry = model.Entries[0];
 
-        Assert.Equal(["G", ">busy*", ">grouped", "looping", "recent", "old"], Rows());
+        Assert.Equal(["G*", ">busy*", ">grouped", "looping", "recent", "old"], Rows());
 
         State(old, WorkspaceState.Working);
 
-        Assert.Equal(["G", ">busy*", ">grouped", "old*", "looping", "recent"], Rows());
+        Assert.Equal(["G*", ">busy*", ">grouped", "old*", "looping", "recent"], Rows());
 
         State(looping, WorkspaceState.Canceling);
 
-        Assert.Equal(["G", ">busy*", ">grouped", "looping*", "old*", "recent"], Rows());
+        Assert.Equal(["G*", ">busy*", ">grouped", "looping*", "old*", "recent"], Rows());
 
         State(old, WorkspaceState.Ready);
         State(looping, WorkspaceState.Ready);
         State(busy, WorkspaceState.Ready);
 
         Assert.Equal(["G", ">grouped", ">busy", "looping", "recent", "old"], Rows());
+    }
+
+    [Fact]
+    public async Task GroupsHoldingAWorkingWorkspace_AreMarkedHoweverDeepAndKeepTheirOrder()
+    {
+        WorkspaceGroup quiet = new() { Id = Guid.NewGuid(), Name = "Quiet" };
+        WorkspaceGroup outer = new() { Id = Guid.NewGuid(), Name = "Outer" };
+        WorkspaceGroup inner = new() { Id = Guid.NewGuid(), Name = "Inner", ParentId = outer.Id };
+        WorkspaceInfo deep = new() { Id = Guid.NewGuid(), Folder = "/work/deep", GroupId = inner.Id };
+        WorkspaceInfo calm = new() { Id = Guid.NewGuid(), Folder = "/work/calm", GroupId = quiet.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([quiet, outer, inner], deep, calm) with { Busy = [deep.Id] });
+
+        await model.Start(focusFirst: false);
+
+        Assert.Equal(["Quiet", "Outer*"], Rows());
+
+        model.SelectedEntry = model.Entries[1];
+
+        Assert.Equal(["Quiet", "Outer*", ">Inner*"], Rows());
+
+        State(deep, WorkspaceState.Ready);
+
+        Assert.Equal(["Quiet", "Outer", ">Inner"], Rows());
+
+        State(calm, WorkspaceState.Managing);
+
+        Assert.Equal(["Quiet*", "Outer", ">Inner"], Rows());
     }
 
     [Fact]

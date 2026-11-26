@@ -2669,6 +2669,44 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal(0, kept);
     }
 
+    [Fact]
+    public async Task HomeView_HighlightsAClosedGroupOnlyWhileAWorkspaceInsideItIsWorking()
+    {
+        WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Team" };
+        WorkspaceInfo inGroup = new() { Id = Guid.NewGuid(), Folder = "/work/beta", GroupId = group.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [group], Workspaces = [inGroup] });
+
+        List<(bool Marked, string Fill, string Text)> seen = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(focusFirst: false).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 700, Content = view };
+            window.Show();
+            model.IsDrawerOpen = true;
+            List<(bool, string, string)> snapshots = [];
+
+            foreach (WorkspaceState state in new[] { WorkspaceState.Ready, WorkspaceState.Working, WorkspaceState.Ready })
+            {
+                connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = inGroup.Id, State = state });
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                ListBoxItem row = (ListBoxItem)view.FindControl<ListBox>("DrawerList")!.ContainerFromIndex(0)!;
+                Avalonia.Media.IBrush? fill = row.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.ContentPresenter>().First(presenter => presenter.Name == "PART_ContentPresenter").Background;
+                TextBlock name = row.GetVisualDescendants().OfType<TextBlock>().First(block => block.IsEffectivelyVisible && block.Text == "▸ Team");
+                snapshots.Add((row.Classes.Contains("working"), (fill as Avalonia.Media.ISolidColorBrush)?.Color.ToString() ?? "none", (name.Foreground as Avalonia.Media.ISolidColorBrush)?.Color.ToString() ?? "none"));
+            }
+
+            window.Close();
+            return snapshots;
+        });
+
+        Assert.Equal([false, true, false], seen.Select(snapshot => snapshot.Marked));
+        Assert.Equal("#ff007acc", seen[1].Fill);
+        Assert.NotEqual("#ff007acc", seen[2].Fill);
+        Assert.Equal(("White", seen[0].Text), (seen[1].Text, seen[2].Text));
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

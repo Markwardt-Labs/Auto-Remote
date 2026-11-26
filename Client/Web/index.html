@@ -6028,6 +6028,11 @@ class Home {
       || this.children(id).some(child => this.matchesText(child.name) || this.holdsMatch(child.id));
   }
 
+  holdsBusy(id) {
+    return this.workspaces.some(item => this.parentOf(item.groupId) === id && this.busy.has(item.id))
+      || this.children(id).some(child => this.holdsBusy(child.id));
+  }
+
   addEntries(parent, depth, showAll) {
     for (const group of this.children(parent)) {
       const shown = !this.filtering || showAll || this.matchesText(group.name);
@@ -6065,7 +6070,7 @@ class Home {
       if (entry.group) {
         const group = entry.group;
         const tool = (label, title, action) => h("button", { class: "flat", title, onclick: event => { event.stopPropagation(); action(); } }, label);
-        return h("div", { class: "row group", style: indent, onclick: () => this.toggleGroup(group.id) },
+        return h("div", { class: `row group${this.holdsBusy(group.id) ? " working" : ""}`, style: indent, onclick: () => this.toggleGroup(group.id) },
           h("div", { class: "name" }, `${entry.collapsed ? "▸" : "▾"} ${group.name}`),
           tool("▲", "Move up", () => this.shift(() => this.connection.shiftGroup(group.id, -1))),
           tool("▼", "Move down", () => this.shift(() => this.connection.shiftGroup(group.id, 1))),
