@@ -20,6 +20,57 @@ public sealed class HomeViewModelTests
 
     private WorkspaceCatalog Catalog(WorkspaceGroup[] groups, params WorkspaceInfo[] workspaces) => new() { Groups = groups, Workspaces = workspaces };
 
+    private void State(WorkspaceInfo workspace, WorkspaceState state) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = workspace.Id, State = state });
+
+    private string[] Rows() => [.. model.Entries.Select(entry => entry.IsGroup ? entry.Group!.Name : $"{new string('>', entry.Depth)}{entry.Workspace!.Name}{(entry.IsWorking ? "*" : string.Empty)}")];
+
+    [Fact]
+    public async Task WorkingWorkspaces_AreMarkedAndSortedToTheTopOfTheirOwnGroup()
+    {
+        WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "G" };
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        WorkspaceInfo recent = new() { Id = Guid.NewGuid(), Folder = "/work/recent", LastUpdated = now };
+        WorkspaceInfo looping = new() { Id = Guid.NewGuid(), Folder = "/work/looping", LastUpdated = now.AddHours(-1) };
+        WorkspaceInfo old = new() { Id = Guid.NewGuid(), Folder = "/work/old", LastUpdated = now.AddHours(-2) };
+        WorkspaceInfo grouped = new() { Id = Guid.NewGuid(), Folder = "/work/grouped", LastUpdated = now, GroupId = group.Id };
+        WorkspaceInfo busy = new() { Id = Guid.NewGuid(), Folder = "/work/busy", LastUpdated = now.AddHours(-3), GroupId = group.Id };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([group], recent, looping, old, grouped, busy) with { Busy = [busy.Id], Looping = [looping.Id] });
+
+        await model.Start(focusFirst: false);
+        model.SelectedEntry = model.Entries[0];
+
+        Assert.Equal(["G", ">busy*", ">grouped", "looping", "recent", "old"], Rows());
+
+        State(old, WorkspaceState.Working);
+
+        Assert.Equal(["G", ">busy*", ">grouped", "old*", "looping", "recent"], Rows());
+
+        State(looping, WorkspaceState.Canceling);
+
+        Assert.Equal(["G", ">busy*", ">grouped", "looping*", "old*", "recent"], Rows());
+
+        State(old, WorkspaceState.Ready);
+        State(looping, WorkspaceState.Ready);
+        State(busy, WorkspaceState.Ready);
+
+        Assert.Equal(["G", ">grouped", ">busy", "looping", "recent", "old"], Rows());
+    }
+
+    [Fact]
+    public async Task AStateHeardWhileTheListWasOnItsWay_WinsOverWhatTheListSays()
+    {
+        TaskCompletionSource<WorkspaceCatalog> listing = new();
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).Returns(listing.Task);
+        Task starting = model.Start(focusFirst: false);
+
+        State(first, WorkspaceState.Ready);
+        State(second, WorkspaceState.Working);
+        listing.SetResult(Catalog([], first, second) with { Busy = [first.Id] });
+        await starting;
+
+        Assert.Equal(["b*", "a"], Rows());
+    }
+
     [Fact]
     public async Task SwitchingToAnotherWorkspace_AppliesTheSettingsEditsOfTheOneLeft()
     {

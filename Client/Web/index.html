@@ -394,6 +394,10 @@ details.section > .stack { padding: 4px 0 12px; }
 .drawer .row { padding: 10px 8px 10px 14px; }
 .drawer .row .name .ws-loop { display: inline-flex; vertical-align: middle; margin-left: 6px; color: var(--muted); }
 .drawer .row .name small { display: block; color: var(--muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+.drawer .row.working { background: var(--working); color: var(--on-working); }
+.drawer .row.working:hover { background: var(--accent-hover); }
+.drawer .row.working .name small, .drawer .row.working .name .ws-loop, .drawer .row.working button { color: var(--on-working); }
+.drawer .row.working.on { box-shadow: inset 4px 0 0 var(--on-working); }
 .drawer .row.group .name { font-weight: 600; }
 .drawer .row button { padding: 4px 8px; }
 .drawer .actions { display: flex; flex-direction: column; gap: 8px; }
@@ -5477,6 +5481,8 @@ class Home {
     this.refreshAgain = false;
     this.error = new ErrorLine();
     this.dialogError = new ErrorLine();
+    this.busy = new Set();
+    this.busyHeard = new Map();
     this.looping = new Set();
     this.queued = new Set();
     this.delegations = new Map();
@@ -5498,6 +5504,15 @@ class Home {
         }
 
         if (had !== this.queued.has(event.workspaceId)) {
+          this.buildEntries();
+          this.renderDrawer();
+        }
+      } else if (event.kind === "StateChanged") {
+        const had = this.busy.has(event.workspaceId);
+        this.busyHeard.set(event.workspaceId, event.state !== "Ready");
+        this.markBusy(event.workspaceId, event.state !== "Ready");
+
+        if (had !== this.busy.has(event.workspaceId)) {
           this.buildEntries();
           this.renderDrawer();
         }
@@ -5585,7 +5600,7 @@ class Home {
         let catalog;
 
         try {
-          catalog = await this.connection.listWorkspaces();
+          catalog = await this.listWorkspaces();
         } catch (exception) {
           return;
         }
@@ -5678,6 +5693,7 @@ class Home {
     const before = this.selected;
     this.workspaces = catalog.workspaces;
     this.groups = catalog.groups;
+    this.setBusy(catalog.busy);
     this.looping = new Set(catalog.looping ?? []);
     this.queued = new Set(catalog.queued ?? []);
     this.setDelegations(catalog.delegations);
@@ -5863,8 +5879,30 @@ class Home {
     }
   }
 
+  // States change often, so one heard while the list was on its way may be newer than what the list says.
+  listWorkspaces() {
+    this.busyHeard.clear();
+    return this.connection.listWorkspaces();
+  }
+
+  markBusy(id, working) {
+    if (working) {
+      this.busy.add(id);
+    } else {
+      this.busy.delete(id);
+    }
+  }
+
+  setBusy(busy) {
+    this.busy = new Set(busy ?? []);
+
+    for (const [id, working] of this.busyHeard) {
+      this.markBusy(id, working);
+    }
+  }
+
   async start(focus = null, focusFirst = true) {
-    const result = await attempt(() => this.connection.listWorkspaces(), this.error);
+    const result = await attempt(() => this.listWorkspaces(), this.error);
 
     if (!result.ok) {
       return;
@@ -5872,6 +5910,7 @@ class Home {
 
     this.workspaces = result.value.workspaces;
     this.groups = result.value.groups;
+    this.setBusy(result.value.busy);
     this.looping = new Set(result.value.looping ?? []);
     this.queued = new Set(result.value.queued ?? []);
     this.setDelegations(result.value.delegations);
@@ -6005,7 +6044,7 @@ class Home {
       }
     }
 
-    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => this.looping.has(right.id) - this.looping.has(left.id) || (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
+    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => this.busy.has(right.id) - this.busy.has(left.id) || this.looping.has(right.id) - this.looping.has(left.id) || (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
       this.entries.push({ workspace, depth });
 
       for (const task of this.swarmTasks.filter(item => item.workspaceId === workspace.id && (activeTaskStates.includes(item.state) || item.state === "Lost")).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))) {
@@ -6043,7 +6082,7 @@ class Home {
       const workspace = entry.workspace;
       const delegatedBy = this.delegations.get(workspace.id)?.from;
       const detail = [this.queued.has(workspace.id) ? "Queued" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
-      return h("div", { class: `row${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
+      return h("div", { class: `row${this.busy.has(workspace.id) ? " working" : ""}${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
         h("div", { class: "name" }, folderName(workspace.folder), ...(this.looping.has(workspace.id) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail)),
         h("button", { class: "flat", title: "Move to a group", onclick: event => { event.stopPropagation(); this.beginMove(workspace, null); } }, "↪"));
     }));
@@ -6154,11 +6193,12 @@ class Home {
   }
 
   async shift(action) {
-    const result = await attempt(async () => { await action(); return this.connection.listWorkspaces(); }, this.error);
+    const result = await attempt(async () => { await action(); return this.listWorkspaces(); }, this.error);
 
     if (result.ok) {
       this.workspaces = result.value.workspaces;
       this.groups = result.value.groups;
+      this.setBusy(result.value.busy);
       this.looping = new Set(result.value.looping ?? []);
       this.queued = new Set(result.value.queued ?? []);
       this.setDelegations(result.value.delegations);

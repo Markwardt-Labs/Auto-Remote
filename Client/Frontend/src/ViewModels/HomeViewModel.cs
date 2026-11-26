@@ -142,6 +142,10 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
     private readonly HashSet<Guid> expanded = [];
 
+    private readonly HashSet<Guid> busy = [];
+
+    private readonly Dictionary<Guid, bool> busyHeard = [];
+
     private readonly HashSet<Guid> looping = [];
 
     private readonly HashSet<Guid> waiting = [];
@@ -221,7 +225,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     public event Action? ChangeServerRequested;
 
     /// <summary>
-    /// Gets the drawer rows: the group tree flattened in display order. Within the top level and within each group the groups come first, in their manual order, and then the workspaces, the one whose AI session was loaded last first. Groups start collapsed, and the groups holding a workspace that gets focused open so that it shows.
+    /// Gets the drawer rows: the group tree flattened in display order. Within the top level and within each group the groups come first, in their manual order, and then the workspaces: the working ones first, then the ones a loop runs in, and among each the one whose AI session was loaded last first. Groups start collapsed, and the groups holding a workspace that gets focused open so that it shows.
     /// </summary>
     public ObservableCollection<DrawerEntry> Entries { get; } = [];
 
@@ -255,39 +259,17 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         get => selectedEntry;
         set
         {
-            if (building || value is null)
+            if (!building && value is not null)
             {
-                return;
-            }
-
-            if (value.Group is { } group)
-            {
-                if (IsFiltering)
-                {
-                    return;
-                }
-
-                if (!expanded.Remove(group.Id))
-                {
-                    expanded.Add(group.Id);
-                }
-
-                BuildEntries();
-            }
-            else if (value.DelegatedTask is { } task)
-            {
-                // The task opens on the swarm screen, and the list keeps the focused workspace selected.
-                building = true;
-                Raise(nameof(SelectedEntry));
-                building = false;
-                SwarmRequested?.Invoke(task.Id, task.WorkspaceId);
-            }
-            else if (value.Workspace is { } workspace)
-            {
-                Selected = workspace;
+                AfterSelection(() => Tap(value));
             }
         }
     }
+
+    /// <summary>
+    /// Gets or sets how a tap on a drawer row is acted on: at once, unless a view puts it off until its list has finished selecting the row, since the rows must not change while it does.
+    /// </summary>
+    public Action<Action> AfterSelection { get; set; } = action => action();
 
     /// <summary>
     /// Gets the usage limits of the AI service of the focused workspace.
@@ -752,7 +734,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     {
         WorkspaceCatalog? catalog = null;
 
-        if (await Attempt(async () => catalog = await connection.ListWorkspaces(CancellationToken.None)))
+        if (await Attempt(async () => catalog = await List()))
         {
             Fill(catalog!);
 
@@ -819,6 +801,16 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         if (remoteEvent.Kind == RemoteEventKind.WorkspacesChanged)
         {
             _ = Refresh();
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
+        {
+            bool working = state != WorkspaceState.Ready;
+            busyHeard[remoteEvent.WorkspaceId] = working;
+
+            if (working ? busy.Add(remoteEvent.WorkspaceId) : busy.Remove(remoteEvent.WorkspaceId))
+            {
+                BuildEntries();
+            }
         }
         else if (remoteEvent.Kind == RemoteEventKind.LoopChanged && (remoteEvent.Loop is not null ? looping.Add(remoteEvent.WorkspaceId) : looping.Remove(remoteEvent.WorkspaceId)))
         {
@@ -915,7 +907,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
                 try
                 {
-                    catalog = await connection.ListWorkspaces(CancellationToken.None);
+                    catalog = await List();
                 }
                 catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
                 {
@@ -982,6 +974,14 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         groups.Clear();
         groups.AddRange(catalog.Groups);
         expanded.IntersectWith(groups.Select(group => group.Id));
+        busy.Clear();
+        busy.UnionWith(catalog.Busy);
+
+        foreach ((Guid id, bool working) in busyHeard)
+        {
+            _ = working ? busy.Add(id) : busy.Remove(id);
+        }
+
         looping.Clear();
         looping.UnionWith(catalog.Looping);
         waiting.Clear();
@@ -997,6 +997,13 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             view.Delegation = delegations.GetValueOrDefault(id);
         }
+    }
+
+    // States change often, so one heard while the list was on its way may be newer than what the list says.
+    private Task<WorkspaceCatalog> List()
+    {
+        busyHeard.Clear();
+        return connection.ListWorkspaces(CancellationToken.None);
     }
 
     private WorkspaceViewModel Open(WorkspaceInfo workspace)
@@ -1176,6 +1183,26 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         AddEntries(null, 0, false, wanted);
         building = true;
 
+        for (int index = Entries.Count - 1; index >= 0; index--)
+        {
+            if (!wanted.Contains(Entries[index]))
+            {
+                Entries.RemoveAt(index);
+            }
+        }
+
+        // A list drops its selection when the selected row is moved, so that row stays and the others move around it.
+        if (selectedEntry is not null && wanted.IndexOf(selectedEntry) is int pinned and >= 0)
+        {
+            for (int index = Entries.IndexOf(selectedEntry) - 1; index >= 0; index--)
+            {
+                if (wanted.IndexOf(Entries[index]) > pinned)
+                {
+                    Entries.Move(index, Entries.Count - 1);
+                }
+            }
+        }
+
         for (int index = 0; index < wanted.Count; index++)
         {
             if (index < Entries.Count && Entries[index] == wanted[index])
@@ -1201,11 +1228,6 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             {
                 Entries.Insert(index, wanted[index]);
             }
-        }
-
-        while (Entries.Count > wanted.Count)
-        {
-            Entries.RemoveAt(Entries.Count - 1);
         }
 
         building = false;
@@ -1239,15 +1261,55 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             }
         }
 
-        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => looping.Contains(workspace.Id)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => busy.Contains(workspace.Id)).ThenByDescending(workspace => looping.Contains(workspace.Id)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
         {
-            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsLooping = looping.Contains(workspace.Id), IsQueued = waiting.Contains(workspace.Id), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
+            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsWorking = busy.Contains(workspace.Id), IsLooping = looping.Contains(workspace.Id), IsQueued = waiting.Contains(workspace.Id), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
 
             foreach (SwarmTaskInfo task in swarmTasks.Where(task => task.WorkspaceId == workspace.Id && (task.IsActive || task.State == SwarmTaskState.Lost)).OrderBy(task => task.CreatedAt))
             {
                 into.Add(new DrawerEntry { DelegatedTask = task, Depth = depth + 1 });
             }
         }
+    }
+
+    private void Tap(DrawerEntry entry)
+    {
+        if (entry.Group is { } group)
+        {
+            if (!IsFiltering)
+            {
+                if (!expanded.Remove(group.Id))
+                {
+                    expanded.Add(group.Id);
+                }
+
+                BuildEntries();
+            }
+
+            ShowFocusedAsSelected();
+        }
+        else if (entry.DelegatedTask is { } task)
+        {
+            // The task opens on the swarm screen, and the list keeps the focused workspace selected.
+            ShowFocusedAsSelected();
+            SwarmRequested?.Invoke(task.Id, task.WorkspaceId);
+        }
+        else if (entry.Workspace is { } workspace)
+        {
+            Selected = workspace;
+        }
+    }
+
+    // The list took the tapped row as selected. Unless it goes back to the focused workspace, tapping that row again would change nothing.
+    private void ShowFocusedAsSelected()
+    {
+        building = true;
+        DrawerEntry? focused = selectedEntry;
+        selectedEntry = null;
+        Raise(nameof(SelectedEntry));
+        selectedEntry = focused;
+        Raise(nameof(SelectedEntry));
+        building = false;
     }
 
     private void SyncSelectedEntry()
@@ -1384,7 +1446,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         if (await Attempt(async () =>
         {
             await connection.ShiftGroup(group.Id, offset, CancellationToken.None);
-            catalog = await connection.ListWorkspaces(CancellationToken.None);
+            catalog = await List();
         }))
         {
             Fill(catalog!);

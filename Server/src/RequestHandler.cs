@@ -545,7 +545,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     private async Task<WorkspaceCatalog> Catalog(CancellationToken cancellation)
     {
         WorkspaceCatalog catalog = await workspaces.List(cancellation);
-        return catalog with { Looping = [.. catalog.Workspaces.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)], Queued = queue.Waiting, Delegations = swarm.Delegations };
+        return catalog with { Looping = [.. catalog.Workspaces.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)], Busy = [.. catalog.Workspaces.Where(workspace => activity.Get(workspace.Id) != WorkspaceState.Ready).Select(workspace => workspace.Id)], Queued = queue.Waiting, Delegations = swarm.Delegations };
     }
 
     private Guid RequireWorkspace(RemoteRequest request) => request.WorkspaceId ?? throw new RequestException("The request needs a workspace.");

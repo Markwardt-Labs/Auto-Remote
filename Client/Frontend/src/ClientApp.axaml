@@ -212,6 +212,16 @@
     <Style Selector="ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource Selection}" />
     </Style>
+    <Style Selector="ListBoxItem.working /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource Working}" />
+    </Style>
+    <Style Selector="ListBoxItem.working:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="{DynamicResource AccentHover}" />
+    </Style>
+    <!-- The bar keeps the focused workspace apart from the others while it is highlighted as working. -->
+    <Style Selector="ListBoxItem.working:selected /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BoxShadow" Value="inset 4 0 0 0 White" />
+    </Style>
     <Style Selector="Path.lineIcon">
       <Setter Property="Stroke" Value="{DynamicResource Muted}" />
       <Setter Property="StrokeThickness" Value="1.2" />
@@ -273,6 +283,9 @@
     <Style Selector="Button.icon.recording /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{DynamicResource Selection}" />
     </Style>
+    <Style Selector="ListBoxItem.working TextBlock"><Setter Property="Foreground" Value="{DynamicResource OnWorking}" /></Style>
+    <Style Selector="ListBoxItem.working Button"><Setter Property="Foreground" Value="{DynamicResource OnWorking}" /></Style>
+    <Style Selector="ListBoxItem.working Path.lineIcon"><Setter Property="Stroke" Value="{DynamicResource OnWorking}" /></Style>
     <Style Selector="TextBlock.added"><Setter Property="Foreground" Value="{DynamicResource GitAdded}" /></Style>
     <Style Selector="TextBlock.modified"><Setter Property="Foreground" Value="{DynamicResource GitModified}" /></Style>
     <Style Selector="TextBlock.deleted"><Setter Property="Foreground" Value="{DynamicResource Danger}" /></Style>

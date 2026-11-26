@@ -41,6 +41,11 @@ internal sealed record DrawerEntry
     public int Depth { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the workspace is working (in any state but <see cref="WorkspaceState.Ready" />), which highlights its row.
+    /// </summary>
+    public bool IsWorking { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether a loop of the AI runs in the workspace, which shows a loop icon next to its name.
     /// </summary>
     public bool IsLooping { get; init; }

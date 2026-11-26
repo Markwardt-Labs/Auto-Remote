@@ -38,6 +38,12 @@ public sealed partial class HomeView : UserControl
             };
         }
 
+        if (this.FindControl<ListBox>("DrawerList") is { } drawer)
+        {
+            // The highlight belongs to the whole row, which only the item's container covers; a row that changes is a new item, so preparing it is enough.
+            drawer.ContainerPrepared += (_, args) => args.Container.Classes.Set("working", drawer.Items[args.Index] is DrawerEntry { IsWorking: true });
+        }
+
         if (this.FindControl<TextBox>("ChatInput") is { } input)
         {
             input.TextChanged += (_, _) => OnChatTextChanged();
@@ -86,10 +92,29 @@ public sealed partial class HomeView : UserControl
 
     private double? restoreHeight;
 
+    private HomeViewModel? home;
+
+    private bool revealFocused;
+
     /// <inheritdoc />
     protected override void OnDataContextChanged(EventArgs args)
     {
         base.OnDataContextChanged(args);
+
+        if (home is not null)
+        {
+            home.PropertyChanged -= OnHomeChanged;
+        }
+
+        home = DataContext as HomeViewModel;
+        revealFocused = home is not null;
+
+        if (home is not null)
+        {
+            home.AfterSelection = action => Dispatcher.UIThread.Post(action);
+            home.PropertyChanged += OnHomeChanged;
+            RevealFocused();
+        }
 
         if (DataContext is HomeViewModel { IsDesktop: true } && this.FindControl<Grid>("ChatGrid") is { } grid && this.FindControl<TextBox>("ChatInput") is { } input)
         {
@@ -100,6 +125,28 @@ public sealed partial class HomeView : UserControl
             input.MaxHeight = double.PositiveInfinity;
         }
     }
+
+    private void OnHomeChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs args)
+    {
+        revealFocused |= args.PropertyName == nameof(HomeViewModel.Selected);
+
+        if (args.PropertyName is nameof(HomeViewModel.Selected) or nameof(HomeViewModel.IsDrawerOpen))
+        {
+            RevealFocused();
+        }
+    }
+
+    // The drawer's list stays where the user scrolled it, so it is only brought to the focused workspace once after the focus moved, when it can be seen.
+    private void RevealFocused() => Dispatcher.UIThread.Post(
+        () =>
+        {
+            if (revealFocused && home is { IsDrawerOpen: true, SelectedEntry: { } entry } && this.FindControl<ListBox>("DrawerList") is { } drawer)
+            {
+                revealFocused = false;
+                drawer.ScrollIntoView(entry);
+            }
+        },
+        DispatcherPriority.Loaded);
 
     private void OnChatTextChanged()
     {

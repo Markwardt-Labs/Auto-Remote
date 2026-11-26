@@ -21,6 +21,11 @@ public sealed record WorkspaceCatalog
     public IReadOnlyList<Guid> Looping { get; init; } = [];
 
     /// <summary>
+    /// Gets the identifiers of the workspaces in any state but <see cref="WorkspaceState.Ready" /> right now; later changes arrive as <see cref="RemoteEventKind.StateChanged" /> events.
+    /// </summary>
+    public IReadOnlyList<Guid> Busy { get; init; } = [];
+
+    /// <summary>
     /// Gets the identifiers of the workspaces with work waiting for the local AI right now; later changes arrive as <see cref="RemoteEventKind.QueueChanged" /> events.
     /// </summary>
     public IReadOnlyList<Guid> Queued { get; init; } = [];

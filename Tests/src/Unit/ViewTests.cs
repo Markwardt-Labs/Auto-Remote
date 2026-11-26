@@ -2523,6 +2523,197 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task HomeView_HighlightsWorkingWorkspacesAndKeepsTheFocusedOneSelectedAsItMovesToTheTop()
+    {
+        WorkspaceInfo first = new() { Id = Guid.NewGuid(), Folder = "/work/a", LastUpdated = DateTimeOffset.UtcNow };
+        WorkspaceInfo second = new() { Id = Guid.NewGuid(), Folder = "/work/b", LastUpdated = DateTimeOffset.UtcNow.AddHours(-1) };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [first, second] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+
+        List<(string Rows, string? Selected, string Fill)> seen = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(second.Id).GetAwaiter().GetResult();
+            model.IsDrawerOpen = true;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 900, Content = view };
+            window.Show();
+            List<(string, string?, string)> snapshots = [];
+
+            void Look()
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                ListBox list = view.FindControl<ListBox>("DrawerList")!;
+                List<ListBoxItem> rows = [.. list.GetRealizedContainers().Cast<ListBoxItem>().OrderBy(row => row.Bounds.Y)];
+                string text = string.Join(",", rows.Select(row => $"{((DrawerEntry)row.DataContext!).Text}{(row.Classes.Contains("working") ? "*" : string.Empty)}"));
+                string fill = string.Join(",", rows.Select(row => row.GetVisualDescendants().OfType<Avalonia.Controls.Presenters.ContentPresenter>().First(presenter => presenter.Name == "PART_ContentPresenter").Background is Avalonia.Media.ISolidColorBrush brush ? brush.Color.ToString() : "none"));
+                snapshots.Add((text, (rows.SingleOrDefault(row => row.IsSelected)?.DataContext as DrawerEntry)?.Text, fill));
+            }
+
+            void State(WorkspaceInfo workspace, WorkspaceState state) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = workspace.Id, State = state });
+
+            Look();
+            State(second, WorkspaceState.Working);
+            Look();
+            State(first, WorkspaceState.Managing);
+            Look();
+            State(second, WorkspaceState.Ready);
+            Look();
+            State(first, WorkspaceState.Ready);
+            Look();
+            window.Close();
+            return snapshots;
+        });
+
+        Assert.Equal(["a,b", "b*,a", "a*,b*", "a*,b", "a,b"], seen.Select(snapshot => snapshot.Rows));
+        Assert.All(seen, snapshot => Assert.Equal("b", snapshot.Selected));
+        Assert.Equal("#ff007acc,none", seen[3].Fill.Replace("Transparent", "none").Replace("#ff094771", "none"));
+    }
+
+    [Fact]
+    public async Task HomeView_KeepsTheScrollPositionAndTheSelectionWhileOtherWorkspacesStartAndStopWorking()
+    {
+        WorkspaceInfo[] many = [.. Enumerable.Range(10, 40).Select(number => new WorkspaceInfo { Id = Guid.NewGuid(), Folder = $"/work/w{number}" })];
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = many });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+
+        List<(double Offset, string? Selected, string First)> seen = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(many[2].Id).GetAwaiter().GetResult();
+            model.IsDrawerOpen = true;
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 600, Content = view };
+            window.Show();
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            ListBox list = view.FindControl<ListBox>("DrawerList")!;
+            ScrollViewer scroller = list.GetVisualDescendants().OfType<ScrollViewer>().First();
+            scroller.Offset = new Avalonia.Vector(0, 600);
+            List<(double, string?, string)> snapshots = [];
+
+            void Look()
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                snapshots.Add((scroller.Offset.Y, (list.SelectedItem as DrawerEntry)?.Text, model.Entries[0].Text));
+            }
+
+            void State(int index, WorkspaceState state) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = many[index].Id, State = state });
+
+            Look();
+            State(30, WorkspaceState.Working);
+            Look();
+            State(1, WorkspaceState.Working);
+            Look();
+            State(30, WorkspaceState.Ready);
+            Look();
+            State(1, WorkspaceState.Ready);
+            Look();
+            window.Close();
+            return snapshots;
+        });
+
+        Assert.Equal(["w10", "w40", "w11", "w11", "w10"], seen.Select(snapshot => snapshot.First));
+        Assert.All(seen, snapshot => Assert.Equal("w12", snapshot.Selected));
+        Assert.All(seen, snapshot => Assert.Equal(seen[0].Offset, snapshot.Offset));
+        Assert.True(seen[0].Offset > 0);
+    }
+
+    [Fact]
+    public async Task HomeView_OpeningTheSidebarAfterTheFocusMovedShowsTheFocusedWorkspace()
+    {
+        WorkspaceInfo[] many = [.. Enumerable.Range(10, 40).Select(number => new WorkspaceInfo { Id = Guid.NewGuid(), Folder = $"/work/w{number}" })];
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = many });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+
+        (double top, double height, double kept) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(many[0].Id).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 600, Content = view };
+            window.Show();
+
+            void Settle()
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            }
+
+            Settle();
+            model.Selected = many[35];
+            Settle();
+            model.IsDrawerOpen = true;
+            Settle();
+            ListBox list = view.FindControl<ListBox>("DrawerList")!;
+            Control row = list.ContainerFromItem(model.SelectedEntry!)!;
+            double top = Avalonia.VisualExtensions.TranslatePoint(row, new Avalonia.Point(0, 0), list)!.Value.Y;
+            ScrollViewer scroller = list.GetVisualDescendants().OfType<ScrollViewer>().First();
+            scroller.Offset = new Avalonia.Vector(0, 0);
+            model.IsDrawerOpen = false;
+            Settle();
+            model.IsDrawerOpen = true;
+            Settle();
+            (double, double, double) result = (top, list.Bounds.Height, scroller.Offset.Y);
+            window.Close();
+            return result;
+        });
+
+        Assert.InRange(top, 0, height - 20);
+        Assert.Equal(0, kept);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HomeView_EveryTapOnAGroupTogglesItAndLeavesTheFocusedWorkspaceSelected(bool focused)
+    {
+        WorkspaceGroup group = new() { Id = Guid.NewGuid(), Name = "Team" };
+        WorkspaceInfo inGroup = new() { Id = Guid.NewGuid(), Folder = "/work/beta", GroupId = group.Id };
+        WorkspaceInfo loose = new() { Id = Guid.NewGuid(), Folder = "/work/delta" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [group], Workspaces = [inGroup, loose] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+
+        List<(string Rows, string? Selected)> seen = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object);
+            model.Start(focused ? loose.Id : null, focusFirst: false).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 900, Height = 700, Content = view };
+            window.Show();
+            model.IsDrawerOpen = true;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            ListBox list = view.FindControl<ListBox>("DrawerList")!;
+            List<(string, string?)> snapshots = [];
+
+            for (int tap = 0; tap < 3; tap++)
+            {
+                Control row = list.ContainerFromIndex(0)!;
+                Avalonia.Point at = Avalonia.VisualExtensions.TranslatePoint(row, new Avalonia.Point(30, row.Bounds.Height / 2), window)!.Value;
+                window.MouseDown(at, Avalonia.Input.MouseButton.Left);
+                window.MouseUp(at, Avalonia.Input.MouseButton.Left);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+                snapshots.Add((string.Join(",", list.GetRealizedContainers().Cast<ListBoxItem>().OrderBy(item => item.Bounds.Y).Select(item => ((DrawerEntry)item.DataContext!).Text)), (list.SelectedItem as DrawerEntry)?.Text));
+            }
+
+            window.Close();
+            return snapshots;
+        });
+
+        Assert.Equal(["▾ Team,beta,delta", "▸ Team,delta", "▾ Team,beta,delta"], seen.Select(snapshot => snapshot.Rows));
+        Assert.All(seen, snapshot => Assert.Equal(focused ? "delta" : null, snapshot.Selected));
+    }
+
+    [Fact]
     public async Task HomeView_TopRightIconButtonsAndTheWindowControlsAreTheSameSizeAndEvenlySpaced()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

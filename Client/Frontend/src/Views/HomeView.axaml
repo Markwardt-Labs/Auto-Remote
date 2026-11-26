@@ -963,7 +963,7 @@
             <local:TouchButton Grid.Column="1" Content="&#x2699;&#xFE0E;" Classes="flat" FontSize="20" ToolTip.Tip="AI environment settings" Command="{Binding EnvironmentCommand}" VerticalAlignment="Center" />
           </Grid>
           <TextBox Grid.Row="1" Text="{Binding Filter}" PlaceholderText="Filter workspaces" Margin="0,0,0,8" />
-          <ListBox Grid.Row="2" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}" Background="Transparent">
+          <ListBox Name="DrawerList" AutoScrollToSelectedItem="False" Grid.Row="2" ItemsSource="{Binding Entries}" SelectedItem="{Binding SelectedEntry}" Background="Transparent">
             <ListBox.ItemTemplate>
               <DataTemplate>
                 <Panel>
