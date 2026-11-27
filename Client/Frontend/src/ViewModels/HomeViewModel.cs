@@ -56,6 +56,11 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             IsUsageOpen = !isUsageOpen;
             return Task.CompletedTask;
         });
+        ToggleNotifyCommand = new AsyncCommand(_ =>
+        {
+            ToggleNotify();
+            return Task.CompletedTask;
+        });
         ToggleDrawerCommand = new AsyncCommand(_ =>
         {
             IsDrawerOpen = !isDrawerOpen;
@@ -406,9 +411,30 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                 Resources.IsSectionShown = value?.ShowSettings ?? false;
                 Raise(nameof(IsAiWorking));
                 Raise(nameof(IsWorking));
+                RaiseNotify();
             }
         }
     }
+
+    /// <summary>
+    /// Gets a value indicating whether the button that turns the ready notification on and off shows: the app can notify, and the focused workspace has work that is not over, being busy, looping, queued or waiting for tasks it delegated, or its notification is on.
+    /// </summary>
+    public bool CanNotify => notifier is not null && active is { } view && (view.NotifyWhenReady || view.State != WorkspaceState.Ready || view.IsLooping || view.Chat.IsQueued || HasTasksUnderWay(view.Workspace.Id));
+
+    /// <summary>
+    /// Gets a value indicating whether the user is told once the work of the focused workspace is over.
+    /// </summary>
+    public bool IsNotifying => active?.NotifyWhenReady ?? false;
+
+    /// <summary>
+    /// Gets what the notification button says it does.
+    /// </summary>
+    public string NotifyTip => IsNotifying ? "You will be notified when this workspace is ready. Press to turn the notification off." : "Notify me when this workspace is ready";
+
+    /// <summary>
+    /// Gets the command that turns the ready notification of the focused workspace on or off.
+    /// </summary>
+    public AsyncCommand ToggleNotifyCommand { get; }
 
     /// <summary>
     /// Gets a value indicating whether the AI is working in the focused workspace.
@@ -1148,6 +1174,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
                 swarmTasks.Clear();
                 swarmTasks.AddRange(status.Tasks.Where(task => !task.IsIncoming));
+                RaiseNotify();
 
                 // Tasks that were all discarded are never reported to the AI, so nothing more would end the wait.
                 foreach (Guid id in held.Where(id => !swarmTasks.Any(task => task.WorkspaceId == id && !task.IsManual)).ToList())
@@ -1382,22 +1409,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             {
                 if (created.NotifyWhenReady)
                 {
-                    // While the AI waits for delegated tasks its work is not over, so the app stays kept alive and the user is told once it has dealt with them.
-                    if (swarmTasks.Any(task => task.WorkspaceId == workspace.Id && !task.IsManual && IsUnderWay(task)))
-                    {
-                        held.Add(workspace.Id);
-                    }
-                    else
-                    {
-                        held.Remove(workspace.Id);
-                        keeper?.Release(workspace.Id);
-                        created.NotifyWhenReady = false;
-
-                        if (!created.IsLooping)
-                        {
-                            notifier?.Notify(workspace.Id, NameOf(workspace));
-                        }
-                    }
+                    Conclude(created, workspace);
                 }
 
                 if (!created.IsLooping && time.GetUtcNow() - busySince >= minimumBusy)
@@ -1407,6 +1419,28 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             }
 
             previous = created.State;
+        };
+        // A loop that ends between its runs changes no state, though the work waited for is over with it.
+        created.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(WorkspaceViewModel.IsLooping) && !created.IsLooping && created.State == WorkspaceState.Ready && !created.Chat.IsQueued && created.NotifyWhenReady)
+            {
+                Conclude(created, workspace);
+            }
+        };
+        created.PropertyChanged += (_, args) =>
+        {
+            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.IsLooping) or nameof(WorkspaceViewModel.NotifyWhenReady))
+            {
+                RaiseNotify();
+            }
+        };
+        created.Chat.PropertyChanged += (_, args) =>
+        {
+            if (created == active && args.PropertyName == nameof(ChatViewModel.IsQueued))
+            {
+                RaiseNotify();
+            }
         };
         created.PropertyChanged += (_, args) =>
         {
@@ -1444,6 +1478,65 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
     // Sessions and workspaces can be renamed while their view stays.
     private string NameOf(WorkspaceInfo workspace) => workspaces.Concat(sideSessions).FirstOrDefault(known => known.Id == workspace.Id)?.Name ?? workspace.Name;
+
+    private bool HasTasksUnderWay(Guid id) => swarmTasks.Any(task => task.WorkspaceId == id && !task.IsManual && IsUnderWay(task));
+
+    // Tells the user that the work they wait for is over, unless more of it is still to come.
+    private void Conclude(WorkspaceViewModel view, WorkspaceInfo workspace)
+    {
+        // While the AI waits for delegated tasks its work is not over, so the app stays kept alive and the user is told once it has dealt with them.
+        if (HasTasksUnderWay(workspace.Id))
+        {
+            held.Add(workspace.Id);
+            return;
+        }
+
+        held.Remove(workspace.Id);
+
+        // Nor is it while a loop runs, between whose runs the workspace is ready.
+        if (view.IsLooping)
+        {
+            return;
+        }
+
+        keeper?.Release(workspace.Id);
+        view.NotifyWhenReady = false;
+        notifier?.Notify(workspace.Id, NameOf(workspace));
+    }
+
+    private void ToggleNotify()
+    {
+        if (active is not { } view)
+        {
+            return;
+        }
+
+        Guid id = view.Workspace.Id;
+
+        if (view.NotifyWhenReady)
+        {
+            view.NotifyWhenReady = false;
+            held.Remove(id);
+            keeper?.Release(id);
+            return;
+        }
+
+        keeper?.Hold(id, NameOf(view.Workspace));
+        view.NotifyWhenReady = true;
+
+        // One that is ready while tasks it delegated are under way waits for them as if it had been waited for all along.
+        if (view.State == WorkspaceState.Ready && HasTasksUnderWay(id))
+        {
+            held.Add(id);
+        }
+    }
+
+    private void RaiseNotify()
+    {
+        Raise(nameof(CanNotify));
+        Raise(nameof(IsNotifying));
+        Raise(nameof(NotifyTip));
+    }
 
     private Task Begin(EditMode mode, string text, WorkspaceGroup? group = null)
     {

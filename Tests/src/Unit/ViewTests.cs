@@ -3267,6 +3267,53 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task NotifyButton_ShowsBesideTheTitleOfAWorkingWorkspaceAndFillsItsBellOnceOn()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+
+        (bool whenReady, bool whenWorking, bool onBefore, bool onAfter, bool filled, double width, double right, double title) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, notifier: Mock.Of<IReadyNotifier>());
+            model.Start().GetAwaiter().GetResult();
+            Window window = new() { Width = 360, Height = 800, Content = new HomeView { DataContext = model } };
+            window.Show();
+            model.IsDrawerOpen = false;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            TouchButton button = window.GetVisualDescendants().OfType<TouchButton>().Single(found => found.Name == "NotifyButton");
+            bool whenReady = button.IsEffectivelyVisible;
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            bool whenWorking = button.IsEffectivelyVisible;
+            bool onBefore = button.Classes.Contains("on");
+            button.Command!.Execute(button.CommandParameter);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            Avalonia.Controls.Shapes.Path bell = button.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Path>().Single();
+            bool onAfter = button.Classes.Contains("on");
+            bool filled = bell.Fill is Avalonia.Media.ISolidColorBrush { Color.A: > 0 };
+            double width = button.Bounds.Width;
+            double right = Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(button.Bounds.Width, 0), window)!.Value.X;
+            double title = window.GetVisualDescendants().OfType<TextBlock>().Single(found => found.Name == "TitleText").Bounds.Width;
+            window.Close();
+            model.Dispose();
+            return (whenReady, whenWorking, onBefore, onAfter, filled, width, right, title);
+        });
+
+        Assert.False(whenReady);
+        Assert.True(whenWorking);
+        Assert.False(onBefore);
+        Assert.True(onAfter);
+        Assert.True(filled);
+        // On a narrow screen the whole button stays left of the two buttons at the right, beside a title that can still be read.
+        Assert.Equal(34, width);
+        Assert.InRange(right, 200, 360 - 76 - 8);
+        Assert.True(title > 30, $"The title is {title} wide.");
+    }
+
+    [Fact]
     public async Task Resources_ShowInTheWorkspaceListAndInTheSectionOfBothSettingsScreens()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };

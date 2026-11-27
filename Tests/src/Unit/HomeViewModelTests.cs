@@ -344,21 +344,169 @@ public sealed class HomeViewModelTests
         notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
     }
 
+    private void Looping(WorkspaceInfo workspace, bool looping) => connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = looping ? new LoopInfo { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UnixEpoch } : null });
+
     [Fact]
-    public async Task Notifier_StaysQuietWhileALoopRunsAndForgetsTheWorkItWasWaitingFor()
+    public async Task Notifier_WaitsThroughTheRunsOfALoopUntilTheLoopIsOver()
     {
-        connection.Setup(x => x.GetLoop(first.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new LoopInfo { Settings = new LoopSettings { Prompt = "check" }, StartedAt = DateTimeOffset.UnixEpoch });
-        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
-        await Task.Delay(100);
+        Mock<IWorkKeeper> keeper = new();
+        Mock<IReadyNotifier> notifier = new();
+        HomeViewModel notifying = new(connection.Object, ClientLayout.Tabs, null, null, null, notifier.Object, keeper.Object);
+        await notifying.Start();
+        Looping(first, true);
         notifying.Active!.Chat.Input = "do it";
 
         notifying.Active.Chat.SendCommand.Execute(null);
         await Task.Delay(50);
         Working(first, true);
         Working(first, false);
+        Working(first, true);
+        Working(first, false);
 
         notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
-        Assert.False(notifying.Active.NotifyWhenReady);
+        keeper.Verify(x => x.Release(It.IsAny<Guid>()), Times.Never);
+        Assert.True(notifying.IsNotifying);
+
+        Looping(first, false);
+
+        notifier.Verify(x => x.Notify(first.Id, "a"), Times.Once);
+        keeper.Verify(x => x.Release(first.Id), Times.Once);
+        Assert.False(notifying.CanNotify);
+    }
+
+    [Fact]
+    public async Task Notifier_SpeaksOnceTheLastRunEndsWhenTheLoopIsOverWhileItStillWorks()
+    {
+        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
+        Looping(first, true);
+        Working(first, true);
+        notifying.ToggleNotifyCommand.Execute(null);
+
+        Looping(first, false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(first.Id, "a"), Times.Once);
+    }
+
+    [Fact]
+    public async Task NotifyButton_ShowsForWorkAnotherClientGaveAndTurnsItsNotificationOn()
+    {
+        Mock<IWorkKeeper> keeper = new();
+        Mock<IReadyNotifier> notifier = new();
+        HomeViewModel notifying = new(connection.Object, ClientLayout.Tabs, null, null, null, notifier.Object, keeper.Object);
+        await notifying.Start();
+        List<string?> changes = [];
+        notifying.PropertyChanged += (_, args) => changes.Add(args.PropertyName);
+        Assert.False(notifying.CanNotify);
+
+        Working(first, true);
+
+        Assert.True(notifying.CanNotify);
+        Assert.False(notifying.IsNotifying);
+        Assert.Equal("Notify me when this workspace is ready", notifying.NotifyTip);
+        Assert.Contains(nameof(HomeViewModel.CanNotify), changes);
+        keeper.Verify(x => x.Hold(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+
+        notifying.ToggleNotifyCommand.Execute(null);
+
+        Assert.True(notifying.IsNotifying);
+        Assert.StartsWith("You will be notified", notifying.NotifyTip);
+        keeper.Verify(x => x.Hold(first.Id, "a"), Times.Once);
+
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(first.Id, "a"), Times.Once);
+        keeper.Verify(x => x.Release(first.Id), Times.Once);
+        Assert.False(notifying.CanNotify);
+        Assert.False(notifying.IsNotifying);
+    }
+
+    [Fact]
+    public async Task NotifyButton_TurnsOffTheNotificationOfAPromptSentFromThisClient()
+    {
+        Mock<IWorkKeeper> keeper = new();
+        Mock<IReadyNotifier> notifier = new();
+        HomeViewModel notifying = new(connection.Object, ClientLayout.Tabs, null, null, null, notifier.Object, keeper.Object);
+        await notifying.Start();
+        notifying.Active!.Chat.Input = "do it";
+        notifying.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+        Working(first, true);
+        Assert.True(notifying.IsNotifying);
+
+        notifying.ToggleNotifyCommand.Execute(null);
+
+        Assert.True(notifying.CanNotify);
+        Assert.False(notifying.IsNotifying);
+        keeper.Verify(x => x.Release(first.Id), Times.Once);
+
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task NotifyButton_BelongsToTheFocusedWorkspaceAndWaitsWithItWhileAnotherIsFocused()
+    {
+        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
+        Working(first, true);
+        notifying.ToggleNotifyCommand.Execute(null);
+
+        notifying.Selected = notifying.Entries.Select(entry => entry.Workspace).First(workspace => workspace?.Id == second.Id);
+
+        Assert.False(notifying.CanNotify);
+
+        Working(first, false);
+
+        notifier.Verify(x => x.Notify(first.Id, "a"), Times.Once);
+    }
+
+    [Fact]
+    public async Task NotifyButton_ShowsWhileWorkWaitsInTheQueueAndBetweenTheRunsOfALoop()
+    {
+        (HomeViewModel notifying, _) = await Notifying();
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = first.Id, Queue = new QueueStatus { Position = 1 } });
+
+        Assert.True(notifying.CanNotify);
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = first.Id });
+
+        Assert.False(notifying.CanNotify);
+
+        Looping(first, true);
+
+        Assert.True(notifying.CanNotify);
+    }
+
+    [Fact]
+    public async Task NotifyButton_IsNotOfferedByAClientThatCannotNotify()
+    {
+        await model.Start();
+
+        Working(first, true);
+
+        Assert.False(model.CanNotify);
+    }
+
+    [Fact]
+    public async Task Notifier_KeepsWaitingForALoopWhenAFurtherPromptBetweenItsRunsCannotBeSent()
+    {
+        (HomeViewModel notifying, Mock<IReadyNotifier> notifier) = await Notifying();
+        Looping(first, true);
+        notifying.ToggleNotifyCommand.Execute(null);
+        connection.Setup(x => x.Prompt(first.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
+        notifying.Active!.Chat.Input = "do it";
+
+        notifying.Active.Chat.SendCommand.Execute(null);
+        await Task.Delay(50);
+
+        Assert.True(notifying.IsNotifying);
+        Looping(first, false);
+        notifier.Verify(x => x.Notify(first.Id, "a"), Times.Once);
     }
 
     [Fact]

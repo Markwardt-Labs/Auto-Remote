@@ -49,9 +49,13 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowLoopButton));
             }
         };
-        Chat.PromptStarted += () => NotifyWhenReady = true;
-        // One that fails beside work still running leaves that work waited for.
-        Chat.PromptFailed += () => NotifyWhenReady &= Chat.IsAiWorking;
+        Chat.PromptStarted += () =>
+        {
+            wasNotifying = NotifyWhenReady;
+            NotifyWhenReady = true;
+        };
+        // One that fails beside work still running, or between the runs of a loop that was waited for, leaves that work waited for.
+        Chat.PromptFailed += () => NotifyWhenReady &= Chat.IsAiWorking || (wasNotifying && IsLooping);
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
@@ -147,6 +151,10 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         });
     }
 
+    private bool notifyWhenReady;
+
+    private bool wasNotifying;
+
     private WorkspaceDelegation? delegation;
 
     private SideSession? side;
@@ -216,9 +224,13 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public string StopTip => delegation is null ? "Stop the work and keep what it did" : "Cancel the delegated task";
 
     /// <summary>
-    /// Gets or sets a value indicating whether the user should be told once the workspace is ready again, which is the case while work this client gave it is running.
+    /// Gets or sets a value indicating whether the user should be told once the work of the workspace is over, which giving it work from this client turns on and the user can also turn on or off.
     /// </summary>
-    public bool NotifyWhenReady { get; set; }
+    public bool NotifyWhenReady
+    {
+        get => notifyWhenReady;
+        set => Set(ref notifyWhenReady, value);
+    }
 
     /// <summary>
     /// Gets the conversation.

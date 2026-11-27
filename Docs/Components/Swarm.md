@@ -75,4 +75,4 @@ Deleting a workspace that delegated tasks cancels those under way and forgets th
 
 Actions of the user never wait for a send that takes long, such as a push over a slow link: after a moment the send goes on by itself.
 
-The client that sent the original prompt holds its ready notification back while the workspace's AI has tasks outstanding, so it arrives when the AI has dealt with them. Tasks that only wait on a lost one do not hold it back, since the AI has been told about their job.
+A client that is to show a ready notification, as the one that sent the original prompt is, holds it back while the workspace's AI has tasks outstanding, so it arrives when the AI has dealt with them. Tasks that only wait on a lost one do not hold it back, since the AI has been told about their job.

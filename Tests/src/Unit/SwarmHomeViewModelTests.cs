@@ -97,6 +97,26 @@ public sealed class SwarmHomeViewModelTests
     }
 
     [Fact]
+    public async Task TheNotificationCanBeTurnedOnWhileOnlyDelegatedTasksAreOutstanding()
+    {
+        tasks = [Task(SwarmTaskState.Running)];
+        HomeViewModel home = await Started();
+        Assert.True(home.CanNotify);
+
+        home.ToggleNotifyCommand.Execute(null);
+
+        keeper.Verify(x => x.Hold(app.Id, "app"), Times.Once);
+        tasks = [tasks[0] with { State = SwarmTaskState.Done }];
+        Changed();
+        Working(true);
+        Working(false);
+
+        notifier.Verify(x => x.Notify(app.Id, "app"), Times.Once);
+        keeper.Verify(x => x.Release(app.Id), Times.Once);
+        Assert.False(home.CanNotify);
+    }
+
+    [Fact]
     public async Task TasksThatOnlyWaitOnALostOneDoNotHoldTheReadyNotificationBack()
     {
         Guid job = Guid.NewGuid();

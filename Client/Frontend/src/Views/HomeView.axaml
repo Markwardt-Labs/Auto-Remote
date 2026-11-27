@@ -22,7 +22,7 @@
               <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource NewWindowIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
           </StackPanel>
-          <Grid Grid.Column="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
+          <Grid Grid.Column="1" ColumnDefinitions="*,Auto" ColumnSpacing="4" VerticalAlignment="Center" HorizontalAlignment="Center">
             <local:TouchButton Name="SessionsButton" Classes="flat sessions" VerticalAlignment="Center" ToolTip.Tip="Sessions of this workspace" Command="{Binding Sessions.ToggleCommand}" IsVisible="{Binding HasSelection}">
               <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
                 <TextBlock Name="TitleText" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
@@ -36,24 +36,31 @@
               </Grid>
             </local:TouchButton>
             <TextBlock Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsVisible="{Binding !HasSelection}" />
-            <local:TouchButton Grid.Column="1" Name="LoopIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}"
-                  IsVisible="{Binding Active.IsLooping, FallbackValue=False}">
-              <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="16" MaxHeight="16" />
-              <Button.Flyout>
-                <Flyout Placement="Bottom">
-                  <TextBlock Text="{Binding Active.LoopNext, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
-                </Flyout>
-              </Button.Flyout>
-            </local:TouchButton>
-            <local:TouchButton Grid.Column="2" Name="LimitPauseIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.Chat.LimitPauseText, FallbackValue=''}"
-                  IsVisible="{Binding Active.Chat.HasLimitPause, FallbackValue=False}">
-              <Path Name="LimitPauseIndicator" Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="16" MaxHeight="16" />
-              <Button.Flyout>
-                <Flyout Placement="Bottom">
-                  <TextBlock Text="{Binding Active.Chat.LimitPauseText, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
-                </Flyout>
-              </Button.Flyout>
-            </local:TouchButton>
+            <!-- The ones that are hidden take no space, which keeps those that show beside the title. -->
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2">
+              <local:TouchButton Name="LoopIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}"
+                    IsVisible="{Binding Active.IsLooping, FallbackValue=False}">
+                <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="16" MaxHeight="16" />
+                <Button.Flyout>
+                  <Flyout Placement="Bottom">
+                    <TextBlock Text="{Binding Active.LoopNext, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
+                  </Flyout>
+                </Button.Flyout>
+              </local:TouchButton>
+              <local:TouchButton Name="LimitPauseIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.Chat.LimitPauseText, FallbackValue=''}"
+                    IsVisible="{Binding Active.Chat.HasLimitPause, FallbackValue=False}">
+                <Path Name="LimitPauseIndicator" Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="16" MaxHeight="16" />
+                <Button.Flyout>
+                  <Flyout Placement="Bottom">
+                    <TextBlock Text="{Binding Active.Chat.LimitPauseText, FallbackValue=''}" TextWrapping="Wrap" MaxWidth="280" />
+                  </Flyout>
+                </Button.Flyout>
+              </local:TouchButton>
+              <local:TouchButton Name="NotifyButton" Classes="flat notify" Classes.on="{Binding IsNotifying}" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding NotifyTip}"
+                    Command="{Binding ToggleNotifyCommand}" IsVisible="{Binding CanNotify}">
+                <Path Name="NotifyIcon" Classes="lineIcon bell" Classes.on="{Binding IsNotifying}" Data="{StaticResource BellIconGeometry}" MaxWidth="16" MaxHeight="16" />
+              </local:TouchButton>
+            </StackPanel>
           </Grid>
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">

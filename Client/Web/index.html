@@ -85,9 +85,13 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .home { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .topbar { display: flex; align-items: center; padding: 8px; gap: 8px; background: var(--elevated); border-bottom: 1px solid var(--border); }
 .topbar .menu { font-size: 20px; width: 48px; padding: 8px 0; margin-right: 96px; }
-.topbar .title { flex: 1; text-align: center; font-size: 20px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topbar .title { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; font-size: 20px; white-space: nowrap; overflow: hidden; }
 .topbar .tools { display: flex; width: 144px; justify-content: flex-end; }
 .topbar .gear, .topbar .usage { width: 48px; font-size: 20px; padding: 8px 0; display: flex; align-items: center; justify-content: center; }
+@media (max-width: 600px) {
+  .topbar .menu { margin-right: 48px; }
+  .topbar .tools { width: 96px; }
+}
 .usage[data-pace=VeryLow], .usage-card [data-pace=VeryLow] { color: var(--pace-very-low); }
 .usage[data-pace=Low], .usage-card [data-pace=Low] { color: var(--pace-low); }
 .usage[data-pace=High], .usage-card [data-pace=High] { color: var(--pace-high); }
@@ -136,8 +140,10 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .script-input { display: flex; gap: 8px; padding: 6px 10px; background: var(--elevated); border-top: 1px solid var(--border); }
 .script-input input { flex: 1; }
 .row.running .name { font-weight: 700; }
-.topbar .title .loop-indicator { display: inline-flex; vertical-align: middle; margin-left: 8px; }
+.topbar .title .loop-indicator { display: inline-flex; flex: none; margin-left: 4px; }
 .topbar .title .limit-indicator { color: var(--warning); }
+.topbar .title .notify.on { background: #ffffff30; }
+.topbar .title .notify.on path { fill: currentColor; }
 .selectable { user-select: text; }
 .swarm-code { font-family: monospace; font-size: 16px; overflow-wrap: anywhere; }
 .swarm-pairing { border: 1px solid var(--accent); border-radius: 6px; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
@@ -161,7 +167,7 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .limit-banner[hidden] { display: none; }
 .row-check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .topbar .title { user-select: none; -webkit-touch-callout: none; }
-.topbar.offline .title::after { content: " (reconnecting…)"; font-size: 12px; opacity: 0.8; }
+.topbar.offline .title::after { content: "(reconnecting…)"; min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 6px; font-size: 12px; opacity: 0.8; }
 .menu-list button:disabled { opacity: 0.45; cursor: default; }
 .tree .row { user-select: none; }
 .messages-wrap { flex: 1; min-height: 0; position: relative; display: flex; }
@@ -337,7 +343,7 @@ button.icon.recording { color: var(--danger); }
 .ref.remote { background: var(--hover); }
 .ref .remote-part { margin-left: 4px; opacity: .65; }
 .ref.session { background: transparent; border: 1px dashed; display: inline-flex; align-items: center; gap: 4px; }
-.topbar .title button.sessions { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 0; padding: 2px 8px; background: transparent; border: 0; font: inherit; vertical-align: middle; }
+.topbar .title button.sessions { display: inline-flex; align-items: center; gap: 6px; min-width: 0; min-height: 0; padding: 2px 8px; background: transparent; border: 0; font: inherit; }
 .topbar .title button.sessions:disabled { opacity: 1; cursor: default; background: transparent; }
 .topbar .title button.sessions .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .topbar .title button.sessions .chevron { flex: none; font-size: 12px; opacity: .7; }
@@ -1798,13 +1804,15 @@ const icons = {
   levels: ["M1,5 L7,2 L13,5 L7,8 Z M1,9 L7,12 L13,9", "0 1 14 12", 13],
   session: ["M3,13 L3,1.5 M3,9.5 C3,6.5 11,8 11,3.5 M8.8,5.5 L11,3 L13.2,5.5", "2 0.5 12 13.5", 13],
   remote: ["M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5", "1.5 0.5 12 13", 13],
+  bell: ["M3,11 C4.3,9.8 4,8 4,6.5 C4,4.4 5.3,3 7,3 C8.7,3 10,4.4 10,6.5 C10,8 9.7,9.8 11,11 Z M7,3 L7,1.5 M5.8,12.8 L8.2,12.8", "2.5 1 9 12.5", 16],
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
 };
 
-function requestNotifications() {
+// Asks to be allowed to notify, answering once the user has chosen, or at once when there is nothing to ask.
+async function requestNotifications() {
   try {
     if ("Notification" in window && Notification.permission === "default") {
-      Notification.requestPermission();
+      await Notification.requestPermission();
     }
   } catch (exception) {
   }
@@ -2194,7 +2202,7 @@ class WorkspaceView {
     this.gitRefs = false;
     this.localBusy = false;
     this.forced = null;
-    this.notifyWhenReady = false;
+    this.notifying = false;
     this.readyNote = null;
     this.lastState = "Ready";
     this.loop = null;
@@ -2825,6 +2833,20 @@ class WorkspaceView {
     return this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
   }
 
+  // Whether the user is told once the work is over, which giving it work from here turns on and the user can also turn on or off.
+  get notifyWhenReady() {
+    return this.notifying;
+  }
+
+  set notifyWhenReady(value) {
+    this.notifying = value;
+    this.home.updateNotify(this);
+  }
+
+  hasTasksUnderWay() {
+    return this.home.swarmTasks.some(task => task.workspaceId === this.info.id && !task.isManual && this.home.isUnderWay(task));
+  }
+
   refuseWork() {
     const state = this.state();
 
@@ -2868,11 +2890,17 @@ class WorkspaceView {
   }
 
   setLoop(loop, notice) {
+    const ended = this.loop !== null && !loop;
     this.loop = loop;
     this.chatNotice.textContent = notice ?? "";
     this.chatNotice.hidden = !notice;
     this.updateSend();
     this.home.updateLoop(this);
+
+    // A loop that ends between its runs changes no state, though the work waited for is over with it.
+    if (ended && this.state() === "Ready" && !this.queue && this.notifyWhenReady) {
+      this.conclude();
+    }
   }
 
   loopTip() {
@@ -3335,31 +3363,38 @@ class WorkspaceView {
 
   announceReady(state) {
     if (state === "Ready" && this.lastState !== "Ready" && this.notifyWhenReady) {
-      // While the AI waits for delegated tasks its work is not over, so the user is told once it has dealt with them.
-      if (this.home.swarmTasks.some(task => task.workspaceId === this.info.id && !task.isManual && this.home.isUnderWay(task))) {
-        this.home.held.add(this.info.id);
-        return;
-      }
+      this.conclude();
+    }
+  }
 
-      this.home.held.delete(this.info.id);
-      this.notifyWhenReady = false;
+  // Tells the user that the work they wait for is over, unless more of it is still to come.
+  conclude() {
+    // While the AI waits for delegated tasks its work is not over, so the user is told once it has dealt with them.
+    if (this.hasTasksUnderWay()) {
+      this.home.held.add(this.info.id);
+      return;
+    }
 
-      if (this.loop !== null) {
-        return;
-      }
+    this.home.held.delete(this.info.id);
 
-      try {
-        if ("Notification" in window && Notification.permission === "granted") {
-          const note = new Notification(`${workspaceName(this.info)} is ready`, { tag: `ready-${this.info.id}` });
-          this.readyNote = note;
-          note.onclick = () => {
-            window.focus();
-            this.home.app.showWorkspace(this.home, this.info.id);
-            note.close();
-          };
-        }
-      } catch (exception) {
+    // Nor is it while a loop runs, between whose runs the workspace is ready.
+    if (this.loop !== null) {
+      return;
+    }
+
+    this.notifyWhenReady = false;
+
+    try {
+      if ("Notification" in window && Notification.permission === "granted") {
+        const note = new Notification(`${workspaceName(this.info)} is ready`, { tag: `ready-${this.info.id}` });
+        this.readyNote = note;
+        note.onclick = () => {
+          window.focus();
+          this.home.app.showWorkspace(this.home, this.info.id);
+          note.close();
+        };
       }
+    } catch (exception) {
     }
   }
 
@@ -4305,7 +4340,7 @@ class WorkspaceView {
     const waited = this.notifyWhenReady;
     this.notifyWhenReady = true;
     this.clearReady();
-    requestNotifications();
+    requestNotifications().then(() => this.home.updateNotify(this));
     let refused = null;
     // A file not uploaded yet is shown by its name.
     let echo = this.echo(this.written(text, sending.map(attachment => attachment.serverPath ?? attachment.name)));
@@ -4395,6 +4430,7 @@ class WorkspaceView {
 
     this.queue = queue;
     this.queueBanner.hidden = !queue;
+    this.home.updateNotify(this);
 
     if (queue?.text) {
       // The banner shows a prompt that has to wait; it is a message once its work starts.
@@ -6036,7 +6072,8 @@ class Home {
     this.sessionsButton = h("button", { class: "sessions", title: "Sessions of this workspace", disabled: true, onclick: () => this.toggleSessions() }, this.titleText, this.sideMarker, this.chevron);
     this.loopIndicator = h("button", { class: "flat icon loop-indicator", hidden: true, onclick: () => this.showLoopNext() }, icon("loop"));
     this.limitIndicator = h("button", { class: "flat icon loop-indicator limit-indicator", hidden: true, onclick: () => this.showLimitPause() }, icon("pause"));
-    this.title = h("div", { class: "title serif" }, this.sessionsButton, this.loopIndicator, this.limitIndicator);
+    this.notifyButton = h("button", { class: "flat icon loop-indicator notify", hidden: true, onclick: () => this.toggleNotify() }, icon("bell"));
+    this.title = h("div", { class: "title serif" }, this.sessionsButton, this.loopIndicator, this.limitIndicator, this.notifyButton);
     this.gearButton = h("button", { class: "flat gear", title: "Workspace settings", onclick: () => this.active?.toggleSettings() }, "\u2699\uFE0E");
     this.usageButton = h("button", { class: "flat usage", title: "AI usage limits", onclick: () => this.toggleUsage() });
     this.usageButton.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18"><path d="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>';
@@ -6210,6 +6247,7 @@ class Home {
     this.activeId = info?.id ?? null;
     this.loopIndicator.hidden = true;
     this.limitIndicator.hidden = true;
+    this.notifyButton.hidden = true;
     this.topbar.classList.remove("working");
     this.updateTitle();
 
@@ -6228,6 +6266,7 @@ class Home {
     this.updateWorking(view);
     this.updateLoop(view);
     this.updateLimit(view);
+    this.updateNotify(view);
   }
 
   updateTitle() {
@@ -6550,6 +6589,7 @@ class Home {
 
         this.buildEntries();
         this.renderDrawer();
+        this.updateNotify(this.active);
       } while (this.refreshSwarmAgain);
     } finally {
       this.refreshingSwarm = false;
@@ -6802,13 +6842,59 @@ class Home {
     if (view === this.active) {
       this.loopIndicator.hidden = view.loop === null;
       this.loopIndicator.title = view.loopTip();
+      this.updateNotify(view);
     }
   }
 
   updateWorking(view) {
     if (view === this.active) {
       this.topbar.classList.toggle("working", view.state() !== "Ready");
+      this.updateNotify(view);
     }
+  }
+
+  // The button shows where the browser can notify and the workspace has work that is not over, or its notification is on.
+  updateNotify(view) {
+    if (view && view === this.active) {
+      const on = view.notifyWhenReady && !this.notificationsBlocked();
+      this.notifyButton.hidden = !("Notification" in window) || !(view.notifyWhenReady || view.state() !== "Ready" || view.loop !== null || !!view.queue || view.hasTasksUnderWay());
+      this.notifyButton.classList.toggle("on", on);
+      this.notifyButton.title = on ? "You will be notified when this workspace is ready. Press to turn the notification off." : "Notify me when this workspace is ready";
+    }
+  }
+
+  notificationsBlocked() {
+    return "Notification" in window && Notification.permission === "denied";
+  }
+
+  async toggleNotify() {
+    const view = this.active;
+
+    if (!view) {
+      return;
+    }
+
+    if (view.notifyWhenReady && !this.notificationsBlocked()) {
+      this.held.delete(view.info.id);
+      view.notifyWhenReady = false;
+      return;
+    }
+
+    if (this.notificationsBlocked()) {
+      view.chatError.set("Notifications are blocked for this page. Allow them in the browser's site settings to be notified.");
+      return;
+    }
+
+    const asked = requestNotifications();
+    view.notifyWhenReady = true;
+
+    // One that is ready while tasks it delegated are under way waits for them as if it had been waited for all along.
+    if (view.state() === "Ready" && view.hasTasksUnderWay()) {
+      this.held.add(view.info.id);
+    }
+
+    await asked;
+    this.updateNotify(view);
   }
 
   // States change often, so one heard while the list was on its way may be newer than what the list says.
