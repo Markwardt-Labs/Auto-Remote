@@ -30,18 +30,21 @@ internal interface IUsageService
 }
 
 /// <inheritdoc />
-internal sealed class UsageService(IPrompterHost host) : IUsageService
+internal sealed class UsageService(IPrompterHost host, TimeProvider? time = null) : IUsageService
 {
     private readonly ConcurrentDictionary<AiService, Cached> cache = new();
 
     private readonly SemaphoreSlim reading = new(1, 1);
 
-    private readonly TimeSpan lifetime = TimeSpan.FromMinutes(1);
+    // Short of the minute between the reads of a client, and counted from when a read began, so that each of them gets a new reading and not the one its last ask made.
+    private readonly TimeSpan lifetime = TimeSpan.FromSeconds(55);
 
     private readonly TimeSpan retry = TimeSpan.FromSeconds(10);
 
+    private readonly TimeProvider clock = time ?? TimeProvider.System;
+
     /// <inheritdoc />
-    public void Note(AiService service, IReadOnlyList<PromptWindow> windows) => cache[service] = new Cached(Status(service, windows), DateTimeOffset.UtcNow + lifetime);
+    public void Note(AiService service, IReadOnlyList<PromptWindow> windows) => cache[service] = new Cached(Status(service, windows), clock.GetUtcNow() + lifetime);
 
     /// <inheritdoc />
     public async Task<UsageStatus?> Refresh(AiService service, CancellationToken cancellation)
@@ -50,11 +53,12 @@ internal sealed class UsageService(IPrompterHost host) : IUsageService
 
         try
         {
+            DateTimeOffset began = clock.GetUtcNow();
             UsageStatus? read = await Read(service, cancellation);
 
             if (read is not null)
             {
-                cache[service] = new Cached(read, DateTimeOffset.UtcNow + lifetime);
+                cache[service] = new Cached(read, began + lifetime);
             }
 
             return read;
@@ -72,13 +76,15 @@ internal sealed class UsageService(IPrompterHost host) : IUsageService
 
         try
         {
-            if (cache.TryGetValue(service, out Cached? known) && DateTimeOffset.UtcNow < known.Until)
+            DateTimeOffset began = clock.GetUtcNow();
+
+            if (cache.TryGetValue(service, out Cached? known) && began < known.Until)
             {
                 return known.Status;
             }
 
             UsageStatus? read = await Read(service, cancellation);
-            Cached next = read is null ? new Cached(known?.Status ?? new UsageStatus { Service = service }, DateTimeOffset.UtcNow + retry) : new Cached(read, DateTimeOffset.UtcNow + lifetime);
+            Cached next = read is null ? new Cached(known?.Status ?? new UsageStatus { Service = service }, clock.GetUtcNow() + retry) : new Cached(read, began + lifetime);
             cache[service] = next;
             return next.Status;
         }
@@ -106,7 +112,7 @@ internal sealed class UsageService(IPrompterHost host) : IUsageService
 
     private UsagePeriod Period(PromptWindow window)
     {
-        bool passed = window.ResetsAt is { } time && time <= DateTimeOffset.UtcNow;
+        bool passed = window.ResetsAt is { } reset && reset <= clock.GetUtcNow();
         return new UsagePeriod { Name = window.Name, PercentUsed = passed ? 0 : Math.Round(window.Used * 100, 1), WindowMinutes = (int)window.Length.TotalMinutes, ResetsAt = passed ? null : window.ResetsAt };
     }
 

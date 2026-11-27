@@ -82,6 +82,87 @@ public sealed class UsageViewModelTests
         Assert.Equal("50% used", model.Windows[0].Text);
     }
 
+    private async Task Until(Func<bool> condition)
+    {
+        for (int attempt = 0; attempt < 500 && !condition(); attempt++)
+        {
+            await Task.Delay(10);
+        }
+
+        Assert.True(condition());
+    }
+
+    [Theory]
+    [InlineData(typeof(IOException))]
+    [InlineData(typeof(SocketException))]
+    [InlineData(typeof(ObjectDisposedException))]
+    [InlineData(typeof(OperationCanceledException))]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(InvalidDataException))]
+    [InlineData(typeof(RemoteException))]
+    [InlineData(typeof(InvalidOperationException))]
+    public async Task Show_KeepsReadingAfterAReadFailsWithAnything(Type kind)
+    {
+        Exception failure = kind == typeof(SocketException) ? new SocketException() : (Exception)Activator.CreateInstance(kind, "the connection was lost")!;
+        int reads = 0;
+        TaskCompletionSource failed = new();
+        double session = 12;
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).Returns(() =>
+        {
+            // The read after the first one fails, as one does that runs while the server is away.
+            if (Interlocked.Increment(ref reads) is 2 or 3)
+            {
+                failed.TrySetResult();
+                return Task.FromException<UsageStatus>(failure);
+            }
+
+            return Task.FromResult(Status(session, 150, 1));
+        });
+        using UsageViewModel model = new(connection.Object, TimeSpan.FromMilliseconds(10));
+        await model.Show(AiService.ClaudeCode);
+        await failed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("12% used", model.Windows[0].Text);
+
+        session = 45;
+
+        await Until(() => model.Windows[0].Text == "45% used");
+    }
+
+    [Fact]
+    public async Task Show_ReadsAgainAsSoonAsTheConnectionIsBack()
+    {
+        connection.SetupSequence(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(Status(12, 150, 1)).ReturnsAsync(Status(45, 150, 17));
+        using UsageViewModel model = new(connection.Object, TimeSpan.FromHours(1));
+        await model.Show(AiService.ClaudeCode);
+
+        connection.Raise(x => x.Reconnected += null);
+
+        Assert.Equal(["45% used", "17% used"], model.Windows.Select(line => line.Text).ToList());
+    }
+
+    [Fact]
+    public async Task Dispose_EndsTheReadingAlsoWhenTheConnectionComesBack()
+    {
+        int reads = 0;
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(() =>
+        {
+            Interlocked.Increment(ref reads);
+            return Status(12, 150, 1);
+        });
+        UsageViewModel model = new(connection.Object, TimeSpan.FromMilliseconds(10));
+        await model.Show(AiService.ClaudeCode);
+        await Until(() => Volatile.Read(ref reads) > 2);
+
+        model.Dispose();
+        // A read that was starting as the view went may still be counted.
+        await Task.Delay(50);
+        int ended = Volatile.Read(ref reads);
+        connection.Raise(x => x.Reconnected += null);
+        await Task.Delay(100);
+
+        Assert.Equal(ended, Volatile.Read(ref reads));
+    }
+
     [Fact]
     public async Task Show_NothingShowsNoLimitsAndAsksNothing()
     {

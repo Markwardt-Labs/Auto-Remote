@@ -6368,6 +6368,8 @@ class Home {
     this.setOffline(false);
     this.refreshCatalog();
     this.refreshSwarm();
+    // What is shown is from before the connection was lost.
+    this.refreshUsage();
 
     for (const view of this.opened.values()) {
       view.reconnected(connection);

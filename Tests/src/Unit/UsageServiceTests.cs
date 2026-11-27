@@ -2,6 +2,13 @@ namespace Markwardt.AutoRemote.Tests.Unit;
 
 public sealed class UsageServiceTests
 {
+    private sealed class ManualTime : TimeProvider
+    {
+        public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;
+
+        public override DateTimeOffset GetUtcNow() => Now;
+    }
+
     private readonly FakePrompter prompter = new();
 
     private readonly UsageService service;
@@ -66,6 +73,36 @@ public sealed class UsageServiceTests
         await service.Get(AiService.ClaudeCode, CancellationToken.None);
 
         Assert.Single(prompter.Tests);
+    }
+
+    [Fact]
+    public async Task Get_GivesAClientThatAsksOnceAMinuteANewReadingEveryTimeHoweverLongReadingTakes()
+    {
+        ManualTime time = new();
+        Mock<IPrompterHost> host = new();
+        host.Setup(x => x.Prompter).Returns(prompter);
+        host.Setup(x => x.Setup(It.IsAny<AiService>(), It.IsAny<string?>())).Returns(() =>
+        {
+            // What a read takes, which passes between the client asking and the answer being kept.
+            time.Now += TimeSpan.FromSeconds(10);
+            return new ClaudeSetup();
+        });
+        UsageService timed = new(host.Object, time);
+        Report(Window("Session", 0.01, TimeSpan.FromHours(5), null));
+        DateTimeOffset start = time.Now;
+
+        for (int minute = 0; minute < 4; minute++)
+        {
+            // A timer is not exact, so a client may ask a little before the minute is full.
+            time.Now = start + TimeSpan.FromMinutes(minute) - TimeSpan.FromSeconds(minute == 0 ? 0 : 1);
+            await timed.Get(AiService.ClaudeCode, CancellationToken.None);
+            Assert.Equal(minute + 1, prompter.Tests.Count);
+        }
+
+        time.Now = start + TimeSpan.FromMinutes(3) + TimeSpan.FromSeconds(40);
+        await timed.Get(AiService.ClaudeCode, CancellationToken.None);
+
+        Assert.Equal(4, prompter.Tests.Count);
     }
 
     [Fact]

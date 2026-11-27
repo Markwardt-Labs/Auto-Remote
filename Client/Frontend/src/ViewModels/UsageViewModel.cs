@@ -3,11 +3,26 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The usage limits of the AI service of the focused workspace, kept up to date while one is focused.
 /// </summary>
-internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBase, IDisposable
+internal sealed class UsageViewModel : ViewModelBase, IDisposable
 {
+    /// <summary>
+    /// Initializes a view model that reads the limits of a server.
+    /// </summary>
+    /// <param name="connection">The connection to the server.</param>
+    /// <param name="interval">The time between reads; a minute by default.</param>
+    public UsageViewModel(IServerConnection connection, TimeSpan? interval = null)
+    {
+        this.connection = connection;
+        this.interval = interval ?? TimeSpan.FromMinutes(1);
+        // What is shown is from before the connection was lost.
+        connection.Reconnected += Reconnected;
+    }
+
+    private readonly IServerConnection connection;
+
     private readonly CancellationTokenSource stopping = new();
 
-    private readonly TimeSpan interval = TimeSpan.FromMinutes(1);
+    private readonly TimeSpan interval;
 
     private AiService? service;
 
@@ -68,22 +83,23 @@ internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBa
     /// </summary>
     public void Dispose()
     {
+        connection.Reconnected -= Reconnected;
         stopping.Cancel();
         stopping.Dispose();
     }
 
+    private void Reconnected() => _ = Refresh();
+
     private async Task Poll()
     {
         using PeriodicTimer timer = new(interval);
+        CancellationToken stopped = stopping.Token;
 
         try
         {
-            while (await timer.WaitForNextTickAsync(stopping.Token))
+            while (await timer.WaitForNextTickAsync(stopped))
             {
-                if (!await Refresh())
-                {
-                    return;
-                }
+                await Refresh();
             }
         }
         catch (OperationCanceledException)
@@ -91,11 +107,11 @@ internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBa
         }
     }
 
-    private async Task<bool> Refresh()
+    private async Task Refresh()
     {
-        if (service is not { } asked)
+        if (service is not { } asked || stopping.IsCancellationRequested)
         {
-            return true;
+            return;
         }
 
         try
@@ -107,16 +123,10 @@ internal sealed class UsageViewModel(IServerConnection connection) : ViewModelBa
                 status = read;
                 RaiseAll();
             }
-
-            return true;
         }
-        catch (RemoteException)
+        // Whatever a read fails with, the reading goes on: the connection reopens by itself, and reading that had ended would never start again.
+        catch (Exception)
         {
-            return true;
-        }
-        catch (Exception exception) when (exception is IOException or SocketException or ObjectDisposedException or OperationCanceledException)
-        {
-            return false;
         }
     }
 
