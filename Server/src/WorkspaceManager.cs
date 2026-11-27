@@ -83,6 +83,47 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> SetOverrides(Guid id, string? reviewPrompt, string? expandPrompt, int? statusMinutes, CancellationToken cancellation);
 
     /// <summary>
+    /// Sets what new side sessions of a workspace are set up with.
+    /// </summary>
+    /// <param name="id">The main workspace.</param>
+    /// <param name="files">The paths to copy, one per line, or <see langword="null" />.</param>
+    /// <param name="script">The setup script, or <see langword="null" />.</param>
+    /// <param name="cancellation">Cancels the change.</param>
+    /// <returns>The workspace.</returns>
+    Task<WorkspaceInfo> SetSessionSetup(Guid id, string? files, string? script, CancellationToken cancellation);
+
+    /// <summary>
+    /// Adds a side session as a workspace of its own, listed apart from the others.
+    /// </summary>
+    /// <param name="id">The identifier of the new workspace.</param>
+    /// <param name="side">What is kept about it.</param>
+    /// <param name="cancellation">Cancels the change.</param>
+    /// <returns>The workspace.</returns>
+    Task<WorkspaceInfo> AddSide(Guid id, StoredSideSession side, CancellationToken cancellation);
+
+    /// <summary>
+    /// Changes what is kept about a side session, and tells the clients when what they see of it changed.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="change">Makes the new record from the current one.</param>
+    /// <returns>The new record, or <see langword="null" /> when there is no such side session any more.</returns>
+    Task<StoredSideSession?> UpdateSide(Guid id, Func<StoredSideSession, StoredSideSession> change);
+
+    /// <summary>
+    /// Gets what is kept about a side session.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <returns>The record, or <see langword="null" /> when the workspace is not a side session.</returns>
+    StoredSideSession? GetSide(Guid id);
+
+    /// <summary>
+    /// Lists side sessions in the order they were made.
+    /// </summary>
+    /// <param name="parentId">The main workspace whose sessions to list, or <see langword="null" /> for all.</param>
+    /// <returns>The identifiers and records.</returns>
+    IReadOnlyList<(Guid Id, StoredSideSession Side)> Sides(Guid? parentId = null);
+
+    /// <summary>
     /// Sets whether the chat of a workspace shows the AI's work, keeps it and tells every client with <see cref="RemoteEventKind.ShowWorkChanged" />; does nothing when it already is so.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -167,6 +208,16 @@ internal interface IWorkspaceManager
     /// <param name="cancellation">Cancels the call.</param>
     /// <exception cref="RequestException">The workspace is unknown, or its folder is shared with another workspace or too important to delete.</exception>
     Task Delete(Guid id, bool deleteFolder, CancellationToken cancellation);
+
+    /// <summary>
+    /// Refuses a deletion that <see cref="Delete" /> would refuse, before anything else is removed for it.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="deleteFolder">Whether its folder is to be deleted.</param>
+    /// <param name="cancellation">Cancels the check.</param>
+    /// <returns>A task that completes when it may be deleted.</returns>
+    /// <exception cref="RequestException">It may not.</exception>
+    Task RequireDeletable(Guid id, bool deleteFolder, CancellationToken cancellation);
 }
 
 /// <inheritdoc />
@@ -179,6 +230,11 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     private readonly List<WorkspaceGroup> groups = [];
 
     private readonly List<StoredWorkspace> unresolved = [];
+
+    // Read without the lock where the answer only has to be as new as the last change.
+    private readonly ConcurrentDictionary<Guid, StoredSideSession> sides = new();
+
+    private (Guid Id, StoredSideSession Side)[] ordered = [];
 
     private readonly HashSet<Guid> adopting = [];
 
@@ -230,15 +286,22 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         {
             workspaces.Clear();
             unresolved.Clear();
+            sides.Clear();
             adopting.Clear();
             groups.Clear();
             groups.AddRange(loaded.Groups);
 
             foreach (StoredWorkspace stored in entries)
             {
-                if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
+                // A side session is known by its own records, also when its AI session is lost, so that it can still be removed.
+                if (stored.Side is { } side)
                 {
-                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation });
+                    sides[stored.Id] = side;
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = side.Folder, Service = side.Service, SessionId = stored.SessionId, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation, LastUpdated = sessions.GetValueOrDefault(stored.SessionId ?? string.Empty)?.LastLoaded });
+                }
+                else if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
+                {
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation, SessionFiles = stored.SessionFiles, SessionSetupScript = stored.SessionSetupScript });
 
                     if (stored.Adopt)
                     {
@@ -250,6 +313,9 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                     unresolved.Add(stored);
                 }
             }
+
+            KeepOrphansAway(entries);
+            Order();
 
             if (changed)
             {
@@ -293,7 +359,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     {
         using (await Lock(cancellation))
         {
-            return Find(id);
+            return Present(Find(id));
         }
     }
 
@@ -345,7 +411,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         {
             WorkspaceInfo workspace = Find(id);
 
-            if (workspaces.Any(other => other.Id != id && IsInside(other.Folder, workspace.Folder)))
+            if (workspaces.Any(other => other.Id != id && !sides.ContainsKey(other.Id) && IsInside(other.Folder, workspace.Folder)))
             {
                 throw new RequestException("Another workspace lives inside this folder, so it cannot be renamed.");
             }
@@ -368,7 +434,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             WorkspaceInfo renamed = workspace with { Folder = renamedFolder };
             workspaces[workspaces.IndexOf(workspace)] = renamed;
             await Save(cancellation);
-            return renamed;
+            return Present(renamed);
         }
     }
 
@@ -426,7 +492,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             if (workspace.ShowWork == show)
             {
-                return workspace;
+                return Present(workspace);
             }
 
             WorkspaceInfo updated = await Replace(workspace with { ShowWork = show }, cancellation, false);
@@ -441,7 +507,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         using (await Lock(cancellation))
         {
             WorkspaceInfo workspace = Find(id);
-            return workspace.AllowDelegation == allowed ? workspace : await Replace(workspace with { AllowDelegation = allowed }, cancellation, false);
+            return workspace.AllowDelegation == allowed ? Present(workspace) : await Replace(workspace with { AllowDelegation = allowed }, cancellation, false);
         }
     }
 
@@ -453,9 +519,97 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             WorkspaceInfo workspace = Find(id);
             string? review = string.IsNullOrWhiteSpace(reviewPrompt) ? null : reviewPrompt.Trim();
             string? expand = string.IsNullOrWhiteSpace(expandPrompt) ? null : expandPrompt.Trim();
-            return review == workspace.ReviewPrompt && expand == workspace.ExpandPrompt && statusMinutes == workspace.StatusMinutes ? workspace : await Replace(workspace with { ReviewPrompt = review, ExpandPrompt = expand, StatusMinutes = statusMinutes }, cancellation, false);
+            return review == workspace.ReviewPrompt && expand == workspace.ExpandPrompt && statusMinutes == workspace.StatusMinutes ? Present(workspace) : await Replace(workspace with { ReviewPrompt = review, ExpandPrompt = expand, StatusMinutes = statusMinutes }, cancellation, false);
         }
     }
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> SetSessionSetup(Guid id, string? files, string? script, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo workspace = Find(id);
+            string? list = string.IsNullOrWhiteSpace(files) ? null : files.Trim();
+            string? setup = string.IsNullOrWhiteSpace(script) ? null : script.Trim();
+            return list == workspace.SessionFiles && setup == workspace.SessionSetupScript ? workspace : await Replace(workspace with { SessionFiles = list, SessionSetupScript = setup }, cancellation, false);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> AddSide(Guid id, StoredSideSession side, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo parent = Find(side.ParentId);
+
+            if (sides.ContainsKey(side.ParentId))
+            {
+                throw new RequestException("A side session cannot have side sessions of its own.");
+            }
+
+            WorkspaceInfo created = new() { Id = id, Folder = side.Folder, Service = side.Service, LastUpdated = DateTimeOffset.UtcNow, ShowWork = parent.ShowWork, AllowDelegation = parent.AllowDelegation, ReviewPrompt = parent.ReviewPrompt, ExpandPrompt = parent.ExpandPrompt, StatusMinutes = parent.StatusMinutes };
+            sides[id] = side;
+            workspaces.Add(created);
+            Order();
+
+            try
+            {
+                await Save(cancellation);
+            }
+            catch
+            {
+                workspaces.Remove(created);
+                sides.TryRemove(id, out _);
+                Order();
+                throw;
+            }
+
+            return Present(created);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<StoredSideSession?> UpdateSide(Guid id, Func<StoredSideSession, StoredSideSession> change)
+    {
+        using (await Lock(CancellationToken.None))
+        {
+            if (!sides.TryGetValue(id, out StoredSideSession? current))
+            {
+                return null;
+            }
+
+            WorkspaceInfo workspace = Find(id);
+            SideSession? before = Present(workspace).Side;
+            StoredSideSession updated = change(current);
+
+            if (updated == current)
+            {
+                return current;
+            }
+
+            sides[id] = updated;
+            Order();
+
+            try
+            {
+                await Save(CancellationToken.None, Present(workspace).Side != before);
+            }
+            catch
+            {
+                sides[id] = current;
+                Order();
+                throw;
+            }
+
+            return updated;
+        }
+    }
+
+    /// <inheritdoc />
+    public StoredSideSession? GetSide(Guid id) => sides.GetValueOrDefault(id);
+
+    /// <inheritdoc />
+    public IReadOnlyList<(Guid Id, StoredSideSession Side)> Sides(Guid? parentId = null) => [.. Volatile.Read(ref ordered).Where(entry => parentId is null || entry.Side.ParentId == parentId)];
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> Move(Guid id, Guid? groupId, CancellationToken cancellation)
@@ -594,20 +748,42 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
             if (deleteFolder)
             {
-                if (workspaces.Any(other => other.Id != id && (IsInside(other.Folder, workspace.Folder) || IsInside(workspace.Folder, other.Folder))))
-                {
-                    throw new RequestException("Another workspace uses this folder, so it cannot be deleted.");
-                }
-
+                RequireUnshared(workspace);
                 await folders.Delete(workspace.Folder, cancellation);
             }
 
             workspaces.Remove(workspace);
+            sides.TryRemove(id, out _);
+            Order();
             await Save(cancellation);
             store.DeleteAttachments(id);
             store.DeleteMessages(id);
             store.DeleteInputs(id);
             store.DeleteErrors(id);
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task RequireDeletable(Guid id, bool deleteFolder, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo workspace = Find(id);
+
+            if (deleteFolder)
+            {
+                RequireUnshared(workspace);
+                folders.RequireRemovable(workspace.Folder);
+            }
+        }
+    }
+
+    // Side sessions of the workspace itself are removed with it.
+    private void RequireUnshared(WorkspaceInfo workspace)
+    {
+        if (workspaces.Any(other => other.Id != workspace.Id && sides.GetValueOrDefault(other.Id)?.ParentId != workspace.Id && (IsInside(other.Folder, workspace.Folder) || IsInside(workspace.Folder, other.Folder))))
+        {
+            throw new RequestException("Another workspace uses this folder, so it cannot be deleted.");
         }
     }
 
@@ -648,7 +824,28 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         }
     }
 
-    private WorkspaceCatalog Snapshot() => new() { Groups = [.. groups], Workspaces = [.. workspaces] };
+    // A side session whose workspace cannot be listed could not be reached either, so it waits with it until that one is back.
+    private void KeepOrphansAway(IReadOnlyList<StoredWorkspace> entries)
+    {
+        HashSet<Guid> listed = [.. workspaces.Select(workspace => workspace.Id)];
+
+        foreach ((Guid id, StoredSideSession side) in sides.Where(entry => !listed.Contains(entry.Value.ParentId)).ToList())
+        {
+            sides.TryRemove(id, out _);
+            workspaces.RemoveAll(workspace => workspace.Id == id);
+            unresolved.Add(entries.First(entry => entry.Id == id) with { Side = side });
+        }
+    }
+
+    // Called with the lock held, so that listing the side sessions needs none.
+    private void Order() => Volatile.Write(ref ordered, [.. workspaces.Where(workspace => sides.ContainsKey(workspace.Id)).Select(workspace => (workspace.Id, sides[workspace.Id]))]);
+
+    private WorkspaceCatalog Snapshot() => new() { Groups = [.. groups], Workspaces = [.. workspaces.Where(workspace => !sides.ContainsKey(workspace.Id))], Sessions = [.. workspaces.Where(workspace => sides.ContainsKey(workspace.Id)).Select(Present)] };
+
+    private WorkspaceInfo Present(WorkspaceInfo workspace)
+        => sides.TryGetValue(workspace.Id, out StoredSideSession? side)
+            ? workspace with { Side = new SideSession { ParentId = side.ParentId, ParentName = workspaces.FirstOrDefault(parent => parent.Id == side.ParentId)?.Name ?? string.Empty, Name = side.Name, State = side.State, StartedFrom = side.StartedFrom, IntegrateWhenFinished = side.IntegrateWhenFinished, Error = side.Error, UnsentTask = side.UnsentTask } }
+            : workspace;
 
     private void Shift<T>(List<T> items, T item, int offset, Func<T, bool> isSibling)
     {
@@ -678,12 +875,12 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     {
         workspaces[workspaces.FindIndex(workspace => workspace.Id == updated.Id)] = updated;
         await Save(cancellation, announce);
-        return updated;
+        return Present(updated);
     }
 
     private async Task Save(CancellationToken cancellation, bool announce = true)
     {
-        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, StatusMinutes = workspace.StatusMinutes, ShowWork = workspace.ShowWork, AllowDelegation = workspace.AllowDelegation, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
+        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Side = sides.GetValueOrDefault(workspace.Id), SessionFiles = workspace.SessionFiles, SessionSetupScript = workspace.SessionSetupScript, Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, StatusMinutes = workspace.StatusMinutes, ShowWork = workspace.ShowWork, AllowDelegation = workspace.AllowDelegation, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
 
         if (announce)
         {

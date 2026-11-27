@@ -122,7 +122,7 @@ internal sealed class RealServer : IAsyncDisposable
         connection = null;
     }
 
-    public async Task<WorkspaceInfo> Workspace(string name, AiService service, bool repository = true, string? folder = null, bool configure = true)
+    public async Task<WorkspaceInfo> Workspace(string name, AiService service, bool repository = true, string? folder = null, bool configure = true, bool shell = true)
     {
         string path = folder ?? Path.Combine(Root, "work", name);
         Directory.CreateDirectory(path);
@@ -140,15 +140,16 @@ internal sealed class RealServer : IAsyncDisposable
         WorkspaceInfo workspace = await Connection.CreateWorkspace(path, service, null, null, CancellationToken.None);
         if (configure)
         {
-            await Economize(workspace);
+            await Economize(workspace, shell: shell);
         }
 
         created.Add(workspace);
         return workspace;
     }
 
-    public async Task Economize(WorkspaceInfo workspace, AiEffort effort = AiEffort.Low)
-        => await Connection.SetWorkspaceSettings(workspace.Id, (await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Capability = AiCapability.Fast, Effort = effort }, CancellationToken.None);
+    // A new workspace has no shell, which the scenarios that have the AI run commands need.
+    public async Task Economize(WorkspaceInfo workspace, AiEffort effort = AiEffort.Low, bool shell = true)
+        => await Connection.SetWorkspaceSettings(workspace.Id, (await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Capability = AiCapability.Fast, Effort = effort, IsShellAllowed = shell }, CancellationToken.None);
 
     public async Task Environment(Func<AiEnvironment, AiEnvironment> change)
         => await Connection.SetAiEnvironment(change(await Connection.GetAiEnvironment(CancellationToken.None)), CancellationToken.None);

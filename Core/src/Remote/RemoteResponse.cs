@@ -21,7 +21,7 @@ public sealed record RemoteResponse
     public WorkspaceCatalog? Catalog { get; init; }
 
     /// <summary>
-    /// Gets the workspace answering <see cref="RemoteCommand.CreateWorkspace" />, <see cref="RemoteCommand.CloneWorkspace" />, <see cref="RemoteCommand.RenameWorkspace" />, <see cref="RemoteCommand.MoveWorkspace" />, <see cref="RemoteCommand.MoveWorkspaceToFolder" /> or <see cref="RemoteCommand.SetShowWork" />.
+    /// Gets the workspace answering <see cref="RemoteCommand.CreateWorkspace" />, <see cref="RemoteCommand.CloneWorkspace" />, <see cref="RemoteCommand.RenameWorkspace" />, <see cref="RemoteCommand.MoveWorkspace" />, <see cref="RemoteCommand.MoveWorkspaceToFolder" />, <see cref="RemoteCommand.SetShowWork" />, <see cref="RemoteCommand.CreateSideSession" /> or <see cref="RemoteCommand.RenameSideSession" />.
     /// </summary>
     public WorkspaceInfo? Workspace { get; init; }
 
@@ -91,7 +91,7 @@ public sealed record RemoteResponse
     public GitStatus? Git { get; init; }
 
     /// <summary>
-    /// Gets the changed paths answering <see cref="RemoteCommand.GetGitChanges" /> or <see cref="RemoteCommand.GetGitCommitChanges" />.
+    /// Gets the changed paths answering <see cref="RemoteCommand.GetGitChanges" />, <see cref="RemoteCommand.GetGitCommitChanges" /> or <see cref="RemoteCommand.GetSessionChanges" />.
     /// </summary>
     public GitChanges? GitChanges { get; init; }
 
@@ -101,7 +101,7 @@ public sealed record RemoteResponse
     public GitHistory? GitHistory { get; init; }
 
     /// <summary>
-    /// Gets the diff answering <see cref="RemoteCommand.GetGitDiff" />.
+    /// Gets the diff answering <see cref="RemoteCommand.GetGitDiff" /> or <see cref="RemoteCommand.GetSessionDiff" />.
     /// </summary>
     public GitDiff? GitDiff { get; init; }
 

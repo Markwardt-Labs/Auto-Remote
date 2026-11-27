@@ -15,6 +15,8 @@ Changing the mode takes effect immediately: switching to `Simultaneous` starts w
 
 A prompt for a workspace that is already working is steered into that work, as without a queue. A prompt for a workspace whose earlier prompt still waits joins it, so a workspace has at most one waiting prompt; the lines naming its attachments are kept at the end, where the server looks for them. Work that is not a prompt of its own, such as writing a commit message or the AI resolving the conflicts of a rebase or merge, reserves the AI for its duration and waits the same way.
 
+A request to integrate a side session is ordinary work for its main workspace: it is steered into running work or joins the waiting prompt, except that it goes ahead of a loop run that waits. Cancelling the integration takes its text out again.
+
 A waiting prompt starts against the files as they are then, and the snapshot a cancellation reverts to is taken then too. It waits while a git action runs in its workspace, and work behind it may go first meanwhile. A waiting workspace is not busy: it counts as ready (clients show the waiting work, not a state), git actions stay available, and it sends no ready notification. If a waiting prompt cannot start, the workspace reports why and its text is kept as a saved input so it is not lost; the same happens, without an error, to one that is stopped or cancelled in the moment it starts, which is never queued again. Text saved this way may be longer than a saved input a client sends.
 
 The report of a job of delegated tasks is a prompt of its own kind: it waits only when nothing else of its workspace does. A prompt the user sends while it waits takes it along, in its place in the queue, and from then on it is part of the user's prompt.
@@ -31,4 +33,4 @@ A loop submits each run like any other direct prompt, so a run waits its turn at
 
 ## Restarts
 
-Waiting direct prompts are stored in `queue.json` and wait again after a restart, in order; once the server is stopping nothing more starts. Reports of delegated jobs are given again by the swarm. Runs of loops are dropped, since loops do not survive a restart, reservations belong to requests that ended with the server, and delegated tasks are submitted again by the swarm, which keeps its own record of them. Work that was running when the server stopped is not run again.
+Waiting direct prompts are stored in `queue.json` and wait again after a restart, in order. Nothing restored starts until the integrations of side sessions have taken their requests out of it, since an integration sends its own again; once the server is stopping nothing more starts. Reports of delegated jobs are given again by the swarm. Runs of loops are dropped, since loops do not survive a restart, reservations belong to requests that ended with the server, and delegated tasks are submitted again by the swarm, which keeps its own record of them. Work that was running when the server stopped is not run again.

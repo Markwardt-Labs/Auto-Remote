@@ -52,7 +52,7 @@ internal sealed class AndroidWorkNotification(Context context) : IAndroidWorkNot
         Intent? launch = context.PackageManager?.GetLaunchIntentForPackage(context.PackageName ?? string.Empty);
         PendingIntent? open = launch is null ? null : PendingIntent.GetActivity(context, 0, launch, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         return builder
-            .SetSmallIcon(context.ApplicationInfo?.Icon ?? 0)!
+            .SetSmallIcon(Resource.Drawable.ic_notification)!
             .SetContentTitle("Auto Remote")!
             .SetContentText(text)!
             .SetOngoing(true)!

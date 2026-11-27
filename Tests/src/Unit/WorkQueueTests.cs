@@ -335,6 +335,70 @@ public sealed class WorkQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task Withdraw_TakesOnlyTheGivenTextOutOfWhatWaitsAndDropsWhatHoldsNothingElse()
+    {
+        Guid one = Workspace("one");
+        Guid alone = Workspace("alone");
+        Guid joined = Workspace("joined");
+        await Submit(one, "a");
+        WorkTicket only = await Submit(alone, "request", WorkSource.Integration);
+        await Submit(joined, "mine");
+        await Submit(joined, "request", WorkSource.Integration);
+
+        await queue.Withdraw(alone, "request");
+        await queue.Withdraw(joined, "request");
+        await queue.Withdraw(joined, "never sent");
+
+        Assert.False(await only.Started);
+        Assert.Null(queue.Get(alone));
+        Assert.Equal("mine", queue.Get(joined)?.Text);
+    }
+
+    [Fact]
+    public async Task Withdraw_AlsoTakesTheTextOutOfWorkThatIsJustStartingSoItDoesNotComeBack()
+    {
+        Guid one = Workspace("one");
+        Guid other = Workspace("other");
+        await Submit(one, "a");
+        WorkTicket waiting = await Submit(other, "request", WorkSource.Integration);
+        TaskCompletionSource starting = new();
+        TaskCompletionSource fail = new();
+        prompts.Setup(x => x.Prompt(other, It.IsAny<string>(), true, It.IsAny<CancellationToken>())).Returns(async () =>
+        {
+            starting.SetResult();
+            await fail.Task;
+            // The workspace was taken meanwhile, which puts the work back to wait.
+            activity.TryEnter(other, WorkspaceState.Managing);
+            throw new RequestException("busy");
+        });
+        Finish(one);
+        await starting.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await queue.Withdraw(other, "request");
+        fail.SetResult();
+
+        Assert.False(await waiting.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Null(queue.Get(other));
+    }
+
+    [Fact]
+    public async Task AnIntegrationStartsBeforeTheWaitingRunOfALoop()
+    {
+        Guid one = Workspace("one");
+        Guid looping = Workspace("looping");
+        await Submit(one, "a");
+        await Submit(looping, "loop", WorkSource.Loop);
+        await Submit(looping, "request", WorkSource.Integration);
+
+        Finish(one);
+        await Until(() => Sent().Count == 2);
+        Finish(looping);
+        await Until(() => Sent().Count == 3);
+
+        Assert.Equal(["a", "request", "loop"], Sent());
+    }
+
+    [Fact]
     public async Task Reserve_WaitsForTheLocalAiHoldsItAndGivesItBackWhenDisposed()
     {
         Guid one = Workspace("one");
@@ -522,6 +586,13 @@ public sealed class WorkQueueTests : IDisposable
         WorkQueue restarted = new(workspaces.Object, prompts.Object, host.Object, fresh, savedInputs.Object, new EventHub());
 
         await restarted.Open(temp.Path, CancellationToken.None);
+        restarted.Pump();
+
+        // Held back until whoever takes something out of what was restored has done so.
+        await Task.Delay(100);
+        Assert.Empty(Sent());
+        Assert.Equal("b", restarted.Get(second)?.Text);
+        restarted.Resume();
 
         await Until(() => Sent().Count == 1);
         Assert.Equal(["b"], Sent());

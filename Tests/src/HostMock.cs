@@ -20,7 +20,7 @@ internal sealed class HostMock
             await using IPromptSession session = await prompter.Create(Setup(service, key) with { WorkspacePath = folder }, cancellation);
             return session.Id;
         });
-        Mock.Setup(x => x.ComposeInstructions(It.IsAny<string?>(), It.IsAny<int?>())).Returns((string? user, int? minutes) => BuiltIn.Compose(user, minutes ?? 5));
+        Mock.Setup(x => x.ComposeInstructions(It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string?>())).Returns((string? user, int? minutes, string? note) => BuiltIn.Compose(user, minutes ?? 5, note));
         Mock.Setup(x => x.UserInstructions(It.IsAny<string?>())).Returns((string? stored) => BuiltIn.Visible(stored));
         Mock.Setup(x => x.Adopt(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
         Mock.Setup(x => x.MoveSession(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);

@@ -5,7 +5,7 @@ namespace Markwardt.AutoRemote.Tests;
 /// </summary>
 internal sealed class SwarmTestServer : IAsyncDisposable
 {
-    private readonly CancellationTokenSource stopping = new();
+    private CancellationTokenSource stopping = new();
 
     private Task running = Task.CompletedTask;
 
@@ -20,6 +20,8 @@ internal sealed class SwarmTestServer : IAsyncDisposable
     public IServerConnection Connection { get; private set; } = null!;
 
     public WorkQueue Queue { get; private set; } = null!;
+
+    public WorkspaceSnapshots Snapshots { get; private set; } = null!;
 
     public SwarmCoordinator Coordinator { get; private set; } = null!;
 
@@ -40,11 +42,26 @@ internal sealed class SwarmTestServer : IAsyncDisposable
     /// </summary>
     public bool Hangs { get; set; }
 
-    public static async Task<SwarmTestServer> Start(string root, string name)
+    /// <summary>
+    /// Gets the command scripts are run with, or <see langword="null" /> for the real one.
+    /// </summary>
+    public string? DotnetCommand { get; init; }
+
+    public static async Task<SwarmTestServer> Start(string root, string name, string? dotnetCommand = null)
     {
-        SwarmTestServer server = new() { Data = Path.Combine(root, name) };
+        SwarmTestServer server = new() { Data = Path.Combine(root, name), DotnetCommand = dotnetCommand };
         await server.Open(name);
         return server;
+    }
+
+    /// <summary>
+    /// Stops the server and starts it again over the same data, with the AI conversations it had.
+    /// </summary>
+    public async Task Restart(string name)
+    {
+        await Stop();
+        stopping = new CancellationTokenSource();
+        await Open(name);
     }
 
     public async Task<SwarmStatus> Status() => await Connection.GetSwarm(CancellationToken.None);
@@ -73,7 +90,9 @@ internal sealed class SwarmTestServer : IAsyncDisposable
         Assert.Fail($"The condition of line {line} did not come true. {(describe is null ? string.Empty : await describe())}");
     }
 
-    public async ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync() => await Stop();
+
+    private async Task Stop()
     {
         await Connection.DisposeAsync();
         await stopping.CancelAsync();
@@ -88,7 +107,13 @@ internal sealed class SwarmTestServer : IAsyncDisposable
     {
         ServerConfig config = new() { Port = 0, Key = "secret", DataFolder = Data };
         Directory.CreateDirectory(Data);
-        Prompter = new FakePrompter
+
+        if (DotnetCommand is not null)
+        {
+            config = config with { DotnetCommand = DotnetCommand };
+        }
+
+        Prompter ??= new FakePrompter
         {
             OnCreate = session =>
             {
@@ -99,8 +124,8 @@ internal sealed class SwarmTestServer : IAsyncDisposable
 
                 session.ReplyWith(prompt =>
                 {
-                    // A session that was closed and loaded again is a new object, which is the one the prompt runs on.
-                    FakePromptSession current = Prompter.Sessions.Last(other => other.Id == session.Id);
+                    // A session loaded again is a new object, and a fork answers as its origin would, so the one it runs on is found by the prompt.
+                    FakePromptSession current = Prompter!.Sessions.LastOrDefault(other => other.Prompts.Any(asked => ReferenceEquals(asked, prompt))) ?? Prompter.Sessions.Last(other => other.Id == session.Id);
 
                     lock (Asked)
                     {
@@ -119,6 +144,7 @@ internal sealed class SwarmTestServer : IAsyncDisposable
         GitService git = new();
         WorkspaceActivity activity = new(events);
         WorkspaceSnapshots snapshots = new(git);
+        Snapshots = snapshots;
         WorkspaceManager workspaces = new(store, folders, events, host);
         UsageService usage = new(host);
         ISessionTools? delegation = null;
@@ -135,12 +161,17 @@ internal sealed class SwarmTestServer : IAsyncDisposable
         SwarmRepository repository = new(git) { AllowLocalRemotes = true };
         SwarmWorker worker = new(book, courier, repository, workspaces, prompts, Queue, store, host, events, (_, _) => System.Threading.Tasks.Task.FromResult<IReadOnlyList<string>>([]));
         Coordinator = new SwarmCoordinator(book, courier, repository, workspaces, Queue, activity) { ReportRetry = TimeSpan.FromMilliseconds(50) };
-        delegation = new DelegationTools(book, Coordinator, worker, workspaces);
+        WorkspaceWatcher watcher = new(events, Mock.Of<ILog>());
+        ISideIntegrations? integrations = null;
+        delegation = new CombinedSessionTools([new DelegationTools(book, Coordinator, worker, workspaces), new SideSessionTools(() => integrations!, worker.IsDelegated)]);
+        SideSessionRepository sideRepository = new(git);
+        SideSessions sideSessions = new(workspaces, sideRepository, store, prompts, Queue, loops, scripts, guard, snapshots, watcher, events, Mock.Of<ILog>());
         SwarmExchange exchange = new(book, courier, worker, Coordinator);
         SwarmDialer dialer = new(new IMessageChannel.Factory());
         SwarmLink link = new(book, courier, exchange, dialer, Mock.Of<ILog>()) { BusyInterval = TimeSpan.FromMilliseconds(40), QuietInterval = TimeSpan.FromMilliseconds(80) };
         SwarmService swarm = new(book, courier, worker, Coordinator, new SwarmDrive(book, exchange), link, dialer, workspaces, activity, store, Mock.Of<ILog>());
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(events, Mock.Of<ILog>()), Mock.Of<IServerUpdater>(), Mock.Of<ILog>(), Queue, swarm);
+        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, Queue, activity, loops, scripts, guard, snapshots, events, Mock.Of<ILog>(), swarm, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(100));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, Mock.Of<IServerUpdater>(), Mock.Of<ILog>(), Queue, swarm, sideSessions, integrations, sideRepository);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, events, Mock.Of<ILog>(), null, link);
         TaskCompletionSource<int> listening = new();

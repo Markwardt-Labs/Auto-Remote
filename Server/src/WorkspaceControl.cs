@@ -40,7 +40,7 @@ internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptServi
 
         if (!snapshots.Has(id))
         {
-            throw new RequestException("This workspace is not a git repository, so its work cannot be reverted. Stop it instead.");
+            throw new RequestException(snapshots.Refusal(id) ?? "This workspace is not a git repository, so its work cannot be reverted. Stop it instead.");
         }
 
         return Halt(id, WorkspaceState.Canceling);

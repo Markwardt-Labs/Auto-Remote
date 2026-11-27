@@ -18,6 +18,7 @@ internal sealed class GitCommitViewModel : ViewModelBase
         this.connection = connection;
         this.workspaceId = workspaceId;
         this.opened = opened;
+        this.git = git;
         Commit = commit;
         string? current = commit.Refs.FirstOrDefault(item => item.IsCurrent)?.Name ?? git.CurrentBranch;
         ToggleCommand = new AsyncCommand(_ => Toggle());
@@ -30,6 +31,8 @@ internal sealed class GitCommitViewModel : ViewModelBase
     private readonly Guid workspaceId;
 
     private readonly Action<ChangeNode> opened;
+
+    private readonly GitViewModel git;
 
     private readonly GitGraphColors colors = new();
 
@@ -161,6 +164,11 @@ internal sealed class GitCommitViewModel : ViewModelBase
     /// Gets the command that opens or closes the commit.
     /// </summary>
     public AsyncCommand ToggleCommand { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether the commit can be checked out, which a side session cannot do.
+    /// </summary>
+    public bool CanCheckout => git.CanChangeRefs;
 
     /// <summary>
     /// Gets the command that checks the commit out.

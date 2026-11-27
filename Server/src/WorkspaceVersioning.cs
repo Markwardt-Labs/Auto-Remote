@@ -1066,10 +1066,22 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     {
         string folder = workspace.Folder;
         await Stopped(folder, journal, outcome);
+        // The conflicted files as they were when git first left them, by their path in the repository.
+        Dictionary<string, int?> left = [];
 
         for (int attempt = 0; outcome == Outcome.Conflicts && attempt < attempts; attempt++)
         {
             IReadOnlyList<string> files = await Conflicted(folder, cancellation);
+            string top = await Text(folder, ["rev-parse", "--show-toplevel"], cancellation);
+
+            foreach (string path in await Unmerged(folder, cancellation))
+            {
+                if (!left.ContainsKey(path) && File.Exists(Path.Combine(top, path)))
+                {
+                    Markers found = Scan(Path.Combine(top, path));
+                    left[path] = found.Edges > 0 ? Math.Max(0, found.Separators - found.Openings) : null;
+                }
+            }
 
             try
             {
@@ -1084,17 +1096,88 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
                 return outcome;
             }
 
+            await StageResolved(folder, top, left, cancellation);
+
             if ((await Conflicted(folder, cancellation)).Count > 0)
             {
                 continue;
             }
 
+            left.Clear();
             outcome = await proceed(cancellation);
             await Stopped(folder, journal, outcome);
         }
 
         return outcome;
     }
+
+    // An AI without a shell can edit files but not stage them, so what it visibly settled is staged for it: conflict markers that are gone, or a file it deleted. A conflict that had no markers and whose file is still there says nothing about what was decided, and stays.
+    private async Task StageResolved(string folder, string top, IReadOnlyDictionary<string, int?> left, CancellationToken cancellation)
+    {
+        foreach (string path in await Unmerged(folder, cancellation))
+        {
+            if (!left.TryGetValue(path, out int? separators))
+            {
+                continue;
+            }
+
+            string file = Path.Combine(top, path);
+            bool resolved = !File.Exists(file) && !Directory.Exists(file);
+
+            if (!resolved && separators is { } own && File.Exists(file))
+            {
+                Markers found = Scan(file);
+                resolved = found.IsRead && found.Edges == 0 && found.Separators <= own;
+            }
+
+            if (resolved)
+            {
+                await git.Run(folder, ["add", "-A", "-f", "--", $":(top,literal){path}"], cancellation);
+            }
+        }
+    }
+
+    private async Task<IReadOnlyList<string>> Unmerged(string folder, CancellationToken cancellation) => Paths(await Raw(folder, ["diff", "--name-only", "-z", "--diff-filter=U"], cancellation));
+
+    private Markers Scan(string file)
+    {
+        int openings = 0;
+        int edges = 0;
+        int separators = 0;
+
+        try
+        {
+            if (new FileInfo(file).LinkTarget is not null)
+            {
+                return new Markers(false, 0, 0, 0);
+            }
+
+            foreach (string line in File.ReadLines(file))
+            {
+                if (Marker(line, '<'))
+                {
+                    openings++;
+                    edges++;
+                }
+                else if (Marker(line, '>') || Marker(line, '|'))
+                {
+                    edges++;
+                }
+                else if (line == "=======")
+                {
+                    separators++;
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return new Markers(false, 0, 0, 0);
+        }
+
+        return new Markers(true, openings, edges, separators);
+    }
+
+    private bool Marker(string line, char sign) => line.Length >= 7 && line.AsSpan(0, 7).IndexOfAnyExcept(sign) < 0 && (line.Length == 7 || line[7] == ' ');
 
     // The files as git left them when it stopped, so that whatever differs later was done by someone and is saved before an abort.
     private async Task Stopped(string folder, Journal? journal, Outcome outcome)
@@ -1114,10 +1197,10 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     }
 
     private string ConflictInstruction(IReadOnlyList<string> files) =>
-        "This produced merge conflicts in: " + string.Join(", ", files) + ". Open each file, resolve the conflict by editing it to the correct final content and removing the conflict markers (<<<<<<<, =======, >>>>>>>), then stage the resolved files with `git add`. Reply once every conflict is resolved and staged.";
+        "This produced merge conflicts in: " + string.Join(", ", files) + ". Open each file, resolve the conflict by editing it to the correct final content and removing the conflict markers (<<<<<<<, =======, >>>>>>>). To resolve a conflict by removing a file, delete it. Stage the resolved files with `git add` if you can run commands; without a shell they are staged for you once you reply. Reply once every conflict is resolved.";
 
     private string StashInstruction(IReadOnlyList<string> files, string original) =>
-        "New commits were just pulled into the current branch, and reapplying your stashed pending changes on top produced merge conflicts in: " + string.Join(", ", files) + $". The current branch was at commit {original} before this pull - everything reachable from HEAD since then is a newly-pulled commit, not part of the stashed changes. Open each file, resolve the conflict by editing it to the correct final content - respecting both the intent of the stashed (previously pending, uncommitted) changes and everything the newly-pulled commits changed - and removing the conflict markers (<<<<<<<, =======, >>>>>>>), then stage the resolved files with `git add`. Reply once every conflict is resolved and staged.";
+        "New commits were just pulled into the current branch, and reapplying your stashed pending changes on top produced merge conflicts in: " + string.Join(", ", files) + $". The current branch was at commit {original} before this pull - everything reachable from HEAD since then is a newly-pulled commit, not part of the stashed changes. Open each file, resolve the conflict by editing it to the correct final content - respecting both the intent of the stashed (previously pending, uncommitted) changes and everything the newly-pulled commits changed - and removing the conflict markers (<<<<<<<, =======, >>>>>>>). To resolve a conflict by removing a file, delete it. Stage the resolved files with `git add` if you can run commands; without a shell they are staged for you once you reply. Reply once every conflict is resolved.";
 
     private async Task<Outcome> Classify(string folder, GitOutput result, CancellationToken cancellation) => result.ExitCode == 0 ? Outcome.Succeeded : (await Conflicted(folder, cancellation)).Count > 0 ? Outcome.Conflicts : Outcome.Failed;
 
@@ -1646,6 +1729,8 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     private sealed record Snapshot(string? Branch, string Head, bool Pending, IReadOnlyDictionary<string, string> Tips, string? Operation);
 
     private sealed record Position(string? Branch, string Head);
+
+    private sealed record Markers(bool IsRead, int Openings, int Edges, int Separators);
 
     private sealed class Journal
     {

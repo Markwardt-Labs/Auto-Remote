@@ -24,5 +24,10 @@ internal enum WorkSource
     /// <summary>
     /// A task another server delegated, which starts only after all direct work that could start.
     /// </summary>
-    Delegated
+    Delegated,
+
+    /// <summary>
+    /// The request to integrate a side session, which goes before a loop's next prompt and goes along with other work that waits.
+    /// </summary>
+    Integration
 }

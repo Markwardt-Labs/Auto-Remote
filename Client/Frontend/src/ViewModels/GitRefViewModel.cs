@@ -16,6 +16,7 @@ internal sealed class GitRefViewModel : ViewModelBase
     public GitRefViewModel(GitRef reference, GitViewModel git, string? currentBranch, IReadOnlyList<string>? remotes = null, ICommand? toggle = null)
     {
         Reference = reference;
+        isSideSession = git.IsSideSession;
         ToggleCommand = toggle;
         RemoteLabel = string.Join(", ", remotes ?? []);
         this.currentBranch = currentBranch;
@@ -31,6 +32,8 @@ internal sealed class GitRefViewModel : ViewModelBase
     }
 
     private readonly string? currentBranch;
+
+    private readonly bool isSideSession;
 
     private IBrush? accent;
 
@@ -79,24 +82,39 @@ internal sealed class GitRefViewModel : ViewModelBase
     public bool IsTag => Reference.Kind == GitRefKind.Tag;
 
     /// <summary>
+    /// Gets a value indicating whether this is the branch of a side session, named after the session.
+    /// </summary>
+    public bool IsSession => Reference.Kind == GitRefKind.Session;
+
+    /// <summary>
+    /// Gets a value indicating whether anything can be done with the ref, without which it has no menu.
+    /// </summary>
+    public bool HasMenu => CanCheckout || CanDelete || HasRelative;
+
+    /// <summary>
+    /// Gets a value indicating whether this is not the branch of a side session.
+    /// </summary>
+    public bool IsPlain => !IsSession;
+
+    /// <summary>
     /// Gets a value indicating whether this is the checked out branch.
     /// </summary>
     public bool IsCurrent => Reference.IsCurrent;
 
     /// <summary>
-    /// Gets a value indicating whether the ref can be checked out, which the checked out branch cannot.
+    /// Gets a value indicating whether the ref can be checked out, which the checked out branch and branches of side sessions cannot, nor anything in a side session.
     /// </summary>
-    public bool CanCheckout => !IsCurrent;
+    public bool CanCheckout => !IsCurrent && !IsSession && !isSideSession;
 
     /// <summary>
-    /// Gets a value indicating whether the ref can be deleted, which the checked out branch cannot.
+    /// Gets a value indicating whether the ref can be deleted, which the checked out branch and branches of side sessions cannot, nor anything in a side session.
     /// </summary>
-    public bool CanDelete => !IsCurrent;
+    public bool CanDelete => !IsCurrent && !IsSession && !isSideSession;
 
     /// <summary>
-    /// Gets a value indicating whether squash, rebase and merge are offered against the checked out branch.
+    /// Gets a value indicating whether squash, rebase and merge are offered against the checked out branch, which they are not for branches of side sessions nor in a side session.
     /// </summary>
-    public bool HasRelative => !IsTag && !IsCurrent && currentBranch is not null && Target != currentBranch;
+    public bool HasRelative => !IsTag && !IsCurrent && !IsSession && !isSideSession && currentBranch is not null && Target != currentBranch;
 
     /// <summary>
     /// Gets the label of squashing the checked out branch against this one.

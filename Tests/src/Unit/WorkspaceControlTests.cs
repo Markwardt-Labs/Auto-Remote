@@ -108,6 +108,19 @@ public sealed class WorkspaceControlTests
     }
 
     [Fact]
+    public async Task Cancel_OfWorkWhoseRevertWouldLoseSomethingSaysSo()
+    {
+        activity.TryEnter(id, WorkspaceState.Working);
+        snapshots.Setup(x => x.Has(id)).Returns(false);
+        snapshots.Setup(x => x.Refusal(id)).Returns("This work integrated a side session.");
+
+        RequestException refused = await Assert.ThrowsAsync<RequestException>(() => control.Cancel(id));
+
+        Assert.Equal("This work integrated a side session.", refused.Message);
+        Assert.Equal(WorkspaceState.Working, activity.Get(id));
+    }
+
+    [Fact]
     public async Task Cancel_ReturnsToReadyEvenWhenTheRevertFails()
     {
         activity.TryEnter(id, WorkspaceState.Working);

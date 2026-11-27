@@ -19,5 +19,10 @@ public enum GitRefKind
     /// <summary>
     /// A tag.
     /// </summary>
-    Tag
+    Tag,
+
+    /// <summary>
+    /// The branch of a side session, named after the session. It is not a branch to check out, merge or delete.
+    /// </summary>
+    Session
 }

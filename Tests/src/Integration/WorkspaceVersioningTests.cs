@@ -313,6 +313,92 @@ public sealed class WorkspaceVersioningTests : IDisposable
         Assert.Equal(string.Empty, G(work, "status", "--porcelain"));
     }
 
+    [Theory]
+    [InlineData("one\nBOTH\nthree\n")]
+    [InlineData("one\nBOTH\r\nthree\r\n")]
+    [InlineData("Title\n=======\none\nBOTH\nthree\n")]
+    public async Task Rebase_StagesTheFilesOfAnAiThatCanOnlyEditThem(string resolution)
+    {
+        // The heading underlined with "=" signs is in both sides, so it is part of the files and not a marker left behind.
+        string heading = resolution.StartsWith("Title", StringComparison.Ordinal) ? "Title\n=======\n" : string.Empty;
+
+        if (heading.Length > 0)
+        {
+            Commit(work, "a.txt", heading + "one\ntwo\nthree\n", "heading");
+        }
+
+        Branch("feature", "a.txt", heading + "one\nFEATURE\nthree\n", "feature edit");
+        G(work, "checkout", "main");
+        Commit(work, "a.txt", heading + "one\nMAIN\nthree\n", "main edit");
+        FakeAi(() => File.WriteAllText(Path.Combine(work, "a.txt"), resolution));
+
+        await versioning.Rebase(workspace, "feature", "main", null, CancellationToken.None);
+
+        Assert.Contains("BOTH", G(work, "show", "feature:a.txt"));
+        Assert.Equal("0", G(work, "rev-list", "--count", "feature..main"));
+        Assert.Equal(string.Empty, G(work, "status", "--porcelain"));
+        prompts.Verify(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("one\n<<<<<<< ours\nBOTH\nthree\n")]
+    [InlineData("one\nMAIN\n=======\nFEATURE\nthree\n")]
+    [InlineData("one\nBOTH\n>>>>>>> theirs\nthree\n")]
+    public async Task Rebase_NeverStagesAFileWithAMarkerLeftInIt(string partly)
+    {
+        string featureTip = Branch("feature", "a.txt", "one\nFEATURE\nthree\n", "feature edit");
+        G(work, "checkout", "main");
+        Commit(work, "a.txt", "one\nMAIN\nthree\n", "main edit");
+        FakeAi(() => File.WriteAllText(Path.Combine(work, "a.txt"), partly));
+
+        RequestException failed = await Refused(versioning.Rebase(workspace, "feature", "main", null, CancellationToken.None));
+
+        Assert.Contains("Could not automatically resolve", failed.Message);
+        Assert.Equal(featureTip, G(work, "rev-parse", "feature"));
+        Assert.Equal(string.Empty, G(work, "status", "--porcelain"));
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Rebase_TakesADeletionAsTheAnswerToAFileOneSideDeletedButNotAFileLeftAsItWas(bool deletes)
+    {
+        G(work, "checkout", "-q", "-b", "feature");
+        File.WriteAllText(Path.Combine(work, "a.txt"), "one\nFEATURE\nthree\n");
+        File.WriteAllText(Path.Combine(work, "c.txt"), "also the feature's\n");
+        G(work, "add", "-A");
+        G(work, "commit", "-m", "feature edit");
+        G(work, "push", "-u", "origin", "feature");
+        string featureTip = G(work, "rev-parse", "feature");
+        G(work, "checkout", "main");
+        G(work, "rm", "-q", "a.txt");
+        G(work, "commit", "-m", "main delete");
+        FakeAi(() =>
+        {
+            if (deletes)
+            {
+                File.Delete(Path.Combine(work, "a.txt"));
+            }
+        });
+
+        Task rebase = versioning.Rebase(workspace, "feature", "main", null, CancellationToken.None);
+
+        if (deletes)
+        {
+            await rebase;
+            Assert.Equal("c.txt", G(work, "ls-tree", "--name-only", "feature"));
+            Assert.Equal("0", G(work, "rev-list", "--count", "feature..main"));
+        }
+        else
+        {
+            await Refused(rebase);
+            Assert.Equal(featureTip, G(work, "rev-parse", "feature"));
+            prompts.Verify(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Exactly(3));
+        }
+
+        Assert.Equal(string.Empty, G(work, "status", "--porcelain"));
+    }
+
     [Fact]
     public async Task Rebase_AbortsAndRestoresEverythingWhenTheAiCannotResolveTheConflicts()
     {

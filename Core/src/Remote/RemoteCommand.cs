@@ -107,7 +107,7 @@ public enum RemoteCommand
     GetWorkspaceState,
 
     /// <summary>
-    /// Deletes <see cref="RemoteRequest.WorkspaceId" />, and its folder too when <see cref="RemoteRequest.DeleteFolder" /> is set.
+    /// Deletes <see cref="RemoteRequest.WorkspaceId" /> with its side sessions, and its folder too when <see cref="RemoteRequest.DeleteFolder" /> is set.
     /// </summary>
     DeleteWorkspace,
 
@@ -122,7 +122,7 @@ public enum RemoteCommand
     CreateFolder,
 
     /// <summary>
-    /// Reads a chunk of the conversation of <see cref="RemoteRequest.WorkspaceId" />, the newest messages or the ones before the cursor <see cref="RemoteRequest.Before" />, at most <see cref="RemoteRequest.Limit" />, and whether the AI is working; answered in <see cref="RemoteResponse.History" />. The conversation is read from the AI service's own stored session, so it holds the user's prompts and the AI's messages as the service kept them.
+    /// Reads a chunk of the conversation of <see cref="RemoteRequest.WorkspaceId" />, the newest messages or the ones before the cursor <see cref="RemoteRequest.Before" />, at most <see cref="RemoteRequest.Limit" />, and whether the AI is working; answered in <see cref="RemoteResponse.History" />. The conversation is the server's own record of the chat: the user's prompts, the AI's messages and, while the workspace shows it, the AI's work.
     /// </summary>
     GetHistory,
 
@@ -449,5 +449,45 @@ public enum RemoteCommand
     /// <summary>
     /// Removes the ended task <see cref="RemoteRequest.TaskId" /> from the list, with its result branch; answered in <see cref="RemoteResponse.Swarm" />.
     /// </summary>
-    DiscardSwarmTask
+    DiscardSwarmTask,
+
+    /// <summary>
+    /// Makes a side session of the workspace <see cref="RemoteRequest.WorkspaceId" /> names, called <see cref="RemoteRequest.Name" />, with files starting from <see cref="RemoteRequest.Start" /> and, when <see cref="RemoteRequest.Text" /> is given, that first task. Answered with the session in <see cref="RemoteResponse.Workspace" /> while it is still being set up.
+    /// </summary>
+    CreateSideSession,
+
+    /// <summary>
+    /// Renames the side session <see cref="RemoteRequest.WorkspaceId" /> names to <see cref="RemoteRequest.Name" />.
+    /// </summary>
+    RenameSideSession,
+
+    /// <summary>
+    /// Removes the side session and everything it holds. It cannot be undone, and is refused while it is being integrated.
+    /// </summary>
+    DeleteSideSession,
+
+    /// <summary>
+    /// Starts bringing the side session into its main workspace. The main AI is given the work at once, and the session is removed once it finishes.
+    /// </summary>
+    IntegrateSideSession,
+
+    /// <summary>
+    /// Cancels the integration of the side session, which can be used again. What reached main stays there.
+    /// </summary>
+    CancelIntegration,
+
+    /// <summary>
+    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the side session is integrated by itself once its AI marks its task complete.
+    /// </summary>
+    SetIntegrateWhenFinished,
+
+    /// <summary>
+    /// Lists what changed in the side session since it started, answered in <see cref="RemoteResponse.GitChanges" />.
+    /// </summary>
+    GetSessionChanges,
+
+    /// <summary>
+    /// Compares the file <see cref="RemoteRequest.Path" /> of the side session with how it was when the session started, answered in <see cref="RemoteResponse.GitDiff" />.
+    /// </summary>
+    GetSessionDiff
 }

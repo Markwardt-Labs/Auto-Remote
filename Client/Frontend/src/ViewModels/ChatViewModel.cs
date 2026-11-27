@@ -969,7 +969,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 break;
             case RemoteEventKind.Failed:
                 Report(remoteEvent.Error ?? "The AI failed.", remoteEvent.Time ?? DateTimeOffset.UtcNow);
-                Unstream();
+
+                // A notice is about something beside the work, whose answer goes on.
+                if (remoteEvent.IsNotice != true)
+                {
+                    Unstream();
+                }
+
                 break;
             case RemoteEventKind.QueueChanged:
                 Queue = remoteEvent.Queue;

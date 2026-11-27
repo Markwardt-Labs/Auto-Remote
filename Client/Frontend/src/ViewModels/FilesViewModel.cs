@@ -499,7 +499,9 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         GitDiff? result = null;
         int request = refresh ? previewRequest : ++previewRequest;
 
-        if (!await Attempt(async () => result = await connection.GetGitDiff(workspaceId, path, commit, CancellationToken.None)))
+        bool sinceStart = commit == Git.SessionStartCommit;
+
+        if (!await Attempt(async () => result = sinceStart ? await connection.GetSessionDiff(workspaceId, path, CancellationToken.None) : await connection.GetGitDiff(workspaceId, path, commit, CancellationToken.None)))
         {
             return false;
         }
@@ -512,7 +514,7 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
         Preview = null;
         diffPath = path;
         diffCommit = commit;
-        diffTitle = commit is null ? $"{path} (changes)" : $"{path} ({commit[..Math.Min(7, commit.Length)]})";
+        diffTitle = commit is null ? $"{path} (changes)" : sinceStart ? $"{path} (changes since session start)" : $"{path} ({commit[..Math.Min(7, commit.Length)]})";
         Diff = result;
         Raise(nameof(PreviewTitle));
 
@@ -589,9 +591,10 @@ internal sealed class FilesViewModel : ViewModelBase, IDisposable
     {
         Apply(Nodes);
 
-        if (diffPath is not null && diffCommit is null && diff is not null)
+        // Both compare with the files as they are, which just changed.
+        if (diffPath is not null && (diffCommit is null || diffCommit == Git.SessionStartCommit) && diff is not null)
         {
-            _ = OpenDiff(diffPath, null, false, true);
+            _ = OpenDiff(diffPath, diffCommit, false, true);
         }
     }
 

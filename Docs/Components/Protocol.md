@@ -63,13 +63,14 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
 | `environment` | object, optional | `RunScript` | The client's `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY` and `XDG_SESSION_TYPE`, when it has them. |
 | `url` | string | `CloneWorkspace`, `GitSetRemote`, `ListLocalModels`, `ListImageModels` | A git repository URL; for the two list commands the optional address of the model server or image server to ask, the one of the environment when omitted. |
-| `enabled` | bool | `ConfigureOllamaService` | Whether the Ollama service runs with the optimized context settings (required for that command). |
+| `enabled` | bool | `ConfigureOllamaService`, `SetIntegrateWhenFinished` | Whether the Ollama service runs with the optimized context settings, or whether the side session is integrated once it is finished (required for both). |
+| `start` | string | `CreateSideSession` | What the session's files start from: `Commit` (main's current commit) or `Files` (main's files as they are, uncommitted changes included). |
 | `password` | string, optional | `ConfigureOllamaService` | The password of the account the server runs as, for `sudo`, when `ollamaServiceNeedsPassword` says it is needed. Handed to `sudo` on its standard input only; never stored, logged or put in a command line. |
 | `commit` | string | per command | A commit hash, 4 to 64 hexadecimal characters. |
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
-| `text` | string | `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles`, `RenderDiagram`, `GitSquash`, `GitRebase`, `GitMerge` | The prompt text, the commit message (of the squashed commit for the last three, optional for `GitRebase` and `GitMerge`), the chat input to save, the line written to a script, the text to search for or the Mermaid source. |
+| `text` | string | `CreateSideSession` (optional first task), `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles`, `RenderDiagram`, `GitSquash`, `GitRebase`, `GitMerge` | The prompt text, the commit message (of the squashed commit for the last three, optional for `GitRebase` and `GitMerge`), the chat input to save, the line written to a script, the text to search for or the Mermaid source. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
 | `showWork` | bool | `SetShowWork` | Whether the chat of the workspace shows the AI's work (required for that command). |
 | `ignoreLimit` | bool | no | `Prompt` only: the user confirmed that the work starts although a usage window is at or past the maximum; the workspace then ignores the maximum until the work is done. |
@@ -98,7 +99,7 @@ Exactly one payload property is set on success (commands whose response column b
 | `id` | number | Always; the request's `id`. |
 | `error` | string | Failure only. |
 | `catalog` | catalog | `ListWorkspaces` |
-| `workspace` | workspace | `CreateWorkspace`, `CloneWorkspace`, `RenameWorkspace`, `MoveWorkspace`, `MoveWorkspaceToFolder`, `SetShowWork` |
+| `workspace` | workspace | `CreateWorkspace`, `CloneWorkspace`, `RenameWorkspace`, `MoveWorkspace`, `MoveWorkspaceToFolder`, `SetShowWork`, `CreateSideSession`, `RenameSideSession` |
 | `group` | group | `CreateGroup`, `RenameGroup`, `MoveGroup` |
 | `listing` | listing | `ListFolders`, `CreateFolder` |
 | `history` | history | `GetHistory` |
@@ -115,9 +116,9 @@ Exactly one payload property is set on success (commands whose response column b
 | `state` | string | `GetWorkspaceState`: the workspace's state, as in the `StateChanged` event. |
 | `git` | git status | `GetGitStatus` |
 | `gitBranch` | branch state | `GetGitBranchState` |
-| `gitChanges` | git changes | `GetGitChanges`, `GetGitCommitChanges` |
+| `gitChanges` | git changes | `GetGitChanges`, `GetGitCommitChanges`, `GetSessionChanges` |
 | `gitHistory` | git history | `GetGitHistory` |
-| `gitDiff` | git diff | `GetGitDiff` |
+| `gitDiff` | git diff | `GetGitDiff`, `GetSessionDiff` |
 | `commitMessage` | string | `GenerateCommitMessage` |
 | `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput`, `TranscribeSavedInput`, `DiscardSavedInput` |
 | `savedInput` | saved input | `TakeSavedInput` |
@@ -131,23 +132,33 @@ Exactly one payload property is set on success (commands whose response column b
 
 ### Commands
 
-While a workspace runs a delegated task, `Prompt`, `UploadAttachment`, `StartLoop`, `RenameWorkspace`, `MoveWorkspaceToFolder`, `SetWorkspaceSettings`, `GenerateCommitMessage`, `RunScript`, `DelegateTask` and every git command except `GetGitStatus` (which answers that it is not a repository) and `GitCancel` are refused, and `StopWorkspace` and `CancelWorkspace` cancel the task.
+While a workspace runs a delegated task, `Prompt`, `UploadAttachment`, `StartLoop`, `RenameWorkspace`, `MoveWorkspaceToFolder`, `SetWorkspaceSettings`, `GenerateCommitMessage`, `RunScript`, `DelegateTask`, `CreateSideSession` and every git command except `GetGitStatus` (which answers that it is not a repository) and `GitCancel` are refused, and `StopWorkspace` and `CancelWorkspace` cancel the task.
 
-A missing required property fails with `The request needs a <field>.` (`workspaceId` reports `a workspace` and `groupId` reports `a group`).
+A missing required property fails with a message that starts `The request needs` and names it (usually `a <field>.`; `workspaceId` reports `a workspace` and `groupId` reports `a group`).
+
+A side session is a workspace to every command that takes a `workspaceId`, with these exceptions. Until it is `Ready` it refuses everything but `CancelIntegration` while `Integrating` and `DeleteSideSession` while `Creating`. It refuses renaming, moving and deleting it as a workspace, side sessions of its own, and `GitCheckout`, `GitCreateBranch`, `GitCreateTag`, `GitSetRemote`, `GitDeleteBranch`, `GitDeleteTag`, `GitSquash`, `GitRebase`, `GitMerge` and `GitFetch`. `GitSync` succeeds without doing anything, `GitCommit` does not push, and `GetGitStatus` gives the session's name as its branch. The git actions of any workspace refuse the branches of side sessions. `RetrySwarmTask` and `ApplySwarmTask`, which name only a task, are refused for a task of a side session that is not `Ready`, and the server itself sends such a session no prompt.
 
 | Command | Request properties | Response property | Notes |
 | --- | --- | --- | --- |
 | `ListWorkspaces` | none | `catalog` | The groups in their custom order and the workspaces, each with when its AI session was last loaded (`lastUpdated`), read from Live AI at each call. Clients put the working workspaces of a group (`busy`) first, then those that run a loop (`looping`), and order each of these by it, latest first. |
 | `CreateWorkspace` | `path` (existing folder on the server), optional `service`, optional `apiKey`, optional `groupId` | `workspace` | The workspace runs on `service` (the environment's default provider when omitted) for good; the provider cannot be changed afterwards. The AI session is made together with the workspace, on `apiKey` when one is given. A workspace whose session cannot be made (a key for a provider that takes none, or local models without a model for every capability) refuses the request and nothing is created. |
-| `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused unless the workspace is Ready. |
-| `MoveWorkspaceToFolder` | `workspaceId`, `path` (existing folder the workspace works in from now on) | `workspace` | Tells the workspace's AI session that the workspace is in `path` now, which is what tracks the place of a workspace; no file is moved by the server, so the folder has to exist already (the project may have been moved on disk, even from a folder that is gone). The workspace keeps its identifier, session, group and place. Refused unless the workspace is Ready, when `path` does not exist, and when it already hosts another workspace. Moving it to the folder it is in changes nothing. |
+| `RenameWorkspace` | `workspaceId`, `name` (new folder name) | `workspace` | Refused unless the workspace is Ready, and while a side session of it is being integrated. |
+| `MoveWorkspaceToFolder` | `workspaceId`, `path` (existing folder the workspace works in from now on) | `workspace` | Tells the workspace's AI session that the workspace is in `path` now, which is what tracks the place of a workspace; no file is moved by the server, so the folder has to exist already (the project may have been moved on disk, even from a folder that is gone). The workspace keeps its identifier, session, group and place. Refused unless the workspace is Ready, while a side session of it is being integrated, when `path` does not exist, when it already hosts another workspace, and when the workspace has side sessions that `path` is not the repository of. Moving it to the folder it is in changes nothing. |
 | `MoveWorkspace` | `workspaceId`, optional `groupId` | `workspace` | Omitting `groupId` takes the workspace out of any group. The group must exist. It goes to the end of the group. |
 | `CreateGroup` | `name`, optional `parentId` | `group` | Names are trimmed, must be non-empty and unique ignoring case among the groups with the same parent. The parent must exist. |
 | `RenameGroup` | `groupId`, `name` | `group` | Same name rules as `CreateGroup`. |
 | `MoveGroup` | `groupId`, optional `parentId` | `group` | Omitting `parentId` moves it to the top level. Refused into itself or anything inside it, and when the name is taken in the new place. It goes to the end of its new parent. |
 | `ShiftGroup` | `groupId`, `offset` | none | Moves the group among the groups with the same parent; it stops at the first or last place. |
 | `DeleteGroup` | `groupId` | none | Its workspaces and groups are kept and move into its parent. |
-| `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Also removes the workspace's waiting work and ends its delegated tasks. Refused unless the workspace is Ready. |
+| `DeleteWorkspace` | `workspaceId`, optional `deleteFolder` | none | Also removes the workspace's waiting work, ends its delegated tasks and permanently deletes its side sessions and their branches, even when the folder is kept. Refused unless the workspace is Ready. |
+| `CreateSideSession` | `workspaceId` (the main workspace), `name`, `start`, optional `text` | `workspace` | Makes a side session, answering while it is still `Creating`; it turns `Ready` once its files are set up, and then `text` is sent to it. Needs the workspace to be the top folder of a git repository with a commit, and the side session storage to be outside every workspace. Names are unique among the workspace's sessions ignoring case, at most 60 characters, and not `Main`. |
+| `RenameSideSession` | `workspaceId` (the side session, as for the next six, which answer that it no longer exists for any other), `name` | `workspace` | Changes the label only, under the name rules of `CreateSideSession`. |
+| `DeleteSideSession` | `workspaceId` | none | Permanently discards the session. Refused while it is integrating. |
+| `IntegrateSideSession` | `workspaceId` | none | Starts integrating the session into its main workspace; permanent. Refused while the session has AI work, a loop, queued work, a running script, a delegated task under way or whose end its AI has yet to be told, or is paused at the usage limit. |
+| `CancelIntegration` | `workspaceId` | none | Gives the session back; nothing main's AI already changed is undone. |
+| `SetIntegrateWhenFinished` | `workspaceId`, `enabled` | none | Whether the session is integrated by itself once its AI marked its task complete and nothing of it runs. |
+| `GetSessionChanges` | `workspaceId` | `gitChanges` | The files that differ from what the session started with, committed or not. |
+| `GetSessionDiff` | `workspaceId`, `path` | `gitDiff` | One of those files compared with what it was when the session started. |
 | `ListFolders` | optional `path` (absolute; the server's `defaultFolder` when omitted) | `listing` | `listing.path` is empty when listing file system roots. |
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
 | `GetHistory` | `workspaceId`, optional `before`, `limit`, `characters` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
@@ -156,7 +167,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes, and removes a run that waits for the local AI unless a message of the user joined it; does nothing when no loop runs. |
 | `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
 | `GetWorkspaceSettings` | `workspaceId` | `settings` | How the workspace's AI session is run, as the session stores it (the server keeps none of its own): the provider, capability, effort, whether the shell, files outside the workspace, the web and image generation are on, the instructions, the workspace's own review and expand prompts next to the global ones, and descriptors, which are lines the session writes about how it runs (the model it chose and so on). Makes the session when the workspace has none yet. |
-| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider, the descriptors and the global prompts in it are ignored) from its next prompt on; the session stores them. The review and expand prompts, the status interval and whether the AI may delegate are stored with the workspace instead, and an omitted or blank prompt clears the override. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
+| `SetWorkspaceSettings` | `workspaceId`, `settings` | `settings` | Gives the session every value in `settings` (the provider, the descriptors and the global prompts in it are ignored) from its next prompt on; the session stores them. The review and expand prompts, the status interval, whether the AI may delegate and what new side sessions get (`sessionFiles`, `sessionSetupScript`, ignored on a side session) are stored with the workspace instead, and an omitted or blank one of these but the delegation clears it. Refused for a capability or effort the AI does not know, instructions the session refuses and combinations the provider cannot do. |
 | `GetAiEnvironment` | none | `aiEnvironment` | The environment of the server's AI. API keys are never sent, only whether one is set. |
 | `SetAiEnvironment` | `aiEnvironment` | `aiEnvironment` | Replaces the environment and applies it to every workspace from the next session on. A key left out stays as it is and an empty one is removed. Refused for an empty command, an address that is not http or https, a context size below one, local models for some capabilities but not all, OpenAI image generation without a key, local image generation without a checkpoint for every capability, an unknown `localWorkMode` and a `delegatedTaskLimit` outside 1 to 16. A change of the mode or the limit applies to waiting work at once. |
 | `ConfigureOllamaService` | `enabled`, optional `password` | `aiEnvironment` | Only when `ollamaServiceControl` is `true`: writes (or removes) the systemd drop-in with the Ollama variables of the optimized context, restarts the service and waits for it to answer, with root rights through `sudo`, then stores `localOptimizeContext` as `enabled`. Refused with the reason when the password is not accepted, the account may not use `sudo` or the service did not come back. Nothing changes in the rest of the environment. |
@@ -202,7 +213,7 @@ A missing required property fails with `The request needs a <field>.` (`workspac
 | `GitSetIdentity` | `workspaceId`, `name`, `email` | none | Sets the git user name and email in the server user's global git configuration. |
 | `GitCancel` | `workspaceId` | none | Cancels the git action running in the workspace; that action then fails with a message saying it was cancelled and undone (an automatic Sync stopped while restoring changes keeps them in the stash and says so). While the workspace is Managing it is the same as `StopWorkspace`. |
 | `StopWorkspace` | `workspaceId` | none | Ends the work of the AI or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
-| `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. None of the clients sends it. Only for the AI's work: refused for a git action (stop it), when nothing runs, when it is already Stopping or Canceling, and in a workspace that is not a git repository. |
+| `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. None of the clients sends it. Only for the AI's work: refused for a git action (stop it), when nothing runs, when it is already Stopping or Canceling, in a workspace that is not a git repository, and once the work under way finished integrating a side session, which reverting would lose. |
 | `GetQueuedWork` | `workspaceId` | `queue` | The work of the workspace that waits for the local AI. |
 | `CancelQueuedWork` | `workspaceId`, optional `keep` | `queue` | Removes what waits, never touching what runs, and answers what was removed; with `keep` its text becomes a saved input. For a delegated workspace it cancels the task. |
 | `GetSwarm` | none | `swarm` | The swarm settings, paired servers, pairings waiting on the drive and delegated tasks. |
@@ -245,6 +256,20 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `showWork` | bool | Whether the chat of the workspace shows the AI's work (see `SetShowWork`). |
 | `allowDelegation` | bool | Whether its AI may delegate tasks to other servers. |
 | `statusMinutes` | number, optional | The status interval the workspace has of its own; omitted when it uses the environment's. |
+| `sessionFiles`, `sessionSetupScript` | string, optional | What is copied into new side sessions of the workspace (one relative path per line) and the script run in them. |
+| `side` | side session, optional | What makes the workspace a side session of another; omitted for a workspace of its own. Clients show such a one as `parentName / name`. |
+
+**side session** (`workspace.side`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `parentId` | GUID | The main workspace. |
+| `parentName`, `name` | string | The main workspace's name and the session's. |
+| `state` | string | `Creating`, `Ready`, `Integrating` or `Deleting`. |
+| `startedFrom` | string | `Commit` or `Files`. |
+| `integrateWhenFinished` | bool | See `SetIntegrateWhenFinished`. |
+| `error` | string, optional | Why setting it up, or starting its integration, failed. |
+| `unsentTask` | string, optional | A first task that has not been sent: it waits for the setup while the session is `Creating`, and stays when the setup or sending it failed, or when the usage limit is reached. `error` and `unsentTask` are cleared when the session is prompted, a loop is started in it or its integration starts, and `unsentTask` when it is sent. |
 
 **catalog** (`ListWorkspaces`)
 
@@ -252,6 +277,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | --- | --- | --- |
 | `groups` | array of group | The groups in their custom order. |
 | `workspaces` | array of workspace | The workspaces in their custom order. |
+| `sessions` | array of workspace | The side sessions of all workspaces in the order they were made; they are not among `workspaces`, and `busy`, `looping` and `queued` cover them too. `WorkspacesChanged` says when they or their `side` changed. |
 | `busy` | array of GUID | The workspaces in any state but `Ready` right now; `StateChanged` events keep it current. |
 | `looping` | array of GUID | The workspaces a loop of the AI runs in right now; `LoopChanged` events keep it current. |
 | `queued` | array of GUID | The workspaces with work waiting for the local AI; `QueueChanged` events keep it current. |
@@ -339,6 +365,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `instructions` | string, optional | Standing instructions for the AI. |
 | `reviewPrompt`, `expandPrompt` | string, optional | The prompts the workspace's review and expand buttons send instead of the ones of the environment; omitted (or blank when setting) means the environment's. They belong to the workspace, not to the session. |
 | `statusMinutes` | number, optional | The status interval of the workspace itself, 1 to 1440; omitted (or omitted when setting) means the environment's. It belongs to the workspace, not to the session. |
+| `sessionFiles`, `sessionSetupScript` | string, optional | As on the workspace; omitted (or blank when setting) means none. Ignored when setting a side session's settings. |
 | `globalStatusMinutes` | number | The environment's status interval, which applies while the workspace has none of its own; read only. |
 | `globalReviewPrompt`, `globalExpandPrompt` | string | The prompts of the environment, which the buttons send while the workspace has none of its own; read only. |
 | `descriptors` | object | What the session says about how it runs, text by name; read only. |
@@ -506,7 +533,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `name` | string | The short name. |
-| `kind` | string | `Branch`, `Remote` or `Tag`. |
+| `kind` | string | `Branch`, `Remote`, `Tag` or `Session`: the branch of a side session, named as the session; `isCurrent` marks it in that session's own history. |
 | `isCurrent` | bool, optional | `true` for the checked out branch. |
 
 **script runs** (`GetScripts`)
@@ -621,14 +648,15 @@ The server pushes events to every authenticated connection, as responses with `i
 | `errors` | array of error | `ErrorsChanged`: the errors of the workspace now, the newest first; sent right after the `Failed` event of the same workspace, and only for that workspace. |
 | `text` | string | `FilesChanged`: `all` when too much changed to say where, so everything is read again. `QueueChanged`: `dropped` when a waiting prompt was removed or could not start, as opposed to starting, so a client that sent it stops waiting for its result. `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded` (for the reasoning, the message with `isThought`), and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |
 | `thought` | bool, optional | `MessageDelta`: `true` when the piece is the reasoning of the AI and not its answer; omitted for the answer. |
-| `error` | string | `Failed`: why the AI could not do its work. |
+| `error` | string | `Failed`: what went wrong, usually why the AI could not do its work. |
+| `isNotice` | bool, optional | `Failed`: `true` when what went wrong is beside the work of the workspace, which goes on: an integration that could not start, or files of a removed side session left on disk. A loop does not end for it. |
 | `queue` | queued work, optional | `QueueChanged`: what of the workspace waits now, omitted once nothing does; sent for every waiting workspace whenever the queue changes, since positions move. |
 | `taskId` | GUID | `SwarmTaskChanged`: the delegated task whose state or conversation changed. |
 | `time` | string (ISO 8601) | `Failed`: when the failure happened, taken by the server so every client shows the same time (the error history records the same one). A client shows the failure as the error line of the chat with this time and clears it when a user `MessageAdded` of the workspace arrives, whichever client sent that input. |
 
 `ScriptChanged` is pushed when a run starts and each time its state changes, a task and each of its scripts separately; `ScriptOutput` carries what a running script wrote, batched about every 100 milliseconds, in order with the state events; `ScriptRemoved` says a run was forgotten or replaced by a new run of the same file. A client reads `GetScripts` after subscribing and applies the events it received meanwhile.
 
-`WorkspacesChanged` says the workspaces or groups changed on the server (one was created, deleted, renamed, moved, reordered or configured, by any client); it carries no details, so a client lists the workspaces again with `ListWorkspaces`, which it also does after reconnecting. A new AI session being attached to a workspace is not announced. The client keeps what it has open: the focused workspace stays open untouched unless it was deleted (the view clears and the drawer opens) or its folder or AI settings changed (it is reopened).
+`WorkspacesChanged` says the workspaces or groups changed on the server (one was created, deleted, renamed, moved, reordered or configured, by any client); it carries no details, so a client lists the workspaces again with `ListWorkspaces`, which it also does after reconnecting. A new AI session being attached to a workspace is not announced. The client keeps what it has open: the focused workspace stays open untouched unless it was deleted (the view clears and the drawer opens) or its folder or AI settings changed (it is reopened). A side session on screen that is removed or starts to be integrated gives way to its main session.
 
 `SwarmChanged` says the swarm's settings, paired servers or tasks changed, and `SwarmTaskChanged` that one task did; both have the empty workspace GUID and carry no details, so a client that shows them reads them again.
 

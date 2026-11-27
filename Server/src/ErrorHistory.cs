@@ -119,7 +119,9 @@ internal sealed class ErrorHistory(IWorkspaceStore store, IWorkspaceManager work
     {
         try
         {
-            foreach (WorkspaceInfo workspace in (await workspaces.List(cancellation)).Workspaces)
+            WorkspaceCatalog catalog = await workspaces.List(cancellation);
+
+            foreach (WorkspaceInfo workspace in catalog.Workspaces.Concat(catalog.Sessions))
             {
                 await Prune(workspace.Id, cancellation);
             }

@@ -63,7 +63,7 @@ internal interface IGitService
     Task<string> Pending(string folder, CancellationToken cancellation);
 
     /// <summary>
-    /// Stages every change and commits it, then pushes the branch when there is a remote; a failing push is ignored.
+    /// Stages every change and commits it, then pushes the branch when there is a remote, unless it is a side session's; a failing push is ignored.
     /// </summary>
     /// <param name="folder">The workspace folder.</param>
     /// <param name="message">The commit message.</param>
@@ -138,6 +138,17 @@ internal interface IGitService
     /// <returns>The outcome.</returns>
     /// <exception cref="RequestException">Git is not installed, the folder is missing or git ran too long.</exception>
     Task<GitOutput> Run(string folder, IReadOnlyList<string> arguments, IReadOnlyDictionary<string, string> environment, CancellationToken cancellation, TimeSpan? timeout = null);
+
+    /// <summary>
+    /// Compares a file between two trees.
+    /// </summary>
+    /// <param name="folder">The repository.</param>
+    /// <param name="path">The file, relative to the repository.</param>
+    /// <param name="from">The tree it was in.</param>
+    /// <param name="to">The tree it is in.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The comparison.</returns>
+    Task<GitDiff> DiffTrees(string folder, string path, string from, string to, CancellationToken cancellation);
 
     /// <summary>
     /// Clones a repository into a new folder.
@@ -333,6 +344,13 @@ internal sealed class GitService : IGitService
     }
 
     /// <inheritdoc />
+    public async Task<GitDiff> DiffTrees(string folder, string path, string from, string to, CancellationToken cancellation)
+    {
+        RequirePath(path);
+        return Parse(path, Check(await Run(folder, ["diff", "--no-color", "--no-ext-diff", "--no-renames", "-U1000000", from, to, "--", path], cancellation)).Output);
+    }
+
+    /// <inheritdoc />
     public async Task Commit(string folder, string message, CancellationToken cancellation)
     {
         await RequireRepo(folder, cancellation);
@@ -345,7 +363,8 @@ internal sealed class GitService : IGitService
 
         Check(await Run(folder, ["commit", "-m", message], cancellation));
 
-        if (await Optional(folder, ["remote", "get-url", "origin"], cancellation) is not null && await Optional(folder, ["symbolic-ref", "--short", "-q", "HEAD"], cancellation) is { } branch)
+        // A side session's branch is only ever here: its work reaches others through the main workspace.
+        if (await Optional(folder, ["remote", "get-url", "origin"], cancellation) is not null && await Optional(folder, ["symbolic-ref", "--short", "-q", "HEAD"], cancellation) is { } branch && !branch.StartsWith("auto-remote/session/", StringComparison.Ordinal))
         {
             await Run(folder, ["push", "origin", branch], cancellation);
         }

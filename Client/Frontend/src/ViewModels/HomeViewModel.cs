@@ -36,6 +36,19 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         connection.Reconnected += Return;
         connection.EventReceived += Receive;
         Usage = new UsageViewModel(connection);
+        // What was edited in main's settings applies to the session made next.
+        Sessions = new SessionsViewModel(connection, id => opened.TryGetValue(id, out WorkspaceViewModel? view) && view.IsAiWorking || busy.Contains(id), id => opened.TryGetValue(id, out WorkspaceViewModel? view) ? view.Settings.Apply() : Task.FromResult(true));
+        Sessions.Failed += message => active?.Chat.Show(message);
+        Sessions.Discarding += Disarm;
+        Sessions.Chosen += id => ShowSession(id);
+        Sessions.ChangesRequested += id =>
+        {
+            if (ShowSession(id))
+            {
+                _ = active!.ShowSessionChanges();
+            }
+        };
+        Sessions.Made += (made, hasTask) => Await(made, hasTask);
         ToggleUsageCommand = new AsyncCommand(_ =>
         {
             IsUsageOpen = !isUsageOpen;
@@ -137,6 +150,15 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     private bool isUsageOpen;
 
     private readonly List<WorkspaceInfo> workspaces = [];
+
+    private readonly List<WorkspaceInfo> sideSessions = [];
+
+    private readonly Dictionary<Guid, Guid> shownSessions = [];
+
+    private Guid? awaited;
+
+    // Sessions made here with a first task, which the user is told about once it is done, whatever is on screen by then.
+    private readonly HashSet<Guid> tasked = [];
 
     private readonly List<WorkspaceGroup> groups = [];
 
@@ -277,6 +299,26 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     public UsageViewModel Usage { get; }
 
     /// <summary>
+    /// Gets the sessions of the selected workspace.
+    /// </summary>
+    public SessionsViewModel Sessions { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether a side session of the selected workspace is on screen.
+    /// </summary>
+    public bool IsSideSession => active?.IsSideSession ?? false;
+
+    /// <summary>
+    /// Gets a value indicating whether the main session of the selected workspace is on screen.
+    /// </summary>
+    public bool IsMainSession => !IsSideSession;
+
+    /// <summary>
+    /// Gets a value indicating whether the selected workspace has side sessions, which go when it is deleted.
+    /// </summary>
+    public bool HasSideSessions => selected is not null && sideSessions.Any(session => session.Side!.ParentId == selected.Id);
+
+    /// <summary>
     /// Gets the command that shows or hides the usage limits.
     /// </summary>
     public AsyncCommand ToggleUsageCommand { get; }
@@ -307,13 +349,20 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             IsUsageOpen = false;
             EditMode = EditMode.None;
             _ = active?.Settings.Apply();
-            Active = value is null ? null : Open(value);
+
+            if (value is not null)
+            {
+                ForgetUnshowable(value);
+            }
+
+            Active = value is null ? null : Open(Shown(value));
             BeginStopCommand.Refresh();
             _ = Active?.Focus();
             _ = Usage.Show(value?.Service);
 
             Raise(nameof(HasSelection));
-            Raise(nameof(Title));
+            RaiseSession();
+            RefreshSessions();
 
             if (value is not null && ExpandAround(value))
             {
@@ -368,12 +417,12 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets the width of the header cell on each side of the title, which the desktop client widens for the window controls.
     /// </summary>
-    public GridLength HeaderSide => new(layout == ClientLayout.Panels ? 250 : 140);
+    public GridLength HeaderSide => new(layout == ClientLayout.Panels ? 250 : 76);
 
     /// <summary>
-    /// Gets a value indicating whether the focused workspace can be renamed or deleted: it is focused and <see cref="WorkspaceState.Ready" />.
+    /// Gets a value indicating whether the focused workspace can be renamed or deleted: it is focused, shows its main session and is <see cref="WorkspaceState.Ready" />.
     /// </summary>
-    public bool CanEditSelected => selected is not null && (active?.State ?? WorkspaceState.Ready) == WorkspaceState.Ready;
+    public bool CanEditSelected => selected is not null && !IsSideSession && (active?.State ?? WorkspaceState.Ready) == WorkspaceState.Ready;
 
     /// <summary>
     /// Gets a value indicating whether the focused workspace can be renamed or moved: <see cref="CanEditSelected" />, and it runs no task another server delegated, which still lets it be deleted.
@@ -411,9 +460,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets the header text: the focused workspace's name.
+    /// Gets the header text: the name of the focused workspace, with that of the side session on screen, and a note while the server is out of reach.
     /// </summary>
-    public string Title => (selected?.Name ?? "Auto Remote") + (isOffline ? " (reconnecting…)" : string.Empty);
+    public string Title => (selected is null ? "Auto Remote" : sideSessions.FirstOrDefault(session => session.Id == active?.Workspace.Id)?.Name ?? selected.Name) + (isOffline ? " (reconnecting…)" : string.Empty);
 
     /// <summary>
     /// Gets or sets a value indicating whether the workspace list drawer is open.
@@ -712,17 +761,203 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     /// <returns>A task that completes once the workspace is shown.</returns>
     public async Task Show(Guid id)
     {
-        if (workspaces.FirstOrDefault(workspace => workspace.Id == id) is { } known)
+        if (workspaces.FirstOrDefault(workspace => workspace.Id == MainOf(id)) is { } known)
         {
             Selected = known;
+            ShowSession(id);
             EditMode = EditMode.None;
             IsDrawerOpen = false;
         }
         else
         {
-            await Start(id, false);
+            WorkspaceCatalog? catalog = null;
+
+            // A notification can outlive what it is about, which then leaves the screen as it is.
+            if (await Attempt(async () => catalog = await List()) && catalog!.Workspaces.Concat(catalog.Sessions).Any(workspace => workspace.Id == id))
+            {
+                await Start(id, false);
+            }
+        }
+
+        Sessions.IsOpen = false;
+    }
+
+    // The main workspace of what the identifier names, which is itself unless it names a side session.
+    private Guid MainOf(Guid id) => sideSessions.FirstOrDefault(session => session.Id == id)?.Side!.ParentId ?? id;
+
+    // The session of a workspace that is on screen when it is selected.
+    private WorkspaceInfo Shown(WorkspaceInfo workspace) => shownSessions.TryGetValue(workspace.Id, out Guid id) && sideSessions.FirstOrDefault(session => session.Id == id) is { Side.State: SideSessionState.Ready } side ? side : workspace;
+
+    private bool ShowSession(Guid id)
+    {
+        if (selected is null || MainOf(id) != selected.Id)
+        {
+            return false;
+        }
+
+        if (id == selected.Id)
+        {
+            shownSessions.Remove(selected.Id);
+        }
+        else if (sideSessions.Any(session => session.Id == id && session.Side!.State == SideSessionState.Ready))
+        {
+            shownSessions[selected.Id] = id;
+        }
+        else
+        {
+            return false;
+        }
+
+        awaited = null;
+        Swap();
+        RefreshSessions();
+        return true;
+    }
+
+    // Main shown in the place of a session that cannot be shown stays, rather than giving way to it again later.
+    private void ForgetUnshowable(WorkspaceInfo workspace)
+    {
+        if (shownSessions.ContainsKey(workspace.Id) && Shown(workspace).Id == workspace.Id)
+        {
+            shownSessions.Remove(workspace.Id);
         }
     }
+
+    // Work that is thrown away does not end in a notification that it is ready.
+    private void Disarm(Guid id)
+    {
+        tasked.Remove(id);
+
+        if (opened.TryGetValue(id, out WorkspaceViewModel? view))
+        {
+            view.NotifyWhenReady = false;
+        }
+
+        keeper?.Release(id);
+        notifier?.Clear(id);
+    }
+
+    // The server sends a first task once the session is set up, and the user is told when it is done as for one typed here.
+    private void FollowTasks()
+    {
+        foreach (Guid id in tasked.ToList())
+        {
+            if (sideSessions.FirstOrDefault(session => session.Id == id) is not { Side.State: not SideSessionState.Deleting } session)
+            {
+                Disarm(id);
+            }
+            else if (session.Side.State == SideSessionState.Ready)
+            {
+                tasked.Remove(id);
+
+                if (session.Side.Error is null)
+                {
+                    Open(session).NotifyWhenReady = true;
+                }
+                else
+                {
+                    keeper?.Release(id);
+                }
+            }
+        }
+    }
+
+    // Puts the view of the session that is to be on screen there, when it is not already.
+    private void Swap()
+    {
+        if (selected is null || Shown(selected) is not { } wanted || active?.Workspace.Id == wanted.Id)
+        {
+            return;
+        }
+
+        _ = active?.Settings.Apply();
+        EditMode = EditMode.None;
+        Active = Open(wanted);
+        BeginStopCommand.Refresh();
+        _ = Active!.Focus();
+        RaiseSession();
+    }
+
+    private void RaiseSession()
+    {
+        Raise(nameof(Title));
+        Raise(nameof(IsSideSession));
+        Raise(nameof(IsMainSession));
+        Raise(nameof(HasSideSessions));
+        BeginRenameCommand.Refresh();
+        MoveWorkspaceToFolderCommand.Refresh();
+        BeginDeleteCommand.Refresh();
+    }
+
+    // A new session is switched to as soon as it is set up, unless the user went somewhere else in the meantime.
+    private void Await(WorkspaceInfo made, bool hasTask)
+    {
+        if (hasTask)
+        {
+            tasked.Add(made.Id);
+            keeper?.Hold(made.Id, made.Name);
+        }
+
+        if (selected is not null && made.Side?.ParentId == selected.Id)
+        {
+            awaited = made.Id;
+        }
+
+        // The list may have said by now that the session is set up.
+        if (sideSessions.Any(session => session.Id == made.Id))
+        {
+            FollowTasks();
+            ShowAwaited();
+        }
+    }
+
+    private void ShowAwaited()
+    {
+        if (awaited is not { } wanted || sideSessions.FirstOrDefault(session => session.Id == wanted) is not { Side.State: SideSessionState.Ready } ready)
+        {
+            return;
+        }
+
+        awaited = null;
+
+        // Choosing a session meanwhile ends the wait, so only another workspace is left to look out for. The list would cover the session that was just made.
+        if (selected?.Id == ready.Side.ParentId && ShowSession(ready.Id))
+        {
+            Sessions.IsOpen = false;
+        }
+    }
+
+    private void RefreshSessions()
+    {
+        if (selected is null)
+        {
+            Sessions.Show(null, []);
+            return;
+        }
+
+        List<SessionEntry> rows = [Row(selected, "Main", null)];
+        rows.AddRange(sideSessions.Where(session => session.Side!.ParentId == selected.Id).Select(session => Row(session, session.Side!.Name, session.Side)));
+        Sessions.Show(selected, rows);
+    }
+
+    private SessionEntry Row(WorkspaceInfo session, string name, SideSession? side) => new()
+    {
+        Id = session.Id,
+        Name = name,
+        Side = side,
+        IsShown = (active?.Workspace.Id ?? selected!.Id) == session.Id,
+        IsWorking = busy.Contains(session.Id),
+        Status = side?.State switch
+        {
+            SideSessionState.Creating => "Setting Up",
+            SideSessionState.Integrating => "Integrating",
+            SideSessionState.Deleting => "Deleting",
+            _ => busy.Contains(session.Id) ? "Working" : waiting.Contains(session.Id) ? "Queued" : looping.Contains(session.Id) ? "Loop" : "Ready"
+        }
+    };
+
+    // A workspace counts as working, looping or queued when any of its sessions does.
+    private bool AnySession(Guid workspace, HashSet<Guid> ids) => ids.Contains(workspace) || sideSessions.Any(session => session.Side!.ParentId == workspace && ids.Contains(session.Id));
 
     /// <summary>
     /// Loads the workspaces and groups and focuses a workspace.
@@ -738,16 +973,27 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             Fill(catalog!);
 
-            foreach (Guid stale in opened.Where(pair => !workspaces.Any(workspace => Same(workspace, pair.Value.Workspace))).Select(pair => pair.Key).ToList())
+            foreach (Guid stale in Stale())
             {
-                opened[stale].Dispose();
-                opened.Remove(stale);
+                if (sideSessions.All(session => session.Id != stale) && workspaces.All(workspace => workspace.Id != stale))
+                {
+                    Disarm(stale);
+                }
+
+                Close(stale);
             }
 
+            FollowTasks();
             BuildEntries();
             EditMode = EditMode.None;
             Selected = null;
-            Selected = workspaces.FirstOrDefault(workspace => workspace.Id == focus) ?? (focusFirst ? Entries.FirstOrDefault(entry => entry.IsWorkspace)?.Workspace : null);
+
+            if (focus is { } wanted && sideSessions.FirstOrDefault(session => session.Id == wanted) is { } side)
+            {
+                shownSessions[side.Side!.ParentId] = side.Id;
+            }
+
+            Selected = workspaces.FirstOrDefault(workspace => focus is { } id && workspace.Id == MainOf(id)) ?? (focusFirst ? Entries.FirstOrDefault(entry => entry.IsWorkspace)?.Workspace : null);
             IsDrawerOpen = Selected is null;
             await RefreshSwarm();
         }
@@ -930,14 +1176,28 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         Fill(catalog);
         bool reopen = false;
 
-        foreach ((Guid id, WorkspaceViewModel view) in opened.ToList())
+        // Announced before the session's work is ended, which would otherwise be told as ready.
+        foreach (Guid removing in sideSessions.Where(session => session.Side!.State == SideSessionState.Deleting).Select(session => session.Id).ToList())
         {
-            if (!workspaces.Any(workspace => Same(workspace, view.Workspace)))
+            Disarm(removing);
+        }
+
+        foreach (Guid stale in Stale())
+        {
+            reopen |= stale == before?.Id;
+
+            if (sideSessions.All(session => session.Id != stale) && workspaces.All(workspace => workspace.Id != stale))
             {
-                view.Dispose();
-                opened.Remove(id);
-                reopen |= id == before?.Id;
+                Disarm(stale);
             }
+
+            // The view on screen is replaced below rather than left behind disposed.
+            if (stale == active?.Workspace.Id && stale != before?.Id)
+            {
+                Active = null;
+            }
+
+            Close(stale);
         }
 
         BuildEntries();
@@ -962,6 +1222,26 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             selected = current;
             SyncSelectedEntry();
         }
+
+        FollowTasks();
+
+        if (selected is not null)
+        {
+            // A session that went, or that is being integrated, gives way to the main one.
+            ForgetUnshowable(selected);
+            Swap();
+            RaiseSession();
+            ShowAwaited();
+            RefreshSessions();
+        }
+    }
+
+    private List<Guid> Stale() => [.. opened.Where(pair => !workspaces.Concat(sideSessions).Any(workspace => Same(workspace, pair.Value.Workspace))).Select(pair => pair.Key)];
+
+    private void Close(Guid id)
+    {
+        opened[id].Dispose();
+        opened.Remove(id);
     }
 
     // A view reads one folder through one provider, so a workspace that changed either needs a new one.
@@ -971,6 +1251,19 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     {
         workspaces.Clear();
         workspaces.AddRange(catalog.Workspaces);
+        Dictionary<Guid, string> named = sideSessions.ToDictionary(session => session.Id, session => session.Side!.Name);
+        sideSessions.Clear();
+        sideSessions.AddRange(catalog.Sessions.Where(session => session.Side is not null));
+        // History shows the branches of sessions by their names, which a rename changes without git changing.
+        HashSet<Guid> renamed = [.. sideSessions.Where(session => named.TryGetValue(session.Id, out string? name) && name != session.Side!.Name).Select(session => session.Side!.ParentId)];
+
+        foreach ((Guid id, WorkspaceViewModel view) in opened)
+        {
+            if (renamed.Contains(MainOf(id)))
+            {
+                _ = view.Git.History.Changed();
+            }
+        }
         groups.Clear();
         groups.AddRange(catalog.Groups);
         expanded.IntersectWith(groups.Select(group => group.Id));
@@ -996,6 +1289,11 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         foreach ((Guid id, WorkspaceViewModel view) in opened)
         {
             view.Delegation = delegations.GetValueOrDefault(id);
+
+            if (sideSessions.FirstOrDefault(session => session.Id == id) is { } side)
+            {
+                view.ShowSide(side.Side!);
+            }
         }
     }
 
@@ -1017,7 +1315,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             Delegation = delegations.GetValueOrDefault(workspace.Id)
         };
-        created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, workspace.Name);
+        created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, NameOf(workspace));
         created.Chat.PromptFailed += () =>
         {
             if (held.Contains(workspace.Id))
@@ -1060,7 +1358,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
                         if (!created.IsLooping)
                         {
-                            notifier?.Notify(workspace.Id, workspace.Name);
+                            notifier?.Notify(workspace.Id, NameOf(workspace));
                         }
                     }
                 }
@@ -1101,6 +1399,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         _ = created.Start();
         return created;
     }
+
+    // Sessions and workspaces can be renamed while their view stays.
+    private string NameOf(WorkspaceInfo workspace) => workspaces.Concat(sideSessions).FirstOrDefault(known => known.Id == workspace.Id)?.Name ?? workspace.Name;
 
     private Task Begin(EditMode mode, string text, WorkspaceGroup? group = null)
     {
@@ -1233,6 +1534,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         building = false;
         Raise(nameof(HasNoMatches));
         SyncSelectedEntry();
+        RefreshSessions();
     }
 
     private bool Matches(WorkspaceInfo workspace) => workspace.Name.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase) || workspace.Folder.Contains(filter.Trim(), StringComparison.OrdinalIgnoreCase);
@@ -1241,7 +1543,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
     private bool HoldsMatch(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && Matches(workspace)) || Children(group).Any(child => Matches(child) || HoldsMatch(child.Id));
 
-    private bool HoldsBusy(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && busy.Contains(workspace.Id)) || Children(group).Any(child => HoldsBusy(child.Id));
+    private bool HoldsBusy(Guid group) => workspaces.Any(workspace => Parent(workspace.GroupId) == group && AnySession(workspace.Id, busy)) || Children(group).Any(child => HoldsBusy(child.Id));
 
     private void AddEntries(Guid? parent, int depth, bool showAll, List<DrawerEntry> into)
     {
@@ -1263,11 +1565,11 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             }
         }
 
-        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => busy.Contains(workspace.Id)).ThenByDescending(workspace => looping.Contains(workspace.Id)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
+        foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => AnySession(workspace.Id, busy)).ThenByDescending(workspace => AnySession(workspace.Id, looping)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
         {
-            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsWorking = busy.Contains(workspace.Id), IsLooping = looping.Contains(workspace.Id), IsQueued = waiting.Contains(workspace.Id), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
+            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsWorking = AnySession(workspace.Id, busy), IsLooping = AnySession(workspace.Id, looping), IsQueued = AnySession(workspace.Id, waiting), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
 
-            foreach (SwarmTaskInfo task in swarmTasks.Where(task => task.WorkspaceId == workspace.Id && (task.IsActive || task.State == SwarmTaskState.Lost)).OrderBy(task => task.CreatedAt))
+            foreach (SwarmTaskInfo task in swarmTasks.Where(task => task.WorkspaceId is { } owner && MainOf(owner) == workspace.Id && (task.IsActive || task.State == SwarmTaskState.Lost)).OrderBy(task => task.CreatedAt))
             {
                 into.Add(new DrawerEntry { DelegatedTask = task, Depth = depth + 1 });
             }
@@ -1294,7 +1596,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             // The task opens on the swarm screen, and the list keeps the focused workspace selected.
             ShowFocusedAsSelected();
-            SwarmRequested?.Invoke(task.Id, task.WorkspaceId);
+            SwarmRequested?.Invoke(task.Id, task.WorkspaceId is { } owner ? MainOf(owner) : null);
         }
         else if (entry.Workspace is { } workspace)
         {

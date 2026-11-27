@@ -30,15 +30,29 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm, ISideSessions sideSessions, ISideIntegrations integrations, ISideSessionRepository sideRepository) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
     // A delegated task runs code another server sent, under permissions its sender was given, so its workspace takes nothing else: no further prompts or settings, and no git, which would run whatever configuration the AI wrote into a repository it made there.
     private readonly HashSet<RemoteCommand> refusedWhenDelegated =
     [
-        RemoteCommand.Prompt, RemoteCommand.UploadAttachment, RemoteCommand.StartLoop, RemoteCommand.RenameWorkspace, RemoteCommand.MoveWorkspaceToFolder, RemoteCommand.SetWorkspaceSettings, RemoteCommand.GenerateCommitMessage, RemoteCommand.RunScript, RemoteCommand.DelegateTask,
+        RemoteCommand.Prompt, RemoteCommand.UploadAttachment, RemoteCommand.StartLoop, RemoteCommand.CreateSideSession, RemoteCommand.RenameWorkspace, RemoteCommand.MoveWorkspaceToFolder, RemoteCommand.SetWorkspaceSettings, RemoteCommand.GenerateCommitMessage, RemoteCommand.RunScript, RemoteCommand.DelegateTask,
         RemoteCommand.GetGitChanges, RemoteCommand.GetGitHistory, RemoteCommand.GetGitCommitChanges, RemoteCommand.GetGitDiff, RemoteCommand.GetGitBranchState, RemoteCommand.GitCommit, RemoteCommand.GitReset, RemoteCommand.GitCreateBranch, RemoteCommand.GitCreateTag, RemoteCommand.GitSetRemote, RemoteCommand.GitCheckout, RemoteCommand.GitDeleteBranch, RemoteCommand.GitDeleteTag, RemoteCommand.GitSquash, RemoteCommand.GitRebase, RemoteCommand.GitMerge, RemoteCommand.GitFetch, RemoteCommand.GitSync, RemoteCommand.GitSetIdentity
+    ];
+
+    // What only a workspace itself takes, which a side session is not.
+    private readonly HashSet<RemoteCommand> workspaceOnly = [RemoteCommand.RenameWorkspace, RemoteCommand.MoveWorkspaceToFolder, RemoteCommand.MoveWorkspace, RemoteCommand.DeleteWorkspace, RemoteCommand.CreateSideSession];
+
+    // A side session shares the main repository, where these would change branches, tags or remotes of the main workspace, or push the session's branch.
+    private readonly HashSet<RemoteCommand> refusedInSideSessions =
+    [
+        RemoteCommand.GitCheckout, RemoteCommand.GitCreateBranch, RemoteCommand.GitCreateTag, RemoteCommand.GitSetRemote, RemoteCommand.GitDeleteBranch, RemoteCommand.GitDeleteTag, RemoteCommand.GitSquash, RemoteCommand.GitRebase, RemoteCommand.GitMerge, RemoteCommand.GitFetch
+    ];
+
+    private readonly HashSet<RemoteCommand> sideSessionCommands =
+    [
+        RemoteCommand.RenameSideSession, RemoteCommand.DeleteSideSession, RemoteCommand.IntegrateSideSession, RemoteCommand.CancelIntegration, RemoteCommand.SetIntegrateWhenFinished, RemoteCommand.GetSessionChanges, RemoteCommand.GetSessionDiff
     ];
 
     private readonly HashSet<string> displayVariables = ["DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_SESSION_TYPE"];
@@ -56,6 +70,10 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         guard.Open(cancellation);
         await queue.Open(config.DataFolder, cancellation);
         await swarm.Open(config, cancellation);
+        await sideSessions.Open(config, cancellation);
+        await integrations.Open(cancellation);
+        // Only now, so a request to integrate that was restored with the queue is taken out before it can be sent.
+        queue.Resume();
     }
 
     /// <inheritdoc />
@@ -95,20 +113,90 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             }
         }
 
+        if (request.WorkspaceId is { } sessionId && workspaces.GetSide(sessionId) is { } side)
+        {
+            // A session that is being set up, integrated or removed is closed to everything but getting out of that.
+            if (side.State != SideSessionState.Ready && !(request.Command == RemoteCommand.CancelIntegration && side.State == SideSessionState.Integrating) && !(request.Command == RemoteCommand.DeleteSideSession && side.State == SideSessionState.Creating))
+            {
+                throw new RequestException(side.State switch
+                {
+                    SideSessionState.Integrating => "The side session is being integrated. Cancel the integration to use it again.",
+                    SideSessionState.Creating => "The side session is still being set up.",
+                    _ => "The side session is being removed."
+                });
+            }
+
+            if (workspaceOnly.Contains(request.Command))
+            {
+                throw new RequestException("This is a side session. Do this with its workspace instead.");
+            }
+
+            if (refusedInSideSessions.Contains(request.Command))
+            {
+                throw new RequestException("Side sessions cannot switch or change branches, tags or remotes. Integrate the session and do this in the main workspace.");
+            }
+
+            // The clients sync on their own now and then; a side session's branch is never pulled or pushed.
+            if (request.Command == RemoteCommand.GitSync)
+            {
+                return new RemoteResponse { Id = 0 };
+            }
+
+            if (request.Command is RemoteCommand.Prompt or RemoteCommand.StartLoop)
+            {
+                await integrations.Reopen(sessionId);
+            }
+        }
+        else if (sideSessionCommands.Contains(request.Command))
+        {
+            throw new RequestException("The side session no longer exists.");
+        }
+
+        RequireOwnBranch(request);
+
         switch (request.Command)
         {
+            case RemoteCommand.CreateSideSession:
+                return new RemoteResponse { Id = 0, Workspace = await sideSessions.Create(RequireWorkspace(request), Require(request.Name, "name"), request.Start ?? throw new RequestException("The request needs what the session starts from."), request.Text, cancellation) };
+            case RemoteCommand.RenameSideSession:
+                return new RemoteResponse { Id = 0, Workspace = await sideSessions.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation) };
+            case RemoteCommand.DeleteSideSession:
+                Guid removed = RequireWorkspace(request);
+                await swarm.Forget(removed);
+                await sideSessions.Delete(removed);
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.IntegrateSideSession:
+                await integrations.Integrate(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.CancelIntegration:
+                await integrations.Cancel(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.SetIntegrateWhenFinished:
+                await integrations.SetWhenFinished(RequireWorkspace(request), request.Enabled ?? throw new RequestException("The request needs enabled."));
+                return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GetSessionChanges:
+                return new RemoteResponse { Id = 0, GitChanges = await sideSessions.Changes(RequireWorkspace(request), cancellation) };
+            case RemoteCommand.GetSessionDiff:
+                return new RemoteResponse { Id = 0, GitDiff = await sideSessions.Diff(RequireWorkspace(request), Require(request.Path, "path"), cancellation) };
             case RemoteCommand.ListWorkspaces:
                 return new RemoteResponse { Id = 0, Catalog = await Catalog(cancellation) };
             case RemoteCommand.CreateWorkspace:
                 return new RemoteResponse { Id = 0, Workspace = await CreateWorkspace(Require(request.Path, "path"), request, cancellation) };
             case RemoteCommand.RenameWorkspace:
+                RequireNoIntegration(RequireWorkspace(request));
                 await RequireIdle(request);
                 watcher.Forget(RequireWorkspace(request));
-                return new RemoteResponse { Id = 0, Workspace = await workspaces.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation) };
+                WorkspaceInfo renamed = await workspaces.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation);
+                await FollowMove(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, Workspace = renamed };
             case RemoteCommand.MoveWorkspaceToFolder:
+                RequireNoIntegration(RequireWorkspace(request));
                 await RequireIdle(request);
+                await sideSessions.RequireSameRepository(RequireWorkspace(request), Require(request.Path, "path"), cancellation);
                 watcher.Forget(RequireWorkspace(request));
-                return new RemoteResponse { Id = 0, Workspace = await workspaces.MoveToFolder(RequireWorkspace(request), Require(request.Path, "path"), cancellation) };
+                WorkspaceInfo moved = await workspaces.MoveToFolder(RequireWorkspace(request), Require(request.Path, "path"), cancellation);
+                await FollowMove(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, Workspace = moved };
             case RemoteCommand.StartLoop:
                 RequireAiInput(request);
                 await loops.Start(RequireWorkspace(request), request.Loop ?? throw new RequestException("The request needs a loop."), cancellation);
@@ -154,6 +242,16 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.DeleteWorkspace:
                 await RequireIdle(request);
                 WorkspaceInfo deleting = await workspaces.Get(RequireWorkspace(request), cancellation);
+                // Checked before any side session goes, so a deletion that is refused removes nothing.
+                await workspaces.RequireDeletable(deleting.Id, request.DeleteFolder, cancellation);
+                await integrations.Forget(deleting.Id);
+
+                foreach ((Guid session, StoredSideSession _) in workspaces.Sides(deleting.Id))
+                {
+                    await swarm.Forget(session);
+                }
+
+                await sideSessions.DeleteAll(deleting.Id);
                 watcher.Forget(deleting.Id);
                 await swarm.Forget(deleting.Id);
                 await queue.Cancel(deleting.Id);
@@ -191,11 +289,11 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.CloneWorkspace:
                 return new RemoteResponse { Id = 0, Workspace = await CreateWorkspace(await git.Clone(Require(request.Path, "path"), Require(request.Url, "URL"), request.Name, cancellation), request, cancellation) };
             case RemoteCommand.GetGitStatus:
-                return new RemoteResponse { Id = 0, Git = (await git.Status(await FolderOf(request, cancellation), cancellation)) with { Busy = versioning.IsBusy(RequireWorkspace(request)) } };
+                return new RemoteResponse { Id = 0, Git = NameSession(RequireWorkspace(request), await git.Status(await FolderOf(request, cancellation), cancellation)) with { Busy = versioning.IsBusy(RequireWorkspace(request)) } };
             case RemoteCommand.GetGitChanges:
                 return new RemoteResponse { Id = 0, GitChanges = new GitChanges { Changes = await git.Changes(await FolderOf(request, cancellation), cancellation) } };
             case RemoteCommand.GetGitHistory:
-                return new RemoteResponse { Id = 0, GitHistory = await git.History(await FolderOf(request, cancellation), request.Skip ?? 0, Math.Clamp(request.Limit ?? 30, 1, 200), cancellation) };
+                return new RemoteResponse { Id = 0, GitHistory = NameSessions(RequireWorkspace(request), await git.History(await FolderOf(request, cancellation), request.Skip ?? 0, Math.Clamp(request.Limit ?? 30, 1, 200), cancellation)) };
             case RemoteCommand.GetGitCommitChanges:
                 return new RemoteResponse { Id = 0, GitChanges = new GitChanges { Changes = await git.CommitChanges(await FolderOf(request, cancellation), Require(request.Commit, "commit"), cancellation) } };
             case RemoteCommand.GetGitDiff:
@@ -385,6 +483,66 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         }
     }
 
+    // The branches of side sessions belong to their sessions: no git action of a workspace may check them out, merge, rewrite or delete them.
+    private void RequireOwnBranch(RemoteRequest request)
+    {
+        if (request.Command is RemoteCommand.GitCheckout or RemoteCommand.GitDeleteBranch or RemoteCommand.GitSquash or RemoteCommand.GitRebase or RemoteCommand.GitMerge or RemoteCommand.GitCreateBranch or RemoteCommand.GetGitBranchState
+            && new[] { request.Name, request.Base }.Any(name => name?.Trim().Replace("refs/heads/", string.Empty, StringComparison.Ordinal).StartsWith(sideRepository.BranchPrefix, StringComparison.Ordinal) == true))
+        {
+            throw new RequestException("That branch belongs to a side session. Use the session itself, or integrate it.");
+        }
+    }
+
+    // A request to integrate names the folder of the workspace, and the access it gives is to folders recorded as they are.
+    private void RequireNoIntegration(Guid id)
+    {
+        if (workspaces.Sides(id).Any(entry => entry.Side.State == SideSessionState.Integrating))
+        {
+            throw new RequestException("A side session is being integrated. Wait for it to finish or cancel it first.");
+        }
+    }
+
+    // The side sessions' links with the repository, and what their AI is told about the folder of the workspace.
+    private async Task FollowMove(Guid id, CancellationToken cancellation)
+    {
+        if (workspaces.Sides(id).Count > 0)
+        {
+            await sideSessions.Repair(id);
+            await prompts.RefreshInstructions(cancellation);
+        }
+    }
+
+    // A side session is on a branch of the server's own making, which is shown by the session's name.
+    private GitStatus NameSession(Guid id, GitStatus status) => status.Branch == sideRepository.Branch(id) && workspaces.GetSide(id) is { } side ? status with { Branch = side.Name } : status;
+
+    // The history shows the branch of a side session under the session's name, apart from the branches git actions work on.
+    private GitHistory NameSessions(Guid id, GitHistory history)
+    {
+        Guid mainId = workspaces.GetSide(id)?.ParentId ?? id;
+        Dictionary<string, (Guid Id, string Name)> branches = workspaces.Sides(mainId).ToDictionary(entry => sideRepository.Branch(entry.Id), entry => (entry.Id, entry.Side.Name));
+
+        if (!history.Commits.Any(commit => commit.Refs.Any(reference => reference.Name.Contains(sideRepository.BranchPrefix, StringComparison.Ordinal))))
+        {
+            return history;
+        }
+
+        return history with
+        {
+            Commits =
+            [
+                .. history.Commits.Select(commit => commit with
+                {
+                    Refs =
+                    [
+                        .. commit.Refs
+                            .Where(reference => !reference.Name.Contains(sideRepository.BranchPrefix, StringComparison.Ordinal) || branches.ContainsKey(reference.Name))
+                            .Select(reference => branches.TryGetValue(reference.Name, out (Guid Id, string Name) session) ? new GitRef { Name = session.Name, Kind = GitRefKind.Session, IsCurrent = session.Id == id } : reference)
+                    ]
+                })
+            ]
+        };
+    }
+
     private async Task<RemoteResponse> Prompt(Guid id, string text, bool ignoreLimit, CancellationToken cancellation)
     {
         if (ignoreLimit)
@@ -532,6 +690,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         Note("status interval", before.StatusMinutes, after.StatusMinutes);
         Note("review prompt", before.ReviewPrompt ?? string.Empty, after.ReviewPrompt ?? string.Empty);
         Note("expand prompt", before.ExpandPrompt ?? string.Empty, after.ExpandPrompt ?? string.Empty);
+        Note("files of new side sessions", before.SessionFiles ?? string.Empty, after.SessionFiles ?? string.Empty);
+        Note("setup script of new side sessions", before.SessionSetupScript ?? string.Empty, after.SessionSetupScript ?? string.Empty);
 
         if (changes.Count > 0)
         {
@@ -545,7 +705,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     private async Task<WorkspaceCatalog> Catalog(CancellationToken cancellation)
     {
         WorkspaceCatalog catalog = await workspaces.List(cancellation);
-        return catalog with { Looping = [.. catalog.Workspaces.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)], Busy = [.. catalog.Workspaces.Where(workspace => activity.Get(workspace.Id) != WorkspaceState.Ready).Select(workspace => workspace.Id)], Queued = queue.Waiting, Delegations = swarm.Delegations };
+        List<WorkspaceInfo> all = [.. catalog.Workspaces, .. catalog.Sessions];
+        return catalog with { Looping = [.. all.Where(workspace => loops.Get(workspace.Id) is not null).Select(workspace => workspace.Id)], Busy = [.. all.Where(workspace => activity.Get(workspace.Id) != WorkspaceState.Ready).Select(workspace => workspace.Id)], Queued = queue.Waiting, Delegations = swarm.Delegations };
     }
 
     private Guid RequireWorkspace(RemoteRequest request) => request.WorkspaceId ?? throw new RequestException("The request needs a workspace.");

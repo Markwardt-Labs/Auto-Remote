@@ -3,6 +3,23 @@ namespace Markwardt.AutoRemote.Tests.Integration.RealAi;
 public sealed class ControlScenarios
 {
     [RealAiTheory]
+    [InlineData(AiService.ClaudeCode, 513)]
+    [InlineData(AiService.Codex, 514)]
+    public async Task StoppingTheVeryFirstTurnKeepsWhatWasSaidInIt(AiService service, int marker)
+    {
+        await using RealServer server = await RealServer.Start();
+        WorkspaceInfo workspace = await server.Workspace("first", service);
+        int mark = server.Mark();
+        await server.Connection.Prompt(workspace.Id, $"The code word is KIWI7. Now run the shell command `sleep {marker}` and wait for it.", CancellationToken.None);
+        await server.Until(() => RealServer.Processes($"sleep {marker}") > 0, 120, "the AI to start the long command");
+
+        await server.Connection.StopWorkspace(workspace.Id, CancellationToken.None);
+        await server.Idle(workspace, mark, 90);
+
+        Assert.Contains("KIWI7", await server.Ask(workspace, "Without using any tools: what is the code word? If you were never told one, say NONE."), StringComparison.OrdinalIgnoreCase);
+    }
+
+    [RealAiTheory]
     [InlineData(AiService.ClaudeCode, 241)]
     [InlineData(AiService.Codex, 242)]
     public async Task Stop_EndsLongWorkAtOnceKeepsWhatItDidAndTheConversationContinues(AiService service, int marker)

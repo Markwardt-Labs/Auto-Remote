@@ -53,8 +53,19 @@ public sealed class HistoryScenarios
         string reply = await server.Ask(workspace, prompt);
 
         Assert.Contains("ZEBRA", reply, StringComparison.Ordinal);
-        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
-        Assert.Equal(prompt.Trim(), history.Messages.First(message => message.Role == MessageRole.User).Text.Trim());
+        // A chunk holds as much text as fits, so a long prompt may be in an older one than the reply.
+        List<ChatMessage> stored = [];
+        string? cursor = null;
+
+        do
+        {
+            ChatHistory chunk = await server.Connection.GetHistory(workspace.Id, cursor, null, null, CancellationToken.None);
+            stored.InsertRange(0, chunk.Messages);
+            cursor = chunk.Older;
+        }
+        while (cursor is not null);
+
+        Assert.Equal(prompt.Trim(), stored.First(message => message.Role == MessageRole.User).Text.Trim());
         Assert.Empty(server.Failures(workspace));
     }
 }

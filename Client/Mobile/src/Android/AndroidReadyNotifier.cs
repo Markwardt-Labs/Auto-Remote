@@ -45,7 +45,7 @@ internal sealed class AndroidReadyNotifier : IReadyNotifier
             .AddFlags(ActivityFlags.NewTask | ActivityFlags.SingleTop | ActivityFlags.ClearTop)!;
         PendingIntent? open = PendingIntent.GetActivity(context, workspaceId.GetHashCode(), launch, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         Notification notification = builder
-            .SetSmallIcon(context.ApplicationInfo?.Icon ?? 0)!
+            .SetSmallIcon(Resource.Drawable.ic_notification)!
             .SetContentTitle(title)!
             .SetAutoCancel(true)!
             .SetContentIntent(open)!

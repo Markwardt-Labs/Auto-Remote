@@ -129,6 +129,43 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         Assert.Equal("main", await Git(folder, "branch", "--format=%(refname:short)"));
     }
 
+    [Fact]
+    public async Task ASideSessionIsNotIntegratedWhileTasksItDelegatedAreUnderWayAndTheirRecordsGoWithIt()
+    {
+        await PairByNetwork();
+        await Permit();
+        await KnowsTheWorker();
+        (WorkspaceInfo workspace, string folder) = await Project();
+        WorkspaceInfo side = await coordinator.Connection.CreateSideSession(workspace.Id, "delegating", SideSessionStart.Files, null, CancellationToken.None);
+        await SwarmTestServer.Until(async () => (await coordinator.Connection.ListWorkspaces(CancellationToken.None)).Sessions.Single().Side!.State == SideSessionState.Ready);
+        worker.Hangs = true;
+        await coordinator.Connection.DelegateTask(side.Id, Request("take long"), CancellationToken.None);
+        SwarmTaskInfo task = await coordinator.Found(found => found.State == SwarmTaskState.Running);
+
+        RemoteException refused = await Assert.ThrowsAsync<RemoteException>(() => coordinator.Connection.IntegrateSideSession(side.Id, CancellationToken.None));
+
+        Assert.Contains("delegated", refused.Message);
+        await coordinator.Connection.CancelSwarmTask(task.Id, CancellationToken.None);
+        await coordinator.Found(found => found.State == SwarmTaskState.Cancelled);
+        await coordinator.Connection.IntegrateSideSession(side.Id, CancellationToken.None);
+        string id = string.Empty;
+        await SwarmTestServer.Until(() =>
+        {
+            lock (coordinator.Asked)
+            {
+                id = coordinator.Asked.Select(asked => Regex.Match(asked.Text, "integration ([0-9a-f]{12})").Groups[1].Value).FirstOrDefault(found => found.Length > 0) ?? string.Empty;
+            }
+
+            return System.Threading.Tasks.Task.FromResult(id.Length > 0);
+        });
+        await SwarmTestServer.Until(async () => await coordinator.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None) == WorkspaceState.Ready);
+
+        Use(coordinator.Prompter.Sessions.Last(session => session.WorkspacePath == folder), "finish_integration", new { integration_id = id });
+
+        Assert.Empty((await coordinator.Connection.ListWorkspaces(CancellationToken.None)).Sessions);
+        Assert.Empty((await coordinator.Status()).Tasks);
+    }
+
     private string Use(FakePromptSession session, string tool, object arguments)
     {
         PromptTool found = Assert.Single(session.Transient.Tools, candidate => candidate.Name == tool);
@@ -181,7 +218,8 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         };
         await coordinator.Connection.Prompt(workspace.Id, "which tools", CancellationToken.None);
         await SwarmTestServer.Until(async () => (await Chat(workspace.Id)).Any(message => message.Role == MessageRole.Assistant));
-        Assert.Equal("tools: ", (await Chat(workspace.Id)).Last().Text);
+        // No delegation tools; every main workspace has the one that finishes the integration of a side session.
+        Assert.Equal("tools: finish_integration", (await Chat(workspace.Id)).Last().Text);
         WorkspaceSettings settings = await coordinator.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
         Assert.False(settings.IsDelegationAllowed);
         Assert.True((await coordinator.Connection.SetWorkspaceSettings(workspace.Id, settings with { IsDelegationAllowed = true }, CancellationToken.None)).IsDelegationAllowed);

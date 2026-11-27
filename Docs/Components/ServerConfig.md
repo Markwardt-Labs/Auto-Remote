@@ -8,6 +8,7 @@ The server reads one JSON file at startup (the path passed as the first argument
 | `port` | `52679` | The one port every client connects to, over secure WebSocket, and paired servers of the swarm too (without the key); 1 to 65535. |
 | `dataFolder` | `AutoRemote` folder in the server user's application data | Folder holding all data the server stores; created when missing. |
 | `defaultFolder` | the server user's home folder | Existing folder where browsing for a new workspace's folder starts. |
+| `sessionsFolder` | `sessions` in `dataFolder` | Folder the files of new side sessions are kept under, as `<workspace id>/<session id>`; it must be outside every workspace. Changing it leaves existing sessions where they are. |
 | `speechModel` | `small.en` | Whisper model that turns speech into text inside the server for voice input: a model name (`tiny.en`, `base.en`, `small.en`, `medium.en`, `small`, `large-v3-turbo` and so on, as named at `huggingface.co/ggerganov/whisper.cpp`) or the path of an existing `ggml` model file; empty turns the built-in voice input off. See Voice input below. |
 | `speechCommand` | none | Executable that turns a recording into text instead of the built-in model; when set, `speechModel` is not used. |
 | `speechArguments` | `[]` | Arguments of the speech command, in which `{file}` is replaced by the path of the recorded WAV file. |
@@ -24,7 +25,7 @@ The clients record speech and the server turns it into text, so it works the sam
 
 ## Data location
 
-The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (the workspaces, each as its session and group, and the groups), `environment.json` (the AI environment), the `liveai` folder where Live AI links each workspace's session to the AI tool's own, the attached files in an `attachments` folder, the prompts waiting for the local AI in `queue.json`, the swarm's keys, settings and tasks in a `swarm` folder (beside the chats, saved inputs and errors of the workspaces), the Whisper `models` and the extracted `native` libraries of voice input, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
+The server stores all its data in `dataFolder`, by default the `AutoRemote` folder of the server user's application data (`~/.local/share/AutoRemote` on Linux) rather than the working directory: `workspaces.json` (the workspaces, each as its session and group, and the groups), `environment.json` (the AI environment), the `liveai` folder where Live AI links each workspace's session to the AI tool's own, the attached files in an `attachments` folder, the prompts waiting for the local AI in `queue.json`, the files of side sessions in a `sessions` folder (unless `sessionsFolder` names another), the swarm's keys, settings and tasks in a `swarm` folder (beside the chats, saved inputs and errors of the workspaces), the Whisper `models` and the extracted `native` libraries of voice input, and the self-signed `certificate.pfx` created on first start when `certificateFile` is not set.
 
 ## AI environment
 

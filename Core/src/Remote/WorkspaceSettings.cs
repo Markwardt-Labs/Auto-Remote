@@ -66,6 +66,16 @@ public sealed record WorkspaceSettings
     public int? StatusMinutes { get; init; }
 
     /// <summary>
+    /// Gets the files and folders copied into every new side session of the workspace, one path relative to its folder per line.
+    /// </summary>
+    public string? SessionFiles { get; init; }
+
+    /// <summary>
+    /// Gets the script run in every new side session of the workspace to set it up, relative to its folder.
+    /// </summary>
+    public string? SessionSetupScript { get; init; }
+
+    /// <summary>
     /// Gets the status interval of the server's environment, which applies while <see cref="StatusMinutes" /> is not set. It is only read; setting it has no effect.
     /// </summary>
     public int GlobalStatusMinutes { get; init; }

@@ -51,6 +51,16 @@ public sealed record WorkspaceInfo
     public string? ExpandPrompt { get; init; }
 
     /// <summary>
+    /// Gets the files and folders, one path relative to the workspace folder per line, copied into every new side session, for what git ignores, or <see langword="null" /> for none.
+    /// </summary>
+    public string? SessionFiles { get; init; }
+
+    /// <summary>
+    /// Gets the script, a path relative to the workspace folder, run in every new side session to set it up, or <see langword="null" /> for none.
+    /// </summary>
+    public string? SessionSetupScript { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the chat of the workspace shows the AI's work (tool calls and their results, dimmed) besides what it says; it starts as <see cref="WorkspaceDefaults.ShowWork" /> and every client of the server shares it.
     /// </summary>
     public bool ShowWork { get; init; }
@@ -61,8 +71,13 @@ public sealed record WorkspaceInfo
     public bool AllowDelegation { get; init; }
 
     /// <summary>
-    /// Gets the workspace's display name, which is the name of <see cref="Folder" />.
+    /// Gets what makes the workspace a side session of another one, or <see langword="null" /> for a workspace of its own.
+    /// </summary>
+    public SideSession? Side { get; init; }
+
+    /// <summary>
+    /// Gets the workspace's display name: the name of <see cref="Folder" />, or for a side session the main workspace's name and its own.
     /// </summary>
     [JsonIgnore]
-    public string Name => Folder.TrimEnd('/', '\\').Split('/', '\\')[^1] is { Length: > 0 } name ? name : Folder;
+    public string Name => Side is { } side ? $"{side.ParentName} / {side.Name}" : Folder.TrimEnd('/', '\\').Split('/', '\\')[^1] is { Length: > 0 } name ? name : Folder;
 }

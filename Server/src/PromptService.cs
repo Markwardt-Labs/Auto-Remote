@@ -118,6 +118,38 @@ internal interface IPromptService
     Task Interrupt(Guid id);
 
     /// <summary>
+    /// Makes an AI session for another folder that knows what a workspace's AI knew after the last work that finished, without waiting for work that is running. A workspace whose AI has had no conversation gives a session without one.
+    /// </summary>
+    /// <param name="id">The workspace whose AI to branch from.</param>
+    /// <param name="folder">The existing folder the new session works in.</param>
+    /// <param name="cancellation">Cancels the work.</param>
+    /// <returns>The identifier of the new session, which is stored and not open, with none of the server's tools.</returns>
+    /// <exception cref="RequestException">The conversation could not be branched.</exception>
+    Task<string> Fork(Guid id, string folder, CancellationToken cancellation);
+
+    /// <summary>
+    /// Lets the AI of a workspace read folders outside it without changing them, from now until <see cref="Unshare" />, also in work that is running and when its session is opened again.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="key">What the folders are shared for, which they are taken back by.</param>
+    /// <param name="folders">The folders.</param>
+    void Share(Guid id, string key, IReadOnlyList<string> folders);
+
+    /// <summary>
+    /// Ends the access <see cref="Share" /> gave.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="key">What they were shared for.</param>
+    void Unshare(Guid id, string key);
+
+    /// <summary>
+    /// Takes back a prompt that has not reached the AI yet, or that would be sent again because it may have been missed.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="text">The prompt.</param>
+    void Withdraw(Guid id, string text);
+
+    /// <summary>
     /// Ends every workspace's AI work and closes every session, including the commands the AI started, as the server stopping needs. Waits a few seconds for the work to end and for each session to finish closing, which is when it saves its configuration, so what was changed in the settings since the last prompt is not lost.
     /// </summary>
     /// <returns>A task that completes once the sessions are closed.</returns>
@@ -130,12 +162,21 @@ internal interface IPromptService
     /// <param name="conversation">Whether the AI service's stored conversation is deleted too.</param>
     /// <returns>A task that completes once the session is gone.</returns>
     Task Forget(WorkspaceInfo workspace, bool conversation);
+
+    /// <summary>
+    /// Deletes an AI conversation that no workspace got, such as a fork made for one that is gone.
+    /// </summary>
+    /// <param name="sessionId">The identifier of the session.</param>
+    /// <returns>A task that completes once it is deleted, or could not be.</returns>
+    Task Discard(string sessionId);
 }
 
 /// <inheritdoc />
 internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null, Func<ISessionTools?>? tools = null) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
+
+    private readonly ConcurrentDictionary<Guid, ConcurrentDictionary<string, IReadOnlyList<string>>> shares = new();
 
     private readonly int defaultChunk = 50;
 
@@ -148,6 +189,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     private readonly int historyScan = 20000;
 
     private readonly int maxAttachment = 20 * 1024 * 1024;
+
+    private readonly string attachmentsShare = "attachments";
 
     private readonly int workLimit = 2000;
 
@@ -245,7 +288,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             if (stored is null)
             {
-                if (live.Session is null && workspace.SessionId is null)
+                // The AI of a side session knows what main's knew before it was made, which is not part of its chat.
+                if (workspace.Side is not null || live.Session is null && workspace.SessionId is null)
                 {
                     return new ChatHistory { Messages = [], Working = live.Working, ShowWork = workspace.ShowWork };
                 }
@@ -320,6 +364,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 throw new RequestException(activity.Describe(id));
             }
 
+            // Looked at with the workspace taken, so a session being integrated or removed gets no prompt from anywhere in the server.
+            if (workspaces.GetSide(id) is { State: not SideSessionState.Ready })
+            {
+                throw new RequestException("The side session is not ready.");
+            }
+
             if (started && activity.Get(id) == WorkspaceState.Working)
             {
                 await snapshots.Capture(workspace, cancellation);
@@ -348,6 +398,15 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             if (onlyWhenIdle && (live.Working || session.State != PromptSessionState.Waiting))
             {
                 throw new RequestException("The AI is working.");
+            }
+
+            // It may have been taken back while the session was being opened.
+            lock (live.Sync)
+            {
+                if (live.Withdrawn.Contains(text))
+                {
+                    throw new RequestException("The prompt was withdrawn.");
+                }
             }
 
             Say(id, live, new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow });
@@ -541,16 +600,17 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             IPromptSessionConfiguration configuration = session.Configuration;
             WorkspaceSettings before = Describe(workspace, session);
+            string? note = await SideNote(workspace, cancellation);
 
             try
             {
-                Apply(configuration, settings);
+                Apply(configuration, settings, note);
             }
             catch (Exception exception) when (exception is PromptSessionException or ArgumentException)
             {
                 try
                 {
-                    Apply(configuration, before);
+                    Apply(configuration, before, note);
                 }
                 catch (Exception restoring) when (restoring is PromptSessionException or ArgumentException)
                 {
@@ -560,6 +620,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             }
 
             WorkspaceInfo overridden = await workspaces.SetOverrides(id, settings.ReviewPrompt, settings.ExpandPrompt, settings.StatusMinutes, cancellation);
+
+            if (workspace.Side is null && (settings.SessionFiles != overridden.SessionFiles || settings.SessionSetupScript != overridden.SessionSetupScript))
+            {
+                overridden = await workspaces.SetSessionSetup(id, settings.SessionFiles, settings.SessionSetupScript, cancellation);
+            }
 
             if (overridden.AllowDelegation != settings.IsDelegationAllowed)
             {
@@ -601,7 +666,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 if (live.Session is { } session)
                 {
                     WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
-                    string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes);
+                    string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes, await SideNote(workspace, cancellation));
 
                     if (session.Configuration.Instructions != wanted)
                     {
@@ -636,6 +701,117 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     /// <inheritdoc />
+    public async Task<string> Fork(Guid id, string folder, CancellationToken cancellation)
+    {
+        WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
+        Live live = lives.GetOrAdd(id, _ => new Live());
+        await live.Gate.WaitAsync(cancellation);
+
+        try
+        {
+            if (live.Session is null && workspace.SessionId is null)
+            {
+                return await host.CreateSession(folder, workspace.Service, null, cancellation);
+            }
+
+            IPromptSession session = await Session(id, workspace, live, cancellation);
+
+            lock (live.Sync)
+            {
+                StopIdle(live);
+            }
+
+            try
+            {
+                IPromptSession fork = await session.ForkFinished(cancellation);
+                string made = fork.Id;
+
+                // Disposed at once: what is only in memory, such as the tools that act for the main workspace, stays behind.
+                await using (fork)
+                {
+                    try
+                    {
+                        await fork.Move(folder, cancellation);
+                    }
+                    catch
+                    {
+                        await fork.DisposeAsync();
+                        await Delete(made);
+                        throw;
+                    }
+                }
+
+                return made;
+            }
+            finally
+            {
+                lock (live.Sync)
+                {
+                    if (!live.Working)
+                    {
+                        Expire(id, live);
+                    }
+                }
+            }
+        }
+        catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or IOException or DirectoryNotFoundException)
+        {
+            throw new RequestException($"The AI conversation could not be copied: {exception.Message}");
+        }
+        finally
+        {
+            live.Gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public void Share(Guid id, string key, IReadOnlyList<string> folders)
+    {
+        shares.GetOrAdd(id, _ => new ConcurrentDictionary<string, IReadOnlyList<string>>())[key] = folders;
+
+        if (lives.TryGetValue(id, out Live? live))
+        {
+            Grant(id, live);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Unshare(Guid id, string key)
+    {
+        if (shares.TryGetValue(id, out ConcurrentDictionary<string, IReadOnlyList<string>>? shared))
+        {
+            shared.TryRemove(key, out _);
+        }
+
+        if (lives.TryGetValue(id, out Live? live))
+        {
+            Grant(id, live);
+        }
+    }
+
+    /// <inheritdoc />
+    public void Withdraw(Guid id, string text)
+    {
+        if (!lives.TryGetValue(id, out Live? live))
+        {
+            return;
+        }
+
+        lock (live.Sync)
+        {
+            live.Withdrawn.Add(text);
+            live.Steered.RemoveAll(item => item.Text == text);
+            List<(string Text, PromptSendOptions Options)> waiting = [.. live.Pending.Where(item => item.Text != text)];
+            live.Pending.Clear();
+
+            foreach ((string Text, PromptSendOptions Options) item in waiting)
+            {
+                live.Pending.Enqueue(item);
+            }
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<string> Attach(Guid id, string name, string data, CancellationToken cancellation)
     {
         await workspaces.Get(id, cancellation);
@@ -651,7 +827,15 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             throw new RequestException($"The attachment is larger than {maxAttachment / 1024 / 1024} MB.");
         }
 
-        return await store.SaveAttachment(id, name, bytes.AsMemory(0, length), cancellation);
+        string path = await store.SaveAttachment(id, name, bytes.AsMemory(0, length), cancellation);
+
+        // The first attachment may be sent into work that is already running.
+        if (lives.TryGetValue(id, out Live? live))
+        {
+            Grant(id, live);
+        }
+
+        return path;
     }
 
     /// <inheritdoc />
@@ -798,7 +982,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
     }
 
-    private void Apply(IPromptSessionConfiguration configuration, WorkspaceSettings settings)
+    private void Apply(IPromptSessionConfiguration configuration, WorkspaceSettings settings, string? note)
     {
         configuration.Capability = Enum.Parse<PromptCapability>(settings.Capability.ToString());
         configuration.Effort = Enum.Parse<PromptEffort>(settings.Effort.ToString());
@@ -806,7 +990,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         configuration.IsSystemAccessAllowed = settings.IsSystemAccessAllowed;
         configuration.IsWebAllowed = settings.IsWebAllowed;
         configuration.IsImageGenerationAllowed = settings.IsImageGenerationAllowed;
-        configuration.Instructions = host.ComposeInstructions(settings.Instructions, settings.StatusMinutes);
+        configuration.Instructions = host.ComposeInstructions(settings.Instructions, settings.StatusMinutes, note);
     }
 
     private WorkspaceSettings Describe(WorkspaceInfo workspace, IPromptSession session)
@@ -827,6 +1011,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             GlobalStatusMinutes = environment.StatusMinutes,
             ReviewPrompt = workspace.ReviewPrompt,
             ExpandPrompt = workspace.ExpandPrompt,
+            SessionFiles = workspace.SessionFiles,
+            SessionSetupScript = workspace.SessionSetupScript,
             GlobalReviewPrompt = environment.ReviewPrompt,
             GlobalExpandPrompt = environment.ExpandPrompt,
             Descriptors = session.Descriptors.ToDictionary(pair => pair.Key, pair => pair.Value)
@@ -857,7 +1043,81 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     }
 
     private async Task<IPromptSession> Session(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
-        => live.Session ??= await Open(id, workspace, live, cancellation);
+    {
+        IPromptSession session = live.Session ??= await Open(id, workspace, live, cancellation);
+        Grant(id, live);
+        return session;
+    }
+
+    // Brings the access the open session has up to what is shared with the workspace now, its own attachments included; a session that was opened again starts with none.
+    private void Grant(Guid id, Live live)
+    {
+        lock (live.Sync)
+        {
+            if (live.Session is not { } session)
+            {
+                return;
+            }
+
+            if (!ReferenceEquals(live.GrantedTo, session))
+            {
+                live.Grants.Clear();
+                live.GrantedTo = session;
+            }
+
+            Dictionary<string, IReadOnlyList<string>> wanted = shares.TryGetValue(id, out ConcurrentDictionary<string, IReadOnlyList<string>>? shared) ? new(shared) : [];
+
+            // A prompt only names an attached file, which is outside the workspace; the AI has to be able to read it without access to anything else out there.
+            if (store.AttachmentsFolder(id) is { } attached && Directory.Exists(attached))
+            {
+                wanted[attachmentsShare] = [attached];
+            }
+
+
+            foreach (string ended in live.Grants.Keys.Where(key => !wanted.ContainsKey(key)).ToList())
+            {
+                live.Grants[ended].ForEach(grant => grant.Dispose());
+                live.Grants.Remove(ended);
+            }
+
+            foreach ((string key, IReadOnlyList<string> folders) in wanted.Where(pair => !live.Grants.ContainsKey(pair.Key)))
+            {
+                try
+                {
+                    live.Grants[key] = [.. folders.Where(Directory.Exists).Select(session.GrantReadAccess)];
+                }
+                catch (Exception exception) when (exception is ObjectDisposedException or DirectoryNotFoundException)
+                {
+                }
+            }
+        }
+    }
+
+    private async Task<string?> SideNote(WorkspaceInfo workspace, CancellationToken cancellation)
+    {
+        if (workspace.Side is not { } side)
+        {
+            return null;
+        }
+
+        string main = (await workspaces.Get(side.ParentId, cancellation)).Folder;
+        string start = side.StartedFrom == SideSessionStart.Files ? "main's files as they were then, changes that were not committed included" : "the commit main had checked out then, without its changes that were not committed";
+        return $"This is a side session named \"{side.Name}\". You work in your own copy of the project at {workspace.Folder}, on a branch of its own. It started from {start}. Everything earlier in this conversation is background from the main session, from before this session was made: paths in it point to the main workspace at {main}, and work in it that was not finished belongs to main, so do not continue it. Only do the work asked for in this session, in your own copy, and change nothing in {main}. Committing and discarding changes in your copy is fine; do not switch branches, merge, rebase, squash, push, pull, or change remotes or tags. When the task asked for in this session is completely done, call mark_task_complete before you write your final reply. Only that call tells that the task is done; saying so in a reply does not.";
+    }
+
+    /// <inheritdoc />
+    public Task Discard(string sessionId) => Delete(sessionId);
+
+    private async Task Delete(string sessionId)
+    {
+        try
+        {
+            await host.Prompter.Delete(sessionId, CancellationToken.None);
+        }
+        catch (Exception exception) when (exception is PromptSessionException or IOException or UnauthorizedAccessException or ArgumentException)
+        {
+        }
+    }
 
     private async Task<IPromptSession> Open(Guid id, WorkspaceInfo workspace, Live live, CancellationToken cancellation)
     {
@@ -865,8 +1125,9 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         try
         {
+            string? note = await SideNote(workspace, cancellation);
             session = await Obtain(workspace, cancellation);
-            string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes);
+            string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes, note);
 
             if (session.Configuration.Instructions != wanted)
             {
@@ -1193,7 +1454,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
                     lock (live.Sync)
                     {
-                        foreach ((string text, PromptSendOptions options) in live.Epoch == epoch ? missed : [])
+                        foreach ((string text, PromptSendOptions options) in live.Epoch == epoch ? missed.Where(item => !live.Withdrawn.Contains(item.Text)) : [])
                         {
                             live.Pending.Enqueue((text, options with { Notes = [.. options.Notes, steeringNote] }));
                         }
@@ -1480,6 +1741,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public int Sending { get; set; }
 
         public List<(string Text, PromptSendOptions Options)> Steered { get; } = [];
+
+        public HashSet<string> Withdrawn { get; } = [];
+
+        public Dictionary<string, List<IDisposable>> Grants { get; } = [];
+
+        public IPromptSession? GrantedTo { get; set; }
 
         public Tally Tally { get; set; } = new();
 

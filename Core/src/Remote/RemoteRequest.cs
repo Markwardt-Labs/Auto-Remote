@@ -101,7 +101,12 @@ public sealed record RemoteRequest
     public bool? Keep { get; init; }
 
     /// <summary>
-    /// Gets whether <see cref="RemoteCommand.ConfigureOllamaService" /> turns the optimized context on (<see langword="true" />) or off.
+    /// Gets what the files of a new side session start from.
+    /// </summary>
+    public SideSessionStart? Start { get; init; }
+
+    /// <summary>
+    /// Gets whether <see cref="RemoteCommand.ConfigureOllamaService" /> turns the optimized context on (<see langword="true" />) or off, or whether <see cref="RemoteCommand.SetIntegrateWhenFinished" /> turns that on or off.
     /// </summary>
     public bool? Enabled { get; init; }
 
@@ -111,7 +116,7 @@ public sealed record RemoteRequest
     public string? Password { get; init; }
 
     /// <summary>
-    /// Gets the folder or group name the command needs, if any.
+    /// Gets the folder, group or side session name the command needs, if any.
     /// </summary>
     public string? Name { get; init; }
 
@@ -141,7 +146,7 @@ public sealed record RemoteRequest
     public int? Characters { get; init; }
 
     /// <summary>
-    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" />, the input for <see cref="RemoteCommand.SaveInput" /> or the input line for <see cref="RemoteCommand.SendScriptInput" />.
+    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" />, the input for <see cref="RemoteCommand.SaveInput" /> the input line for <see cref="RemoteCommand.SendScriptInput" /> or the first task of <see cref="RemoteCommand.CreateSideSession" />.
     /// </summary>
     public string? Text { get; init; }
 

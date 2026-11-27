@@ -15,6 +15,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         this.connection = connection;
         ProviderName = workspace.Service.Label();
         workspaceId = workspace.Id;
+        HasSessionSettings = workspace.Side is null;
         ClearReviewPromptCommand = new AsyncCommand(_ =>
         {
             ReviewPrompt = string.Empty;
@@ -245,6 +246,29 @@ internal sealed class SettingsViewModel : ViewModelBase
     public string GlobalExpandPrompt => pending.GlobalExpandPrompt;
 
     /// <summary>
+    /// Gets a value indicating whether there are settings for new side sessions, which only a workspace itself has.
+    /// </summary>
+    public bool HasSessionSettings { get; }
+
+    /// <summary>
+    /// Gets or sets the files and folders copied into every new side session, one path per line.
+    /// </summary>
+    public string SessionFiles
+    {
+        get => pending.SessionFiles ?? string.Empty;
+        set => Edit(settings => settings with { SessionFiles = value });
+    }
+
+    /// <summary>
+    /// Gets or sets the script run in every new side session to set it up.
+    /// </summary>
+    public string SessionSetupScript
+    {
+        get => pending.SessionSetupScript ?? string.Empty;
+        set => Edit(settings => settings with { SessionSetupScript = value });
+    }
+
+    /// <summary>
     /// Gets the command that clears the review prompt of this workspace, so that the global one is used again.
     /// </summary>
     public AsyncCommand ClearReviewPromptCommand { get; }
@@ -272,7 +296,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         }
 
         WorkspaceSettings? saved = null;
-        WorkspaceSettings wanted = pending with { Instructions = (pending.Instructions ?? string.Empty).Trim(), ReviewPrompt = Blank(pending.ReviewPrompt), ExpandPrompt = Blank(pending.ExpandPrompt) };
+        WorkspaceSettings wanted = pending with { Instructions = (pending.Instructions ?? string.Empty).Trim(), ReviewPrompt = Blank(pending.ReviewPrompt), ExpandPrompt = Blank(pending.ExpandPrompt), SessionFiles = Blank(pending.SessionFiles), SessionSetupScript = Blank(pending.SessionSetupScript) };
 
         if (await Attempt(async () => saved = await connection.SetWorkspaceSettings(workspaceId, wanted, CancellationToken.None)) && saved is not null)
         {
@@ -284,7 +308,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     private bool Differs(WorkspaceSettings first, WorkspaceSettings second)
-        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, first.IsDelegationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, second.IsDelegationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes);
+        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, first.IsDelegationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes, Blank(first.SessionFiles), Blank(first.SessionSetupScript)) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, second.IsDelegationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes, Blank(second.SessionFiles), Blank(second.SessionSetupScript));
 
     private string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
@@ -349,5 +373,7 @@ internal sealed class SettingsViewModel : ViewModelBase
         Raise(nameof(GlobalStatusMinutes));
         Raise(nameof(GlobalReviewPrompt));
         Raise(nameof(GlobalExpandPrompt));
+        Raise(nameof(SessionFiles));
+        Raise(nameof(SessionSetupScript));
     }
 }

@@ -125,6 +125,42 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Prompt_LetsTheAiReadTheWorkspacesAttachmentsAlsoAfterItsSessionWasOpenedAgain()
+    {
+        string attached = temp.Combine("attachments");
+        store.Setup(x => x.AttachmentsFolder(workspace.Id)).Returns(attached);
+        prompter.OnCreate = session => session.Reply("ok");
+        await service.Prompt(workspace.Id, "nothing attached yet", CancellationToken.None);
+        await Settled();
+        Assert.Empty(Session.SharedFolders);
+
+        Directory.CreateDirectory(attached);
+        await service.Prompt(workspace.Id, "read it", CancellationToken.None);
+        await Settled();
+        Assert.Equal([attached], Session.SharedFolders);
+
+        await service.Close();
+        await service.Prompt(workspace.Id, "read it again", CancellationToken.None);
+        await Settled();
+        Assert.Equal([attached], Session.SharedFolders);
+    }
+
+    [Fact]
+    public async Task Attach_LetsAnOpenSessionReadTheFileAtOnce()
+    {
+        string attached = temp.Combine("attachments");
+        store.Setup(x => x.AttachmentsFolder(workspace.Id)).Returns(attached);
+        store.Setup(x => x.SaveAttachment(workspace.Id, "a.txt", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Directory.CreateDirectory(attached).FullName + "/a.txt");
+        prompter.OnCreate = session => session.Reply("ok");
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Settled();
+
+        await service.Attach(workspace.Id, "a.txt", Convert.ToBase64String(new byte[] { 1 }), CancellationToken.None);
+
+        Assert.Equal([attached], Session.SharedFolders);
+    }
+
+    [Fact]
     public async Task Prompt_RecordsTheToolCallsAndResultsAsWorkMessagesBesideWhatTheAiSaidAndPublishesThem()
     {
         string longOutput = new('x', 2500);
@@ -839,7 +875,7 @@ public sealed class PromptServiceTests : IDisposable
         host.Mock.Setup(x => x.Get()).Returns(new AiEnvironment { StatusMinutes = 5 });
         await service.GetSettings(workspace.Id, CancellationToken.None);
         Assert.Equal(host.BuiltIn.Compose(null, 5), Session.Configuration.Instructions);
-        host.Mock.Setup(x => x.ComposeInstructions(It.IsAny<string?>(), It.IsAny<int?>())).Returns((string? user, int? minutes) => host.BuiltIn.Compose(user, minutes ?? 20));
+        host.Mock.Setup(x => x.ComposeInstructions(It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<string?>())).Returns((string? user, int? minutes, string? note) => host.BuiltIn.Compose(user, minutes ?? 20, note));
 
         await service.RefreshInstructions(CancellationToken.None);
 
@@ -1097,6 +1133,20 @@ public sealed class PromptServiceTests : IDisposable
         Assert.False(service.IsBusy(workspace.Id));
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
         snapshots.Verify(x => x.Discard(workspace.Id), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(SideSessionState.Integrating)]
+    [InlineData(SideSessionState.Deleting)]
+    public async Task Prompt_OfASideSessionThatIsNotReadyIsRefusedWhereverItComesFrom(SideSessionState state)
+    {
+        workspaces.Setup(x => x.GetSide(workspace.Id)).Returns(new StoredSideSession { ParentId = Guid.NewGuid(), Name = "s", Service = AiService.ClaudeCode, State = state, StartedFrom = SideSessionStart.Commit, Root = "/r", Folder = "/r/f" });
+
+        RequestException exception = await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "resume unfinished work", true, CancellationToken.None));
+
+        Assert.Contains("not ready", exception.Message);
+        Assert.Empty(prompter.Sessions.SelectMany(session => session.Prompts));
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
     }
 
     [Fact]

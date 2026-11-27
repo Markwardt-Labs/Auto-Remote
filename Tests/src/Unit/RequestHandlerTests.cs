@@ -48,6 +48,12 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<ISwarmService> swarm = new();
 
+    private readonly Mock<ISideSessions> sideSessions = new();
+
+    private readonly Mock<ISideIntegrations> integrations = new();
+
+    private readonly Mock<ISideSessionRepository> sideRepository = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -64,9 +70,11 @@ public sealed class RequestHandlerTests
         });
         queue.SetupGet(x => x.Waiting).Returns([]);
         swarm.SetupGet(x => x.Delegations).Returns([]);
+        sideRepository.SetupGet(x => x.BranchPrefix).Returns("auto-remote/session/");
+        workspaces.Setup(x => x.Sides(It.IsAny<Guid?>())).Returns([]);
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken cancellation, bool _) => action(cancellation));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object, sideSessions.Object, integrations.Object, sideRepository.Object);
     }
 
     [Fact]

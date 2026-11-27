@@ -79,7 +79,7 @@ internal sealed class AndroidUpdater(IReleaseFeed feed) : IClientUpdater
 
         PendingIntent? open = PendingIntent.GetActivity(context, noticeId, install, PendingIntentFlags.Immutable | PendingIntentFlags.UpdateCurrent);
         Notification notification = builder
-            .SetSmallIcon(context.ApplicationInfo?.Icon ?? 0)!
+            .SetSmallIcon(Resource.Drawable.ic_notification)!
             .SetContentTitle("Auto Remote update ready")!
             .SetContentText("Tap to install it.")!
             .SetAutoCancel(true)!

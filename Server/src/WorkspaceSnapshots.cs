@@ -31,12 +31,28 @@ internal interface IWorkspaceSnapshots
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     void Discard(Guid id);
+
+    /// <summary>
+    /// Gives up the snapshot of the work under way because reverting it would now lose something.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="reason">What a cancellation of that work is told.</param>
+    void Protect(Guid id, string reason);
+
+    /// <summary>
+    /// Tells why the work under way cannot be reverted although it could have been.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <returns>The reason, or <see langword="null" />.</returns>
+    string? Refusal(Guid id);
 }
 
 /// <inheritdoc />
 internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
 {
     private readonly ConcurrentDictionary<Guid, WorkspaceSnapshot> snapshots = new();
+
+    private readonly ConcurrentDictionary<Guid, string> refusals = new();
 
     private readonly int batch = 100;
 
@@ -46,7 +62,7 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
     /// <inheritdoc />
     public async Task Capture(WorkspaceInfo workspace, CancellationToken cancellation)
     {
-        snapshots.TryRemove(workspace.Id, out _);
+        Discard(workspace.Id);
 
         try
         {
@@ -133,7 +149,21 @@ internal sealed class WorkspaceSnapshots(IGitService git) : IWorkspaceSnapshots
     }
 
     /// <inheritdoc />
-    public void Discard(Guid id) => snapshots.TryRemove(id, out _);
+    public void Discard(Guid id)
+    {
+        snapshots.TryRemove(id, out _);
+        refusals.TryRemove(id, out _);
+    }
+
+    /// <inheritdoc />
+    public void Protect(Guid id, string reason)
+    {
+        snapshots.TryRemove(id, out _);
+        refusals[id] = reason;
+    }
+
+    /// <inheritdoc />
+    public string? Refusal(Guid id) => refusals.GetValueOrDefault(id);
 
     private bool SameFolder(string top, string folder) => string.Equals(Path.TrimEndingDirectorySeparator(Path.GetFullPath(top)), Path.TrimEndingDirectorySeparator(Path.GetFullPath(folder)), OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 

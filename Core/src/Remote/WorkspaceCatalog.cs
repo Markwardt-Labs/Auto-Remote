@@ -16,6 +16,11 @@ public sealed record WorkspaceCatalog
     public required IReadOnlyList<WorkspaceInfo> Workspaces { get; init; }
 
     /// <summary>
+    /// Gets the side sessions of all workspaces in the order they were made. They are not among <see cref="Workspaces" />; <see cref="Busy" />, <see cref="Looping" /> and <see cref="Queued" /> cover them too.
+    /// </summary>
+    public IReadOnlyList<WorkspaceInfo> Sessions { get; init; } = [];
+
+    /// <summary>
     /// Gets the identifiers of the workspaces a loop of the AI runs in right now; later changes arrive as <see cref="RemoteEventKind.LoopChanged" /> events.
     /// </summary>
     public IReadOnlyList<Guid> Looping { get; init; } = [];

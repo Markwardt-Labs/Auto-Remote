@@ -24,7 +24,7 @@ internal interface IWorkQueue
     Task Open(string dataFolder, CancellationToken cancellation);
 
     /// <summary>
-    /// Starts a prompt, steers it into the work the workspace already does, or lets it wait. A workspace has at most one waiting prompt, which later ones join.
+    /// Starts a prompt, steers it into the work the workspace already does, or lets it wait. A workspace has at most one waiting prompt, which later ones join, except that a request to integrate a side session goes ahead of a waiting run of a loop.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The prompt.</param>
@@ -58,6 +58,14 @@ internal interface IWorkQueue
     Task CancelLoop(Guid id);
 
     /// <summary>
+    /// Takes a prompt back out of the work that waits, also when it was put together with other work.
+    /// </summary>
+    /// <param name="id">The workspace.</param>
+    /// <param name="text">The prompt.</param>
+    /// <returns>A task that completes once the queue is saved.</returns>
+    Task Withdraw(Guid id, string text);
+
+    /// <summary>
     /// Gets what of a workspace waits.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -68,6 +76,11 @@ internal interface IWorkQueue
     /// Starts whatever may start now, as a change of the mode or of the limit can allow.
     /// </summary>
     void Pump();
+
+    /// <summary>
+    /// Lets waiting work start, which <see cref="Open" /> holds back until whoever has something to take out of it has done so.
+    /// </summary>
+    void Resume();
 }
 
 /// <inheritdoc />
@@ -106,6 +119,8 @@ internal sealed class WorkQueue : IWorkQueue
     private readonly IEventHub events;
 
     private readonly Lock gate = new();
+
+    private volatile bool held;
 
     private readonly Lock publishing = new();
 
@@ -163,6 +178,7 @@ internal sealed class WorkQueue : IWorkQueue
     public async Task Open(string dataFolder, CancellationToken cancellation)
     {
         stopping = cancellation;
+        held = true;
         file = Path.Combine(dataFolder, "queue.json");
         List<StoredEntry> restored = [];
 
@@ -195,6 +211,12 @@ internal sealed class WorkQueue : IWorkQueue
         }
 
         Changed();
+    }
+
+    /// <inheritdoc />
+    public void Resume()
+    {
+        held = false;
         Pump();
     }
 
@@ -227,12 +249,22 @@ internal sealed class WorkQueue : IWorkQueue
             }
             else if (entries.FirstOrDefault(waiting => waiting.Workspace == id && !waiting.IsReservation) is { } waiting)
             {
-                if (source is WorkSource.Loop or WorkSource.Report)
+                if (source == WorkSource.Integration && waiting.Source == WorkSource.Loop)
+                {
+                    // It takes the loop's place in the line, ahead of the loop's prompt.
+                    entry = new Entry(id, waiting.Name, false) { Text = text, Source = source, Sequence = waiting.Sequence };
+                    entries.Insert(entries.IndexOf(waiting), entry);
+                }
+                else if (source is WorkSource.Loop or WorkSource.Report)
                 {
                     throw new RequestException("The workspace already has queued work.");
                 }
-
-                if (waiting.Source == WorkSource.Report)
+                else if (source == WorkSource.Integration)
+                {
+                    waiting.Text = Merge(waiting.Text, text);
+                    entry = waiting;
+                }
+                else if (waiting.Source == WorkSource.Report)
                 {
                     // The report goes along with the user's prompt, in the place it had.
                     joined = waiting;
@@ -400,6 +432,49 @@ internal sealed class WorkQueue : IWorkQueue
     }
 
     /// <inheritdoc />
+    public async Task Withdraw(Guid id, string text)
+    {
+        List<Entry> removed = [];
+        bool changed = false;
+
+        lock (gate)
+        {
+            foreach (Entry entry in entries.Where(entry => entry.Workspace == id && !entry.IsReservation && entry.Text.Contains(text, StringComparison.Ordinal)).ToList())
+            {
+                string rest = entry.Text.Replace(text, string.Empty, StringComparison.Ordinal).Replace("\n\n\n\n", "\n\n", StringComparison.Ordinal).Trim();
+                changed = true;
+
+                if (rest.Length == 0)
+                {
+                    entries.Remove(entry);
+                    removed.Add(entry);
+                }
+                else
+                {
+                    entry.Text = rest;
+                }
+            }
+
+            // One that is just starting may come back to wait, and then without the text.
+            foreach (Entry entry in launching.Where(entry => entry.Workspace == id && entry.Text.Contains(text, StringComparison.Ordinal)))
+            {
+                entry.Text = entry.Text.Replace(text, string.Empty, StringComparison.Ordinal).Replace("\n\n\n\n", "\n\n", StringComparison.Ordinal).Trim();
+                entry.IsAbandoned |= entry.Text.Length == 0;
+            }
+        }
+
+        if (removed.Count > 0)
+        {
+            await Dropped(removed);
+        }
+        else if (changed)
+        {
+            Changed([id]);
+            await Save();
+        }
+    }
+
+    /// <inheritdoc />
     public QueueStatus? Get(Guid id)
     {
         lock (gate)
@@ -411,7 +486,7 @@ internal sealed class WorkQueue : IWorkQueue
     /// <inheritdoc />
     public void Pump()
     {
-        if (stopping.IsCancellationRequested)
+        if (held || stopping.IsCancellationRequested)
         {
             return;
         }
@@ -476,6 +551,13 @@ internal sealed class WorkQueue : IWorkQueue
     private async Task Start(Entry entry)
     {
         await Save();
+
+        if (entry.Text.Length == 0)
+        {
+            Settle(entry.Workspace, true);
+            entry.Started.TrySetResult(false);
+            return;
+        }
 
         try
         {

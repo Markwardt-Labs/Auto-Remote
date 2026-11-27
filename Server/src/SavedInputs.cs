@@ -257,6 +257,8 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
                 return;
             }
 
+            // A workspace removed meanwhile keeps nothing, so nothing of it is written again.
+            await workspaces.Get(id, CancellationToken.None);
             IReadOnlyList<SavedInput> stored = await store.LoadInputs(id, CancellationToken.None);
 
             if (error is not null)

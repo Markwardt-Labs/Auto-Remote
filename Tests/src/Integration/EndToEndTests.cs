@@ -40,7 +40,9 @@ public sealed class EndToEndTests : IAsyncLifetime
         FakePrompter prompter = prompterOf = new() { OnCreate = session => session.ReplyWith(Answer) };
         PrompterHost host = new(_ => prompter);
         WorkspaceManager workspaces = new(store, folders, hub, host);
-        PromptService prompts = new(workspaces, store, host, hub, activity, snapshots);
+        ISessionTools? tools = null;
+        ISideIntegrations? integrations = null;
+        PromptService prompts = new(workspaces, store, host, hub, activity, snapshots, null, () => tools);
         SpeechService speech = new(Mock.Of<IWhisperEngine>());
         SavedInputs savedInputs = new(store, workspaces, hub, speech);
         WorkQueue queue = new(workspaces, prompts, host, activity, savedInputs, hub);
@@ -48,7 +50,13 @@ public sealed class EndToEndTests : IAsyncLifetime
         Mock<IUsageService> usage = usageOf = new();
         WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub, null, null, null, null, queue);
         ScriptRunner scripts = new(hub);
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), new WindowGuard(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) }, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, new WorkspaceWatcher(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300)), updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()));
+        tools = new SideSessionTools(() => integrations!, _ => false);
+        WorkspaceWatcher watcher = new(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300));
+        SideSessionRepository sideRepository = new(git);
+        WindowGuard guard = new(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) };
+        SideSessions sideSessions = new(workspaces, sideRepository, store, prompts, queue, loops, scripts, guard, snapshots, watcher, hub, Mock.Of<ILog>());
+        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, queue, activity, loops, scripts, guard, snapshots, hub, Mock.Of<ILog>(), null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), guard, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()), sideSessions, integrations, sideRepository);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();

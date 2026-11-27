@@ -120,6 +120,13 @@ internal interface ISwarmCoordinator
     Task Revoke(string peerId);
 
     /// <summary>
+    /// Tells whether tasks a workspace delegated are still under way.
+    /// </summary>
+    /// <param name="workspaceId">The workspace.</param>
+    /// <returns>Whether any is waiting, on its way or running, or its AI has yet to be told how they ended.</returns>
+    Task<bool> IsUnderWay(Guid workspaceId);
+
+    /// <summary>
     /// Cancels and removes the tasks of a workspace that is deleted.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
@@ -501,6 +508,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
     public async Task<Guid> Retry(Guid taskId, CancellationToken cancellation)
     {
         SwarmOutgoing task = await Find(taskId);
+        RequireOpen(task.WorkspaceId);
 
         if (task.State is not (SwarmTaskState.Failed or SwarmTaskState.Cancelled or SwarmTaskState.Lost))
         {
@@ -550,6 +558,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             throw new RequestException("The changes of this task were already applied.");
         }
 
+        RequireOpen(task.WorkspaceId);
         string folder = await Folder(task.WorkspaceId) ?? throw new RequestException("The workspace of the task is gone.");
         SwarmApplyResult applied = await repository.Apply(folder, task.BaseCommit, result, cancellation);
         await Update(entry => entry.Id == taskId, entry => entry.IsApplied = true);
@@ -650,6 +659,11 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         await FailTasksOf(peerId);
         await DispatchSoon();
     }
+
+    /// <inheritdoc />
+    public async Task<bool> IsUnderWay(Guid workspaceId)
+        => await book.Read(document => document.Outgoing.Any(task => task.WorkspaceId == workspaceId && task.State is SwarmTaskState.Waiting or SwarmTaskState.Pending or SwarmTaskState.InTransit or SwarmTaskState.Queued or SwarmTaskState.Running)
+            || document.Jobs.Any(job => job.WorkspaceId == workspaceId && !job.IsManual && !job.IsReported && document.Outgoing.Any(task => task.JobId == job.Id)));
 
     /// <inheritdoc />
     public async Task Forget(Guid workspaceId)
@@ -1051,6 +1065,15 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             log?.Write($"Sending delegated tasks failed: {exception.Message}");
         }
     });
+
+    // These name only a task, so the side session it belongs to is checked here: one being integrated takes no new files.
+    private void RequireOpen(Guid workspaceId)
+    {
+        if (workspaces.GetSide(workspaceId) is { State: not SideSessionState.Ready })
+        {
+            throw new RequestException("The side session of this task is being set up, integrated or removed.");
+        }
+    }
 
     private async Task<SwarmOutgoing> Find(Guid taskId) => await book.Read(document => document.Outgoing.FirstOrDefault(task => task.Id == taskId)) ?? throw new RequestException("There is no such delegated task.");
 

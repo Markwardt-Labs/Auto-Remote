@@ -2914,6 +2914,205 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.Equal(1, icons);
     }
 
+    [Theory]
+    [InlineData(390)]
+    [InlineData(1200)]
+    public async Task HomeView_OpensTheSessionsFromTheTitleAndShowsASideSessionAsOne(int width)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/application", Service = AiService.Local };
+        WorkspaceInfo side = new() { Id = Guid.NewGuid(), Folder = "/data/sessions/fix", Service = AiService.Local, Side = new SideSession { ParentId = workspace.Id, ParentName = "application", Name = "fix-login", Error = "Setting up the session failed: no" } };
+        WorkspaceInfo integrating = new() { Id = Guid.NewGuid(), Folder = "/data/sessions/other", Service = AiService.Local, Side = new SideSession { ParentId = workspace.Id, ParentName = "application", Name = "other", State = SideSessionState.Integrating } };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace], Sessions = [side, integrating] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Service = AiService.Local });
+        connection.Setup(x => x.GetGitStatus(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main" });
+        connection.Setup(x => x.GetGitChanges(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+
+        await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, width < 600 ? ClientLayout.Tabs : ClientLayout.Panels);
+            model.Start(workspace.Id).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = width, Height = 900, Content = view };
+            window.Show();
+
+            void Settle()
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+            }
+
+            T Named<T>(string name) where T : Control => window.GetVisualDescendants().OfType<T>().Single(item => item.Name == name);
+            bool Shows(string text) => window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.IsEffectivelyVisible && block.Text == text);
+            List<Button> Buttons(Avalonia.Visual within) => [.. within.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible)];
+            Button Labelled(Avalonia.Visual within, string text) => Buttons(within).Single(button => Equals(button.Content, text));
+
+            Settle();
+            Assert.False(Named<Border>("SideMarker").IsEffectivelyVisible);
+            Assert.False(Named<TextBlock>("SessionContextLabel").IsEffectivelyVisible);
+            Named<Button>("SessionsButton").Command!.Execute(null);
+            Settle();
+            Grid list = Named<Grid>("SessionList");
+            Assert.True(list.IsEffectivelyVisible);
+            Assert.True(Shows("Main"));
+            Assert.True(Shows("fix-login"));
+            Assert.True(Shows("Integrating"));
+            Assert.Single(Buttons(list), button => Equals(button.Content, "Cancel Integration"));
+            Button dots = Assert.Single(Buttons(list), button => Equals(button.Content, "⋯"));
+            Assert.DoesNotContain(Buttons(list), button => Equals(button.Content, "Rename"));
+            dots.Command!.Execute(dots.CommandParameter);
+            Settle();
+
+            foreach (string action in (string[])["Integrate", "Integrate When Finished", "Changes Since Session Start", "Rename", "Delete", "New Session"])
+            {
+                Button button = Labelled(list, action);
+                Avalonia.Point corner = Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(button.Bounds.Width, 0), window)!.Value;
+                Assert.InRange(corner.X, button.Bounds.Width, width);
+            }
+
+            model.Sessions.ChooseCommand.Execute(model.Sessions.Entries[1]);
+            Settle();
+            Assert.False(list.IsEffectivelyVisible);
+            Assert.True(Named<Border>("SideMarker").IsEffectivelyVisible);
+            TextBlock title = Named<TextBlock>("TitleText");
+            Assert.Equal("application / fix-login", title.Text);
+            Assert.True(title.Bounds.Width >= 100, $"the title has only {title.Bounds.Width} to show in");
+            Button sessions = Named<Button>("SessionsButton");
+            Assert.InRange(Avalonia.VisualExtensions.TranslatePoint(sessions, new Avalonia.Point(sessions.Bounds.Width, 0), window)!.Value.X, 0, width);
+            Assert.True(Named<TextBlock>("SessionContextLabel").IsEffectivelyVisible);
+            Assert.True(Shows("Has main's context from session creation."));
+            Assert.True(Shows("Setting up the session failed: no"));
+
+            model.Active!.ToggleSettingsCommand.Execute(null);
+            Settle();
+            string[] sections = [.. window.GetVisualDescendants().OfType<Expander>().Where(section => section.IsEffectivelyVisible).Select(section => section.Header?.ToString() ?? string.Empty)];
+            Assert.DoesNotContain("Workspace", sections);
+            Assert.DoesNotContain("Side sessions", sections);
+            Assert.Contains("AI", sections);
+
+            model.Sessions.NewCommand.Execute(null);
+            Settle();
+            Border dialog = Named<Border>("SessionDialogOverlay");
+            Assert.True(dialog.IsEffectivelyVisible);
+            Assert.Equal(["Current Commit:False", "Current Files:True"], dialog.GetVisualDescendants().OfType<RadioButton>().Select(radio => $"{radio.Content}:{radio.IsChecked}"));
+            dialog.GetVisualDescendants().OfType<RadioButton>().First().IsChecked = true;
+            Settle();
+            Assert.True(model.Sessions.UseCurrentCommit);
+            Assert.True(Shows("First Task (optional)"));
+            Assert.Equal("Create Session", Named<Button>("SessionConfirm").Content);
+            model.Sessions.DismissCommand.Execute(null);
+            model.Sessions.CancelIntegrationCommand.Execute(model.Sessions.Entries[2]);
+            Settle();
+            Assert.Equal(("Cancel Integration", "Keep Integrating"), (Named<Button>("SessionConfirm").Content, Named<Button>("SessionDismiss").Content));
+            window.Close();
+            model.Dispose();
+            return true;
+        });
+    }
+
+    [Fact]
+    public async Task HomeView_TakesKeysInTheSessionDialogsWithoutConfirmingWhatCannotBeUndone()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        WorkspaceInfo side = new() { Id = Guid.NewGuid(), Folder = "/data/sessions/fix", Side = new SideSession { ParentId = workspace.Id, ParentName = "app", Name = "fix-login" } };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace], Sessions = [side] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.RenameWorkspace(workspace.Id, "other", It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
+
+        await fixture.RunAsync(async () =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            await model.Start(workspace.Id);
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 900, Content = view };
+            window.Show();
+
+            async Task Settle()
+            {
+                await Task.Delay(50);
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+            }
+
+            async Task Press(Avalonia.Input.Key key, Avalonia.Input.PhysicalKey physical)
+            {
+                window.KeyPress(key, Avalonia.Input.RawInputModifiers.None, physical, null);
+                await Settle();
+            }
+
+            await Settle();
+            model.Sessions.ToggleCommand.Execute(null);
+            await Settle();
+            await Press(Avalonia.Input.Key.Escape, Avalonia.Input.PhysicalKey.Escape);
+            Assert.False(model.Sessions.IsOpen);
+
+            model.Sessions.ToggleCommand.Execute(null);
+            model.Sessions.RenameCommand.Execute(model.Sessions.Entries[1]);
+            await Settle();
+            Assert.True(window.GetVisualDescendants().OfType<TextBox>().Single(box => box.Name == "SessionName").IsFocused);
+            model.Sessions.Name = "better";
+            await Press(Avalonia.Input.Key.Enter, Avalonia.Input.PhysicalKey.Enter);
+            connection.Verify(x => x.RenameSideSession(side.Id, "better", It.IsAny<CancellationToken>()), Times.Once);
+
+            model.Sessions.IntegrateCommand.Execute(model.Sessions.Entries[1]);
+            await Settle();
+            await Press(Avalonia.Input.Key.Enter, Avalonia.Input.PhysicalKey.Enter);
+            Assert.Equal(SessionDialog.Integrate, model.Sessions.Dialog);
+            connection.Verify(x => x.IntegrateSideSession(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+            await Press(Avalonia.Input.Key.Escape, Avalonia.Input.PhysicalKey.Escape);
+            Assert.Equal(SessionDialog.None, model.Sessions.Dialog);
+            model.Sessions.IsOpen = false;
+
+            model.BeginRenameCommand.Execute(null);
+            await Settle();
+            TextBox name = window.GetVisualDescendants().OfType<TextBox>().Single(box => box.IsEffectivelyVisible && box.Text == "app");
+            name.Focus();
+            model.RenameText = "other";
+            await Press(Avalonia.Input.Key.Enter, Avalonia.Input.PhysicalKey.Enter);
+            connection.Verify(x => x.RenameWorkspace(workspace.Id, "other", It.IsAny<CancellationToken>()), Times.Once);
+            window.Close();
+            model.Dispose();
+            return true;
+        });
+    }
+
+    [Fact]
+    public async Task HomeView_DrawsTheBranchOfASideSessionDashedWithItsName()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetGitStatus(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main" });
+        connection.Setup(x => x.GetGitChanges(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetGitHistory(It.IsAny<Guid>(), It.IsAny<int>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new GitHistory
+        {
+            Commits = [new GitCommit { Hash = "abcdef123456", Parents = [], Author = "a", Date = DateTimeOffset.UtcNow, Subject = "first", Refs = [new GitRef { Name = "main", Kind = GitRefKind.Branch, IsCurrent = true }, new GitRef { Name = "fix-login", Kind = GitRefKind.Session }] }],
+            HasMore = false
+        });
+
+        (int dashed, bool named) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start(workspace.Id).GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 900, Content = view };
+            window.Show();
+            model.Active!.ShowHistoryCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            int dashed = window.GetVisualDescendants().OfType<Avalonia.Controls.Shapes.Rectangle>().Count(outline => outline.Name == "SessionRefOutline" && outline.IsEffectivelyVisible && outline.StrokeDashArray is { Count: > 0 } && outline.Bounds.Width > 20);
+            bool named = window.GetVisualDescendants().OfType<TextBlock>().Any(block => block.IsEffectivelyVisible && block.Text == "fix-login");
+            window.Close();
+            model.Dispose();
+            return (dashed, named);
+        });
+
+        Assert.Equal((1, true), (dashed, named));
+    }
+
     [Fact]
     public async Task Settings_AreSortedIntoSectionsThatStartCollapsedInAColumnOfLimitedWidth()
     {
@@ -2963,7 +3162,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (workspaceSections, workspaceOpen, workspaceWidth, globalSections, globalOpen, globalWidth, opens);
         });
 
-        Assert.Equal(["AI", "Access", "Instructions and prompts", "How it runs", "Errors", "Workspace"], workspaceSections);
+        Assert.Equal(["AI", "Access", "Instructions and prompts", "Side sessions", "How it runs", "Errors", "Workspace"], workspaceSections);
         Assert.All(workspaceOpen, open => Assert.False(open));
         Assert.Equal(["New workspaces", "Status and prompts", "Claude Code", "OpenAI Codex", "Local models", "Image generation"], globalSections);
         Assert.All(globalOpen, open => Assert.False(open));

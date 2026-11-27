@@ -21,6 +21,11 @@ internal sealed record ServerConfig
     public string DataFolder { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoRemote");
 
     /// <summary>
+    /// Gets the folder the side sessions of workspaces are stored in, which must be outside every workspace; the <c>sessions</c> folder of <see cref="DataFolder" /> unless set. A change applies to sessions made afterwards.
+    /// </summary>
+    public string? SessionsFolder { get; init; }
+
+    /// <summary>
     /// Gets the existing folder that browsing for a new workspace's folder starts in; the server user's home folder unless set.
     /// </summary>
     public string DefaultFolder { get; init; } = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);

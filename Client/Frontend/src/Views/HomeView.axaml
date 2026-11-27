@@ -22,9 +22,21 @@
               <Path Classes="usageIcon" StrokeThickness="1.3" Data="{StaticResource NewWindowIconGeometry}" MaxWidth="18" MaxHeight="18" />
             </local:TouchButton>
           </StackPanel>
-          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
-            <TextBlock Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            <local:TouchButton Name="LoopIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}"
+          <Grid Grid.Column="1" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" VerticalAlignment="Center" HorizontalAlignment="Center">
+            <local:TouchButton Name="SessionsButton" Classes="flat sessions" VerticalAlignment="Center" ToolTip.Tip="Sessions of this workspace" Command="{Binding Sessions.ToggleCommand}" IsVisible="{Binding HasSelection}">
+              <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="6">
+                <TextBlock Name="TitleText" Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+                <Border Grid.Column="1" Name="SideMarker" Classes="sideMarker" IsVisible="{Binding IsSideSession}" VerticalAlignment="Center" ToolTip.Tip="A side session">
+                  <StackPanel Orientation="Horizontal" Spacing="4">
+                    <Path Classes="lineIcon" Data="{StaticResource SessionIconGeometry}" MaxWidth="10" MaxHeight="10" />
+                    <TextBlock Text="Side" FontSize="10.5" VerticalAlignment="Center" />
+                  </StackPanel>
+                </Border>
+                <TextBlock Grid.Column="2" Text="▾" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+              </Grid>
+            </local:TouchButton>
+            <TextBlock Text="{Binding Title}" Classes="serif" FontSize="20" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" IsVisible="{Binding !HasSelection}" />
+            <local:TouchButton Grid.Column="1" Name="LoopIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.LoopTip, FallbackValue=''}"
                   IsVisible="{Binding Active.IsLooping, FallbackValue=False}">
               <Path Name="LoopIndicator" Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="16" MaxHeight="16" />
               <Button.Flyout>
@@ -33,7 +45,7 @@
                 </Flyout>
               </Button.Flyout>
             </local:TouchButton>
-            <local:TouchButton Name="LimitPauseIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.Chat.LimitPauseText, FallbackValue=''}"
+            <local:TouchButton Grid.Column="2" Name="LimitPauseIndicatorButton" Classes="flat" Padding="2" VerticalAlignment="Center" ToolTip.Tip="{Binding Active.Chat.LimitPauseText, FallbackValue=''}"
                   IsVisible="{Binding Active.Chat.HasLimitPause, FallbackValue=False}">
               <Path Name="LimitPauseIndicator" Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="16" MaxHeight="16" />
               <Button.Flyout>
@@ -42,7 +54,7 @@
                 </Flyout>
               </Button.Flyout>
             </local:TouchButton>
-          </StackPanel>
+          </Grid>
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right">
             <StackPanel Orientation="Horizontal" IsVisible="{Binding HasSelection}">
               <local:TouchButton Classes="flat toolbar" ToolTip.Tip="AI usage limits" Command="{Binding ToggleUsageCommand}">
@@ -71,10 +83,10 @@
                     <MenuItem Header="Commit" Command="{Binding CommitCommand}" />
                     <MenuItem Header="Auto Commit" Command="{Binding AutoCommitCommand}" />
                     <MenuItem Header="Reset" Command="{Binding ResetCommand}" />
-                    <Separator />
-                    <MenuItem Header="Branch" Command="{Binding BranchCommand}" />
-                    <MenuItem Header="Tag" Command="{Binding TagCommand}" />
-                    <MenuItem Header="Remote" Command="{Binding RemoteCommand}" />
+                    <Separator IsVisible="{Binding CanChangeRefs}" />
+                    <MenuItem Header="Branch" Command="{Binding BranchCommand}" IsVisible="{Binding CanChangeRefs}" />
+                    <MenuItem Header="Tag" Command="{Binding TagCommand}" IsVisible="{Binding CanChangeRefs}" />
+                    <MenuItem Header="Remote" Command="{Binding RemoteCommand}" IsVisible="{Binding CanChangeRefs}" />
                   </MenuFlyout>
                 </Button.Flyout>
                 <Grid>
@@ -90,7 +102,10 @@
               <Border VerticalAlignment="Bottom" Height="1" Background="{DynamicResource Border}" IsHitTestVisible="False" />
             </Grid>
             <Grid Grid.Row="1" ColumnDefinitions="Auto,*,Auto,Auto,Auto,Auto,Auto,Auto" Margin="6,4,6,4">
-              <TextBlock Grid.Column="1" Text="Changes" IsVisible="{Binding Git.IsChangesMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" />
+              <ToggleButton Grid.Column="0" Name="SessionChangesToggle" Classes="icon" ToolTip.Tip="Changes Since Session Start" IsChecked="{Binding Git.IsSessionChangesMode, Mode=TwoWay}" IsVisible="{Binding Git.IsSideSession}">
+                <Path Classes="lineIcon" Data="{StaticResource SessionIconGeometry}" MaxWidth="13" MaxHeight="13" />
+              </ToggleButton>
+              <TextBlock Grid.Column="1" Text="Changes" IsVisible="{Binding Git.IsUncommittedMode}" Classes="muted" FontSize="12" VerticalAlignment="Center" Margin="6,0" />
               <local:TouchButton Grid.Column="2" Classes="icon" ToolTip.Tip="Open in file manager" Click="OnOpenFolderClick" IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop}">
                 <Path Classes="lineIcon" Data="{StaticResource OpenExternalIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </local:TouchButton>
@@ -100,7 +115,7 @@
               <ToggleButton Grid.Column="4" Classes="icon" ToolTip.Tip="Search files" IsChecked="{Binding Search.IsOpen, Mode=TwoWay}" Click="OnSearchToggled">
                 <Path Classes="lineIcon" Data="{StaticResource FindIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </ToggleButton>
-              <ToggleButton Grid.Column="5" Classes="icon" ToolTip.Tip="Toggle changes mode" IsChecked="{Binding Git.IsChangesMode, Mode=TwoWay}" IsVisible="{Binding Git.IsRepo}">
+              <ToggleButton Grid.Column="5" Classes="icon" ToolTip.Tip="Toggle changes mode" IsChecked="{Binding Git.IsUncommittedMode, Mode=TwoWay}" IsVisible="{Binding Git.IsRepo}">
                 <Path Classes="lineIcon" Data="{StaticResource ChangesIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </ToggleButton>
               <ToggleButton Grid.Column="6" Classes="icon" ToolTip.Tip="See hidden files" IsChecked="{Binding ShowHidden, Mode=TwoWay}">
@@ -110,7 +125,11 @@
                 <Path Classes="lineIcon" Data="{StaticResource CollapseAllIconGeometry}" MaxWidth="13" MaxHeight="13" />
               </local:TouchButton>
             </Grid>
-            <TextBlock Grid.Row="2" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="10,0,8,8" />
+            <StackPanel Grid.Row="2">
+              <TextBlock Name="SessionChangesTitle" Text="Changes Since Session Start" IsVisible="{Binding Git.IsSessionChangesMode}" Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="12,0,8,6" />
+              <TextBlock Text="{Binding Git.SessionChangesError}" IsVisible="{Binding Git.HasSessionChangesError}" Classes="error" Margin="10,0,8,8" />
+              <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="10,0,8,8" />
+            </StackPanel>
             <DockPanel Grid.Row="3" DataContext="{Binding Search}" IsVisible="{Binding IsOpen}" Margin="8,0,8,6">
               <TextBox Name="SearchBox" DockPanel.Dock="Top" Text="{Binding Query}" PlaceholderText="{Binding Placeholder}" FontSize="12" Padding="6,3" MinHeight="26" />
               <ToggleButton DockPanel.Dock="Top" Classes="icon" IsChecked="{Binding SearchContent, Mode=TwoWay}" Margin="0,4" HorizontalAlignment="Left" HorizontalContentAlignment="Left" Padding="6,2" ToolTip.Tip="Search inside the files instead of their names">
@@ -200,6 +219,12 @@
            <Panel IsVisible="{Binding ShowChatView}">
            <Grid Name="ChatGrid" DataContext="{Binding Chat}" RowDefinitions="*,Auto,Auto">
             <DockPanel Grid.Row="0">
+            <StackPanel DockPanel.Dock="Top" IsVisible="{Binding $parent[local:HomeView].DataContext.IsSideSession, FallbackValue=False}">
+              <TextBlock Name="SessionContextLabel" Text="Has main's context from session creation." Classes="muted" FontSize="11" HorizontalAlignment="Center" Margin="12,4" TextWrapping="Wrap" />
+              <Border Name="SideErrorBanner" IsVisible="{Binding $parent[local:HomeView].DataContext.Active.HasSideError, FallbackValue=False}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Danger}" BorderThickness="0,0,0,1" Padding="14,8">
+                <TextBlock Text="{Binding $parent[local:HomeView].DataContext.Active.SideError, FallbackValue=''}" Classes="error" FontSize="12" />
+              </Border>
+            </StackPanel>
             <Border Name="LimitPauseBanner" DockPanel.Dock="Top" IsVisible="{Binding HasLimitPause}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Warning}" BorderThickness="0,0,0,1" Padding="14,8">
               <Grid ColumnDefinitions="Auto,*,Auto">
                 <Path Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="14" MaxHeight="14" VerticalAlignment="Top" Margin="0,2,10,0" />
@@ -522,10 +547,10 @@
            <Grid DataContext="{Binding Git.History}" RowDefinitions="Auto,Auto,*">
             <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="16,8,8,4">
               <StackPanel Grid.Column="1" Orientation="Horizontal">
-                <local:TouchButton Classes="icon" ToolTip.Tip="Git remote" Command="{Binding Git.RemoteCommand}">
+                <local:TouchButton Classes="icon" ToolTip.Tip="Git remote" Command="{Binding Git.RemoteCommand}" IsVisible="{Binding Git.CanChangeRefs}">
                   <Path Classes="lineIcon" Data="{StaticResource RemoteIconGeometry}" MaxWidth="13" MaxHeight="13" />
                 </local:TouchButton>
-                <local:TouchButton Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}">
+                <local:TouchButton Classes="icon" ToolTip.Tip="Fetch from the remote" Command="{Binding Git.FetchCommand}" IsVisible="{Binding Git.CanChangeRefs}">
                   <Path Classes="lineIcon" Data="M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13" MaxWidth="13" MaxHeight="13" />
                 </local:TouchButton>
                 <local:TouchButton Classes="icon" ToolTip.Tip="Refresh" Command="{Binding RefreshCommand}">
@@ -545,8 +570,8 @@
                         <Grid Grid.Column="1" Grid.Row="0" ColumnDefinitions="Auto,*,Auto">
                           <local:TouchButton Grid.ColumnSpan="3" Classes="flat" Command="{Binding ToggleCommand}" HorizontalAlignment="Stretch" VerticalAlignment="Stretch" CornerRadius="4" ToolTip.Tip="{Binding FullHash}">
                             <Button.ContextMenu>
-                              <ContextMenu>
-                                <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" />
+                              <ContextMenu Opening="OnCommitMenuOpening">
+                                <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" IsVisible="{Binding CanCheckout}" />
                               </ContextMenu>
                             </Button.ContextMenu>
                           </local:TouchButton>
@@ -560,7 +585,7 @@
                               <DataTemplate>
                                 <local:TouchButton Classes="flat" Padding="0" Margin="0" Command="{Binding ToggleCommand}">
                                   <Button.ContextMenu>
-                                    <ContextMenu>
+                                    <ContextMenu Opening="OnRefMenuOpening">
                                       <MenuItem Header="Checkout" Command="{Binding CheckoutCommand}" IsVisible="{Binding CanCheckout}" />
                                       <Separator IsVisible="{Binding HasRelative}" />
                                       <MenuItem Header="{Binding SquashCurrentHeader}" Command="{Binding SquashCurrentCommand}" IsVisible="{Binding HasRelative}" />
@@ -575,12 +600,21 @@
                                       <MenuItem Header="Delete" Command="{Binding DeleteCommand}" IsVisible="{Binding CanDelete}" />
                                     </ContextMenu>
                                   </Button.ContextMenu>
-                                  <Border Classes="ref" Classes.branch="{Binding IsBranch}" Classes.tag="{Binding IsTag}" Classes.current="{Binding IsCurrent}" BorderBrush="{Binding Accent}" Margin="0,0,4,0">
-                                    <StackPanel Orientation="Horizontal" Spacing="4">
-                                      <TextBlock Text="{Binding Name}" FontSize="10.5" />
-                                      <TextBlock Text="{Binding RemoteLabel}" IsVisible="{Binding HasRemote}" FontSize="10.5" Opacity="0.65" />
-                                    </StackPanel>
-                                  </Border>
+                                  <Panel Margin="0,0,4,0">
+                                    <Border Classes="ref" Classes.branch="{Binding IsBranch}" Classes.tag="{Binding IsTag}" Classes.current="{Binding IsCurrent}" BorderBrush="{Binding Accent}" Margin="0" IsVisible="{Binding IsPlain}">
+                                      <StackPanel Orientation="Horizontal" Spacing="4">
+                                        <TextBlock Text="{Binding Name}" FontSize="10.5" />
+                                        <TextBlock Text="{Binding RemoteLabel}" IsVisible="{Binding HasRemote}" FontSize="10.5" Opacity="0.65" />
+                                      </StackPanel>
+                                    </Border>
+                                    <Panel IsVisible="{Binding IsSession}" ToolTip.Tip="A side session">
+                                      <Rectangle Name="SessionRefOutline" Stroke="{Binding Accent}" StrokeThickness="1" StrokeDashArray="3,2" RadiusX="3" RadiusY="3" />
+                                      <StackPanel Orientation="Horizontal" Spacing="4" Margin="5,2">
+                                        <Path Classes="lineIcon" Data="{StaticResource SessionIconGeometry}" MaxWidth="9" MaxHeight="9" />
+                                        <TextBlock Text="{Binding Name}" FontSize="10.5" />
+                                      </StackPanel>
+                                    </Panel>
+                                  </Panel>
                                 </local:TouchButton>
                               </DataTemplate>
                             </ItemsControl.ItemTemplate>
@@ -825,6 +859,15 @@
                   </Grid>
                 </StackPanel>
               </Expander>
+              <Expander Classes="section" Header="Side sessions" IsExpanded="False" IsVisible="{Binding HasSessionSettings}">
+                <StackPanel Spacing="8" Margin="0,4,0,8" IsEnabled="{Binding CanEdit}">
+                  <TextBlock Text="Files ignored by git are not copied into a new session." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+                  <TextBlock Text="Files to copy into new sessions (one path per line)" Classes="muted" Margin="0,8,0,0" TextWrapping="Wrap" />
+                  <TextBox Text="{Binding SessionFiles}" PlaceholderText=".env" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" MaxHeight="160" />
+                  <TextBlock Text="Setup script run in new sessions" Classes="muted" Margin="0,8,0,0" />
+                  <TextBox Text="{Binding SessionSetupScript}" PlaceholderText="Scripts/setup.cs" />
+                </StackPanel>
+              </Expander>
               <Expander Classes="section" Header="How it runs" IsExpanded="False" IsVisible="{Binding HasDetails}">
                 <StackPanel Spacing="8" Margin="0,4,0,8">
                   <ItemsControl ItemsSource="{Binding Details}">
@@ -856,7 +899,7 @@
                 </StackPanel>
               </Expander>
               <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
-              <Expander Classes="section" Header="Workspace" IsExpanded="False">
+              <Expander Classes="section" Header="Workspace" IsExpanded="False" IsVisible="{Binding HasSessionSettings}">
                 <StackPanel Spacing="8" Margin="0,4,0,8">
                   <local:TouchButton Content="Rename Workspace" Command="{Binding $parent[UserControl].DataContext.BeginRenameCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
                   <local:TouchButton Content="Move Workspace to Folder" Command="{Binding $parent[UserControl].DataContext.MoveWorkspaceToFolderCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
@@ -930,6 +973,71 @@
         </ScrollViewer>
       </Border>
     </Grid>
+
+    <Grid Name="SessionList" IsVisible="{Binding Sessions.IsOpen}">
+      <Border Background="Transparent" PointerPressed="CloseSessions" />
+      <Border Name="SessionCard" Focusable="True" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="6" Padding="10" MaxWidth="380" MaxHeight="560" HorizontalAlignment="Stretch" VerticalAlignment="Top" Margin="8,56,8,8">
+        <DockPanel DataContext="{Binding Sessions}">
+          <TextBlock DockPanel.Dock="Top" Text="Sessions" Classes="serif" FontSize="16" Margin="6,2,6,8" />
+          <local:TouchButton DockPanel.Dock="Bottom" Content="New Session" Command="{Binding NewCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
+          <TextBlock DockPanel.Dock="Bottom" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="6,6,6,0" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+            <ItemsControl ItemsSource="{Binding Entries}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Margin="0,0,0,2">
+                    <Grid ColumnDefinitions="*,Auto,Auto">
+                      <local:TouchButton Grid.Column="0" Classes="flat session" Classes.on="{Binding IsShown}" IsEnabled="{Binding CanOpen}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,5" Command="{Binding $parent[ItemsControl].DataContext.ChooseCommand}" CommandParameter="{Binding}">
+                        <StackPanel>
+                          <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="6">
+                            <Path Grid.Column="0" Classes="lineIcon" Data="{StaticResource SessionIconGeometry}" MaxWidth="11" MaxHeight="11" IsVisible="{Binding IsSide}" VerticalAlignment="Center" />
+                            <TextBlock Grid.Column="1" Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Grid.Column="2" Text="●" FontSize="8" Foreground="{DynamicResource Accent}" IsVisible="{Binding IsWorking}" VerticalAlignment="Center" />
+                          </Grid>
+                          <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
+                        </StackPanel>
+                      </local:TouchButton>
+                      <local:TouchButton Grid.Column="1" Content="Cancel Integration" FontSize="12" Padding="8,4" VerticalAlignment="Center" IsVisible="{Binding IsIntegrating}" Command="{Binding $parent[ItemsControl].DataContext.CancelIntegrationCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Grid.Column="2" Content="⋯" Classes="flat" Padding="10,4" VerticalAlignment="Center" ToolTip.Tip="Session actions" IsVisible="{Binding HasActions}" Command="{Binding $parent[ItemsControl].DataContext.ExpandCommand}" CommandParameter="{Binding}" />
+                    </Grid>
+                    <WrapPanel IsVisible="{Binding IsExpanded}" Margin="8,2,0,6">
+                      <local:TouchButton Content="Integrate" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.IntegrateCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Content="{Binding WhenFinishedText}" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.WhenFinishedCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Content="Changes Since Session Start" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.ChangesCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Content="Rename" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.RenameCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Content="Delete" Classes="danger" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowDelete}" Command="{Binding $parent[ItemsControl].DataContext.DeleteCommand}" CommandParameter="{Binding}" />
+                    </WrapPanel>
+                  </StackPanel>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <Border Name="SessionDialogOverlay" IsVisible="{Binding Sessions.IsPrompting}" Background="{DynamicResource Scrim}">
+      <Border Name="SessionDialogCard" Focusable="True" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
+        <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel DataContext="{Binding Sessions}" Spacing="12">
+            <TextBlock Text="{Binding DialogTitle}" Classes="serif" FontSize="20" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding DialogText}" IsVisible="{Binding HasDialogText}" Classes="muted" TextWrapping="Wrap" />
+            <TextBox Name="SessionName" Text="{Binding Name}" PlaceholderText="Name" IsVisible="{Binding NeedsName}" />
+            <StackPanel Spacing="4" IsVisible="{Binding IsNew}">
+              <TextBlock Text="Starting files" Classes="muted" />
+              <RadioButton GroupName="SessionStart" Content="Current Commit" IsChecked="{Binding UseCurrentCommit, Mode=TwoWay}" />
+              <RadioButton GroupName="SessionStart" Content="Current Files" IsChecked="{Binding UseCurrentFiles, Mode=TwoWay}" />
+              <TextBlock Text="Current Files includes changes that are not committed, new files too." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+              <TextBlock Text="First Task (optional)" Classes="muted" Margin="0,8,0,0" />
+              <TextBox Text="{Binding FirstTask}" PlaceholderText="Work the session starts on once it is set up" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" MaxHeight="160" />
+            </StackPanel>
+            <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
+            <local:TouchButton Name="SessionConfirm" Content="{Binding ConfirmText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+            <local:TouchButton Name="SessionDismiss" Content="{Binding DismissText}" Command="{Binding DismissCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+          </StackPanel>
+        </ScrollViewer>
+      </Border>
+    </Border>
 
     <Grid IsVisible="{Binding IsUsageOpen}">
       <Border Background="Transparent" PointerPressed="CloseUsage" />
@@ -1080,6 +1188,7 @@
           <StackPanel IsVisible="{Binding IsDeleting}" Spacing="12">
             <TextBlock Text="Delete workspace?" Classes="serif" FontSize="20" />
             <TextBlock Text="{Binding Title, StringFormat='{}{0} will be removed from the server.'}" Classes="muted" TextWrapping="Wrap" />
+            <TextBlock Text="Its side sessions and their changes are permanently deleted too." IsVisible="{Binding HasSideSessions}" Classes="muted" TextWrapping="Wrap" />
             <CheckBox IsChecked="{Binding DeleteFolder}" Content="Also delete the workspace folder and everything in it" />
             <local:TouchButton Content="Delete" Command="{Binding ConfirmDeleteCommand}" Classes="danger" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
           </StackPanel>

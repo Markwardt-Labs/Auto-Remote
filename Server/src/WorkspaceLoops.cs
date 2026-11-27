@@ -30,7 +30,7 @@ internal interface IWorkspaceLoops
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null, IWorkQueue? queue = null) : IWorkspaceLoops
+internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null, IWorkQueue? queue = null, Func<Guid, bool>? delivering = null) : IWorkspaceLoops
 {
     private readonly ConcurrentDictionary<Guid, LoopRun> loops = new();
 
@@ -140,7 +140,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
     {
         using IDisposable watch = events.Subscribe(remoteEvent =>
         {
-            if (remoteEvent.WorkspaceId == id && remoteEvent.Kind == RemoteEventKind.Failed)
+            if (remoteEvent.WorkspaceId == id && remoteEvent.Kind == RemoteEventKind.Failed && remoteEvent.IsNotice != true)
             {
                 run.Failure = remoteEvent.Error ?? "The AI failed.";
             }
@@ -151,7 +151,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
             while (!run.Over)
             {
                 run.LastWindowCheck = DateTimeOffset.MinValue;
-                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && queue?.Get(id) is null && guard?.IsPaused(id) != true);
+                // A side session waiting to be integrated goes first.
+                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && queue?.Get(id) is null && guard?.IsPaused(id) != true && delivering?.Invoke(id) != true);
 
                 if (run.Over || reason is not null)
                 {

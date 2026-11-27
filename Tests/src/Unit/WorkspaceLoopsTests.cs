@@ -82,7 +82,12 @@ public sealed class WorkspaceLoopsTests : IDisposable
         }
     }
 
-    private string? Ended() => Changes().LastOrDefault(change => change.Loop is null)?.Text;
+    // A loop is gone a moment before its end is announced.
+    private string? Ended()
+    {
+        SpinWait.SpinUntil(() => Changes().Any(change => change.Loop is null), TimeSpan.FromSeconds(5));
+        return Changes().LastOrDefault(change => change.Loop is null)?.Text;
+    }
 
     [Fact]
     public async Task Start_SendsTheRunsOneAfterAnotherPublishesTheirCountAndEndsWithTheReason()
@@ -582,7 +587,7 @@ public sealed class WorkspaceLoopsTests : IDisposable
         Assert.Single(Session.Prompts);
         Assert.True(reads >= 4);
         Assert.Equal(0, loops.Get(workspace.Id)!.Runs);
-        Assert.Null(Ended());
+        Assert.DoesNotContain(Changes(), change => change.Loop is null);
 
         used = 40;
         await Until(() => loops.Get(workspace.Id) is null);

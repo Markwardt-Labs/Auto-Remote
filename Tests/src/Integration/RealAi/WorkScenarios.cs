@@ -8,7 +8,7 @@ public sealed class WorkScenarios
     public async Task AttachedImagesAreSeenAndAttachedTextFilesAreReadByPath(AiService service)
     {
         await using RealServer server = await RealServer.Start();
-        WorkspaceInfo workspace = await server.Workspace("attach", service);
+        WorkspaceInfo workspace = await server.Workspace("attach", service, shell: false);
         string image = await server.Connection.UploadAttachment(workspace.Id, "square.png", PngImage.Solid(48, 48, 255, 0, 0), CancellationToken.None);
         string notes = await server.Connection.UploadAttachment(workspace.Id, "notes.txt", Encoding.UTF8.GetBytes("The secret number is 4711."), CancellationToken.None);
 
@@ -120,7 +120,7 @@ public sealed class WorkScenarios
     }
 
     [RealAiFact]
-    public async Task APromptForAWorkspaceWhoseFolderWasRemovedIsRefusedOnceTheSessionIsReopenedAndTheWorkspaceStaysReady()
+    public async Task APromptForAWorkspaceWhoseFolderWasRemovedIsRefusedAndTheWorkspaceStaysReadyWithItsChat()
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("removed", AiService.ClaudeCode);
@@ -133,8 +133,9 @@ public sealed class WorkScenarios
 
         Console.Error.WriteLine("ERROR: " + error.Message);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
-        RemoteException history = await Assert.ThrowsAsync<RemoteException>(() => server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None));
-        Assert.Contains("does not exist", history.Message, StringComparison.Ordinal);
+        // The chat is the server's own record, so it is still there without the folder.
+        ChatHistory history = await server.Connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None);
+        Assert.Contains(history.Messages, message => message.Role == MessageRole.User && message.Text.StartsWith("Reply with exactly the word OK.", StringComparison.Ordinal));
     }
 
     [RealAiTheory]
@@ -171,13 +172,16 @@ public sealed class WorkScenarios
         RealServer.Git(folder, "push", "-u", "origin", "main");
         RealServer.Git(folder, "checkout", "-b", "feature");
         await File.WriteAllTextAsync(Path.Combine(folder, "file.txt"), "title: feature\nbody: unchanged\n");
-        RealServer.Git(folder, "commit", "-am", "feature title");
+        // Neither title is the right one, and a commit left empty by keeping main's is refused rather than dropped, so it holds more than the title.
+        await File.WriteAllTextAsync(Path.Combine(folder, "feature.txt"), "only on the feature\n");
+        RealServer.Git(folder, "add", "-A");
+        RealServer.Git(folder, "commit", "-m", "feature title");
         RealServer.Git(folder, "push", "-u", "origin", "feature");
         RealServer.Git(folder, "checkout", "main");
         await File.WriteAllTextAsync(Path.Combine(folder, "file.txt"), "title: main\nbody: unchanged\n");
         RealServer.Git(folder, "commit", "-am", "main title");
         RealServer.Git(folder, "push", "origin", "main");
-        WorkspaceInfo workspace = await server.Workspace("conflict", AiService.ClaudeCode, repository: false, folder: folder);
+        WorkspaceInfo workspace = await server.Workspace("conflict", AiService.ClaudeCode, repository: false, folder: folder, shell: false);
         int mark = server.Mark();
 
         await server.Connection.GitRebase(workspace.Id, "feature", "main", null, CancellationToken.None);

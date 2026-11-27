@@ -41,6 +41,13 @@ internal interface IFolderBrowser
     Task<string> Rename(string path, string name, CancellationToken cancellation);
 
     /// <summary>
+    /// Refuses a folder that is never deleted, without deleting anything.
+    /// </summary>
+    /// <param name="path">The folder.</param>
+    /// <exception cref="RequestException">The folder is a file system root or the user's home folder (or contains it).</exception>
+    void RequireRemovable(string path);
+
+    /// <summary>
     /// Deletes a folder and everything in it; does nothing if it is already gone.
     /// </summary>
     /// <param name="path">The folder to delete.</param>
@@ -111,20 +118,27 @@ internal sealed class FolderBrowser : IFolderBrowser
         cancellation);
 
     /// <inheritdoc />
+    public void RequireRemovable(string path)
+    {
+        string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+        StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+        string homeFull = Path.TrimEndingDirectorySeparator(home);
+
+        if (Path.GetPathRoot(full) is { } root && Path.TrimEndingDirectorySeparator(root).Length == full.Length
+            || full.Length == 0
+            || homeFull.StartsWith(full + Path.DirectorySeparatorChar, comparison)
+            || string.Equals(homeFull, full, comparison))
+        {
+            throw new RequestException("This folder is too important to delete.");
+        }
+    }
+
+    /// <inheritdoc />
     public Task Delete(string path, CancellationToken cancellation) => Task.Run(
         () =>
         {
+            RequireRemovable(path);
             string full = Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
-            StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
-            string homeFull = Path.TrimEndingDirectorySeparator(home);
-
-            if (Path.GetPathRoot(full) is { } root && Path.TrimEndingDirectorySeparator(root).Length == full.Length
-                || full.Length == 0
-                || homeFull.StartsWith(full + Path.DirectorySeparatorChar, comparison)
-                || string.Equals(homeFull, full, comparison))
-            {
-                throw new RequestException("This folder is too important to delete.");
-            }
 
             if (Directory.Exists(full))
             {

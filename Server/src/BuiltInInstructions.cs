@@ -17,8 +17,9 @@ internal interface IBuiltInInstructions
     /// </summary>
     /// <param name="user">The user's own instructions, or <see langword="null" /> or blank for none; built-in instructions already in front of them are replaced, not doubled.</param>
     /// <param name="statusMinutes">How often, in minutes, the AI must report its status.</param>
+    /// <param name="note">What else the AI has to know about where it works, or <see langword="null" />.</param>
     /// <returns>The instructions for the session.</returns>
-    string Compose(string? user, int statusMinutes);
+    string Compose(string? user, int statusMinutes, string? note = null);
 
     /// <summary>
     /// Takes the built-in instructions off what a session is configured with, whichever interval or older wording they have, leaving what the user wrote.
@@ -46,7 +47,11 @@ internal sealed class BuiltInInstructions : IBuiltInInstructions
     }
 
     /// <inheritdoc />
-    public string Compose(string? user, int statusMinutes) => Visible(user) is { } own ? $"{open}{Text(statusMinutes)}{close}\n\n{own}" : $"{open}{Text(statusMinutes)}{close}";
+    public string Compose(string? user, int statusMinutes, string? note = null)
+    {
+        string built = note is null ? $"{open}{Text(statusMinutes)}{close}" : $"{open}{Text(statusMinutes)}\n\n{note}{close}";
+        return Visible(user) is { } own ? $"{built}\n\n{own}" : built;
+    }
 
     /// <inheritdoc />
     public string? Visible(string? stored)

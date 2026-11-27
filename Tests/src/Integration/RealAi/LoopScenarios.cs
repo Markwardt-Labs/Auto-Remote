@@ -81,9 +81,10 @@ public sealed class LoopScenarios
         await server.Connection.Prompt(workspace.Id, "Create a file named between.txt containing exactly the word yes, then reply with just BETWEEN.", CancellationToken.None);
         await server.Until(() => server.Events().Skip(mark).Any(item => item.Kind == RemoteEventKind.LoopChanged && item.Loop is null) && server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None).Result == WorkspaceState.Ready, 360, "the loop and the prompt to finish");
 
-        string replies = server.Replies(workspace, mark);
+        // What the AI answers is its own affair: a prompt steered into a run can take over the run's reply.
+        Assert.Equal(2, server.Events().Skip(mark).Count(item => item.Kind == RemoteEventKind.MessageAdded && item.Message is { Role: MessageRole.User } message && message.Text.Contains("sleep 4", StringComparison.Ordinal)));
+        Assert.Contains("LOOPRUN", server.Replies(workspace, mark), StringComparison.Ordinal);
         Assert.Equal("yes", (await File.ReadAllTextAsync(Path.Combine(workspace.Folder, "between.txt"))).Trim());
-        Assert.Equal(2, replies.Split("LOOPRUN").Length - 1);
         Assert.Empty(server.Failures(workspace));
     }
 

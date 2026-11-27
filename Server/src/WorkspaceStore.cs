@@ -37,6 +37,13 @@ internal interface IWorkspaceStore
     Task<string> SaveAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation);
 
     /// <summary>
+    /// Gets where a workspace's attachments are stored; the folder only exists once something was attached.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns>The full path of the folder.</returns>
+    string AttachmentsFolder(Guid id);
+
+    /// <summary>
     /// Deletes a workspace's attachments.
     /// </summary>
     /// <param name="id">The workspace.</param>
@@ -196,7 +203,7 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     public async Task<string> SaveAttachment(Guid id, string name, ReadOnlyMemory<byte> data, CancellationToken cancellation)
     {
         string clean = string.Concat(name.Split(['/', '\\']).Last().Where(character => !Path.GetInvalidFileNameChars().Contains(character)));
-        string folder = AttachmentsPath(id);
+        string folder = AttachmentsFolder(id);
         Directory.CreateDirectory(folder);
         string file = Path.Combine(folder, $"{Guid.NewGuid():N}"[..8] + "-" + (clean.Length == 0 ? "file" : clean));
         await File.WriteAllBytesAsync(file, data, cancellation);
@@ -204,11 +211,14 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     }
 
     /// <inheritdoc />
+    public string AttachmentsFolder(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "attachments", id.ToString("N"));
+
+    /// <inheritdoc />
     public void DeleteAttachments(Guid id)
     {
-        if (Directory.Exists(AttachmentsPath(id)))
+        if (Directory.Exists(AttachmentsFolder(id)))
         {
-            Directory.Delete(AttachmentsPath(id), true);
+            Directory.Delete(AttachmentsFolder(id), true);
         }
     }
 
@@ -456,8 +466,6 @@ internal sealed class WorkspaceStore : IWorkspaceStore
     private string InputsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "inputs", id.ToString("N") + ".json");
 
     private string ChatPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "chats", id.ToString("N") + ".jsonl");
-
-    private string AttachmentsPath(Guid id) => Path.Combine(Path.GetDirectoryName(path)!, "attachments", id.ToString("N"));
 
     private void UpgradeToTwo(JsonObject content)
     {

@@ -38,6 +38,52 @@ public sealed partial class HomeView : UserControl
             };
         }
 
+        if (this.FindControl<Border>("SessionDialogOverlay") is { } asking && this.FindControl<TextBox>("SessionName") is { } named && this.FindControl<Border>("SessionDialogCard") is { } dialogCard)
+        {
+            // The dialog takes the keyboard: its name, or where there is none itself, so that Enter confirms nothing.
+            asking.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == Visual.IsVisibleProperty && asking.IsVisible)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        if (named.IsEffectivelyVisible)
+                        {
+                            named.Focus();
+                            named.SelectAll();
+                        }
+                        else
+                        {
+                            dialogCard.Focus();
+                        }
+                    }, Avalonia.Threading.DispatcherPriority.Background);
+                }
+                else if (args.Property == Visual.IsVisibleProperty)
+                {
+                    // Closing it leaves the keyboard nowhere again, and Escape has to reach the list it was opened from.
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() =>
+                    {
+                        if (this.FindControl<Border>("SessionCard") is { IsEffectivelyVisible: true } list)
+                        {
+                            list.Focus();
+                        }
+                    }, Avalonia.Threading.DispatcherPriority.Background);
+                }
+            };
+        }
+
+        if (this.FindControl<Grid>("SessionList") is { } sessionList && this.FindControl<Border>("SessionCard") is { } card)
+        {
+            // Opening it leaves the keyboard nowhere, since the title is held back while it is clicked, and Escape has to reach it.
+            sessionList.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == Visual.IsVisibleProperty && sessionList.IsVisible)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => card.Focus(), Avalonia.Threading.DispatcherPriority.Background);
+                }
+            };
+        }
+
         if (this.FindControl<ListBox>("DrawerList") is { } drawer)
         {
             // The highlight belongs to the whole row, which only the item's container covers; a row that changes is a new item, so preparing it is enough.
@@ -296,8 +342,77 @@ public sealed partial class HomeView : UserControl
         box?.Paste();
     }
 
+    private void OnCommitMenuOpening(object? sender, System.ComponentModel.CancelEventArgs args)
+    {
+        if (sender is Control { DataContext: GitCommitViewModel { CanCheckout: false } })
+        {
+            args.Cancel = true;
+        }
+    }
+
+    private void OnRefMenuOpening(object? sender, System.ComponentModel.CancelEventArgs args)
+    {
+        if (sender is Control { DataContext: GitRefViewModel { HasMenu: false } })
+        {
+            args.Cancel = true;
+        }
+    }
+
+    private bool SessionKey(HomeViewModel home, Avalonia.Input.Key key)
+    {
+        if (home.Sessions.IsPrompting)
+        {
+            if (key == Avalonia.Input.Key.Escape)
+            {
+                home.Sessions.DismissCommand.Execute(null);
+                return true;
+            }
+
+            // Enter takes a name only; what cannot be undone is confirmed with its button.
+            if (key == Avalonia.Input.Key.Enter && home.Sessions.NeedsName && this.FindControl<TextBox>("SessionName") is { IsFocused: true })
+            {
+                home.Sessions.ConfirmCommand.Execute(null);
+                return true;
+            }
+
+            return false;
+        }
+
+        if (key != Avalonia.Input.Key.Escape || !home.Sessions.IsOpen)
+        {
+            return false;
+        }
+
+        home.Sessions.IsOpen = false;
+        return true;
+    }
+
+    private bool NameKey(HomeViewModel home, object? source)
+    {
+        if (source is not TextBox)
+        {
+            return false;
+        }
+
+        AsyncCommand? submit = home.EditMode switch
+        {
+            EditMode.RenameWorkspace => home.ConfirmRenameCommand,
+            EditMode.NewGroup => home.ConfirmNewGroupCommand,
+            EditMode.RenameGroup => home.ConfirmRenameGroupCommand,
+            _ => null
+        };
+        submit?.Execute(null);
+        return submit is not null;
+    }
+
     private void OnPromptKeyDown(object? sender, Avalonia.Input.KeyEventArgs args)
     {
+        if (DataContext is HomeViewModel shown && args.KeyModifiers == Avalonia.Input.KeyModifiers.None && (SessionKey(shown, args.Key) || args.Key == Avalonia.Input.Key.Enter && shown.IsEditing && NameKey(shown, args.Source)))
+        {
+            args.Handled = true;
+            return;
+        }
+
         if (DataContext is HomeViewModel { IsEditing: true } home && args.Key == Avalonia.Input.Key.Escape && args.KeyModifiers == Avalonia.Input.KeyModifiers.None)
         {
             home.CancelEditCommand.Execute(null);
@@ -442,6 +557,14 @@ public sealed partial class HomeView : UserControl
         if (NodeOf(sender) is { } node && (DataContext as HomeViewModel)?.Active is { } workspace && TopLevel.GetTopLevel(this)?.Clipboard is { } clipboard)
         {
             await clipboard.SetTextAsync(workspace.AbsolutePath(node.Path));
+        }
+    }
+
+    private void CloseSessions(object? sender, Avalonia.Input.PointerPressedEventArgs args)
+    {
+        if (DataContext is HomeViewModel home)
+        {
+            home.Sessions.IsOpen = false;
         }
     }
 

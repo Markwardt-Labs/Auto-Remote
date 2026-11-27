@@ -61,8 +61,9 @@ internal interface IPrompterHost : IAsyncDisposable
     /// </summary>
     /// <param name="user">The user's own instructions, or <see langword="null" /> for none.</param>
     /// <param name="statusMinutes">The status interval of the workspace, or <see langword="null" /> for the one of the environment.</param>
+    /// <param name="note">What else the AI has to know about where it works, or <see langword="null" />.</param>
     /// <returns>The instructions for the session.</returns>
-    string ComposeInstructions(string? user, int? statusMinutes);
+    string ComposeInstructions(string? user, int? statusMinutes, string? note = null);
 
     /// <summary>
     /// Takes the instructions every AI gets off what a session is configured with, leaving what the user wrote.
@@ -180,7 +181,7 @@ internal sealed class PrompterHost(Func<string, IPrompter>? createPrompter = nul
     }
 
     /// <inheritdoc />
-    public string ComposeInstructions(string? user, int? statusMinutes) => builtIn.Compose(user, statusMinutes ?? kept.StatusMinutes);
+    public string ComposeInstructions(string? user, int? statusMinutes, string? note = null) => builtIn.Compose(user, statusMinutes ?? kept.StatusMinutes, note);
 
     /// <inheritdoc />
     public string? UserInstructions(string? stored) => builtIn.Visible(stored);

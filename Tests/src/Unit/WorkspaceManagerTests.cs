@@ -127,6 +127,16 @@ public sealed class WorkspaceManagerTests
     }
 
     [Fact]
+    public async Task RequireDeletable_RefusesAFolderThatIsNeverDeletedBeforeAnythingElseOfTheWorkspaceGoes()
+    {
+        WorkspaceInfo created = await manager.Create("/work/app", AiService.ClaudeCode, null, null, CancellationToken.None);
+        folders.Setup(x => x.RequireRemovable(created.Folder)).Throws(new RequestException("This folder is too important to delete."));
+
+        await Assert.ThrowsAsync<RequestException>(() => manager.RequireDeletable(created.Id, true, CancellationToken.None));
+        await manager.RequireDeletable(created.Id, false, CancellationToken.None);
+    }
+
+    [Fact]
     public async Task Create_StoresWorkspaceNamedAfterFolder()
     {
         WorkspaceInfo created = await manager.Create("/work/app/", AiService.ClaudeCode, null, null, CancellationToken.None);

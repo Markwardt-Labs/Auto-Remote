@@ -52,6 +52,76 @@ internal interface IServerConnection : IAsyncDisposable
     Task<WorkspaceInfo> CreateWorkspace(string folder, AiService? service, string? apiKey, Guid? groupId, CancellationToken cancellation);
 
     /// <summary>
+    /// Makes a side session of a workspace.
+    /// </summary>
+    /// <param name="id">The main workspace.</param>
+    /// <param name="name">The name of the session.</param>
+    /// <param name="start">What its files start from.</param>
+    /// <param name="firstTask">Its first prompt, or <see langword="null" />.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The session, which is still being set up.</returns>
+    Task<WorkspaceInfo> CreateSideSession(Guid id, string name, SideSessionStart start, string? firstTask, CancellationToken cancellation);
+
+    /// <summary>
+    /// Renames a side session.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="name">The new name.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The session.</returns>
+    Task<WorkspaceInfo> RenameSideSession(Guid id, string name, CancellationToken cancellation);
+
+    /// <summary>
+    /// Removes a side session for good.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>A task that completes once it is gone.</returns>
+    Task DeleteSideSession(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Starts integrating a side session into its main workspace.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>A task that completes once the session is locked.</returns>
+    Task IntegrateSideSession(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Cancels the integration of a side session.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>A task that completes once the session is unlocked.</returns>
+    Task CancelIntegration(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sets whether a side session is integrated by itself once its AI marks its task complete.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="enabled">Whether it is.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>A task that completes once set.</returns>
+    Task SetIntegrateWhenFinished(Guid id, bool enabled, CancellationToken cancellation);
+
+    /// <summary>
+    /// Lists what changed in a side session since it started.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The changed files.</returns>
+    Task<IReadOnlyList<GitChange>> GetSessionChanges(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Compares a file of a side session with how it was when the session started.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="path">The file.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The comparison.</returns>
+    Task<GitDiff> GetSessionDiff(Guid id, string path, CancellationToken cancellation);
+
+    /// <summary>
     /// Renames a workspace by renaming its folder.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -1079,6 +1149,30 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> MoveWorkspaceToFolder(Guid id, string folder, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = id, Path = folder }, cancellation)).Workspace ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> CreateSideSession(Guid id, string name, SideSessionStart start, string? firstTask, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateSideSession, WorkspaceId = id, Name = name, Start = start, Text = firstTask }, cancellation)).Workspace ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> RenameSideSession(Guid id, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenameSideSession, WorkspaceId = id, Name = name }, cancellation)).Workspace ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task DeleteSideSession(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.DeleteSideSession, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task IntegrateSideSession(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.IntegrateSideSession, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task CancelIntegration(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.CancelIntegration, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task SetIntegrateWhenFinished(Guid id, bool enabled, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SetIntegrateWhenFinished, WorkspaceId = id, Enabled = enabled }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<GitChange>> GetSessionChanges(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetSessionChanges, WorkspaceId = id }, cancellation)).GitChanges?.Changes ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<GitDiff> GetSessionDiff(Guid id, string path, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetSessionDiff, WorkspaceId = id, Path = path }, cancellation)).GitDiff ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> RenameWorkspace(Guid id, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenameWorkspace, WorkspaceId = id, Name = name }, cancellation)).Workspace ?? throw Malformed();

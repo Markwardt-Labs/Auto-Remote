@@ -11,7 +11,7 @@ public sealed record GitStatus
     public required bool IsRepo { get; init; }
 
     /// <summary>
-    /// Gets the checked out branch, or <see langword="null" /> when the head is detached.
+    /// Gets the checked out branch, or <see langword="null" /> when the head is detached; for a side session the name of the session.
     /// </summary>
     public string? Branch { get; init; }
 

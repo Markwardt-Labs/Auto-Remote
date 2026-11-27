@@ -51,6 +51,24 @@ internal sealed record StoredWorkspace
     public bool AllowDelegation { get; init; }
 
     /// <summary>
+    /// Gets the files copied into new side sessions of the workspace.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionFiles { get; init; }
+
+    /// <summary>
+    /// Gets the script that sets up new side sessions of the workspace.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? SessionSetupScript { get; init; }
+
+    /// <summary>
+    /// Gets what is kept about a side session, for a workspace that is one.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public StoredSideSession? Side { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the session was stored by an older release, before sessions kept the settings the server runs them with, and still has to be given them (<see cref="IPrompterHost.Adopt" />), which the server does when it starts and then clears this.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]

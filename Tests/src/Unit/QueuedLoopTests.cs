@@ -61,7 +61,7 @@ public sealed class QueuedLoopTests
         Assert.Equal((1, 0), (submitted, loops.Get(workspace.Id)?.Runs));
 
         started.SetResult(true);
-        await Until(() => loops.Get(workspace.Id) is null);
+        await Until(() => loops.Get(workspace.Id) is null && !ends.IsEmpty);
 
         Assert.Equal(1, submitted);
         Assert.Equal("The loop made all its runs.", Assert.Single(ends));
@@ -75,7 +75,7 @@ public sealed class QueuedLoopTests
         await Until(() => submitted == 1);
 
         started.SetResult(false);
-        await Until(() => loops.Get(workspace.Id) is null);
+        await Until(() => loops.Get(workspace.Id) is null && !ends.IsEmpty);
 
         Assert.Equal("The loop stopped: its waiting run was cancelled.", Assert.Single(ends));
     }

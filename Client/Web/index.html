@@ -336,6 +336,35 @@ button.icon.recording { color: var(--danger); }
 .ref.tag { background: #4B3F1F; }
 .ref.remote { background: var(--hover); }
 .ref .remote-part { margin-left: 4px; opacity: .65; }
+.ref.session { background: transparent; border: 1px dashed; display: inline-flex; align-items: center; gap: 4px; }
+.topbar .title button.sessions { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; min-height: 0; padding: 2px 8px; background: transparent; border: 0; font: inherit; vertical-align: middle; }
+.topbar .title button.sessions:disabled { opacity: 1; cursor: default; background: transparent; }
+.topbar .title button.sessions .name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.topbar .title button.sessions .chevron { flex: none; font-size: 12px; opacity: .7; }
+.side-marker { flex: none; display: inline-flex; align-items: center; gap: 4px; font: 10.5px system-ui, sans-serif; border: 1px solid var(--accent); border-radius: 3px; padding: 1px 5px; }
+.side-marker[hidden] { display: none; }
+.sessions-wrap { position: absolute; inset: 0; z-index: 12; }
+.sessions-wrap[hidden] { display: none; }
+.sessions-card { position: absolute; top: 56px; left: 50%; transform: translateX(-50%); width: min(380px, calc(100% - 16px)); max-height: calc(100% - 72px); display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 10px; }
+.sessions-card h3 { font-size: 16px; margin: 2px 6px; }
+.sessions-card .rows { overflow-y: auto; min-height: 0; }
+.session-row { display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+.session-row button.pick { flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; padding: 5px 8px; }
+.session-row button.pick:hover:not(:disabled) { background: var(--hover); }
+.session-row button.pick.on { background: var(--selection); }
+.session-row button.pick .name { display: flex; align-items: center; gap: 6px; }
+.session-row button.pick .name span:not(.dot) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-row .dot { color: var(--accent); font-size: 8px; }
+.session-row button.small { flex: none; font-size: 12px; padding: 4px 8px; }
+.session-actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 2px 8px 8px; }
+.session-actions button { font-size: 12px; padding: 4px 8px; }
+.files .bar .since-toggle { margin-right: auto; }
+.since-title { flex: none; font-size: 12px; padding: 0 8px 4px 12px; }
+.since-title[hidden] { display: none; }
+.side-context { flex: none; text-align: center; font-size: 11px; padding: 4px 12px; }
+.side-context[hidden], .side-error[hidden] { display: none; }
+.side-error { flex: none; font-size: 12px; padding: 8px 14px; background: var(--elevated); border-bottom: 1px solid var(--danger); color: var(--danger); white-space: pre-wrap; }
+.dialog textarea { resize: vertical; min-height: 60px; }
 .commit-changes { margin: 0 0 6px 4px; padding: 6px 8px; background: var(--elevated); border-radius: 4px; }
 .preview .diff { flex: 1; overflow: auto; background: transparent; margin: 0; font: 12px/1.45 var(--mono); user-select: text; padding: 8px 0; }
 .dl { display: flex; white-space: pre; min-width: max-content; }
@@ -402,7 +431,8 @@ details.section > .stack { padding: 4px 0 12px; }
 .drawer .row button { padding: 4px 8px; }
 .drawer .actions { display: flex; flex-direction: column; gap: 8px; }
 .dialog-wrap { position: absolute; inset: 0; background: var(--scrim); z-index: 20; display: flex; align-items: center; justify-content: center; padding: 24px; }
-.dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 12px; }
+.dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 100%; max-width: 420px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+.dialog > * { flex: none; }
 .dialog h3 { font-size: 20px; }
 
 .newws { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px; max-width: 820px; width: 100%; margin: 0 auto; }
@@ -519,6 +549,8 @@ function h(tag, props = {}, ...children) {
       element.className = value;
     } else if (name.startsWith("on")) {
       element.addEventListener(name.slice(2), value);
+    } else if (name.startsWith("data-")) {
+      element.setAttribute(name, value);
     } else if (value !== undefined && value !== null && value !== false) {
       element[name] = value;
     }
@@ -1368,6 +1400,14 @@ function folderName(folder) {
   return name || folder;
 }
 
+// A side session is shown under its workspace's name and its own.
+function workspaceName(info) {
+  return info.side ? `${info.side.parentName} / ${info.side.name}` : folderName(info.folder);
+}
+
+// Stands for the commit of a diff that compares a side session's file with what it was when the session started.
+const sessionStartCommit = "session-start";
+
 class RemoteError extends Error {
   constructor(message, overLimit) {
     super(message);
@@ -1594,6 +1634,14 @@ class Connection {
   gitMerge(workspaceId, name, base, text) { return this.request("GitMerge", { workspaceId, name, base, text: text ?? undefined }); }
   gitFetch(workspaceId) { return this.request("GitFetch", { workspaceId }); }
   gitSync(workspaceId) { return this.request("GitSync", { workspaceId }); }
+  createSideSession(workspaceId, name, start, text) { return this.request("CreateSideSession", { workspaceId, name, start, text: text || undefined }).then(r => r.workspace); }
+  renameSideSession(workspaceId, name) { return this.request("RenameSideSession", { workspaceId, name }); }
+  deleteSideSession(workspaceId) { return this.request("DeleteSideSession", { workspaceId }); }
+  integrateSideSession(workspaceId) { return this.request("IntegrateSideSession", { workspaceId }); }
+  cancelIntegration(workspaceId) { return this.request("CancelIntegration", { workspaceId }); }
+  setIntegrateWhenFinished(workspaceId, enabled) { return this.request("SetIntegrateWhenFinished", { workspaceId, enabled }); }
+  getSessionChanges(workspaceId) { return this.request("GetSessionChanges", { workspaceId }).then(r => r.gitChanges.changes); }
+  getSessionDiff(workspaceId, path) { return this.request("GetSessionDiff", { workspaceId, path }).then(r => r.gitDiff); }
   gitSetIdentity(workspaceId, name, email) { return this.request("GitSetIdentity", { workspaceId, name, email }); }
   gitCancel(workspaceId) { return this.request("GitCancel", { workspaceId }); }
 }
@@ -1740,6 +1788,7 @@ const icons = {
   unfoldAll: ["M1,7 L13,7 M4,5 L7,2 L10,5 M4,9 L7,12 L10,9", "1 1.5 12 11", 13],
   outline: ["M1,3 L3,3 M5,3 L13,3 M3,7 L5,7 M7,7 L13,7 M5,11 L7,11 M9,11 L13,11", "0 1 14 12", 13],
   levels: ["M1,5 L7,2 L13,5 L7,8 Z M1,9 L7,12 L13,9", "0 1 14 12", 13],
+  session: ["M3,13 L3,1.5 M3,9.5 C3,6.5 11,8 11,3.5 M8.8,5.5 L11,3 L13.2,5.5", "2 0.5 12 13.5", 13],
   remote: ["M4,3.5 L4,10.5 M2.5,2 A1.5,1.5 0 1,1 5.5,2 A1.5,1.5 0 1,1 2.5,2 Z M2.5,12 A1.5,1.5 0 1,1 5.5,12 A1.5,1.5 0 1,1 2.5,12 Z M9.5,5 A1.5,1.5 0 1,1 12.5,5 A1.5,1.5 0 1,1 9.5,5 Z M11,6.5 C11,9 4,8 4,10.5", "1.5 0.5 12 13", 13],
   fetch: ["M7,1 L7,10 M3,6 L7,10 L11,6 M2,13 L12,13", "2 1 10 12", 13],
 };
@@ -1992,7 +2041,13 @@ class WorkspaceView {
     this.scriptError = new ErrorLine();
     this.errorsError = new ErrorLine();
     this.syncTimer = null;
+    this.sideInfo = info.side ?? null;
+    this.keptTask = null;
+    this.missedReconnect = false;
+    this.sinceStart = false;
+    this.sessionChanges = [];
     this.build();
+    this.updateSide(info);
     this.applyState();
     this.listener = event => this.receive(event);
     connection.listeners.add(this.listener);
@@ -2059,7 +2114,11 @@ class WorkspaceView {
     this.queueText = h("div", {});
     this.queuePrompt = h("div", { class: "prompt" });
     this.queueBanner = h("div", { class: "queue-banner", hidden: true }, h("div", { class: "info" }, this.queueText, this.queuePrompt), h("button", { class: "flat", onclick: () => this.cancelQueued() }, "Cancel Queued Work"));
+    this.contextLabel = h("div", { class: "side-context muted", hidden: !this.sideInfo }, "Has main's context from session creation.");
+    this.sideErrorBanner = h("div", { class: "side-error", hidden: true });
     this.chatBody = h("div", { class: "pane-body chat" },
+      this.contextLabel,
+      this.sideErrorBanner,
       this.limitBanner,
       this.queueBanner,
       h("div", { class: "messages-wrap" }, this.scroller, this.workButton, this.chatAutoButton),
@@ -2070,7 +2129,7 @@ class WorkspaceView {
       h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
-      h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
+      h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", hidden: !!this.sideInfo, onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", hidden: !!this.sideInfo, onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
       h("div", { style: "padding:0 16px" }, this.historyError.element),
       this.historyList);
     this.scriptSelect = h("select", { onchange: () => this.selectScript(this.scriptSelect.value) });
@@ -2102,6 +2161,8 @@ class WorkspaceView {
     this.chatPane = h("div", { class: "panel chat" }, this.tabs, this.chatBody, this.scriptBody, this.historyBody);
 
     this.pathLabel = h("div", { class: "path muted", hidden: true }, "Changes");
+    this.sinceTitle = h("div", { class: "since-title muted", hidden: true }, "Changes Since Session Start");
+    this.sessionChangesError = new ErrorLine("error since-title");
     this.fileList = h("div", { class: "list tree" });
     this.previewKind = h("span", { class: "kind", hidden: true }, "");
     this.previewTitle = h("div", { class: "name" });
@@ -2160,14 +2221,16 @@ class WorkspaceView {
       h("button", { onclick: choose("commit") }, "Commit"),
       h("button", { onclick: choose("autocommit") }, "Auto Commit"),
       h("button", { onclick: choose("reset") }, "Reset"),
-      h("hr"),
-      h("button", { onclick: choose("branch") }, "Branch"),
-      h("button", { onclick: choose("tag") }, "Tag"),
-      h("button", { onclick: choose("remote") }, "Remote"));
+      ...(this.sideInfo ? [] : [
+        h("hr"),
+        h("button", { onclick: choose("branch") }, "Branch"),
+        h("button", { onclick: choose("tag") }, "Tag"),
+        h("button", { onclick: choose("remote") }, "Remote")]));
     this.versionWrap = h("div", { class: "menu-wrap version-line", hidden: true }, this.versionButton, this.versionMenu);
     this.menuListener = () => { this.versionMenu.hidden = true; this.levelMenu.hidden = true; this.outlineMenu.hidden = true; };
     document.addEventListener("click", this.menuListener);
-    this.changesToggle = h("button", { class: "flat icon", title: "Toggle changes mode", hidden: true, onclick: () => this.setChangesMode(!this.changesMode) }, icon("changes"));
+    this.changesToggle = h("button", { class: "flat icon", title: "Toggle changes mode", hidden: true, onclick: () => this.setChangesMode(!this.changesMode || this.sinceStart) }, icon("changes"));
+    this.sinceToggle = h("button", { class: "flat icon since-toggle", title: "Changes Since Session Start", hidden: !this.sideInfo, onclick: () => this.setChangesMode(!this.sinceStart, true) }, icon("session"));
     this.hiddenToggle = h("button", { class: "flat icon", title: "See hidden files", onclick: () => this.setShowHidden(!this.showHidden) }, icon("eye"));
     this.searchToggle = h("button", { class: "flat icon", title: "Search files", onclick: () => this.setSearch(!this.searchOpen) }, icon("find"));
     this.searchInput = h("input", { type: "text", placeholder: "Search files by name", oninput: () => this.runSearch(), onkeydown: event => { if (event.key === "Escape") { this.setSearch(false); } } });
@@ -2184,7 +2247,9 @@ class WorkspaceView {
     this.changeList = h("div", { class: "list tree", hidden: true });
     this.filesPane = h("div", { class: "panel files" },
       this.versionWrap,
-      h("div", { class: "bar" }, this.pathLabel, this.searchToggle, this.changesToggle, this.hiddenToggle, h("button", { class: "flat icon", title: "Collapse All", onclick: () => this.collapseAll() }, icon("collapse"))),
+      h("div", { class: "bar" }, this.sinceToggle, this.pathLabel, this.searchToggle, this.changesToggle, this.hiddenToggle, h("button", { class: "flat icon", title: "Collapse All", onclick: () => this.collapseAll() }, icon("collapse"))),
+      this.sinceTitle,
+      this.sessionChangesError.element,
       h("div", { style: "margin-bottom:8px" }, this.filesError.element),
       this.searchPane,
       this.fileList,
@@ -2240,10 +2305,23 @@ class WorkspaceView {
         ...promptRow("Review prompt", this.reviewPromptBox, "Use the review prompt of the global settings"),
         ...promptRow("Expand prompt", this.expandPromptBox, "Use the expand prompt of the global settings"))
     ];
+    this.sessionFilesBox = h("textarea", { rows: 3, placeholder: ".env" });
+    this.setupScriptBox = h("input", { type: "text", placeholder: "Scripts/setup.cs" });
+    const sessionSection = section("Side sessions",
+      h("div", { class: "muted small" }, "Files ignored by git are not copied into a new session."),
+      h("div", { class: "muted", style: "margin-top:8px" }, "Files to copy into new sessions (one path per line)"), this.sessionFilesBox,
+      h("div", { class: "muted", style: "margin-top:8px" }, "Setup script run in new sessions"), this.setupScriptBox);
+    sessionSection.hidden = !!this.sideInfo;
+    lockedSections.push(sessionSection);
     this.lockedControls = lockedSections.flatMap(item => [...item.querySelectorAll("input, select, textarea, button")]);
     this.lockedNote = h("div", { class: "muted", hidden: true }, "This workspace runs a task delegated by another server, so its settings cannot be changed.");
     this.renameButton = h("button", { class: "block", onclick: () => this.home.beginRename() }, "Rename Workspace");
     this.relocateButton = h("button", { class: "block", onclick: () => this.home.beginRelocate() }, "Move Workspace to Folder");
+    const workspaceSection = section("Workspace",
+      this.renameButton,
+      this.relocateButton,
+      h("button", { class: "block danger", onclick: () => this.home.beginDelete() }, "Delete Workspace"));
+    workspaceSection.hidden = !!this.sideInfo;
     this.settingsPane = h("div", { class: "pane settings" },
       h("div", { class: "inner stack tight" },
         this.lockedNote,
@@ -2251,10 +2329,7 @@ class WorkspaceView {
         this.detailsSection,
         section("Errors", this.errorsError.element, this.errorsBox),
         this.settingsError.element,
-        section("Workspace",
-          this.renameButton,
-          this.relocateButton,
-          h("button", { class: "block danger", onclick: () => this.home.beginDelete() }, "Delete Workspace"))));
+        workspaceSection));
 
     this.settingsPane.hidden = true;
 
@@ -2353,6 +2428,8 @@ class WorkspaceView {
     this.expandPromptBox.value = settings.expandPrompt ?? "";
     this.reviewPromptBox.placeholder = settings.globalReviewPrompt ?? "";
     this.expandPromptBox.placeholder = settings.globalExpandPrompt ?? "";
+    this.sessionFilesBox.value = settings.sessionFiles ?? "";
+    this.setupScriptBox.value = settings.sessionSetupScript ?? "";
     const details = Object.entries(settings.descriptors ?? {});
     this.detailsSection.hidden = details.length === 0;
     this.detailsBox.replaceChildren(...details.map(([name, value]) => h("div", { class: "row small", style: "display:flex;gap:12px" }, h("span", { class: "muted" }, name), h("span", {}, value))));
@@ -2367,7 +2444,9 @@ class WorkspaceView {
       instructions: this.instructionsBox.value.trim(),
       statusMinutes: this.statusBox.value.trim() === "" ? undefined : Math.min(1440, Math.max(1, Math.round(Number(this.statusBox.value)))),
       reviewPrompt: this.reviewPromptBox.value.trim() || undefined,
-      expandPrompt: this.expandPromptBox.value.trim() || undefined
+      expandPrompt: this.expandPromptBox.value.trim() || undefined,
+      sessionFiles: this.sessionFilesBox.value.trim() || undefined,
+      sessionSetupScript: this.setupScriptBox.value.trim() || undefined
     };
   }
 
@@ -2383,7 +2462,9 @@ class WorkspaceView {
       || edited.instructions !== (this.current.instructions ?? "").trim()
       || (edited.statusMinutes ?? null) !== (this.current.statusMinutes ?? null)
       || (edited.reviewPrompt ?? "") !== (this.current.reviewPrompt ?? "").trim()
-      || (edited.expandPrompt ?? "") !== (this.current.expandPrompt ?? "").trim();
+      || (edited.expandPrompt ?? "") !== (this.current.expandPrompt ?? "").trim()
+      || (edited.sessionFiles ?? "") !== (this.current.sessionFiles ?? "").trim()
+      || (edited.sessionSetupScript ?? "") !== (this.current.sessionSetupScript ?? "").trim();
   }
 
   async applySettings() {
@@ -2432,6 +2513,47 @@ class WorkspaceView {
     this.startSync();
     this.scrollToEnd();
     this.restoreDraft();
+    this.keepUnsentTask();
+  }
+
+  // Takes what the server knows about the side session now.
+  updateSide(info) {
+    this.sideInfo = info.side ?? null;
+    this.sideErrorBanner.textContent = this.sideInfo?.error ?? "";
+    this.sideErrorBanner.hidden = !this.sideInfo?.error;
+    this.keepUnsentTask();
+
+    if (this.missedReconnect && this.sideInfo?.state === "Ready") {
+      this.missedReconnect = false;
+      this.resync();
+    }
+  }
+
+  // A first task that was never sent goes into the message box when it is first heard of, unless something else is being written there.
+  keepUnsentTask() {
+    const side = this.sideInfo;
+
+    if (this.draftRestored && side?.state === "Ready" && side.error && side.unsentTask && this.keptTask !== side.unsentTask) {
+      this.keptTask = side.unsentTask;
+
+      if (!this.input.value) {
+        this.input.value = side.unsentTask;
+        this.inputChanged();
+      }
+    }
+  }
+
+  showSessionChanges() {
+    if (!this.sideInfo) {
+      return;
+    }
+
+    if (this.settingsOpen) {
+      this.toggleSettings();
+    }
+
+    this.setSearch(false);
+    this.setChangesMode(true, true);
   }
 
   restoreDraft() {
@@ -2468,7 +2590,22 @@ class WorkspaceView {
     this.connection = connection;
     this.diagrams.connection = connection;
     connection.listeners.add(this.listener);
-    this.watch();
+
+    // The server refuses what is read of a session that is being set up, integrated or removed; it is read once it is ready.
+    if (this.sideInfo && this.sideInfo.state !== "Ready") {
+      this.missedReconnect = true;
+      return;
+    }
+
+    this.resync();
+  }
+
+  resync() {
+    // The server watches one workspace for a connection, which is to be the one on screen.
+    if (this === this.home.active) {
+      this.watch();
+    }
+
     this.loadChat();
     this.refreshGit(true);
     this.loadScripts();
@@ -2745,6 +2882,7 @@ class WorkspaceView {
       ...Object.values(boxes),
       h("label", { class: "check", style: "margin-top:6px" }, waitForLimit, "Wait for the usage limit instead of ending"),
       h("button", { class: "primary block", onclick: start }, "Start Loop"));
+    this.home.dialogHost.firstChild.dataset.view = this.info.id;
   }
 
   async loadState() {
@@ -3040,7 +3178,7 @@ class WorkspaceView {
 
       try {
         if ("Notification" in window && Notification.permission === "granted") {
-          const note = new Notification(`${folderName(this.info.folder)} is ready`, { tag: `ready-${this.info.id}` });
+          const note = new Notification(`${workspaceName(this.info)} is ready`, { tag: `ready-${this.info.id}` });
           this.readyNote = note;
           note.onclick = () => {
             window.focus();
@@ -3430,7 +3568,11 @@ class WorkspaceView {
       }
     } else if (event.kind === "Failed") {
       this.chatError.set(event.error, event.time);
-      this.dropStreaming();
+
+      // A notice is about something beside the work, whose answer goes on.
+      if (!event.isNotice) {
+        this.dropStreaming();
+      }
     } else if (event.kind === "SavedInputsChanged" && event.savedInputs) {
       this.setSavedInputs(event.savedInputs);
     }
@@ -4332,7 +4474,7 @@ class WorkspaceView {
     if (this.changesMode) {
       const folders = nodes => nodes.filter(node => node.children).flatMap(node => [node.path, ...folders(node.children)]);
 
-      for (const path of folders(this.changeTree())) {
+      for (const path of folders(this.sinceStart ? this.changeTree(this.sessionChanges, sessionStartCommit) : this.changeTree())) {
         this.changeCollapsed.add(path);
       }
 
@@ -4810,6 +4952,24 @@ class WorkspaceView {
     try {
       const status = await this.connection.getGitStatus(this.info.id);
       const changes = status.isRepo ? await this.connection.getGitChanges(this.info.id) : [];
+      const compared = this.sinceStart && status.isRepo;
+      let sessionChanges = [];
+      let failed = null;
+
+      // Failing to list them must not keep the rest of what was read from being shown.
+      if (compared) {
+        try {
+          sessionChanges = await this.connection.getSessionChanges(this.info.id);
+        } catch (exception) {
+          failed = exception.message;
+        }
+      }
+
+      if (compared === this.sinceStart) {
+        this.sessionChanges = sessionChanges;
+        this.sessionChangesError.set(failed);
+      }
+
       const before = this.gitStatus;
       const moved = status.commit !== before.commit || status.branch !== before.branch || status.tag !== before.tag || status.isRepo !== before.isRepo;
       this.gitStatus = status;
@@ -4817,6 +4977,7 @@ class WorkspaceView {
 
       if (!status.isRepo) {
         this.changesMode = false;
+        this.sinceStart = false;
       }
 
       this.renderGit();
@@ -4825,8 +4986,9 @@ class WorkspaceView {
         await this.loadHistory(true);
       }
 
-      if (this.diffState && this.diffState.commit === null) {
-        await this.openDiff(this.diffState.path, null, true);
+      // Both compare with the files as they are, which just changed.
+      if (this.diffState && (this.diffState.commit === null || this.diffState.commit === sessionStartCommit)) {
+        await this.openDiff(this.diffState.path, this.diffState.commit, true);
       }
     } catch (exception) {
     }
@@ -4859,8 +5021,10 @@ class WorkspaceView {
   applyChangesMode() {
     this.changeList.hidden = !this.changesMode || this.searchOpen;
     this.fileList.hidden = this.changesMode || this.searchOpen;
-    this.pathLabel.hidden = !this.changesMode;
-    this.changesToggle.classList.toggle("on", this.changesMode);
+    this.pathLabel.hidden = !this.changesMode || this.sinceStart;
+    this.sinceTitle.hidden = !this.changesMode || !this.sinceStart;
+    this.changesToggle.classList.toggle("on", this.changesMode && !this.sinceStart);
+    this.sinceToggle.classList.toggle("on", this.changesMode && this.sinceStart);
   }
 
   setSearch(open) {
@@ -4947,10 +5111,24 @@ class WorkspaceView {
     this.renderTree();
   }
 
-  setChangesMode(on) {
-    this.changesMode = on && !!this.gitStatus.isRepo;
+  setChangesMode(on, sinceStart = false) {
+    // A side session is always a repository, which may not have been read yet.
+    this.changesMode = on && (sinceStart ? !!this.sideInfo : !!this.gitStatus.isRepo);
+    const compared = this.changesMode && sinceStart;
+    const other = compared !== this.sinceStart;
+    this.sinceStart = compared;
+
+    if (other) {
+      this.sessionChanges = [];
+      this.sessionChangesError.set(null);
+    }
+
     this.applyChangesMode();
     this.renderChanges();
+
+    if (compared && other) {
+      this.refreshGit();
+    }
   }
 
   changeTree(changes = this.gitChanges.filter(change => change.status !== "Ignored"), commit = null) {
@@ -5011,14 +5189,16 @@ class WorkspaceView {
     }
 
     const scroll = this.changeList.scrollTop;
-    this.changeList.replaceChildren(...this.changeRows(this.changeTree(), 0, "", this.changeCollapsed, node => this.openDiff(node.path, null), () => this.renderChanges()));
+    const commit = this.sinceStart ? sessionStartCommit : null;
+    const tree = this.sinceStart ? this.changeTree(this.sessionChanges, commit) : this.changeTree();
+    this.changeList.replaceChildren(...this.changeRows(tree, 0, "", this.changeCollapsed, node => this.openDiff(node.path, commit), () => this.renderChanges()));
     this.changeList.scrollTop = scroll;
   }
 
   // A quiet open only reads the shown diff again.
   async openDiff(path, commit, quiet = false, remember = true) {
     const request = quiet ? this.previewRequest : ++this.previewRequest;
-    const result = await attempt(() => this.connection.getGitDiff(this.info.id, path, commit), quiet ? new ErrorLine() : this.filesError);
+    const result = await attempt(() => commit === sessionStartCommit ? this.connection.getSessionDiff(this.info.id, path) : this.connection.getGitDiff(this.info.id, path, commit), quiet ? new ErrorLine() : this.filesError);
 
     if (request !== this.previewRequest || quiet && (this.diffState?.path !== path || this.diffState.commit !== (commit ?? null))) {
       return false;
@@ -5040,7 +5220,7 @@ class WorkspaceView {
     this.preview = null;
     this.setFind(false);
     this.diffState = { path, commit: commit ?? null };
-    this.previewTitle.textContent = commit ? `${path} (${commit.slice(0, 7)})` : `${path} (changes)`;
+    this.previewTitle.textContent = commit === sessionStartCommit ? `${path} (changes since session start)` : commit ? `${path} (${commit.slice(0, 7)})` : `${path} (changes)`;
     this.previewKind.textContent = "Diff";
     this.previewKind.hidden = false;
     this.previewNote.hidden = false;
@@ -5142,13 +5322,15 @@ class WorkspaceView {
       const refs = shown.length > 0
         ? h("div", { class: "refs" }, shown.map(ref => {
           const remotes = ref.kind === "Branch" ? commit.refs.filter(other => other.kind === "Remote" && other.name.includes("/") && branchOf(other) === ref.name).map(other => other.name.slice(0, other.name.indexOf("/"))) : [];
-          const badge = h("span", { class: `ref${ref.kind === "Tag" ? " tag" : ref.kind === "Remote" ? " remote" : ref.isCurrent ? " current" : ""}` }, ref.name, remotes.length > 0 ? h("span", { class: "remote-part" }, remotes.join(", ")) : null);
+          const badge = ref.kind === "Session"
+            ? h("span", { class: "ref session", title: "A side session" }, icon("session"), ref.name)
+            : h("span", { class: `ref${ref.kind === "Tag" ? " tag" : ref.kind === "Remote" ? " remote" : ref.isCurrent ? " current" : ""}` }, ref.name, remotes.length > 0 ? h("span", { class: "remote-part" }, remotes.join(", ")) : null);
           badge.style.borderColor = graphColors[row.color % graphColors.length];
           return h("button", { class: "refbtn", onclick: () => this.toggleCommit(commit), oncontextmenu: event => { event.preventDefault(); this.refMenu(event, ref, current); } }, badge);
         }))
         : null;
       const date = new Date(commit.date).toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
-      const main = h("div", { class: "main", title: commit.hash, onclick: () => this.toggleCommit(commit), oncontextmenu: event => { event.preventDefault(); this.showMenu(event, [{ label: "Checkout this commit", action: () => this.checkout(commit.hash) }]); } },
+      const main = h("div", { class: "main", title: commit.hash, onclick: () => this.toggleCommit(commit), oncontextmenu: event => { event.preventDefault(); if (!this.sideInfo) { this.showMenu(event, [{ label: "Checkout", action: () => this.checkout(commit.hash) }]); } } },
         refs,
         h("div", { class: "subject" }, commit.subject),
         h("div", { class: "author" }, commit.author),
@@ -5241,6 +5423,7 @@ class WorkspaceView {
 
     this.home.dialog(title, body, nameBox, emailBox, h("button", { class: `${destructive ? "danger" : "primary"} block`, onclick: go }, confirm));
     shown = this.home.dialogHost.firstChild;
+    shown.dataset.view = this.info.id;
   }
 
   withIdentity(next) {
@@ -5445,6 +5628,11 @@ class WorkspaceView {
   }
 
   refMenu(event, ref, current) {
+    // The branches of side sessions are theirs alone, and a side session changes no refs at all.
+    if (this.sideInfo || ref.kind === "Session") {
+      return;
+    }
+
     const target = ref.kind === "Remote" && ref.name.includes("/") ? ref.name.slice(ref.name.indexOf("/") + 1) : ref.name;
     const tag = ref.kind === "Tag";
     const relative = !tag && !ref.isCurrent && current && target !== current;
@@ -5473,6 +5661,13 @@ class Home {
     this.app = app;
     this.connection = connection;
     this.workspaces = [];
+    this.sideSessions = [];
+    this.shownSessions = new Map();
+    this.activeId = null;
+    this.awaited = null;
+    this.tasked = new Set();
+    this.sessionExpanded = null;
+    this.sessionAsk = null;
     this.groups = [];
     this.expanded = new Set();
     this.opened = new Map();
@@ -5537,10 +5732,13 @@ class Home {
 
   build() {
     this.menuButton = h("button", { class: "flat menu", title: "Workspaces", onclick: () => this.setDrawer(!this.drawerOpen) }, "☰");
-    this.titleText = h("span", {}, "Auto Remote");
+    this.titleText = h("span", { class: "name" }, "Auto Remote");
+    this.sideMarker = h("span", { class: "side-marker", hidden: true, title: "A side session" }, icon("session"), "Side");
+    this.chevron = h("span", { class: "chevron", hidden: true }, "▾");
+    this.sessionsButton = h("button", { class: "sessions", title: "Sessions of this workspace", disabled: true, onclick: () => this.toggleSessions() }, this.titleText, this.sideMarker, this.chevron);
     this.loopIndicator = h("button", { class: "flat icon loop-indicator", hidden: true, onclick: () => this.showLoopNext() }, icon("loop"));
     this.limitIndicator = h("button", { class: "flat icon loop-indicator limit-indicator", hidden: true, onclick: () => this.showLimitPause() }, icon("pause"));
-    this.title = h("div", { class: "title serif" }, this.titleText, this.loopIndicator, this.limitIndicator);
+    this.title = h("div", { class: "title serif" }, this.sessionsButton, this.loopIndicator, this.limitIndicator);
     this.gearButton = h("button", { class: "flat gear", title: "Workspace settings", onclick: () => this.active?.toggleSettings() }, "\u2699\uFE0E");
     this.usageButton = h("button", { class: "flat usage", title: "AI usage limits", onclick: () => this.toggleUsage() });
     this.usageButton.innerHTML = '<svg viewBox="0 0 16 16" width="18" height="18"><path d="M3,13 L3,8 M8,13 L8,3 M13,13 L13,10" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>';
@@ -5549,6 +5747,14 @@ class Home {
     this.content = h("div", { class: "content" });
     this.usageCard = h("div", { class: "usage-card" });
     this.usageWrap = h("div", { class: "usage-wrap", hidden: true, onclick: event => event.target === this.usageWrap && this.toggleUsage(false) }, this.usageCard);
+    this.sessionRows = h("div", { class: "rows" });
+    this.sessionError = new ErrorLine();
+    this.sessionsCard = h("div", { class: "sessions-card" },
+      h("h3", { class: "serif" }, "Sessions"),
+      this.sessionRows,
+      this.sessionError.element,
+      h("button", { class: "block", onclick: () => this.beginNewSession() }, "New Session"));
+    this.sessionsWrap = h("div", { class: "sessions-wrap", hidden: true, onclick: event => event.target === this.sessionsWrap && this.toggleSessions(false) }, this.sessionsCard);
     this.usage = null;
     this.usageService = null;
     this.usageTimer = null;
@@ -5574,12 +5780,399 @@ class Home {
     this.dialogHost = h("div", { class: "dialog-wrap", hidden: true });
     this.dialogKeyListener = event => this.dialogKey(event);
     document.addEventListener("keydown", this.dialogKeyListener);
-    this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.scrim, this.drawer, this.dialogHost);
+    this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.sessionsWrap, this.scrim, this.drawer, this.dialogHost);
     this.drawerOpen = false;
   }
 
   get active() {
-    return this.selected ? this.opened.get(this.selected.id) ?? null : null;
+    return this.activeId ? this.opened.get(this.activeId) ?? null : null;
+  }
+
+  // The main workspace of what the identifier names, which is itself unless it names a side session.
+  mainOf(id) {
+    return this.sideSessions.find(session => session.id === id)?.side.parentId ?? id;
+  }
+
+  // The session of a workspace that is on screen when it is selected.
+  shownOf(workspace) {
+    const id = this.shownSessions.get(workspace.id);
+    return this.sideSessions.find(session => session.id === id && session.side.state === "Ready") ?? workspace;
+  }
+
+  known(id) {
+    return this.workspaces.find(item => item.id === id) ?? this.sideSessions.find(item => item.id === id) ?? null;
+  }
+
+  // A workspace counts as working, looping or queued when any of its sessions does.
+  anySession(workspaceId, ids) {
+    return ids.has(workspaceId) || this.sideSessions.some(session => session.side.parentId === workspaceId && ids.has(session.id));
+  }
+
+  showSession(id) {
+    if (!this.selected || this.mainOf(id) !== this.selected.id) {
+      return false;
+    }
+
+    if (id === this.selected.id) {
+      this.shownSessions.delete(id);
+    } else if (this.sideSessions.some(session => session.id === id && session.side.state === "Ready")) {
+      this.shownSessions.set(this.selected.id, id);
+    } else {
+      return false;
+    }
+
+    this.awaited = null;
+    this.swap();
+    this.renderSessions();
+    return true;
+  }
+
+  // Main shown in the place of a session that cannot be shown stays, rather than giving way to it again later.
+  forgetUnshowable(workspace) {
+    if (this.shownSessions.has(workspace.id) && this.shownOf(workspace).id === workspace.id) {
+      this.shownSessions.delete(workspace.id);
+    }
+  }
+
+  // Work that is thrown away does not end in a notification that it is ready.
+  disarm(id) {
+    this.tasked.delete(id);
+    this.held.delete(id);
+    const view = this.opened.get(id);
+
+    if (view) {
+      view.notifyWhenReady = false;
+      view.clearReady();
+    }
+  }
+
+  // The server sends a first task once the session is set up, and the user is told when it is done as for one typed here.
+  followTasks() {
+    for (const id of [...this.tasked]) {
+      const session = this.sideSessions.find(item => item.id === id);
+
+      if (!session || session.side.state === "Deleting") {
+        this.disarm(id);
+      } else if (session.side.state === "Ready") {
+        this.tasked.delete(id);
+
+        if (!session.side.error) {
+          this.viewOf(session).notifyWhenReady = true;
+        }
+      }
+    }
+  }
+
+  viewOf(info) {
+    let view = this.opened.get(info.id);
+
+    if (!view) {
+      view = new WorkspaceView(this.connection, info, this);
+      view.element.hidden = true;
+      this.opened.set(info.id, view);
+      this.content.append(view.element);
+    }
+
+    return view;
+  }
+
+  // History shows the branches of sessions by their names, which a rename changes without git changing.
+  followRenames(before) {
+    const renamed = new Set(this.sideSessions.filter(session => before.has(session.id) && before.get(session.id) !== session.side.name).map(session => session.side.parentId));
+
+    for (const [id, view] of this.opened) {
+      if (renamed.has(this.mainOf(id)) && view.history.loaded) {
+        view.loadHistory(true);
+      }
+    }
+  }
+
+  // Puts the view of the session that is to be on screen there, when it is not already.
+  swap() {
+    if (!this.selected || this.activeId === this.shownOf(this.selected).id) {
+      return;
+    }
+
+    this.active?.applySettings();
+
+    // Only what is about the view that goes is closed with it; the rest may hold what is being typed.
+    if (this.dialogHost.firstChild?.getAttribute("data-view")) {
+      this.closeDialog();
+    }
+
+    this.activate(this.shownOf(this.selected));
+  }
+
+  activate(info) {
+    for (const view of this.opened.values()) {
+      view.element.hidden = true;
+      view.blur();
+    }
+
+    this.activeId = info?.id ?? null;
+    this.loopIndicator.hidden = true;
+    this.limitIndicator.hidden = true;
+    this.topbar.classList.remove("working");
+    this.updateTitle();
+
+    if (!info) {
+      return;
+    }
+
+    const view = this.viewOf(info);
+    view.info = info;
+    view.updateSide(info);
+    view.element.hidden = false;
+    view.focus();
+    this.updateWorking(view);
+    this.updateLoop(view);
+    this.updateLimit(view);
+  }
+
+  updateTitle() {
+    const info = this.selected ? this.known(this.activeId) ?? this.selected : null;
+    this.titleText.textContent = info ? workspaceName(info) : "Auto Remote";
+    this.sessionsButton.disabled = !info;
+    this.sideMarker.hidden = !info?.side;
+    this.chevron.hidden = !info;
+  }
+
+  toggleSessions(open = this.sessionsWrap.hidden) {
+    this.sessionsWrap.hidden = !open || !this.selected;
+    this.sessionError.set(null);
+
+    if (!open) {
+      this.sessionExpanded = null;
+    }
+
+    this.renderSessions();
+  }
+
+  sessionStatus(session) {
+    const states = { Creating: "Setting Up", Integrating: "Integrating", Deleting: "Deleting" };
+    return states[session.side?.state] ?? (this.busy.has(session.id) ? "Working" : this.queued.has(session.id) ? "Queued" : this.looping.has(session.id) ? "Loop" : "Ready");
+  }
+
+  renderSessions() {
+    const main = this.selected;
+    const rows = main ? [main, ...this.sideSessions.filter(session => session.side.parentId === main.id)] : [];
+    this.closeStaleSessionDialog(rows);
+
+    if (!main) {
+      this.sessionsWrap.hidden = true;
+    }
+
+    if (this.sessionsWrap.hidden) {
+      return;
+    }
+
+    this.sessionRows.replaceChildren(...rows.map(session => {
+      const side = session.side;
+      const ready = side?.state === "Ready";
+      const removable = ready || side?.state === "Creating";
+      const status = this.sessionStatus(session);
+      const detail = side?.integrateWhenFinished && ready ? `${status} - Integrates when finished` : status;
+      const pick = h("button", { class: `pick${(this.activeId ?? main?.id) === session.id ? " on" : ""}`, disabled: !!side && !ready, onclick: () => { this.toggleSessions(false); this.showSession(session.id); } },
+        h("div", { class: "name" }, ...(side ? [icon("session")] : []), h("span", {}, side ? side.name : "Main"), ...(this.busy.has(session.id) ? [h("span", { class: "dot" }, "●")] : [])),
+        h("div", { class: "muted small" }, detail));
+      const row = h("div", { class: "session-row" },
+        pick,
+        ...(side?.state === "Integrating" ? [h("button", { class: "small", onclick: () => this.beginCancelIntegration(session) }, "Cancel Integration")] : []),
+        ...(side && removable ? [h("button", { class: "flat small", title: "Session actions", onclick: () => { this.sessionExpanded = this.sessionExpanded === session.id ? null : session.id; this.renderSessions(); } }, "⋯")] : []));
+
+      if (!side || !removable || this.sessionExpanded !== session.id) {
+        return row;
+      }
+
+      return h("div", {}, row, h("div", { class: "session-actions" },
+        ...(ready ? [
+          h("button", { onclick: () => this.beginIntegrate(session) }, "Integrate"),
+          h("button", { onclick: () => this.switchWhenFinished(session) }, side.integrateWhenFinished ? "✓ Integrate When Finished" : "Integrate When Finished"),
+          h("button", { onclick: () => this.showChangesOf(session.id) }, "Changes Since Session Start"),
+          h("button", { onclick: () => this.beginRenameSession(session) }, "Rename")] : []),
+        h("button", { class: "danger", onclick: () => this.beginDeleteSession(session) }, "Delete")));
+    }));
+  }
+
+  showChangesOf(id) {
+    this.toggleSessions(false);
+
+    if (this.showSession(id)) {
+      this.active.showSessionChanges();
+    }
+  }
+
+  // A dialog about sessions: what it asks closes when the session it is about stops being what it was asked about.
+  askSession({ title, body = null, controls = [], confirm, destructive = false, dismiss = "Cancel", id = null, holds = () => true, action, then, enter = false }) {
+    this.dialogError.set(null);
+    const failure = new ErrorLine();
+    const go = h("button", { class: `${destructive ? "danger" : "primary"} block`, onclick: async () => {
+      go.disabled = true;
+      failure.set(null);
+
+      try {
+        const value = await action();
+
+        if (this.dialogHost.firstChild === element) {
+          this.closeDialog();
+        }
+
+        then?.(value);
+      } catch (exception) {
+        if (this.dialogHost.firstChild === element) {
+          failure.set(exception.message);
+        } else {
+          this.active?.chatError.set(exception.message);
+        }
+      } finally {
+        go.disabled = false;
+      }
+    } }, confirm);
+    // Enter confirms only what asks for a name; what cannot be undone takes its button.
+    const element = h("div", { class: "dialog", "data-button-only": enter ? undefined : "true" },
+      h("h3", { class: "serif" }, title),
+      body ? h("div", { class: "muted" }, body) : null,
+      ...controls,
+      failure.element,
+      go,
+      h("button", { class: "block", onclick: () => this.closeDialog() }, dismiss));
+    this.sessionAsk = { element, id, holds, main: this.selected?.id };
+    this.dialogHost.replaceChildren(element);
+    this.dialogHost.hidden = false;
+    this.dialogHost.querySelector("input[type=text]")?.focus();
+  }
+
+  closeStaleSessionDialog(rows) {
+    const ask = this.sessionAsk;
+
+    if (!ask || this.dialogHost.firstChild !== ask.element) {
+      return;
+    }
+
+    const session = ask.id ? rows.find(row => row.id === ask.id) : null;
+
+    if (ask.main !== this.selected?.id || ask.id && (!session || !ask.holds(session))) {
+      this.closeDialog();
+    }
+  }
+
+  beginNewSession() {
+    const main = this.selected;
+
+    if (!main) {
+      return;
+    }
+
+    // Decided as the dialog opens and left alone after that: unfinished work of a busy AI is best left behind.
+    const working = this.busy.has(main.id) || !!this.opened.get(main.id)?.working;
+    const choice = (label, checked) => {
+      const box = h("input", { type: "radio", name: "session-start", checked });
+      return { box, element: h("label", { class: "check" }, box, label) };
+    };
+    const commit = choice("Current Commit", working);
+    const files = choice("Current Files", !working);
+    const name = h("input", { type: "text", placeholder: "Name" });
+    const task = h("textarea", { rows: 3, placeholder: "Work the session starts on once it is set up" });
+    let hasTask = false;
+    const create = async () => {
+      if (!name.value.trim()) {
+        throw new RemoteError("Enter a name.");
+      }
+
+      const given = name.value.trim();
+      const start = files.box.checked ? "Files" : "Commit";
+      const first = task.value.trim();
+      hasTask = !!first;
+
+      // Browsers ask only while the user is clicking.
+      if (hasTask) {
+        requestNotifications();
+      }
+
+      // What was edited in main's settings applies to the session made next.
+      const settings = this.opened.get(main.id);
+
+      if (settings && !await settings.applySettings()) {
+        throw new RemoteError("The workspace's settings could not be saved.");
+      }
+
+      return this.connection.createSideSession(main.id, given, start, first);
+    };
+    this.askSession({
+      title: "New session",
+      controls: [name,
+        h("div", { class: "stack tight" },
+          h("div", { class: "muted" }, "Starting files"),
+          commit.element,
+          files.element,
+          h("div", { class: "muted small" }, "Current Files includes changes that are not committed, new files too."),
+          h("div", { class: "muted", style: "margin-top:8px" }, "First Task (optional)"),
+          task)],
+      confirm: "Create Session",
+      enter: true,
+      action: create,
+      then: made => this.awaitSession(made, hasTask)
+    });
+    name.addEventListener("keydown", event => { if (event.key === "Enter") { this.dialogHost.querySelector("button.primary")?.click(); } });
+  }
+
+  beginRenameSession(session) {
+    const name = h("input", { type: "text", value: session.side.name });
+    name.addEventListener("keydown", event => { if (event.key === "Enter") { this.dialogHost.querySelector("button.primary")?.click(); } });
+    this.askSession({ title: "Rename session", controls: [name], confirm: "Rename", enter: true, id: session.id, action: () => name.value.trim() ? this.connection.renameSideSession(session.id, name.value.trim()) : Promise.reject(new RemoteError("Enter a name.")) });
+  }
+
+  beginDeleteSession(session) {
+    this.askSession({ title: "Delete session?", body: `"${session.side.name}" and all of its changes will be permanently discarded.`, confirm: "Delete", destructive: true, id: session.id, action: () => { this.disarm(session.id); return this.connection.deleteSideSession(session.id); } });
+  }
+
+  beginIntegrate(session) {
+    this.askSession({ title: "Integrate session?", body: `The main session's AI brings the changes of "${session.side.name}" into the main session, and the session is then permanently removed. This cannot be undone.`, confirm: "Integrate", id: session.id, holds: now => now.side.state === "Ready", action: () => this.connection.integrateSideSession(session.id) });
+  }
+
+  async switchWhenFinished(session) {
+    if (session.side.integrateWhenFinished) {
+      await attempt(() => this.connection.setIntegrateWhenFinished(session.id, false), this.sessionError);
+      return;
+    }
+
+    this.askSession({ title: "Integrate When Finished?", body: `Once its AI marks its task complete and nothing of it runs any more, "${session.side.name}" is integrated into the main session by itself and permanently removed. This cannot be undone.`, confirm: "Turn On", id: session.id, holds: now => now.side.state === "Ready", action: () => this.connection.setIntegrateWhenFinished(session.id, true) });
+  }
+
+  beginCancelIntegration(session) {
+    this.askSession({ title: "Cancel Integration?", body: "Main may already contain some of this session's changes. They will not be undone, and you may need to clean up main yourself. The AI may make a few more edits before it stops.", confirm: "Cancel Integration", dismiss: "Keep Integrating", id: session.id, holds: now => now.side.state === "Integrating", action: () => this.connection.cancelIntegration(session.id) });
+  }
+
+  // A new session is switched to as soon as it is set up, unless the user went somewhere else in the meantime.
+  awaitSession(made, hasTask) {
+    if (hasTask) {
+      this.tasked.add(made.id);
+    }
+
+    if (this.selected && made.side?.parentId === this.selected.id) {
+      this.awaited = made.id;
+    }
+
+    // The list may have said by now that the session is set up.
+    if (this.sideSessions.some(session => session.id === made.id)) {
+      this.followTasks();
+      this.showAwaited();
+    }
+  }
+
+  showAwaited() {
+    const ready = this.awaited && this.sideSessions.find(session => session.id === this.awaited && session.side.state === "Ready");
+
+    if (!ready) {
+      return;
+    }
+
+    this.awaited = null;
+
+    // Choosing a session meanwhile ends the wait, so only another workspace is left to look out for. The list would cover the session that was just made.
+    if (this.selected?.id === ready.side.parentId && this.showSession(ready.id)) {
+      this.toggleSessions(false);
+    }
   }
 
   setOffline(offline) {
@@ -5691,7 +6284,14 @@ class Home {
 
   applyCatalog(catalog) {
     const before = this.selected;
+    const named = new Map(this.sideSessions.map(session => [session.id, session.side.name]));
     this.workspaces = catalog.workspaces;
+    this.sideSessions = (catalog.sessions ?? []).filter(session => session.side);
+
+    // Announced before the session's work is ended, which would otherwise be told as ready.
+    for (const session of this.sideSessions.filter(item => item.side.state === "Deleting")) {
+      this.disarm(session.id);
+    }
     this.groups = catalog.groups;
     this.setBusy(catalog.busy);
     this.looping = new Set(catalog.looping ?? []);
@@ -5707,16 +6307,29 @@ class Home {
     let reopen = false;
 
     for (const [id, view] of [...this.opened]) {
-      const now = this.workspaces.find(workspace => workspace.id === id);
+      const now = this.known(id);
 
       if (!now || now.folder !== view.info.folder || now.service !== view.info.service) {
+        if (!now) {
+          this.disarm(id);
+        }
+
         view.dispose();
         view.element.remove();
         this.opened.delete(id);
         reopen = reopen || id === before?.id;
+
+        if (id === this.activeId) {
+          this.activeId = null;
+        }
+      } else {
+        view.info = now;
+        view.updateSide(now);
       }
     }
 
+    this.followRenames(named);
+    this.followTasks();
     this.buildEntries();
     this.renderDrawer();
 
@@ -5734,11 +6347,16 @@ class Home {
       this.select(current);
     } else {
       this.selected = current;
-      const view = this.opened.get(current.id);
+    }
 
-      if (view) {
-        view.info = current;
-      }
+    if (this.selected) {
+      // A session that went, or that is being integrated, gives way to the main one.
+      this.forgetUnshowable(this.selected);
+
+      this.swap();
+      this.updateTitle();
+      this.showAwaited();
+      this.renderSessions();
     }
   }
 
@@ -5843,7 +6461,7 @@ class Home {
       this.closeDialog();
     };
     this.dialogError.set(null);
-    this.dialogHost.replaceChildren(h("div", { class: "dialog" }, h("h3", { class: "serif" }, "Loop"), text, h("button", { class: "block", onclick: close }, "Close")));
+    this.dialogHost.replaceChildren(h("div", { class: "dialog", "data-view": view.info.id }, h("h3", { class: "serif" }, "Loop"), text, h("button", { class: "block", onclick: close }, "Close")));
     this.dialogHost.hidden = false;
   }
 
@@ -5855,7 +6473,7 @@ class Home {
     }
 
     this.dialogError.set(null);
-    this.dialogHost.replaceChildren(h("div", { class: "dialog" }, h("h3", { class: "serif" }, "Paused automatically"), h("div", { class: "muted" }, view.limitPauseText()), h("button", { class: "block", onclick: () => this.closeDialog() }, "Close")));
+    this.dialogHost.replaceChildren(h("div", { class: "dialog", "data-view": view.info.id }, h("h3", { class: "serif" }, "Paused automatically"), h("div", { class: "muted" }, view.limitPauseText()), h("button", { class: "block", onclick: () => this.closeDialog() }, "Close")));
     this.dialogHost.hidden = false;
   }
 
@@ -5909,6 +6527,7 @@ class Home {
     }
 
     this.workspaces = result.value.workspaces;
+    this.sideSessions = (result.value.sessions ?? []).filter(session => session.side);
     this.groups = result.value.groups;
     this.setBusy(result.value.busy);
     this.looping = new Set(result.value.looping ?? []);
@@ -5923,7 +6542,8 @@ class Home {
     }
 
     for (const [id, view] of [...this.opened]) {
-      if (!this.workspaces.some(workspace => workspace.id === id)) {
+      if (!this.known(id)) {
+        this.disarm(id);
         view.dispose();
         view.element.remove();
         this.opened.delete(id);
@@ -5934,8 +6554,32 @@ class Home {
     this.closeDialog();
     this.select(null);
     const first = focusFirst ? this.entries.find(entry => entry.workspace)?.workspace ?? null : null;
-    this.select(this.workspaces.find(workspace => workspace.id === focus) ?? first);
+    const side = this.sideSessions.find(session => session.id === focus);
+
+    if (side) {
+      this.shownSessions.set(side.side.parentId, side.id);
+    }
+
+    this.select(this.workspaces.find(workspace => workspace.id === this.mainOf(focus)) ?? first);
     this.setDrawer(this.selected === null);
+  }
+
+  // Shows a workspace or one of its side sessions, as a notification of it asks.
+  show(id) {
+    const workspace = this.workspaces.find(item => item.id === this.mainOf(id));
+
+    if (!workspace) {
+      return false;
+    }
+
+    if (this.selected?.id !== workspace.id) {
+      this.select(workspace);
+    }
+
+    this.showSession(id);
+    this.toggleSessions(false);
+    this.setDrawer(false);
+    return true;
   }
 
   async reload() {
@@ -5949,40 +6593,28 @@ class Home {
       this.active?.applySettings();
     }
 
+    const changed = this.selected?.id !== workspace?.id;
     this.selected = workspace;
     this.setDrawer(false);
     this.closeDialog();
 
-    for (const view of this.opened.values()) {
-      view.element.hidden = true;
-      view.blur();
+    if (changed) {
+      this.sessionsWrap.hidden = true;
+      this.sessionExpanded = null;
     }
 
     this.empty.hidden = workspace !== null;
     this.tools.hidden = workspace === null;
     this.toggleUsage(false);
     this.showUsage(workspace?.service ?? null);
-    this.titleText.textContent = workspace ? folderName(workspace.folder) : "Auto Remote";
-    this.loopIndicator.hidden = true;
-    this.limitIndicator.hidden = true;
-    this.topbar.classList.remove("working");
 
     if (workspace) {
-      let view = this.opened.get(workspace.id);
+      this.forgetUnshowable(workspace);
+    }
 
-      if (!view) {
-        view = new WorkspaceView(this.connection, workspace, this);
-        this.opened.set(workspace.id, view);
-        this.content.append(view.element);
-      }
+    this.activate(workspace ? this.shownOf(workspace) : null);
 
-      view.info = workspace;
-      view.element.hidden = false;
-      view.focus();
-      this.updateWorking(view);
-      this.updateLoop(view);
-      this.updateLimit(view);
-
+    if (workspace) {
       let opened = false;
 
       for (let group = this.parentOf(workspace.groupId); group; group = this.parentOf(this.groups.find(item => item.id === group).parentId)) {
@@ -6029,7 +6661,7 @@ class Home {
   }
 
   holdsBusy(id) {
-    return this.workspaces.some(item => this.parentOf(item.groupId) === id && this.busy.has(item.id))
+    return this.workspaces.some(item => this.parentOf(item.groupId) === id && this.anySession(item.id, this.busy))
       || this.children(id).some(child => this.holdsBusy(child.id));
   }
 
@@ -6049,16 +6681,18 @@ class Home {
       }
     }
 
-    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => this.busy.has(right.id) - this.busy.has(left.id) || this.looping.has(right.id) - this.looping.has(left.id) || (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
+    for (const workspace of this.workspaces.filter(item => this.parentOf(item.groupId) === parent && (!this.filtering || showAll || this.matchesWorkspace(item))).sort((left, right) => this.anySession(right.id, this.busy) - this.anySession(left.id, this.busy) || this.anySession(right.id, this.looping) - this.anySession(left.id, this.looping) || (Date.parse(right.lastUpdated) || 0) - (Date.parse(left.lastUpdated) || 0) || folderName(left.folder).localeCompare(folderName(right.folder), undefined, { sensitivity: "base" }))) {
       this.entries.push({ workspace, depth });
 
-      for (const task of this.swarmTasks.filter(item => item.workspaceId === workspace.id && (activeTaskStates.includes(item.state) || item.state === "Lost")).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))) {
+      for (const task of this.swarmTasks.filter(item => this.mainOf(item.workspaceId) === workspace.id && (activeTaskStates.includes(item.state) || item.state === "Lost")).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt))) {
         this.entries.push({ task, depth: depth + 1 });
       }
     }
   }
 
   renderDrawer() {
+    this.renderSessions();
+
     if (this.filtering && this.entries.length === 0) {
       this.drawerList.replaceChildren(h("div", { class: "muted", style: "padding:8px" }, "No workspaces match."));
       return;
@@ -6080,15 +6714,15 @@ class Home {
       }
 
       if (entry.task) {
-        return h("div", { class: "row", style: indent, onclick: () => this.app.showSwarm(this.connection, this, entry.task.id, entry.task.workspaceId) },
+        return h("div", { class: "row", style: indent, onclick: () => this.app.showSwarm(this.connection, this, entry.task.id, this.mainOf(entry.task.workspaceId)) },
           h("div", { class: "name" }, `\u21B3 ${entry.task.title}`, h("small", {}, taskLine(entry.task))));
       }
 
       const workspace = entry.workspace;
       const delegatedBy = this.delegations.get(workspace.id)?.from;
-      const detail = [this.queued.has(workspace.id) ? "Queued" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
-      return h("div", { class: `row${this.busy.has(workspace.id) ? " working" : ""}${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
-        h("div", { class: "name" }, folderName(workspace.folder), ...(this.looping.has(workspace.id) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail)),
+      const detail = [this.anySession(workspace.id, this.queued) ? "Queued" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
+      return h("div", { class: `row${this.anySession(workspace.id, this.busy) ? " working" : ""}${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
+        h("div", { class: "name" }, folderName(workspace.folder), ...(this.anySession(workspace.id, this.looping) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail)),
         h("button", { class: "flat", title: "Move to a group", onclick: event => { event.stopPropagation(); this.beginMove(workspace, null); } }, "↪"));
     }));
   }
@@ -6115,7 +6749,7 @@ class Home {
     this.haltView = view;
     this.haltNote = h("div", { class: "muted" });
     this.updateHaltNote(view);
-    this.haltDialog = h("div", { class: "dialog" },
+    this.haltDialog = h("div", { class: "dialog", "data-view": view.info.id },
       h("h3", { class: "serif" }, "Stop the work?"),
       this.haltNote,
       h("button", { class: "primary block", onclick: go }, "Stop"),
@@ -6140,6 +6774,12 @@ class Home {
   }
 
   dialogKey(event) {
+    if (event.key === "Escape" && this.dialogHost.hidden && !this.sessionsWrap.hidden && !event.defaultPrevented) {
+      event.preventDefault();
+      this.toggleSessions(false);
+      return;
+    }
+
     if (this.dialogHost.hidden || event.defaultPrevented || event.isComposing) {
       return;
     }
@@ -6147,7 +6787,7 @@ class Home {
     if (event.key === "Escape") {
       event.preventDefault();
       this.closeDialog();
-    } else if (event.key === "Enter" && !["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(event.target.tagName)) {
+    } else if (event.key === "Enter" && !this.dialogHost.firstChild?.getAttribute("data-button-only") && !["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(event.target.tagName)) {
       const submit = this.dialogHost.querySelector("button.primary");
 
       if (submit) {
@@ -6202,6 +6842,7 @@ class Home {
 
     if (result.ok) {
       this.workspaces = result.value.workspaces;
+      this.sideSessions = (result.value.sessions ?? []).filter(session => session.side);
       this.groups = result.value.groups;
       this.setBusy(result.value.busy);
       this.looping = new Set(result.value.looping ?? []);
@@ -6268,6 +6909,7 @@ class Home {
 
     const folder = h("input", { type: "checkbox", checked: true });
     this.dialog("Delete workspace?", `${folderName(workspace.folder)} will be removed from the server.`,
+      ...(this.sideSessions.some(session => session.side.parentId === workspace.id) ? [h("div", { class: "muted" }, "Its side sessions and their changes are permanently deleted too.")] : []),
       h("label", { class: "check" }, folder, "Also delete the workspace folder and everything in it"),
       h("button", { class: "danger block", onclick: () => this.submit(() => this.connection.deleteWorkspace(workspace.id, folder.checked), () => this.start()) }, "Delete"));
   }
@@ -7910,15 +8552,12 @@ class App {
       this.show(home.element);
     }
 
-    const workspace = home.workspaces.find(item => item.id === workspaceId);
-
-    if (workspace) {
-      if (covered || home.selected?.id !== workspaceId) {
-        home.select(workspace);
-      }
-
-      home.setDrawer(false);
+    // A screen that covered the workspace left it behind, which selecting it again catches up.
+    if (covered && home.selected?.id === home.mainOf(workspaceId)) {
+      home.select(home.selected);
     }
+
+    home.show(workspaceId);
   }
 
   showEnvironment(connection, home) {

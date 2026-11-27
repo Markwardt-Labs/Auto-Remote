@@ -20,7 +20,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         this.connection = connection;
         Workspace = workspace;
         Chat = new ChatViewModel(connection, workspace.Id, drafts, recorder);
-        Git = new GitViewModel(connection, workspace.Id);
+        Git = new GitViewModel(connection, workspace.Id) { IsSideSession = workspace.Side is not null };
+        side = workspace.Side;
         Files = new FilesViewModel(connection, workspace.Id, Git, layout == ClientLayout.Panels, null, preferences);
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
@@ -148,6 +149,16 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private WorkspaceDelegation? delegation;
 
+    private SideSession? side;
+
+    private bool chatStarted;
+
+    private string? keptTask;
+
+    private bool focused;
+
+    private bool missedReconnect;
+
     private readonly ClientLayout layout;
 
     private readonly IServerConnection connection;
@@ -168,6 +179,21 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the workspace as it was when it was focused.
     /// </summary>
     public WorkspaceInfo Workspace { get; }
+
+    /// <summary>
+    /// Gets a value indicating whether it shows a side session rather than a workspace itself.
+    /// </summary>
+    public bool IsSideSession => Workspace.Side is not null;
+
+    /// <summary>
+    /// Gets what went wrong while the side session was set up, or <see langword="null" />.
+    /// </summary>
+    public string? SideError => side?.Error;
+
+    /// <summary>
+    /// Gets a value indicating whether setting the side session up went wrong.
+    /// </summary>
+    public bool HasSideError => SideError is not null;
 
     /// <summary>
     /// Gets or sets the task another server delegated that the workspace runs, which keeps the user from giving it other work, or <see langword="null" />.
@@ -489,6 +515,59 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Takes what the server knows about the side session now.
+    /// </summary>
+    /// <param name="current">The side session.</param>
+    public void ShowSide(SideSession current)
+    {
+        side = current;
+        Raise(nameof(SideError));
+        Raise(nameof(HasSideError));
+        KeepUnsentTask();
+
+        if (missedReconnect && current.State == SideSessionState.Ready)
+        {
+            missedReconnect = false;
+            Resync();
+        }
+    }
+
+    /// <summary>
+    /// Shows what the side session changed since it started.
+    /// </summary>
+    /// <returns>A task that ends once the changes are shown.</returns>
+    public async Task ShowSessionChanges()
+    {
+        if (!IsSideSession)
+        {
+            return;
+        }
+
+        if (tab != WorkspaceTab.Files && (layout == ClientLayout.Tabs || tab == WorkspaceTab.Settings))
+        {
+            Tab = layout == ClientLayout.Tabs ? WorkspaceTab.Files : WorkspaceTab.Chat;
+        }
+
+        Files.Search.IsOpen = false;
+        Git.IsSessionChangesMode = true;
+        await Files.Start();
+    }
+
+    // A first task that was never sent goes into the message box when it is first heard of, unless something else is being written there.
+    private void KeepUnsentTask()
+    {
+        if (chatStarted && side?.UnsentTask is { } task && side.State == SideSessionState.Ready && side.Error is not null && keptTask != task)
+        {
+            keptTask = task;
+
+            if (Chat.Input.Length == 0)
+            {
+                Chat.Input = task;
+            }
+        }
+    }
+
+    /// <summary>
     /// Loads the conversation.
     /// </summary>
     /// <returns>A task that completes once the conversation is shown.</returns>
@@ -507,6 +586,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         _ = Scripts.Start();
         _ = Errors.Load();
         await Chat.Start();
+        chatStarted = true;
+        KeepUnsentTask();
     }
 
     /// <summary>
@@ -521,6 +602,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <returns>A task that completes once the files are up to date.</returns>
     public Task Focus()
     {
+        focused = true;
         _ = Git.Refresh();
         Git.StartSync();
         return layout == ClientLayout.Panels || Tab == WorkspaceTab.Files ? Files.Start() : Task.CompletedTask;
@@ -529,7 +611,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Called when another workspace gets the focus, so this one stops fetching and pulling in the background.
     /// </summary>
-    public void Blur() => Git.StopSync();
+    public void Blur()
+    {
+        focused = false;
+        Git.StopSync();
+    }
 
     /// <summary>
     /// Stops following the server.
@@ -581,6 +667,13 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private void Resync()
     {
+        // The server refuses what is read of a session that is being set up, integrated or removed; it is read once it is ready.
+        if (side is { State: not SideSessionState.Ready })
+        {
+            missedReconnect = true;
+            return;
+        }
+
         _ = ReadState();
         _ = ReadLoop();
         _ = Chat.Resync();
@@ -588,7 +681,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         _ = Errors.Load();
         _ = Git.Refresh();
 
-        if (layout == ClientLayout.Panels || Tab == WorkspaceTab.Files)
+        // The server watches one workspace for a connection, which is to be the one on screen.
+        if (focused && (layout == ClientLayout.Panels || Tab == WorkspaceTab.Files))
         {
             _ = Files.Start();
         }

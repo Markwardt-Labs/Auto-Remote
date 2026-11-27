@@ -20,10 +20,10 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         CommitCommand = new AsyncCommand(_ => AskCommit(), () => CanAct);
         AutoCommitCommand = new AsyncCommand(_ => AutoCommit(), () => CanAct);
         ResetCommand = new AsyncCommand(_ => AskReset(), () => CanAct);
-        BranchCommand = new AsyncCommand(_ => NewBranch(), () => CanAct);
-        TagCommand = new AsyncCommand(_ => NewTag(), () => CanAct);
-        RemoteCommand = new AsyncCommand(_ => SetRemote(), () => CanAct);
-        FetchCommand = new AsyncCommand(_ => Fetch(), () => CanAct);
+        BranchCommand = new AsyncCommand(_ => NewBranch(), () => CanAct && CanChangeRefs);
+        TagCommand = new AsyncCommand(_ => NewTag(), () => CanAct && CanChangeRefs);
+        RemoteCommand = new AsyncCommand(_ => SetRemote(), () => CanAct && CanChangeRefs);
+        FetchCommand = new AsyncCommand(_ => Fetch(), () => CanAct && CanChangeRefs);
         ConfirmCommand = new AsyncCommand(_ => Confirm());
         CancelCommand = new AsyncCommand(_ =>
         {
@@ -94,6 +94,10 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
 
     private bool isChangesMode;
 
+    private bool sinceStart;
+
+    private string? sessionChangesError;
+
     private bool isLocked;
 
     private bool subscribed;
@@ -108,7 +112,7 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     public event Action? Updated;
 
     /// <summary>
-    /// Raised with a path and its commit, or <see langword="null" /> for the working tree, when the diff of a changed file is asked for.
+    /// Raised with a path and its commit, <see langword="null" /> for the working tree or <see cref="SessionStartCommit" />, when the diff of a changed file is asked for.
     /// </summary>
     public event Action<string, string?>? DiffRequested;
 
@@ -168,12 +172,78 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
     public string Remote => status.Remote ?? string.Empty;
 
     /// <summary>
+    /// Gets what stands for the commit of a diff that compares a side session's file with what it was when the session started.
+    /// </summary>
+    public string SessionStartCommit { get; } = "session-start";
+
+    /// <summary>
+    /// Gets why the changes since the session started could not be listed, or <see langword="null" />.
+    /// </summary>
+    public string? SessionChangesError
+    {
+        get => sessionChangesError;
+        private set
+        {
+            if (Set(ref sessionChangesError, value))
+            {
+                Raise(nameof(HasSessionChangesError));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether the changes since the session started could not be listed.
+    /// </summary>
+    public bool HasSessionChangesError => sessionChangesError is not null;
+
+    /// <summary>
+    /// Gets a value indicating whether this is the repository as a side session sees it, where git is limited to history, changes, commits and discarding.
+    /// </summary>
+    public bool IsSideSession { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether branches, tags and the remote can be changed.
+    /// </summary>
+    public bool CanChangeRefs => !IsSideSession;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the changed files are the uncommitted ones.
+    /// </summary>
+    public bool IsUncommittedMode
+    {
+        get => isChangesMode && !sinceStart;
+        set
+        {
+            if (value || !sinceStart)
+            {
+                ShowChanges(value && status.IsRepo, false);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether the changed files are those a side session changed since it started, committed or not.
+    /// </summary>
+    public bool IsSessionChangesMode
+    {
+        get => isChangesMode && sinceStart;
+        set
+        {
+            if (value || sinceStart)
+            {
+                // A side session is always a repository, which may not have been read yet.
+                ShowChanges(value && IsSideSession, value && IsSideSession);
+            }
+        }
+    }
+
+    /// <summary>
     /// Gets or sets a value indicating whether the file tree shows the changed files instead of every file.
     /// </summary>
     public bool IsChangesMode
     {
         get => isChangesMode;
-        set => Set(ref isChangesMode, value && status.IsRepo);
+        set => ShowChanges(value && status.IsRepo, value && sinceStart);
     }
 
     /// <summary>
@@ -480,12 +550,19 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
             changes.Clear();
             changes.AddRange(found);
             ChangeNode root = new();
-            root.Fill(found.Where(change => change.Status != GitChangeStatus.Ignored), null, node => RequestDiff(node.Path, node.Commit));
-            ChangeTree.Clear();
+            bool compared = sinceStart && read.IsRepo;
+            IEnumerable<GitChange> listed = compared ? await SessionChanges() : found.Where(change => change.Status != GitChangeStatus.Ignored);
+            root.Fill(listed, compared ? SessionStartCommit : null, node => RequestDiff(node.Path, node.Commit));
 
-            foreach (ChangeNode node in root.Children)
+            // The list was switched while it was read, and the read that follows shows the other one.
+            if (compared == sinceStart || !read.IsRepo)
             {
-                ChangeTree.Add(node);
+                ChangeTree.Clear();
+
+                foreach (ChangeNode node in root.Children)
+                {
+                    ChangeTree.Add(node);
+                }
             }
 
             if (!read.IsRepo)
@@ -503,6 +580,50 @@ internal sealed class GitViewModel : ViewModelBase, IDisposable
         }
         catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
         {
+        }
+    }
+
+    // Failing to list them must not keep the rest of what was read from being shown.
+    private async Task<IReadOnlyList<GitChange>> SessionChanges()
+    {
+        try
+        {
+            IReadOnlyList<GitChange> found = await connection.GetSessionChanges(workspaceId, CancellationToken.None);
+            SessionChangesError = null;
+            return found;
+        }
+        catch (RemoteException exception)
+        {
+            SessionChangesError = exception.Message;
+            return [];
+        }
+    }
+
+    private void ShowChanges(bool shown, bool compared)
+    {
+        bool other = compared != sinceStart;
+
+        if (shown == isChangesMode && !other)
+        {
+            return;
+        }
+
+        isChangesMode = shown;
+        sinceStart = compared;
+        SessionChangesError = null;
+
+        if (other)
+        {
+            ChangeTree.Clear();
+        }
+
+        Raise(nameof(IsChangesMode));
+        Raise(nameof(IsUncommittedMode));
+        Raise(nameof(IsSessionChangesMode));
+
+        if (other && subscribed)
+        {
+            _ = Refresh();
         }
     }
 

@@ -159,6 +159,13 @@ internal interface ISwarmService
     Task CancelByOwner(Guid workspaceId);
 
     /// <summary>
+    /// Tells whether tasks a workspace delegated are still under way.
+    /// </summary>
+    /// <param name="workspaceId">The workspace.</param>
+    /// <returns>Whether any is waiting, on its way or running, or its AI has yet to be told how they ended.</returns>
+    Task<bool> IsDelegating(Guid workspaceId);
+
+    /// <summary>
     /// Deals with a workspace being deleted: a delegated one's task is cancelled, and the tasks delegated from any other are cancelled and removed.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
@@ -194,7 +201,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
     /// <inheritdoc />
     public async Task<SwarmStatus> Status(string? report, CancellationToken cancellation)
     {
-        Dictionary<Guid, string> names = (await workspaces.List(cancellation)).Workspaces.ToDictionary(workspace => workspace.Id, workspace => workspace.Name);
+        Dictionary<Guid, string> names = await Names(cancellation);
         (SwarmServer server, List<SwarmPeer> peers, List<SwarmTaskInfo> tasks, string folder) = await book.Read(document => (
             document.Server with { Fingerprint = book.Identity.Public.Fingerprint },
             document.Peers.OrderBy(peer => peer.Name, StringComparer.OrdinalIgnoreCase).Select(Describe).ToList(),
@@ -345,7 +352,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
     /// <inheritdoc />
     public async Task<SwarmTaskDetail> Detail(Guid taskId, CancellationToken cancellation)
     {
-        Dictionary<Guid, string> names = (await workspaces.List(cancellation)).Workspaces.ToDictionary(workspace => workspace.Id, workspace => workspace.Name);
+        Dictionary<Guid, string> names = await Names(cancellation);
         (SwarmTaskDetail? detail, Guid? conversation) = await book.Read<(SwarmTaskDetail?, Guid?)>(document =>
         {
             if (document.Outgoing.FirstOrDefault(task => task.Id == taskId) is { } outgoing)
@@ -430,6 +437,9 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
     public Task CancelByOwner(Guid workspaceId) => worker.CancelByOwner(workspaceId);
 
     /// <inheritdoc />
+    public async Task<bool> IsDelegating(Guid workspaceId) => open && await coordinator.IsUnderWay(workspaceId);
+
+    /// <inheritdoc />
     public async Task Forget(Guid workspaceId)
     {
         if (!open)
@@ -445,6 +455,13 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         {
             await coordinator.Forget(workspaceId);
         }
+    }
+
+    // Side sessions delegate tasks too.
+    private async Task<Dictionary<Guid, string>> Names(CancellationToken cancellation)
+    {
+        WorkspaceCatalog catalog = await workspaces.List(cancellation);
+        return catalog.Workspaces.Concat(catalog.Sessions).ToDictionary(workspace => workspace.Id, workspace => workspace.Name);
     }
 
     private async Task Check(CancellationToken cancellation)
