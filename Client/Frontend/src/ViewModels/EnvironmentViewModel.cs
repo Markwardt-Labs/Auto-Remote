@@ -14,6 +14,7 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     {
         this.connection = connection;
         Update = update;
+        Resources = new ResourcesViewModel(connection) { IsOnScreen = false };
         selectedDefault = Services[0];
         selectedImage = ImageKinds[0];
         selectedWorkMode = WorkModes[0];
@@ -120,6 +121,11 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     /// Raised when the user closes the screen.
     /// </summary>
     public event Action? Closed;
+
+    /// <summary>
+    /// Gets what the workspaces take of the server's computer.
+    /// </summary>
+    public ResourcesViewModel Resources { get; }
 
     /// <summary>
     /// Gets the providers to choose the default from.

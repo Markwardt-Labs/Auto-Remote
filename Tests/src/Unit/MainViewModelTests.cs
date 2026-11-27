@@ -47,6 +47,29 @@ public sealed class MainViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task OnlyTheScreenThatShowsReadsTheResourcesOfTheServer()
+    {
+        store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+        factory.Setup(x => x.Connect(saved, It.IsAny<CancellationToken>())).ReturnsAsync(connection.Object);
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment());
+        await model.Start();
+        HomeViewModel home = Assert.IsType<HomeViewModel>(model.Current);
+        Assert.True(home.Resources.IsOnScreen);
+
+        home.EnvironmentCommand.Execute(null);
+
+        EnvironmentViewModel environment = Assert.IsType<EnvironmentViewModel>(model.Current);
+        Assert.False(home.Resources.IsOnScreen);
+        Assert.True(environment.Resources.IsOnScreen);
+
+        environment.CloseCommand.Execute(null);
+        await WaitFor(() => model.Current == home);
+
+        Assert.True(home.Resources.IsOnScreen);
+        Assert.False(environment.Resources.IsOnScreen);
+    }
+
+    [Fact]
     public async Task Start_WhenSavedServerUnreachable_ShowsPrefilledConnectWithError()
     {
         store.Setup(x => x.Load(It.IsAny<CancellationToken>())).ReturnsAsync(saved);

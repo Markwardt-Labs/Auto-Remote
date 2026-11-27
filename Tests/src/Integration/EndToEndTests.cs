@@ -24,7 +24,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     public async Task InitializeAsync()
     {
         string fakeDotnet = temp.Combine("fake-dotnet");
-        await File.WriteAllTextAsync(fakeDotnet, "#!/bin/sh\necho \"display=$DISPLAY wayland=$WAYLAND_DISPLAY other=$AUTO_REMOTE_PROBE\"\n");
+        await File.WriteAllTextAsync(fakeDotnet, "#!/bin/sh\ncase \"$*\" in *slow.cs*) sleep 30 ;; esac\necho \"display=$DISPLAY wayland=$WAYLAND_DISPLAY other=$AUTO_REMOTE_PROBE\"\n");
         if (!OperatingSystem.IsWindows())
         {
             File.SetUnixFileMode(fakeDotnet, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
@@ -42,7 +42,8 @@ public sealed class EndToEndTests : IAsyncLifetime
         WorkspaceManager workspaces = new(store, folders, hub, host);
         ISessionTools? tools = null;
         ISideIntegrations? integrations = null;
-        PromptService prompts = new(workspaces, store, host, hub, activity, snapshots, null, () => tools);
+        ShellCommandLog shellCommands = new();
+        PromptService prompts = new(workspaces, store, host, hub, activity, snapshots, null, () => tools, shellCommands);
         SpeechService speech = new(Mock.Of<IWhisperEngine>());
         SavedInputs savedInputs = new(store, workspaces, hub, speech);
         WorkQueue queue = new(workspaces, prompts, host, activity, savedInputs, hub);
@@ -56,7 +57,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         WindowGuard guard = new(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) };
         SideSessions sideSessions = new(workspaces, sideRepository, store, prompts, queue, loops, scripts, guard, snapshots, watcher, hub, Mock.Of<ILog>());
         integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, queue, activity, loops, scripts, guard, snapshots, hub, Mock.Of<ILog>(), null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), guard, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()), sideSessions, integrations, sideRepository);
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), guard, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()), sideSessions, integrations, sideRepository, new ResourceMonitor(new ProcessSource(), shellCommands, workspaces, activity, scripts));
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -479,6 +480,40 @@ public sealed class EndToEndTests : IAsyncLifetime
         List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptOutput && remoteEvent.Text!.Contains("display=", StringComparison.Ordinal)));
 
         Assert.Equal("display=:7 wayland=wayland-9 other=", string.Concat(events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptOutput).Select(remoteEvent => remoteEvent.Text)).Trim());
+    }
+
+    [Fact]
+    public async Task GetResources_ShowsWhatTheProcessesOfARunningScriptTakeUnderItsWorkspace()
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        FolderListing folder = await connection.CreateFolder(temp.Path, "measured", CancellationToken.None);
+        await File.WriteAllTextAsync(Path.Combine(folder.Path, "slow.cs"), "// not run by the fake");
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+
+        await connection.RunScript(workspace.Id, "slow.cs", CancellationToken.None);
+        ResourceReport report = await connection.GetResources(CancellationToken.None);
+
+        for (int attempt = 0; attempt < 100 && report.Workspaces.FirstOrDefault(item => item.Id == workspace.Id)?.Total.Processes is not 2; attempt++)
+        {
+            await Task.Delay(100);
+            report = await connection.GetResources(CancellationToken.None);
+        }
+
+        await connection.StopScript(workspace.Id, "slow.cs", CancellationToken.None);
+
+        Assert.True(report.Supported);
+        Assert.True(report.Machine!.TotalMemory > report.Machine.AvailableMemory);
+        Assert.True(report.Server.Memory > 0);
+        WorkspaceResources measured = report.Workspaces.Single(item => item.Id == workspace.Id);
+        Assert.True(measured.IsWorking);
+        Assert.Equal(("measured", 2), (measured.Name, measured.Total.Processes));
+        Assert.True(measured.Total.Memory > 0);
+        Assert.Contains(measured.Total.Heaviest, process => process.Command.StartsWith("sleep 30", StringComparison.Ordinal));
+        Assert.Equal("Main", Assert.Single(measured.Sessions).Name);
     }
 
     [Fact]

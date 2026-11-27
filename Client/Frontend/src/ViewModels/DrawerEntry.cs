@@ -56,6 +56,11 @@ internal sealed record DrawerEntry
     public bool IsQueued { get; init; }
 
     /// <summary>
+    /// Gets the line that says what a working workspace takes, the same one for as long as the list shows the workspace.
+    /// </summary>
+    public ResourceBadge? Resources { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether this row is a group header.
     /// </summary>
     public bool IsGroup => Group is not null;

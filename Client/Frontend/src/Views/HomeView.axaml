@@ -869,6 +869,9 @@
                   <TextBox Text="{Binding SessionSetupScript}" PlaceholderText="Scripts/setup.cs" />
                 </StackPanel>
               </Expander>
+              <Expander Classes="section" Header="Resources" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" DataContext="{Binding $parent[UserControl].DataContext.Resources}">
+                <local:ResourcesView />
+              </Expander>
               <Expander Classes="section" Header="How it runs" IsExpanded="False" IsVisible="{Binding HasDetails}">
                 <StackPanel Spacing="8" Margin="0,4,0,8">
                   <ItemsControl ItemsSource="{Binding Details}">
@@ -1095,6 +1098,7 @@
                         <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="12" MaxHeight="12" VerticalAlignment="Center" IsVisible="{Binding IsLooping}" ToolTip.Tip="A loop is running" />
                       </StackPanel>
                       <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
+                      <TextBlock Name="ResourceBadge" Text="{Binding Resources.Text, FallbackValue=''}" IsVisible="{Binding Resources.HasText, FallbackValue=False}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
                     </StackPanel>
                     <local:TouchButton Grid.Column="1" Content="↪" Classes="flat" Padding="8,4" ToolTip.Tip="Move to a group" Command="{Binding $parent[ListBox].DataContext.BeginMoveWorkspaceCommand}" CommandParameter="{Binding Workspace}" />
                   </Grid>

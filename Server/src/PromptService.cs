@@ -172,7 +172,7 @@ internal interface IPromptService
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null, Func<ISessionTools?>? tools = null) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null, Func<ISessionTools?>? tools = null, IShellCommandLog? commands = null) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
 
@@ -1397,6 +1397,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 if (call.Name == "shell")
                 {
                     live.Tally.Running[call.Id] = 0;
+
+                    if (describer.Command(call.Input) is { } command)
+                    {
+                        commands?.Note(id, command);
+                    }
                 }
 
                 Say(id, live, Work(describer.Call(call.Server, call.Name, call.Input)));

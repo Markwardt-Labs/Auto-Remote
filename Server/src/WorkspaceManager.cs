@@ -30,6 +30,13 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> Get(Guid id, CancellationToken cancellation);
 
     /// <summary>
+    /// Lists every workspace and side session as they are kept, without asking the AI tool when each was last used.
+    /// </summary>
+    /// <param name="cancellation">Cancels the listing.</param>
+    /// <returns>The workspaces and side sessions.</returns>
+    Task<IReadOnlyList<WorkspaceInfo>> All(CancellationToken cancellation);
+
+    /// <summary>
     /// Creates a workspace hosted by an existing folder, with the AI session that holds its folder, provider and configuration.
     /// </summary>
     /// <param name="folder">The folder.</param>
@@ -360,6 +367,15 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
         using (await Lock(cancellation))
         {
             return Present(Find(id));
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<WorkspaceInfo>> All(CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            return [.. workspaces.Select(Present)];
         }
     }
 

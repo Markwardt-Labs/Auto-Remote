@@ -54,6 +54,8 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<ISideSessionRepository> sideRepository = new();
 
+    private readonly Mock<IResourceMonitor> resources = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -74,7 +76,19 @@ public sealed class RequestHandlerTests
         workspaces.Setup(x => x.Sides(It.IsAny<Guid?>())).Returns([]);
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken cancellation, bool _) => action(cancellation));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object, sideSessions.Object, integrations.Object, sideRepository.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object, sideSessions.Object, integrations.Object, sideRepository.Object, resources.Object);
+    }
+
+    [Fact]
+    public async Task GetResources_AnswersWithWhatTheMonitorReads()
+    {
+        ResourceReport report = new() { Supported = true };
+        resources.Setup(x => x.Read(It.IsAny<CancellationToken>())).ReturnsAsync(report);
+
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 7, Command = RemoteCommand.GetResources }, this, CancellationToken.None);
+
+        Assert.Same(report, response.Resources);
+        Assert.Equal(7, response.Id);
     }
 
     [Fact]

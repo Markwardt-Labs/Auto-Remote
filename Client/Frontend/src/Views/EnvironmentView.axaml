@@ -13,6 +13,10 @@
     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
       <StackPanel Spacing="8" Margin="0,0,0,12" MaxWidth="640">
 
+        <Expander Classes="section" Header="Resources" IsExpanded="{Binding IsExpanded, Mode=TwoWay}" DataContext="{Binding Resources}">
+          <local:ResourcesView />
+        </Expander>
+
         <Expander Classes="section" Header="New workspaces" IsExpanded="False">
           <StackPanel Spacing="8" Margin="0,4,0,8">
             <TextBlock Text="Default provider for new workspaces" Classes="muted" Margin="0,8,0,0" />

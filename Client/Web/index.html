@@ -429,6 +429,13 @@ details.section > .stack { padding: 4px 0 12px; }
 .drawer .row.working.on { box-shadow: inset 4px 0 0 var(--on-working); }
 .drawer .row.group .name { font-weight: 600; }
 .drawer .row button { padding: 4px 8px; }
+.res-row { display: flex; flex-direction: column; gap: 2px; padding-top: 6px; min-width: 0; }
+.res-row.part { margin-left: 16px; }
+.res-head, .res-process { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.res-head > b { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.res-process { font-size: 11px; }
+.res-process > span:first-child { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.res-process > span:last-child { flex: none; }
 .drawer .actions { display: flex; flex-direction: column; gap: 8px; }
 .dialog-wrap { position: absolute; inset: 0; background: var(--scrim); z-index: 20; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 100%; max-width: 420px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
@@ -1573,6 +1580,7 @@ class Connection {
   renameWorkspace(workspaceId, name) { return this.request("RenameWorkspace", { workspaceId, name }).then(r => r.workspace); }
   moveWorkspaceToFolder(workspaceId, path) { return this.request("MoveWorkspaceToFolder", { workspaceId, path }).then(r => r.workspace); }
   getUsage(service) { return this.request("GetUsage", { service }).then(r => r.usage); }
+  getResources() { return this.request("GetResources", {}).then(r => r.resources); }
   startLoop(workspaceId, loop) { return this.request("StartLoop", { workspaceId, loop }); }
   cancelLoop(workspaceId) { return this.request("CancelLoop", { workspaceId }); }
   getLoop(workspaceId) { return this.request("GetLoop", { workspaceId }).then(r => r.loop ?? null); }
@@ -1824,6 +1832,159 @@ function taskStateText(task) {
 
 function taskLine(task) {
   return [taskStateText(task), task.peerName ? `${task.isIncoming ? "from" : "on"} ${task.peerName}` : null, !task.isIncoming && task.workspaceName ? task.workspaceName : null].filter(part => part).join(" - ");
+}
+
+function bytesText(bytes) {
+  const megabytes = bytes / (1024 * 1024);
+  return megabytes >= 1024 ? `${(megabytes / 1024).toFixed(1)} GB` : bytes > 0 && megabytes < 1 ? "<1 MB" : `${Math.round(megabytes)} MB`;
+}
+
+function percentText(percent) {
+  return percent > 0 && percent < 1 ? "<1%" : `${Math.round(percent)}%`;
+}
+
+function takenText(memory, cpu) {
+  return cpu === undefined || cpu === null ? bytesText(memory) : `${bytesText(memory)} · ${percentText(cpu)} CPU`;
+}
+
+// What the server's computer has and what the workspaces take of it, read over and over while any of it is on screen.
+class ResourceFeed {
+  constructor(connection, isWanted, updated) {
+    this.connection = connection;
+    this.isWanted = isWanted;
+    this.updated = updated;
+    this.report = null;
+    this.failure = null;
+    this.timer = null;
+    this.run = 0;
+    this.disposed = false;
+  }
+
+  sync() {
+    const wanted = !this.disposed && this.isWanted();
+
+    if (wanted && this.timer === null) {
+      this.timer = setInterval(() => this.refresh(), 3000);
+      this.refresh();
+    } else if (!wanted && this.timer !== null) {
+      clearInterval(this.timer);
+      this.timer = null;
+      this.run++;
+      // What was read is not kept, since it would be old by the time it is shown again.
+      this.report = null;
+      this.failure = null;
+
+      if (!this.disposed) {
+        this.updated();
+      }
+    }
+  }
+
+  async refresh() {
+    const run = this.run;
+
+    try {
+      const report = await this.connection().getResources();
+
+      if (run === this.run) {
+        this.report = report;
+        this.failure = null;
+        this.updated();
+      }
+    } catch (exception) {
+      // Whatever a read fails with, the reading goes on, since the connection reopens by itself.
+      if (run === this.run) {
+        this.report = null;
+        this.failure = exception.message;
+        this.updated();
+      }
+    }
+  }
+
+  dispose() {
+    this.disposed = true;
+    this.sync();
+  }
+
+  brief(id, isWorking) {
+    const found = this.report?.workspaces.find(item => item.id === id);
+    return found && found.total.processes > 0 && (isWorking || found.isWorking) ? takenText(found.total.memory, found.total.cpu) : "";
+  }
+
+  // Fills a resources section: with the sessions of a workspace, or with every workspace when none is given.
+  render(box, id) {
+    const report = this.report;
+    const shown = report?.workspaces.find(item => item.id === id);
+    const notice = this.failure !== null ? `Resources could not be read: ${this.failure}`
+      : !report ? "Reading…"
+      : !report.supported ? "This server can only measure resources on Linux."
+      : id !== null && !shown ? "Nothing is running in this workspace."
+      : id === null && report.workspaces.length === 0 ? "No workspace is working."
+      : null;
+    const machine = report?.machine;
+    const lines = [];
+
+    if (machine) {
+      lines.push(`Server computer memory: ${bytesText(machine.totalMemory - machine.availableMemory)} of ${bytesText(machine.totalMemory)} used, ${bytesText(machine.availableMemory)} available`);
+
+      if (machine.totalSwap > 0) {
+        lines.push(`Swap: ${bytesText(machine.totalSwap - machine.freeSwap)} of ${bytesText(machine.totalSwap)} used`);
+      }
+
+      if (machine.cpu !== undefined && machine.cpu !== null) {
+        lines.push(`Processor: ${percentText(machine.cpu)} of ${machine.cores} ${machine.cores === 1 ? "core" : "cores"}`);
+      }
+    }
+
+    const rows = !report?.supported ? [] : id === null ? this.allRows(report) : shown ? this.sessionRows(shown) : [];
+    const low = machine && machine.availableMemory < machine.totalMemory * 0.1;
+    box.replaceChildren(...[
+      low ? h("div", { class: "error" }, "The server computer is low on memory. Stop work that takes much of it, or the system may end the server.") : null,
+      ...lines.map(line => h("div", { class: "muted small" }, line)),
+      notice === null ? null : h("div", { class: "muted small" }, notice),
+      ...rows.map(row => h("div", { class: `res-row${row.part ? " part" : ""}` },
+        h("div", { class: "res-head" }, h("b", {}, row.name), row.state ? h("span", { class: "muted small" }, row.state) : null),
+        h("div", { class: "small" }, row.summary),
+        ...(row.processes ?? []).map(process => h("div", { class: "res-process muted" }, h("span", { title: process.command }, process.command), h("span", {}, takenText(process.memory, process.cpu))))))
+    ].filter(node => node !== null));
+  }
+
+  sessionRows(shown) {
+    const several = shown.sessions.length > 1;
+    return [
+      ...(several ? [{ name: "All sessions", summary: this.summary(shown.total) }] : []),
+      ...shown.sessions.map(session => ({ name: session.name, state: this.state(session.isWorking), summary: this.summary(session.usage), part: several, processes: session.usage.heaviest }))
+    ];
+  }
+
+  allRows(report) {
+    const rows = [];
+
+    for (const workspace of report.workspaces) {
+      rows.push({ name: workspace.name, state: this.state(workspace.isWorking), summary: this.summary(workspace.total), processes: workspace.total.heaviest });
+
+      // The sessions are only worth listing when there is more to the workspace than its main session.
+      if (workspace.sessions.some(session => session.id !== workspace.id)) {
+        rows.push(...workspace.sessions.map(session => ({ name: session.name, state: this.state(session.isWorking), summary: this.summary(session.usage), part: true })));
+      }
+    }
+
+    rows.push({ name: "Server itself", summary: this.summary(report.server) });
+
+    if (report.other.processes > 0) {
+      rows.push({ name: "Other server processes", summary: this.summary(report.other), processes: report.other.heaviest });
+    }
+
+    return rows;
+  }
+
+  state(isWorking) {
+    return isWorking ? "Working" : "Not working";
+  }
+
+  summary(usage) {
+    return usage.processes === 0 ? "No processes" : `${takenText(usage.memory, usage.cpu)} · ${usage.processes} ${usage.processes === 1 ? "process" : "processes"}`;
+  }
 }
 
 function section(name, ...children) {
@@ -2283,6 +2444,9 @@ class WorkspaceView {
     this.detailsSection.hidden = true;
     this.errorsBox = h("div", { class: "stack tight" });
     this.showErrors([]);
+    this.resourcesBox = h("div", { class: "stack tight" });
+    this.resourcesSection = section("Resources", this.resourcesBox);
+    this.resourcesSection.addEventListener("toggle", () => this.home.resources.sync());
     this.current = null;
     this.formShown = false;
     this.settingsEdits = 0;
@@ -2326,6 +2490,7 @@ class WorkspaceView {
       h("div", { class: "inner stack tight" },
         this.lockedNote,
         ...lockedSections,
+        this.resourcesSection,
         this.detailsSection,
         section("Errors", this.errorsError.element, this.errorsBox),
         this.settingsError.element,
@@ -2500,10 +2665,16 @@ class WorkspaceView {
 
     this.settingsPane.hidden = !this.settingsOpen;
     this.panels.hidden = this.settingsOpen;
+    this.home.resources.sync();
+    this.showResources();
 
     if (!this.settingsOpen) {
       this.scrollToEnd();
     }
+  }
+
+  showResources() {
+    this.home.resources.render(this.resourcesBox, this.home.mainOf(this.info.id));
   }
 
   focus() {
@@ -5786,6 +5957,7 @@ class Home {
   constructor(app, connection) {
     this.app = app;
     this.connection = connection;
+    this.resources = new ResourceFeed(() => this.connection, () => this.element?.isConnected === true && (this.drawerOpen || !!(this.active?.settingsOpen && this.active.resourcesSection.open)), () => this.showResources());
     this.workspaces = [];
     this.sideSessions = [];
     this.shownSessions = new Map();
@@ -6042,6 +6214,7 @@ class Home {
     this.updateTitle();
 
     if (!info) {
+      this.resources.sync();
       return;
     }
 
@@ -6050,6 +6223,8 @@ class Home {
     view.updateSide(info);
     view.element.hidden = false;
     view.focus();
+    this.resources.sync();
+    view.showResources();
     this.updateWorking(view);
     this.updateLoop(view);
     this.updateLimit(view);
@@ -6505,6 +6680,17 @@ class Home {
     this.drawerOpen = open;
     this.drawer.hidden = !open;
     this.scrim.hidden = !open;
+    this.resources.sync();
+  }
+
+  showResources() {
+    for (const line of this.drawerList.querySelectorAll("[data-resources]")) {
+      const id = line.getAttribute("data-resources");
+      line.textContent = this.resources.brief(id, this.anySession(id, this.busy));
+      line.hidden = line.textContent === "";
+    }
+
+    this.active?.showResources();
   }
 
   toggleUsage(open = this.usageWrap.hidden) {
@@ -6849,8 +7035,9 @@ class Home {
       const workspace = entry.workspace;
       const delegatedBy = this.delegations.get(workspace.id)?.from;
       const detail = [this.anySession(workspace.id, this.queued) ? "Queued" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
+      const taken = this.resources.brief(workspace.id, this.anySession(workspace.id, this.busy));
       return h("div", { class: `row${this.anySession(workspace.id, this.busy) ? " working" : ""}${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
-        h("div", { class: "name" }, folderName(workspace.folder), ...(this.anySession(workspace.id, this.looping) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail)),
+        h("div", { class: "name" }, folderName(workspace.folder), ...(this.anySession(workspace.id, this.looping) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail), h("small", { "data-resources": workspace.id, hidden: taken === "" }, taken)),
         h("button", { class: "flat", title: "Move to a group", onclick: event => { event.stopPropagation(); this.beginMove(workspace, null); } }, "↪"));
     }));
   }
@@ -7108,6 +7295,7 @@ class Home {
   }
 
   dispose() {
+    this.resources.dispose();
     document.removeEventListener("keydown", this.dialogKeyListener);
     this.connection.listeners.delete(this.catalogListener);
 
@@ -7481,6 +7669,11 @@ class AiEnvironmentScreen {
     this.baseline = null;
     this.localNames = h("datalist", { id: "local-model-names" });
     this.imageNames = h("datalist", { id: "image-model-names" });
+    this.resourcesBox = h("div", { class: "stack tight" });
+    this.resourcesSection = section("Resources", this.resourcesBox);
+    this.resources = new ResourceFeed(() => this.connection, () => this.element.isConnected && this.resourcesSection.open, () => this.resources.render(this.resourcesBox, null));
+    this.resourcesSection.addEventListener("toggle", () => this.resources.sync());
+    this.resources.render(this.resourcesBox, null);
     this.build();
     this.load();
   }
@@ -7578,6 +7771,7 @@ class AiEnvironmentScreen {
       h("header", {}, h("h1", { class: "serif" }, "AI environment"), h("button", { class: "flat", onclick: () => this.close() }, "Close")),
       h("div", { class: "settings", style: "flex:1;min-height:0;overflow-y:auto" },
         h("div", { class: "stack tight", style: "padding:8px 0 12px" },
+          this.resourcesSection,
           section("New workspaces",
             this.field("Default provider for new workspaces", this.defaultSelect),
             this.field("Capability", this.newCapability),
@@ -8547,8 +8741,11 @@ class App {
 
   // A screen that covers the main one is told of a new connection, so it stays through a reconnect as the main one does.
   show(element, screen = null) {
+    const previous = this.screen;
     this.screen = screen;
     this.root.replaceChildren(element);
+    previous?.resources?.sync();
+    this.home?.resources.sync();
   }
 
   saved() {

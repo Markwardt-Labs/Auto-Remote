@@ -1,0 +1,40 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:Markwardt.AutoRemote.Client"
+             x:Class="Markwardt.AutoRemote.Client.ResourcesView"
+             x:CompileBindings="False">
+  <StackPanel Spacing="8" Margin="0,4,0,8">
+    <TextBlock Text="{Binding Warning}" IsVisible="{Binding HasWarning}" Classes="error" TextWrapping="Wrap" />
+    <ItemsControl ItemsSource="{Binding MachineLines}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <TextBlock Text="{Binding}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+    <TextBlock Text="{Binding Notice}" IsVisible="{Binding HasNotice}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+    <ItemsControl ItemsSource="{Binding Rows}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <StackPanel Spacing="2" Margin="{Binding Indent}">
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8" Margin="0,6,0,0">
+              <TextBlock Grid.Column="0" Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="1" Text="{Binding State}" IsVisible="{Binding HasState}" Classes="muted" FontSize="12" VerticalAlignment="Center" />
+            </Grid>
+            <TextBlock Text="{Binding Summary}" FontSize="12" TextWrapping="Wrap" />
+            <ItemsControl ItemsSource="{Binding Processes}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0" Text="{Binding Command}" ToolTip.Tip="{Binding Command}" Classes="muted" FontSize="11" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Grid.Column="1" Text="{Binding Usage}" Classes="muted" FontSize="11" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

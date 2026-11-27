@@ -169,4 +169,9 @@ public sealed record RemoteResponse
     /// Gets the task answering <see cref="RemoteCommand.GetSwarmTask" />.
     /// </summary>
     public SwarmTaskDetail? SwarmTask { get; init; }
+
+    /// <summary>
+    /// Gets the report answering <see cref="RemoteCommand.GetResources" />.
+    /// </summary>
+    public ResourceReport? Resources { get; init; }
 }

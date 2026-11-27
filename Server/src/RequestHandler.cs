@@ -30,7 +30,7 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm, ISideSessions sideSessions, ISideIntegrations integrations, ISideSessionRepository sideRepository) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm, ISideSessions sideSessions, ISideIntegrations integrations, ISideSessionRepository sideRepository, IResourceMonitor resources) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
@@ -74,6 +74,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         await integrations.Open(cancellation);
         // Only now, so a request to integrate that was restored with the queue is taken out before it can be sent.
         queue.Resume();
+        resources.Open(cancellation);
     }
 
     /// <inheritdoc />
@@ -221,6 +222,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0, AiEnvironment = await host.ConfigureOllamaService(request.Enabled ?? throw new RequestException("The request needs enabled."), request.Password, cancellation) };
             case RemoteCommand.GetUsage:
                 return new RemoteResponse { Id = 0, Usage = await usage.Get(request.Service ?? throw new RequestException("The request needs a service."), cancellation) };
+            case RemoteCommand.GetResources:
+                return new RemoteResponse { Id = 0, Resources = await resources.Read(cancellation) };
             case RemoteCommand.ListLocalModels:
                 return new RemoteResponse { Id = 0, Names = await host.ListLocalModels(request.Url, cancellation) };
             case RemoteCommand.ListImageModels:

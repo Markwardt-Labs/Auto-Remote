@@ -20,6 +20,12 @@ internal interface IScriptRunner
     bool IsRunning(Guid id);
 
     /// <summary>
+    /// Lists the processes of the scripts that are running.
+    /// </summary>
+    /// <returns>The workspace and the process of each.</returns>
+    IReadOnlyList<(Guid Id, int ProcessId)> Processes();
+
+    /// <summary>
     /// Lists the runs held for a workspace.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -89,6 +95,22 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
     {
         this.config = config;
         this.stopping = cancellation;
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<(Guid Id, int ProcessId)> Processes()
+    {
+        List<(Guid Id, int ProcessId)> running = [];
+
+        foreach ((Guid id, Workspace workspace) in workspaces)
+        {
+            lock (workspace.Lock)
+            {
+                running.AddRange(workspace.Entries.Select(entry => entry.ProcessId).OfType<int>().Select(process => (id, process)));
+            }
+        }
+
+        return running;
     }
 
     /// <inheritdoc />
@@ -569,6 +591,8 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
 
         public ScriptState State { get; set; } = state;
 
+        public int? ProcessId { get; private set; }
+
         public StringBuilder Output { get; } = new();
 
         public StringBuilder Pending { get; } = new();
@@ -602,9 +626,17 @@ internal sealed class ScriptRunner(IEventHub events) : IScriptRunner
             }
         }
 
-        public void Attach(Process started) => process = started;
+        public void Attach(Process started)
+        {
+            process = started;
+            ProcessId = started.Id;
+        }
 
-        public void Detach() => process = null;
+        public void Detach()
+        {
+            process = null;
+            ProcessId = null;
+        }
 
         public async Task WriteInput(string text, CancellationToken cancellation)
         {

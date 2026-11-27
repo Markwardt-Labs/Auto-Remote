@@ -3267,6 +3267,67 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
+    public async Task Resources_ShowInTheWorkspaceListAndInTheSectionOfBothSettingsScreens()
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        ResourceUsage taken = new() { Memory = 300 * 1024 * 1024, Cpu = 12, Processes = 1, Heaviest = [new ProcessUsage { Id = 5, Command = "dotnet build", Memory = 300 * 1024 * 1024, Cpu = 12 }] };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace], Busy = [workspace.Id] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
+        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+        connection.Setup(x => x.GetAiEnvironment(It.IsAny<CancellationToken>())).ReturnsAsync(new AiEnvironment());
+        connection.Setup(x => x.GetResources(It.IsAny<CancellationToken>())).ReturnsAsync(new ResourceReport { Supported = true, Workspaces = [new WorkspaceResources { Id = workspace.Id, Name = "app", IsWorking = true, Total = taken, Sessions = [new SessionResources { Id = workspace.Id, Name = "Main", IsWorking = true, Usage = taken }] }] });
+
+        (string[] listed, string[] ofWorkspace, string[] ofAll) = await fixture.Run(() =>
+        {
+            string[] Shown(Window window)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                return [.. window.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible).Select(block => block.Text ?? string.Empty)];
+            }
+
+            string[] Expanded(Window window)
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.GetVisualDescendants().OfType<Expander>().Single(section => section.Header?.ToString() == "Resources").IsExpanded = true;
+                return Shown(window);
+            }
+
+            HomeViewModel model = new(connection.Object);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1600, Height = 1000, Content = view };
+            window.Show();
+            model.IsDrawerOpen = true;
+            string[] listed = Shown(window);
+            model.IsDrawerOpen = false;
+            model.Active!.ToggleSettingsCommand.Execute(null);
+            string[] ofWorkspace = Expanded(window);
+            window.Close();
+            model.Dispose();
+
+            EnvironmentViewModel environment = new(connection.Object);
+            environment.Resources.IsOnScreen = true;
+            environment.Load().GetAwaiter().GetResult();
+            Window global = new() { Width = 1600, Height = 1000, Content = new EnvironmentView { DataContext = environment } };
+            global.Show();
+            string[] ofAll = Expanded(global);
+            global.Close();
+            environment.Resources.IsOnScreen = false;
+            return (listed, ofWorkspace, ofAll);
+        });
+
+        Assert.Contains("300 MB · 12% CPU", listed);
+        Assert.Contains("Main", ofWorkspace);
+        Assert.Contains("300 MB · 12% CPU · 1 process", ofWorkspace);
+        Assert.Contains("dotnet build", ofWorkspace);
+        Assert.Contains("app", ofAll);
+        Assert.Contains("Server itself", ofAll);
+        Assert.Contains("dotnet build", ofAll);
+    }
+
+    [Fact]
     public async Task Settings_AreSortedIntoSectionsThatStartCollapsedInAColumnOfLimitedWidth()
     {
         WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
@@ -3315,9 +3376,9 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (workspaceSections, workspaceOpen, workspaceWidth, globalSections, globalOpen, globalWidth, opens);
         });
 
-        Assert.Equal(["AI", "Access", "Instructions and prompts", "Side sessions", "How it runs", "Errors", "Workspace"], workspaceSections);
+        Assert.Equal(["AI", "Access", "Instructions and prompts", "Side sessions", "Resources", "How it runs", "Errors", "Workspace"], workspaceSections);
         Assert.All(workspaceOpen, open => Assert.False(open));
-        Assert.Equal(["New workspaces", "Status and prompts", "Claude Code", "OpenAI Codex", "Local models", "Image generation"], globalSections);
+        Assert.Equal(["Resources", "New workspaces", "Status and prompts", "Claude Code", "OpenAI Codex", "Local models", "Image generation"], globalSections);
         Assert.All(globalOpen, open => Assert.False(open));
         Assert.InRange(workspaceWidth, 600, 640);
         Assert.InRange(globalWidth, 600, 640);

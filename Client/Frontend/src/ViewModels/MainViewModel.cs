@@ -48,6 +48,9 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
                 leaving.Stop();
             }
 
+            SetOnScreen(current, false);
+            SetOnScreen(value, true);
+
             if (Set(ref current, value))
             {
                 if (value is HomeViewModel home)
@@ -468,6 +471,13 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
         {
             await Open(opened, null);
         }
+    }
+
+    // Only the screen that is showing reads the resources of the server.
+    private void SetOnScreen(object? screen, bool isOnScreen)
+    {
+        ResourcesViewModel? resources = screen switch { HomeViewModel shown => shown.Resources, EnvironmentViewModel environment => environment.Resources, _ => null };
+        resources?.IsOnScreen = isOnScreen;
     }
 
     private async Task Close()

@@ -101,6 +101,7 @@ The Android app (`Client/Mobile/`) and the desktop app (`Client/Desktop/`, a win
     - Integrate has main's AI bring the session's changes into main as changes that are not committed, then removes the session. While it runs the session cannot be opened and its row offers Cancel Integration, which gives the session back without undoing anything main's AI already changed. Integrating and deleting cannot be undone.
     - Git in a side session shows history and changes, commits (never pushed) and discards; branches, tags, remotes, merging and rebasing are done in main.
     - Files that git ignores, such as `.env`, are not copied into a new session. List them, and a setup script to run, under Side sessions in the workspace's settings.
+18. To see what takes the server computer's memory and processor, expand Resources in the workspace's settings (the workspace's sessions, with their heaviest processes) or in the AI environment (every workspace that works or still has processes running, the server itself and other processes). Both show the computer's memory and warn when little is left. In the drawer, a working workspace shows its memory and CPU under its folder. CPU is a share of the whole computer. A workspace marked "Not working" there still has processes running that its work left behind. This only shows what is taken; stop the workspace's work, or end processes on the server's computer, to free it. It needs a server on Linux.
 
 ## Use the web client
 

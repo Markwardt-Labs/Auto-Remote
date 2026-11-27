@@ -599,6 +599,27 @@ public sealed class PromptServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task Prompt_NotesTheShellCommandsOfASessionSoItsProcessesCanBeToldApart()
+    {
+        Mock<IShellCommandLog> commands = new();
+        service = new PromptService(workspaces.Object, store.Object, host.Object, hub.Object, activity, snapshots.Object, null, null, commands.Object);
+        service.Configure(stopping.Token);
+        prompter.OnCreate = session => session.ReplyWith(_ =>
+        [
+            new PromptToolCallEvent { Id = "1", Name = "shell", Input = "{\"command\":\"make all\",\"background\":true}" },
+            new PromptToolCallEvent { Id = "2", Name = "shell", Input = "not json" },
+            new PromptToolCallEvent { Id = "3", Name = "read_file", Input = "{\"command\":\"not one\"}" },
+            new PromptMessageEvent { Text = "done" }
+        ]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id));
+
+        commands.Verify(x => x.Note(workspace.Id, "make all"), Times.Once);
+        commands.Verify(x => x.Note(It.IsAny<Guid>(), It.IsAny<string>()), Times.Once);
+    }
+
+    [Fact]
     public async Task Prompt_ReportsNothingForAWorkWhoseAnswerIsOnlyAToolCallAndItsResult()
     {
         prompter.OnCreate = session => session.ReplyWith(_ => [new PromptToolCallEvent { Id = "1", Name = "read_file", Input = "{}" }, new PromptToolResultEvent { Id = "1", Output = "text", IsError = false }]);

@@ -794,6 +794,14 @@ internal interface IServerConnection : IAsyncDisposable
     Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation);
 
     /// <summary>
+    /// Reads what the server's computer has and what the workspaces take of it.
+    /// </summary>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The report.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<ResourceReport> GetResources(CancellationToken cancellation);
+
+    /// <summary>
     /// Starts a loop of the AI in a workspace: the prompt is sent over and over on the interval until the condition ends the loop or it is cancelled.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -1388,6 +1396,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<UsageStatus> GetUsage(AiService service, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetUsage, Service = service }, cancellation)).Usage ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<ResourceReport> GetResources(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetResources }, cancellation)).Resources ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task StartLoop(Guid id, LoopSettings loop, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StartLoop, WorkspaceId = id, Loop = loop }, cancellation);

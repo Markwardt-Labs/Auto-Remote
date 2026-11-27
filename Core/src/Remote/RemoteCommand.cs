@@ -489,5 +489,10 @@ public enum RemoteCommand
     /// <summary>
     /// Compares the file <see cref="RemoteRequest.Path" /> of the side session with how it was when the session started, answered in <see cref="RemoteResponse.GitDiff" />.
     /// </summary>
-    GetSessionDiff
+    GetSessionDiff,
+
+    /// <summary>
+    /// Reads the memory and processor use of the server's computer and of the workspaces that are working or still have processes running, answered in <see cref="RemoteResponse.Resources" />.
+    /// </summary>
+    GetResources
 }

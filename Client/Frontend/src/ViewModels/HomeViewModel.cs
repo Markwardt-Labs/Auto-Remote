@@ -36,6 +36,8 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         connection.Reconnected += Return;
         connection.EventReceived += Receive;
         Usage = new UsageViewModel(connection);
+        Resources = new ResourcesViewModel(connection) { IsSectionShown = false };
+        Resources.Updated += RefreshBadges;
         // What was edited in main's settings applies to the session made next.
         Sessions = new SessionsViewModel(connection, id => opened.TryGetValue(id, out WorkspaceViewModel? view) && view.IsAiWorking || busy.Contains(id), id => opened.TryGetValue(id, out WorkspaceViewModel? view) ? view.Settings.Apply() : Task.FromResult(true));
         Sessions.Failed += message => active?.Chat.Show(message);
@@ -165,6 +167,8 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     private readonly HashSet<Guid> expanded = [];
 
     private readonly HashSet<Guid> busy = [];
+
+    private readonly Dictionary<Guid, ResourceBadge> badges = [];
 
     private readonly Dictionary<Guid, bool> busyHeard = [];
 
@@ -299,6 +303,11 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     public UsageViewModel Usage { get; }
 
     /// <summary>
+    /// Gets what the workspaces take of the server's computer, which the workspace settings show for the focused workspace and the workspace list for the working ones.
+    /// </summary>
+    public ResourcesViewModel Resources { get; }
+
+    /// <summary>
     /// Gets the sessions of the selected workspace.
     /// </summary>
     public SessionsViewModel Sessions { get; }
@@ -355,6 +364,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                 ForgetUnshowable(value);
             }
 
+            Resources.Workspace = value?.Id;
             Active = value is null ? null : Open(Shown(value));
             BeginStopCommand.Refresh();
             _ = Active?.Focus();
@@ -393,6 +403,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                     before.Blur();
                 }
 
+                Resources.IsSectionShown = value?.ShowSettings ?? false;
                 Raise(nameof(IsAiWorking));
                 Raise(nameof(IsWorking));
             }
@@ -470,7 +481,13 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     public bool IsDrawerOpen
     {
         get => isDrawerOpen;
-        set => Set(ref isDrawerOpen, value);
+        set
+        {
+            if (Set(ref isDrawerOpen, value))
+            {
+                Resources.IsListed = value;
+            }
+        }
     }
 
     /// <summary>
@@ -940,6 +957,25 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         Sessions.Show(selected, rows);
     }
 
+    private ResourceBadge Badge(Guid workspace)
+    {
+        if (!badges.TryGetValue(workspace, out ResourceBadge? badge))
+        {
+            badge = new ResourceBadge { Text = Resources.Brief(workspace, AnySession(workspace, busy)) };
+            badges[workspace] = badge;
+        }
+
+        return badge;
+    }
+
+    private void RefreshBadges()
+    {
+        foreach ((Guid workspace, ResourceBadge badge) in badges)
+        {
+            badge.Text = Resources.Brief(workspace, AnySession(workspace, busy));
+        }
+    }
+
     private SessionEntry Row(WorkspaceInfo session, string name, SideSession? side) => new()
     {
         Id = session.Id,
@@ -1031,6 +1067,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         held.Clear();
         followed.Clear();
         Usage.Dispose();
+        Resources.Dispose();
     }
 
     private void Lose() => IsOffline = true;
@@ -1385,6 +1422,11 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                 BeginDeleteCommand.Refresh();
             }
 
+            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.ShowSettings))
+            {
+                Resources.IsSectionShown = created.ShowSettings;
+            }
+
             if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State))
             {
                 BeginStopCommand.Refresh();
@@ -1532,6 +1574,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         }
 
         building = false;
+        RefreshBadges();
         Raise(nameof(HasNoMatches));
         SyncSelectedEntry();
         RefreshSessions();
@@ -1567,7 +1610,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
         foreach (WorkspaceInfo workspace in workspaces.Where(workspace => Parent(workspace.GroupId) == parent && (!IsFiltering || showAll || Matches(workspace))).OrderByDescending(workspace => AnySession(workspace.Id, busy)).ThenByDescending(workspace => AnySession(workspace.Id, looping)).ThenByDescending(workspace => workspace.LastUpdated ?? DateTimeOffset.MinValue).ThenBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
         {
-            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsWorking = AnySession(workspace.Id, busy), IsLooping = AnySession(workspace.Id, looping), IsQueued = AnySession(workspace.Id, waiting), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
+            into.Add(new DrawerEntry { Workspace = workspace, Depth = depth, IsWorking = AnySession(workspace.Id, busy), IsLooping = AnySession(workspace.Id, looping), IsQueued = AnySession(workspace.Id, waiting), Resources = Badge(workspace.Id), DelegatedBy = delegations.GetValueOrDefault(workspace.Id)?.From });
 
             foreach (SwarmTaskInfo task in swarmTasks.Where(task => task.WorkspaceId is { } owner && MainOf(owner) == workspace.Id && (task.IsActive || task.State == SwarmTaskState.Lost)).OrderBy(task => task.CreatedAt))
             {

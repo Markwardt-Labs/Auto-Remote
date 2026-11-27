@@ -104,6 +104,7 @@ Exactly one payload property is set on success (commands whose response column b
 | `listing` | listing | `ListFolders`, `CreateFolder` |
 | `history` | history | `GetHistory` |
 | `usage` | usage | `GetUsage` |
+| `resources` | resources | `GetResources` |
 | `settings` | workspace settings | `GetWorkspaceSettings`, `SetWorkspaceSettings` |
 | `aiEnvironment` | ai environment | `GetAiEnvironment`, `SetAiEnvironment` |
 | `loop` | loop, optional | `GetLoop` |
@@ -163,6 +164,7 @@ A side session is a workspace to every command that takes a `workspaceId`, with 
 | `CreateFolder` | `path` (the parent), `name` | `listing` | Listing of the parent, including the new folder. |
 | `GetHistory` | `workspaceId`, optional `before`, `limit`, `characters` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. A reading is kept for a little less than a minute, counted from when it began, so a client asking once a minute gets a new one each time. Clients ask once a minute for the focused workspace's service and as soon as they reconnect, and go on asking after a failed ask, since a lost connection reopens by itself. |
+| `GetResources` | none | `resources` | What the server's computer has and what the workspaces take of it now, at most 1.5 seconds old. Clients ask every 3 seconds, only while it is on screen. |
 | `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes, and removes a run that waits for the local AI unless a message of the user joined it; does nothing when no loop runs. |
 | `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
@@ -396,6 +398,29 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `claudeMaxWindowPercent`, `codexMaxWindowPercent` | number | The share of a usage window of Claude Code and of OpenAI Codex, the providers that report usage windows, from 1 to 100 (default 95, fractions allowed, one number for each provider), at which the server tells the AI of a workspace that uses it to pause. There is no single maximum, and the local models, which report none, have no such setting; omitted by an older server and then 95. |
 | `reviewPrompt`, `expandPrompt` | string | The prompts the review and expand buttons send in every workspace that has none of its own; trimmed, and a blank one is replaced by the default (`review workspace and fix any problems or inconsistencies`, `expand upon content in workspace in areas that make sense`). |
 | `newWorkspaces` | workspace defaults | What the AI session of a new workspace starts with: `capability`, `effort`, `isShellAllowed`, `isSystemAccessAllowed`, `isWebAllowed`, `isDelegationAllowed`, `isImageGenerationAllowed` (which only takes effect while `imageGeneration` is set) and `instructions`, a string where empty means none (the wire leaves out what is null, so none is not null). It starts balanced and high, with the web allowed, the shell, files outside the workspace and image generation not allowed, and no instructions. `showWork` says whether the chat of a new workspace shows the AI's work (tool calls and results, dimmed), off by default. A workspace keeps the values it was created with whatever this says later. |
+
+**resources** (`GetResources`)
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `supported` | boolean | `false` when the server cannot measure (it is not on Linux); everything else is then empty. |
+| `machine` | machine, optional | The whole computer. |
+| `workspaces` | array of resource workspace | The workspaces that work or still have processes running, the one taking the most memory first. |
+| `server` | resource usage | The server's own process. |
+| `other` | resource usage | Processes the server started that belong to no workspace. |
+
+**machine** (`resources.machine`): `totalMemory`, `availableMemory` (what can be taken without swapping), `totalSwap` and `freeSwap` in bytes, `cores`, and `cpu` (how busy all cores together are, 0 to 100, omitted until measured twice).
+
+**resource workspace** (items of `resources.workspaces`): `id` (the main session), `name`, `isWorking` (any session works or runs a script), `total` (resource usage) and `sessions`, the ones that work or have processes, the main session first, each with `id`, `name` (`Main` for the main session), `isWorking` and `usage` (resource usage).
+
+**resource usage**
+
+| Property | Type | Meaning |
+| --- | --- | --- |
+| `memory` | number | Bytes, with shared memory divided between those sharing it. |
+| `cpu` | number, optional | Share of the whole computer's processor, 0 to 100; omitted until measured twice. |
+| `processes` | number | How many processes. |
+| `heaviest` | array of process | The ones taking the most memory plus any keeping the processor busy, the one taking the most memory first; each with `id`, `command` (shortened when long), `memory` and optional `cpu`. |
 
 **usage** (`GetUsage`)
 

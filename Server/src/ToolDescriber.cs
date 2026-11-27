@@ -15,6 +15,13 @@ internal interface IToolDescriber
     string Call(string? server, string name, string input);
 
     /// <summary>
+    /// Reads the command a call of the shell tool runs.
+    /// </summary>
+    /// <param name="input">The arguments of the call.</param>
+    /// <returns>The command, or <see langword="null" /> when the arguments name none.</returns>
+    string? Command(string input);
+
+    /// <summary>
     /// Describes what a tool gave back, which is a count or a short line and never more.
     /// </summary>
     /// <param name="name">The name of the tool the result belongs to, or <see langword="null" /> when it is not known.</param>
@@ -91,6 +98,9 @@ internal sealed class ToolDescriber : IToolDescriber
                 return Generic(server is { Length: > 0 } && server != ownServer ? $"{server}/{name}" : name, arguments);
         }
     }
+
+    /// <inheritdoc />
+    public string? Command(string input) => Argument(Parse(input), "command") is { Length: > 0 } command ? command : null;
 
     /// <inheritdoc />
     public string Result(string? name, string output, bool isError)

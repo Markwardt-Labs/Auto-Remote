@@ -57,6 +57,61 @@ public sealed class HomeViewModelTests
     }
 
     [Fact]
+    public async Task WorkingWorkspaces_SayWhatTheyTakeWhileTheListShowsWithoutReplacingTheirRows()
+    {
+        ResourceUsage taken = new() { Memory = 3L * 512 * 1024 * 1024, Cpu = 35.2, Processes = 4 };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(Catalog([], first, second) with { Busy = [first.Id] });
+        connection.Setup(x => x.GetResources(It.IsAny<CancellationToken>())).ReturnsAsync(new ResourceReport
+        {
+            Supported = true,
+            Workspaces =
+            [
+                new WorkspaceResources { Id = first.Id, Name = "a", IsWorking = true, Total = taken },
+                new WorkspaceResources { Id = second.Id, Name = "b", Total = taken }
+            ]
+        });
+        await model.Start(focusFirst: false);
+        model.IsDrawerOpen = false;
+        connection.Verify(x => x.GetResources(It.IsAny<CancellationToken>()), Times.AtMostOnce);
+        DrawerEntry[] before = [.. model.Entries];
+
+        model.IsDrawerOpen = true;
+
+        Assert.Equal(["1.5 GB · 35% CPU", string.Empty], model.Entries.Select(entry => entry.Resources!.Text).ToList());
+        Assert.Equal(before.Length, model.Entries.Count);
+        Assert.All(before.Zip(model.Entries), pair => Assert.Same(pair.First, pair.Second));
+
+        model.IsDrawerOpen = false;
+
+        Assert.All(model.Entries, entry => Assert.False(entry.Resources!.HasText));
+    }
+
+    [Fact]
+    public async Task Resources_ListTheFocusedWorkspaceAndAreReadWhileItsSettingsShowTheOpenSection()
+    {
+        connection.Setup(x => x.GetResources(It.IsAny<CancellationToken>())).ReturnsAsync(new ResourceReport { Supported = true });
+        await model.Start(first.Id);
+        model.IsDrawerOpen = false;
+        connection.Invocations.Clear();
+
+        model.Resources.IsExpanded = true;
+
+        Assert.Equal(first.Id, model.Resources.Workspace);
+        connection.Verify(x => x.GetResources(It.IsAny<CancellationToken>()), Times.Never);
+
+        model.Active!.ToggleSettingsCommand.Execute(null);
+
+        connection.Verify(x => x.GetResources(It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal("Nothing is running in this workspace.", model.Resources.Notice);
+
+        model.Active.ToggleSettingsCommand.Execute(null);
+
+        Assert.Equal("Reading…", model.Resources.Notice);
+        model.Selected = model.Entries.Select(entry => entry.Workspace).First(workspace => workspace?.Id == second.Id);
+        Assert.Equal(second.Id, model.Resources.Workspace);
+    }
+
+    [Fact]
     public async Task GroupsHoldingAWorkingWorkspace_AreMarkedHoweverDeepAndKeepTheirOrder()
     {
         WorkspaceGroup quiet = new() { Id = Guid.NewGuid(), Name = "Quiet" };
