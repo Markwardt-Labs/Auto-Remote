@@ -2824,7 +2824,8 @@ class WorkspaceView {
         return fail(reviewRadio.checked ? "The review prompt could not be read, so write the prompt the loop sends." : expandRadio.checked ? "The expand prompt could not be read, so write the prompt the loop sends." : "Write the prompt the loop sends.");
       }
 
-      if (interval.value === "" || !(minutesBetween >= 0 && minutesBetween <= 1440)) {
+      // An empty box counts as 0; a number box also reads as empty while it holds something that is no number.
+      if (interval.validity.badInput || !(minutesBetween >= 0 && minutesBetween <= 1440)) {
         return fail("The minutes between runs must be between 0 and 1440.");
       }
 

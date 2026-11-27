@@ -142,6 +142,16 @@ public sealed class LoopViewModelTests
     }
 
     [Fact]
+    public void Build_TakesAnEmptyIntervalAsZero()
+    {
+        LoopViewModel panel = Opened();
+        panel.IntervalMinutes = null;
+
+        Assert.Equal(0, panel.Build(now).IntervalSeconds);
+        Assert.Null(panel.IntervalMinutes);
+    }
+
+    [Fact]
     public void Build_RefusesAnIntervalOutOfRange()
     {
         LoopViewModel panel = Opened();

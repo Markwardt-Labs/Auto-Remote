@@ -146,7 +146,7 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets the minutes from the start of one run to the start of the next; zero runs again as soon as the last run is done.
+    /// Gets or sets the minutes from the start of one run to the start of the next; zero, or nothing (an empty box), runs again as soon as the last run is done.
     /// </summary>
     public decimal? IntervalMinutes
     {
@@ -336,12 +336,14 @@ internal sealed class LoopViewModel : ViewModelBase
             });
         }
 
-        if (intervalMinutes is not (>= 0 and <= 1440))
+        decimal interval = intervalMinutes ?? 0;
+
+        if (interval is < 0 or > 1440)
         {
             throw new InvalidOperationException("The minutes between runs must be between 0 and 1440.");
         }
 
-        LoopSettings settings = new() { Prompt = prompt, IntervalSeconds = (int)Math.Round(intervalMinutes.Value * 60), Condition = selectedCondition.Condition, WaitForLimit = waitForLimit };
+        LoopSettings settings = new() { Prompt = prompt, IntervalSeconds = (int)Math.Round(interval * 60), Condition = selectedCondition.Condition, WaitForLimit = waitForLimit };
 
         switch (selectedCondition.Condition)
         {
