@@ -136,6 +136,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public event Action? Loaded;
 
     /// <summary>
+    /// Raised when new output was added at the end of the conversation: a message or a piece of one as it is written, also what turned out to be new when the conversation was read again. Older messages loaded in front are not output.
+    /// </summary>
+    public event Action? OutputArrived;
+
+    /// <summary>
     /// Gets the most messages a chunk of the conversation holds, which is both what a read asks the server for and what the window of the newest messages keeps.
     /// </summary>
     internal int ChunkMessages { get; init; } = 100;
@@ -457,6 +462,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
+    /// Gets or sets a value indicating whether the end of the conversation is what is on screen, which the view tells as it scrolls. Where it is not, reading the conversation again keeps what the user scrolled to, whether or not <see cref="AutoScroll" /> is on.
+    /// </summary>
+    public bool IsAtEnd { get; set; } = true;
+
+    /// <summary>
     /// Gets or sets a value indicating whether the conversation also shows the work the AI does on the way, its tool calls and their results, dimmed. The server keeps it for the workspace and tells every client, so setting it changes it for all of them.
     /// </summary>
     public bool ShowWork
@@ -722,21 +732,36 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
+    // Reading the conversation again is not new output, only what it holds beyond what was there is, so what a user scrolled to is read with it.
     private async Task Reload()
     {
         loading = true;
-        bool following = autoScroll;
-        ChatMessage? reach = following ? null : Messages.FirstOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
+        ChatMessage? reach = autoScroll && IsAtEnd ? null : Messages.FirstOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
+        ChatMessage? newest = Newest();
 
         try
         {
             await Load(reach, Math.Max(ChunkCharacters, Weight(Messages)));
+
+            if (Newest() is { } now && (newest is null || !Reaches(now, newest)))
+            {
+                // What was read to keep a place the user scrolled to goes as new output takes the conversation back to its end.
+                if (reach is not null)
+                {
+                    KeepWindow();
+                }
+
+                OutputArrived?.Invoke();
+            }
         }
         finally
         {
             Flush();
         }
     }
+
+    // Work is left out, since it comes and goes with the setting that shows it.
+    private ChatMessage? Newest() => Messages.LastOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
 
     private void Stream(string piece, bool thought)
     {
@@ -951,9 +976,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                     KeepWindow();
                 }
 
+                OutputArrived?.Invoke();
                 break;
             case RemoteEventKind.MessageDelta when showWork && remoteEvent.Text is { Length: > 0 } piece:
                 Stream(piece, remoteEvent.Thought == true);
+                OutputArrived?.Invoke();
                 break;
             case RemoteEventKind.ShowWorkChanged:
                 _ = Reload();

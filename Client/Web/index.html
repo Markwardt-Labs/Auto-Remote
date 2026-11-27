@@ -2606,7 +2606,7 @@ class WorkspaceView {
       this.watch();
     }
 
-    this.loadChat();
+    this.reloadChat();
     this.refreshGit(true);
     this.loadScripts();
     this.loadState();
@@ -3325,11 +3325,20 @@ class WorkspaceView {
     return message.role === wanted.role && message.text === wanted.text && (!message.time || !wanted.time || message.time === wanted.time);
   }
 
+  // Work is left out, since it comes and goes with the setting that shows it.
+  newestMessage() {
+    return this.messages.findLast(message => !message.isWork && message !== this.streaming?.message) ?? null;
+  }
+
+  // Reading the chat again is not new output, only what it holds beyond what was there is, so what a user scrolled to is read with it.
   async reloadChat() {
-    const reach = this.chatAuto ? null : this.messages.find(message => !message.isWork && message !== this.streaming?.message) ?? null;
+    const newest = this.newestMessage();
+    const scroller = this.scroller;
+    const stays = this.chatAuto && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
+    const reach = stays ? null : this.messages.find(message => !message.isWork && message !== this.streaming?.message) ?? null;
     const visible = [];
 
-    if (!this.chatAuto && this.scroller.clientHeight > 0) {
+    if (!stays && this.scroller.clientHeight > 0) {
       const scroller = this.scroller.getBoundingClientRect();
 
       [...this.list.children].forEach((child, index) => {
@@ -3342,6 +3351,7 @@ class WorkspaceView {
     }
 
     this.reloading = true;
+    this.stays = stays;
 
     let lost = false;
 
@@ -3349,9 +3359,19 @@ class WorkspaceView {
       lost = await this.loadChat(reach, Math.max(chatChunkCharacters, this.weight(this.messages)));
     } finally {
       this.reloading = false;
+      this.stays = false;
     }
 
-    if (visible.length > 0 && !lost) {
+    const now = this.newestMessage();
+    const arrived = !!now && (!newest || !this.reaches(now, newest));
+
+    if (arrived && this.chatAuto) {
+      if (reach) {
+        this.keepWindow();
+      }
+
+      this.scrollToEnd();
+    } else if (visible.length > 0 && !lost) {
       this.returnTo(visible);
     }
   }
@@ -3601,7 +3621,7 @@ class WorkspaceView {
   renderMessages() {
     this.list.replaceChildren(...this.messages.map(message => this.messageElement(message)));
 
-    if (this.chatAuto || !this.reloading) {
+    if (this.stays || !this.reloading) {
       this.scrollToEnd(true);
     }
   }

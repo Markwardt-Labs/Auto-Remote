@@ -962,6 +962,48 @@ public sealed class ChatViewModelTests
     }
 
     [Fact]
+    public async Task OutputArrivedIsRaisedForWhatIsWrittenAndNotForOlderMessagesOrHiddenWork()
+    {
+        await WithHistory(1000, 20);
+        int arrived = 0;
+        chat.OutputArrived += () => arrived++;
+
+        await chat.LoadOlder();
+        connection.Raise(x => x.EventReceived += null, Added(Weighty("hidden", 10, true)));
+        Assert.Equal(0, arrived);
+
+        connection.Raise(x => x.EventReceived += null, Added(Said("new")));
+        Assert.Equal(1, arrived);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadingAgainWhileScrolledUpKeepsWhatWasLoadedAndCountsOnlyWhatIsNewAsOutput(bool somethingNew)
+    {
+        await WithHistory(1000, 20);
+        await chat.LoadOlder();
+        chat.IsAtEnd = false;
+        int newest = somethingNew ? 1001 : 1000;
+        connection.Setup(x => x.GetHistory(workspaceId, null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Enumerable.Range(newest - 20, 20).Select(number => Said($"m{number}")).ToList(), Older = $"{newest - 20}" });
+        connection.Setup(x => x.GetHistory(workspaceId, $"{newest - 20}", It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = Enumerable.Range(newest - 40, 20).Select(number => Said($"m{number}")).ToList(), Older = $"{newest - 40}" });
+        List<string> first = [];
+        int arrived = 0;
+        chat.OutputArrived += () =>
+        {
+            arrived++;
+            first.Add(chat.Messages[0].Text);
+        };
+
+        await chat.Resync();
+
+        // New output takes a conversation that follows its end back to the newest chunk; without any, what was loaded stays.
+        Assert.Equal(somethingNew ? 1 : 0, arrived);
+        Assert.Equal(somethingNew ? ("m981", 20) : ("m960", 40), (chat.Messages[0].Text, chat.Messages.Count));
+        Assert.True(chat.AutoScroll);
+    }
+
+    [Fact]
     public async Task ReachingTheEndDropsTheChunksLoadedByScrollingUpAndTheyLoadAgainFromTheRightPlace()
     {
         await WithHistory(1000, 20);

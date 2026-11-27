@@ -651,9 +651,14 @@ public sealed partial class HomeView : UserControl
 
     private void OnChatAutoScrollToggled(object? sender, Avalonia.Interactivity.RoutedEventArgs args)
     {
-        if (sender is Avalonia.Controls.Primitives.ToggleButton { IsChecked: true })
+        if (sender is Avalonia.Controls.Primitives.ToggleButton { IsChecked: true } && this.FindControl<ScrollViewer>("MessageScroller") is { } scroller)
         {
-            this.FindControl<ScrollViewer>("MessageScroller")?.ScrollToEnd();
+            if (scroller.DataContext is ChatViewModel chat)
+            {
+                chat.IsAtEnd = true;
+            }
+
+            scroller.ScrollToEnd();
         }
     }
 
@@ -741,7 +746,16 @@ public sealed partial class HomeView : UserControl
             CaptureOnScreen(scroller);
         }
 
-        if (args.ExtentDelta.Y > 0 && chat.AutoScroll && !GrewAboveAnchor())
+        bool bottom = scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 2;
+
+        // Moving to the end leaves it there; moving up takes it away, also in a change that brought a new height with it.
+        if (args.OffsetDelta.Y < 0 || args.OffsetDelta.Y > 0 && args.ExtentDelta.Y == 0)
+        {
+            chat.IsAtEnd = bottom;
+        }
+
+        // A chat left at its end stays there while it grows. Anywhere else a height that grows is not new output, which alone moves it: older messages, text that wraps anew and content that is drawn late all grow it.
+        if (args.ExtentDelta.Y > 0 && chat.AutoScroll && chat.IsAtEnd)
         {
             scroller.ScrollToEnd();
             return;
@@ -826,8 +840,6 @@ public sealed partial class HomeView : UserControl
 
     private int IndexOfMessage(Control child) => child.DataContext is ChatMessage message && followed is { } chat ? chat.Messages.IndexOf(message) : -1;
 
-    private bool GrewAboveAnchor() => anchor is { } kept && kept.IsAttachedToVisualTree() && anchorIndex >= 0 && IndexOfMessage(kept) > anchorIndex;
-
     private void Compensate(ScrollViewer scroller)
     {
         double moved = HowFarAnchorMoved();
@@ -881,7 +893,7 @@ public sealed partial class HomeView : UserControl
 
     private void OnMessagesReplaced(object? sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs args)
     {
-        if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset && followed is { AutoScroll: false } && onScreen.Count > 0)
+        if (args.Action == System.Collections.Specialized.NotifyCollectionChangedAction.Reset && followed is { } chat && !(chat.AutoScroll && chat.IsAtEnd) && onScreen.Count > 0)
         {
             returning = [.. onScreen];
             returnAttempts = 0;
@@ -962,6 +974,7 @@ public sealed partial class HomeView : UserControl
         if (followed is not null)
         {
             followed.Loaded -= ScrollMessagesToEnd;
+            followed.OutputArrived -= FollowOutput;
             followed.Messages.CollectionChanged -= OnMessagesReplaced;
         }
 
@@ -972,16 +985,32 @@ public sealed partial class HomeView : UserControl
         if (followed is not null)
         {
             followed.Loaded += ScrollMessagesToEnd;
+            followed.OutputArrived += FollowOutput;
             followed.Messages.CollectionChanged += OnMessagesReplaced;
         }
 
         ScrollMessagesToEnd();
     }
 
+    private void FollowOutput()
+    {
+        if (followed is { AutoScroll: true })
+        {
+            // What was on screen is not returned to, and the layouts the output still needs keep the end in view.
+            returning = null;
+            ScrollMessagesToEnd();
+        }
+    }
+
     private void ScrollMessagesToEnd()
     {
         if (this.FindControl<ScrollViewer>("MessageScroller") is { } scroller)
         {
+            if (followed is not null)
+            {
+                followed.IsAtEnd = true;
+            }
+
             Avalonia.Threading.Dispatcher.UIThread.Post(scroller.ScrollToEnd, Avalonia.Threading.DispatcherPriority.Background);
         }
     }

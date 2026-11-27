@@ -1551,6 +1551,159 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.All(moves, move => Assert.InRange(move, -1.5, 1.5));
     }
 
+    private List<ChatMessage> Numbered(int begin, int end)
+    {
+        string tall = string.Join("\n\n", Enumerable.Range(0, 5).Select(line => $"Paragraph {line} of a long answer that wraps over a few lines when the chat is narrow enough."));
+        string rich = "## Heading\n\n- one item\n- another item\n\n```csharp\nint x = 1;\n```\n\n| A | B |\n|---|---|\n| 1 | 2 |\n\n> a quote";
+        return [.. Enumerable.Range(begin, end - begin).Select(number => new ChatMessage { Role = MessageRole.Assistant, Text = $"a{number}\n\n{(number % 3 == 0 ? rich : number % 3 == 1 ? tall : "short")}", Time = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero).AddMinutes(number) })];
+    }
+
+    // Shows a chat of the messages a80 to a99, with older ones to load twenty at a time after a delay as a server takes, and hands the view to the actions of a test.
+    private async Task<T> InALongChat<T>(Func<ChatViewModel, ScrollViewer, Window, WorkspaceInfo, Action<int>, T> actions)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => new ChatHistory { Messages = Numbered(80, 100), Older = "80" });
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.Is<string?>(cursor => cursor != null), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).Returns(async (Guid _, string? cursor, int? _, int? _, CancellationToken _) =>
+        {
+            await Task.Delay(30);
+            int end = int.Parse(cursor!, CultureInfo.InvariantCulture);
+            int begin = Math.Max(0, end - 20);
+            return new ChatHistory { Messages = Numbered(begin, end), Older = begin > 0 ? begin.ToString(CultureInfo.InvariantCulture) : null };
+        });
+
+        return await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = 1200, Height = 700, Content = view };
+            window.Show();
+
+            void Pump(int rounds)
+            {
+                for (int round = 0; round < rounds; round++)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                    window.UpdateLayout();
+                    Thread.Sleep(10);
+                }
+            }
+
+            Pump(30);
+            ScrollViewer scroller = window.GetVisualDescendants().OfType<ScrollViewer>().Single(item => item.Name == "MessageScroller");
+            T result = actions(model.Active!.Chat, scroller, window, workspace, Pump);
+            window.Close();
+            return result;
+        });
+    }
+
+    private bool IsAtEnd(ScrollViewer scroller) => scroller.Offset.Y + scroller.Viewport.Height >= scroller.Extent.Height - 2;
+
+    // The user scrolls up in steps, as with a wheel.
+    private void ScrollUp(ScrollViewer scroller, Action<int> pump, int steps)
+    {
+        for (int step = 0; step < steps; step++)
+        {
+            scroller.Offset = new Avalonia.Vector(0, Math.Max(0, scroller.Offset.Y - 200));
+            pump(5);
+        }
+    }
+
+    [Fact]
+    public async Task HomeView_LetsTheUserScrollUpThroughEveryChunkWithAutoScrollOnWithoutBeingTakenToTheEnd()
+    {
+        (int times, int shown, bool more, bool auto) = await InALongChat((chat, scroller, window, _, pump) =>
+        {
+            bool started = IsAtEnd(scroller);
+            int taken = started ? 0 : 1;
+
+            for (int step = 0; step < 200 && (chat.HasMore || scroller.Offset.Y > 1); step++)
+            {
+                ScrollUp(scroller, pump, 1);
+
+                // Text that wraps anew grows the chat without anything new in it.
+                if (step % 25 == 12)
+                {
+                    window.Width = window.Width > 1100 ? 1000 : 1200;
+                    pump(8);
+                }
+
+                taken += IsAtEnd(scroller) ? 1 : 0;
+            }
+
+            return (taken, chat.Messages.Count, chat.HasMore, chat.AutoScroll);
+        });
+
+        Assert.Equal((0, 100, false, true), (times, shown, more, auto));
+    }
+
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    public async Task HomeView_GoesToTheEndForNewOutputOnlyWhileAutoScrollIsOn(bool autoScroll, bool streamed)
+    {
+        (bool before, bool after) = await InALongChat((chat, scroller, _, workspace, pump) =>
+        {
+            chat.AutoScroll = autoScroll;
+
+            if (streamed)
+            {
+                chat.ShowWork = true;
+                pump(5);
+            }
+
+            ScrollUp(scroller, pump, 30);
+            bool left = IsAtEnd(scroller);
+            connection.Raise(x => x.EventReceived += null, streamed
+                ? new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspace.Id, Text = "a piece of what is being written" }
+                : new RemoteEvent { Kind = RemoteEventKind.MessageAdded, WorkspaceId = workspace.Id, Message = new ChatMessage { Role = MessageRole.Assistant, Text = "new output" } });
+            pump(20);
+            return (left, IsAtEnd(scroller));
+        });
+
+        Assert.False(before);
+        Assert.Equal(autoScroll, after);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HomeView_StaysPutWhenTheChatIsReadAgainUnlessItHoldsSomethingNew(bool somethingNew)
+    {
+        (double moved, bool end) = await InALongChat((chat, scroller, window, workspace, pump) =>
+        {
+            ScrollUp(scroller, pump, 40);
+            int count = chat.Messages.Count;
+            Control kept = window.GetVisualDescendants().OfType<Control>().First(control => control.DataContext is ChatMessage && control.GetVisualParent() is Panel && Avalonia.VisualExtensions.TranslatePoint(control, new Avalonia.Point(0, 0), scroller)!.Value.Y + control.Bounds.Height > 0);
+            string name = ((ChatMessage)kept.DataContext!).Text.Split('\n')[0];
+            double Y() => Avalonia.VisualExtensions.TranslatePoint(window.GetVisualDescendants().OfType<Control>().First(control => control.DataContext is ChatMessage message && message.Text.Split('\n')[0] == name && control.GetVisualParent() is Panel), new Avalonia.Point(0, 0), scroller)!.Value.Y;
+            double before = Y();
+
+            if (somethingNew)
+            {
+                connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), null, It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [.. Numbered(81, 100), new ChatMessage { Role = MessageRole.Assistant, Text = "written while away" }], Older = "81" });
+            }
+
+            // As after a connection that was lost.
+            Task read = chat.Resync();
+
+            for (int round = 0; round < 100 && !read.IsCompleted; round++)
+            {
+                pump(1);
+            }
+
+            pump(20);
+            return (somethingNew ? 0 : Y() - before, IsAtEnd(scroller));
+        });
+
+        Assert.Equal(somethingNew, end);
+        Assert.InRange(moved, -1.5, 1.5);
+    }
+
     [Fact]
     public async Task HomeView_ShowsTheLocalTimeUnderEachMessageThatHasOne()
     {
