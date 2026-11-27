@@ -277,6 +277,7 @@
                               </ItemsControl>
                               <TextBlock Classes="muted" FontSize="11" HorizontalAlignment="Left" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}"
                                          ToolTip.Tip="{Binding Time, Converter={x:Static local:MessageConverters.FullTime}}" IsVisible="{Binding Time, Converter={x:Static local:MessageConverters.HasTime}}" />
+                              <TextBlock Classes="muted" FontSize="11" HorizontalAlignment="Left" Text="Sending…" IsVisible="{Binding IsPending}" />
                             </StackPanel>
                           </Border>
                         </Panel>

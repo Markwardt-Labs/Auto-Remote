@@ -31,6 +31,12 @@ public sealed record ChatMessage
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
     public bool IsThought { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether this is a prompt a client shows while it is on its way to the server, until the server's copy takes its place. It is the client's own and never sent.
+    /// </summary>
+    [JsonIgnore]
+    public bool IsPending { get; init; }
 }
 
 /// <summary>

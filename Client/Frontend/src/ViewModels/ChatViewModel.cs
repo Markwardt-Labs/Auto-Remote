@@ -374,6 +374,17 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 submitted.Clear();
             }
 
+            if (value is { Text.Length: > 0 })
+            {
+                // The banner shows a prompt that has to wait; it is a message once its work starts.
+                MessageParts waiting = MessageParts.Parse(value.Text);
+
+                foreach (ChatMessage echo in Messages.Where(message => message.IsPending && Holds(waiting, MessageParts.Parse(message.Text))).ToList())
+                {
+                    Withdraw(echo);
+                }
+            }
+
             if (Set(ref queue, value))
             {
                 Raise(nameof(IsQueued));
@@ -697,7 +708,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             keep++;
         }
 
-        int drop = Messages.Count - keep;
+        // A prompt on its way is no part of the stored chat, which what is dropped is counted in.
+        int pending = FirstPending();
+        int drop = Math.Min(Messages.Count - keep, pending < 0 ? Messages.Count : pending);
 
         if (drop <= 0)
         {
@@ -736,7 +749,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     private async Task Reload()
     {
         loading = true;
-        ChatMessage? reach = autoScroll && IsAtEnd ? null : Messages.FirstOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
+        ChatMessage? reach = autoScroll && IsAtEnd ? null : Messages.FirstOrDefault(message => !message.IsWork && !message.IsPending && !ReferenceEquals(message, streaming));
         ChatMessage? newest = Newest();
 
         try
@@ -761,7 +774,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     // Work is left out, since it comes and goes with the setting that shows it.
-    private ChatMessage? Newest() => Messages.LastOrDefault(message => !message.IsWork && !ReferenceEquals(message, streaming));
+    private ChatMessage? Newest() => Messages.LastOrDefault(message => !message.IsWork && !message.IsPending && !ReferenceEquals(message, streaming));
 
     private void Stream(string piece, bool thought)
     {
@@ -773,7 +786,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         if (streaming is null)
         {
             streaming = new ChatMessage { Role = MessageRole.Assistant, Text = piece, Time = DateTimeOffset.UtcNow, IsWork = thought, IsThought = thought };
-            Messages.Add(streaming);
+            Append(streaming);
             KeepWindow();
             return;
         }
@@ -809,7 +822,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
         else
         {
-            Messages.Add(replacement);
+            Append(replacement);
             KeepWindow();
         }
     }
@@ -843,9 +856,10 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         List<RemoteEvent> pending = [.. early];
         early.Clear();
         List<ChatMessage> added = [.. pending.Where(item => item.Kind == RemoteEventKind.MessageAdded && item.Message is not null && !IsHidden(item)).Select(item => item.Message!)];
-        int overlap = Math.Min(added.Count, Messages.Count);
+        List<ChatMessage> stored = [.. Messages.Where(message => !message.IsPending)];
+        int overlap = Math.Min(added.Count, stored.Count);
 
-        while (overlap > 0 && !Enumerable.Range(0, overlap).All(index => Same(Messages[Messages.Count - overlap + index], added[index])))
+        while (overlap > 0 && !Enumerable.Range(0, overlap).All(index => Same(stored[stored.Count - overlap + index], added[index])))
         {
             overlap--;
         }
@@ -900,7 +914,10 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
             bool lost = reach is not null && !window.Any(message => Reaches(message, reach));
             streaming = null;
-            Messages.Reset(window);
+            // A prompt on its way stays, unless what was read holds the server's copy of it, one that was not shown before.
+            List<ChatMessage> shown = [.. Messages.Where(message => !message.IsPending)];
+            List<ChatMessage> unsent = [.. Messages.Where(message => message.IsPending && !window.Any(told => told.Role == MessageRole.User && told.Text == message.Text && !shown.Any(old => Reaches(told, old))))];
+            Messages.Reset([.. window, .. unsent]);
             start = Position(older);
             Raise(nameof(HasMore));
 
@@ -958,6 +975,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 if (message.Role == MessageRole.User)
                 {
                     Error = null;
+
+                    if (Arrived(message))
+                    {
+                        break;
+                    }
                 }
 
                 if (streaming is not null && message.Role == MessageRole.Assistant && (message.IsThought ? streaming.IsThought : !message.IsWork && !streaming.IsThought))
@@ -972,7 +994,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                         Unstream();
                     }
 
-                    Messages.Add(message);
+                    Append(message);
                     KeepWindow();
                 }
 
@@ -1348,17 +1370,20 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         PromptStarted?.Invoke();
 
         OverLimitAsk? refused = null;
+        // Shown before the server is asked anything. A file not uploaded yet is shown by its name.
+        ChatMessage echo = Echo(Written(text, sending.Select(attachment => attachment.ServerPath ?? attachment.Name)));
 
         bool sent = await Attempt(async () =>
         {
-            List<string> lines = text.Length == 0 ? [] : [text];
+            List<string> paths = [];
 
             foreach (ChatAttachment attachment in sending)
             {
-                lines.Add($"Attached file: {attachment.ServerPath ?? await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None)}");
+                paths.Add(attachment.ServerPath ?? await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None));
             }
 
-            string prompt = string.Join('\n', lines);
+            string prompt = Written(text, paths);
+            echo = Reword(echo, prompt);
 
             try
             {
@@ -1370,6 +1395,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 refused = new OverLimitAsk(pause, prompt, typed ? text : null, typed ? sending : []);
             }
         });
+
+        if (refused is not null || !sent)
+        {
+            Withdraw(echo);
+        }
 
         if (refused is not null)
         {
@@ -1386,6 +1416,95 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
 
         return sent;
+    }
+
+    private string Written(string text, IEnumerable<string> attached) => string.Join('\n', (string[])[.. text.Length == 0 ? [] : (string[])[text], .. attached.Select(path => $"Attached file: {path}")]);
+
+    private ChatMessage Echo(string prompt)
+    {
+        ChatMessage echo = new() { Role = MessageRole.User, Text = prompt, IsPending = true };
+        Error = null;
+        Messages.Add(echo);
+        KeepWindow();
+        // The user's own new message, which the view goes to as it does to any other output.
+        OutputArrived?.Invoke();
+        return echo;
+    }
+
+    private ChatMessage Reword(ChatMessage echo, string prompt)
+    {
+        int index = IndexOf(echo);
+
+        if (index < 0 || echo.Text == prompt)
+        {
+            return echo;
+        }
+
+        ChatMessage reworded = echo with { Text = prompt };
+        Messages[index] = reworded;
+        return reworded;
+    }
+
+    private void Withdraw(ChatMessage echo)
+    {
+        int index = IndexOf(echo);
+
+        if (index >= 0)
+        {
+            Messages.RemoveAt(index);
+        }
+    }
+
+    // The server's copy of a prompt takes the place of the one shown while it was on its way. It is no new output: the user saw it already.
+    private bool Arrived(ChatMessage told)
+    {
+        for (int index = 0; index < Messages.Count; index++)
+        {
+            if (Messages[index] is { IsPending: true } echo && echo.Text == told.Text)
+            {
+                if (index == FirstPending())
+                {
+                    Messages[index] = told;
+                }
+                else
+                {
+                    Messages.RemoveAt(index);
+                    Append(told);
+                }
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // Prompts on their way stay at the end: whatever the server tells of before them came before them.
+    private void Append(ChatMessage message)
+    {
+        int pending = FirstPending();
+
+        if (pending < 0)
+        {
+            Messages.Add(message);
+        }
+        else
+        {
+            Messages.Insert(pending, message);
+        }
+    }
+
+    private int FirstPending()
+    {
+        for (int index = 0; index < Messages.Count; index++)
+        {
+            if (Messages[index].IsPending)
+            {
+                return index;
+            }
+        }
+
+        return -1;
     }
 
     private void ClearOverLimit()
@@ -1419,9 +1538,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
 
         PromptStarted?.Invoke();
+        ChatMessage echo = Echo(ask.Prompt);
 
         if (!await Attempt(() => connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
         {
+            Withdraw(echo);
             PutBack(cleared ? ask.Typed! : string.Empty, taken);
             PromptFailed?.Invoke();
         }
@@ -1474,10 +1595,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
+    private bool Submitted(MessageParts queued) => submitted.Any(sent => Holds(queued, sent));
+
     // The server joins waiting prompts as paragraphs and keeps their attachment lines at the end.
-    private bool Submitted(MessageParts queued) => submitted.Any(sent => sent.Body.Length > 0
+    private bool Holds(MessageParts queued, MessageParts sent) => sent.Body.Length > 0
         ? $"\n\n{queued.Body}\n\n".Contains($"\n\n{sent.Body}\n\n", StringComparison.Ordinal)
-        : sent.Files.Any(file => queued.Files.Any(other => other.Path == file.Path)));
+        : sent.Files.Any(file => queued.Files.Any(other => other.Path == file.Path));
 
     private async Task CancelLimitPause()
     {

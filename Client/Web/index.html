@@ -3297,7 +3297,10 @@ class WorkspaceView {
 
       lost = !!reach && !window.some(message => this.reaches(message, reach));
       this.streaming = null;
-      this.messages = window;
+      // A prompt on its way stays, unless what was read holds the server's copy of it, one that was not shown before.
+      const shown = this.messages.filter(message => !message.pending);
+      const unsent = this.messages.filter(message => message.pending && !window.some(told => told.role === "User" && told.text === message.text && !shown.some(old => this.reaches(told, old))));
+      this.messages = [...window, ...unsent];
       this.start = messagePosition(older);
       this.setShowWork(result.value.showWork === true);
       this.setWorking(result.value.working === true);
@@ -3327,7 +3330,7 @@ class WorkspaceView {
 
   // Work is left out, since it comes and goes with the setting that shows it.
   newestMessage() {
-    return this.messages.findLast(message => !message.isWork && message !== this.streaming?.message) ?? null;
+    return this.messages.findLast(message => !message.isWork && !message.pending && message !== this.streaming?.message) ?? null;
   }
 
   // Reading the chat again is not new output, only what it holds beyond what was there is, so what a user scrolled to is read with it.
@@ -3335,7 +3338,7 @@ class WorkspaceView {
     const newest = this.newestMessage();
     const scroller = this.scroller;
     const stays = this.chatAuto && scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 2;
-    const reach = stays ? null : this.messages.find(message => !message.isWork && message !== this.streaming?.message) ?? null;
+    const reach = stays ? null : this.messages.find(message => !message.isWork && !message.pending && message !== this.streaming?.message) ?? null;
     const visible = [];
 
     if (!stays && this.scroller.clientHeight > 0) {
@@ -3396,9 +3399,10 @@ class WorkspaceView {
     const hidden = event => event.kind === "MessageAdded" && event.message?.isWork === true && !this.showWork;
     const added = pending.filter(event => event.kind === "MessageAdded" && event.message && !hidden(event)).map(event => event.message);
     const same = (first, second) => first.role === second.role && first.text.trim() === second.text.trim();
-    let overlap = Math.min(added.length, this.messages.length);
+    const stored = this.messages.filter(message => !message.pending);
+    let overlap = Math.min(added.length, stored.length);
 
-    while (overlap > 0 && !added.slice(0, overlap).every((message, index) => same(this.messages[this.messages.length - overlap + index], message))) {
+    while (overlap > 0 && !added.slice(0, overlap).every((message, index) => same(stored[stored.length - overlap + index], message))) {
       overlap--;
     }
 
@@ -3462,7 +3466,9 @@ class WorkspaceView {
       keep++;
     }
 
-    const drop = this.messages.length - keep;
+    // A prompt on its way is no part of the stored chat, which what is dropped is counted in.
+    const pending = this.firstPending();
+    const drop = Math.min(this.messages.length - keep, pending < 0 ? this.messages.length : pending);
 
     if (drop <= 0) {
       return false;
@@ -3560,6 +3566,10 @@ class WorkspaceView {
 
       if (event.message.role === "User") {
         this.chatError.set(null);
+
+        if (this.arrived(event.message)) {
+          return;
+        }
       }
 
       const message = event.message;
@@ -3576,7 +3586,6 @@ class WorkspaceView {
         this.dropStreaming();
       }
 
-      this.messages.push(event.message);
       this.appendMessage(event.message);
       this.keepWindow();
     } else if (event.kind === "MessageDelta" && this.showWork && event.text) {
@@ -3601,7 +3610,7 @@ class WorkspaceView {
 
   messageElement(message) {
     const user = message.role === "User";
-    const stamp = message.time ? [h("div", { class: "stamp", title: new Date(message.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(message.time))] : [];
+    const stamp = message.pending ? [h("div", { class: "stamp" }, "Sending…")] : message.time ? [h("div", { class: "stamp", title: new Date(message.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(message.time))] : [];
 
     if (message.isWork) {
       return h("div", { class: "msg work" }, h("div", { class: "bubble" }, message.text), ...stamp);
@@ -3633,9 +3642,7 @@ class WorkspaceView {
 
     if (!this.streaming) {
       const message = { role: "Assistant", text: piece, time: new Date().toISOString(), isWork: thought, isThought: thought };
-      this.messages.push(message);
-      this.streaming = { message, element: this.messageElement(message) };
-      this.list.append(this.streaming.element);
+      this.streaming = { message, element: this.insertMessage(message) };
       this.keepWindow();
     } else {
       const message = { ...this.streaming.message, text: this.streaming.message.text + piece };
@@ -3658,7 +3665,7 @@ class WorkspaceView {
   }
 
   appendMessage(message) {
-    this.list.append(this.messageElement(message));
+    this.insertMessage(message);
     this.scrollToEnd();
   }
 
@@ -4129,15 +4136,18 @@ class WorkspaceView {
     this.clearReady();
     requestNotifications();
     let refused = null;
+    // A file not uploaded yet is shown by its name.
+    let echo = this.echo(this.written(text, sending.map(attachment => attachment.serverPath ?? attachment.name)));
 
     const result = await attempt(async () => {
-      const lines = text ? [text] : [];
+      const paths = [];
 
       for (const attachment of sending) {
-        lines.push(`Attached file: ${attachment.serverPath ?? await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file))}`);
+        paths.push(attachment.serverPath ?? await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file)));
       }
 
-      const prompt = lines.join("\n");
+      const prompt = this.written(text, paths);
+      echo = this.reword(echo, prompt);
 
       try {
         this.submitted.push(splitAttachments(prompt));
@@ -4154,6 +4164,7 @@ class WorkspaceView {
     // A prompt that was not taken leaves the wait for earlier work as it was, unless that work was announced meanwhile.
     if (refused || !result.ok) {
       this.notifyWhenReady &&= waited;
+      this.withdraw(echo);
     }
 
     if (refused) {
@@ -4188,8 +4199,11 @@ class WorkspaceView {
       this.notifyWhenReady = true;
       this.clearReady();
 
+      const echo = this.echo(ask.prompt);
+
       if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
         this.notifyWhenReady &&= waited;
+        this.withdraw(echo);
         this.giveBack(boxed ? ask.typed : "", taken);
       }
     };
@@ -4211,6 +4225,12 @@ class WorkspaceView {
     this.queue = queue;
     this.queueBanner.hidden = !queue;
 
+    if (queue?.text) {
+      // The banner shows a prompt that has to wait; it is a message once its work starts.
+      const held = splitAttachments(queue.text);
+      this.messages.filter(message => message.pending && this.holds(held, splitAttachments(message.text))).forEach(echo => this.withdraw(echo));
+    }
+
     if (!queue) {
       return;
     }
@@ -4228,9 +4248,94 @@ class WorkspaceView {
 
   // The server joins waiting prompts as paragraphs and keeps their attachment lines at the end.
   wasSubmitted(queued) {
-    return this.submitted.some(sent => sent.body
+    return this.submitted.some(sent => this.holds(queued, sent));
+  }
+
+  // The server joins waiting prompts as paragraphs and keeps their attachment lines at the end.
+  holds(queued, sent) {
+    return sent.body
       ? `\n\n${queued.body}\n\n`.includes(`\n\n${sent.body}\n\n`)
-      : sent.files.some(file => queued.files.some(other => other.path === file.path)));
+      : sent.files.some(file => queued.files.some(other => other.path === file.path));
+  }
+
+  written(text, attached) {
+    return [...(text ? [text] : []), ...attached.map(path => `Attached file: ${path}`)].join("\n");
+  }
+
+  // Shows a prompt before the server is asked anything; the server's copy takes its place once it tells of it.
+  echo(prompt) {
+    const echo = { role: "User", text: prompt, pending: true };
+    this.chatError.set(null);
+    this.messages.push(echo);
+    this.list.append(this.messageElement(echo));
+    this.keepWindow();
+    // The user's own new message, which the chat goes to as it does to any other output.
+    this.scrollToEnd();
+    return echo;
+  }
+
+  reword(echo, prompt) {
+    const index = this.messages.indexOf(echo);
+
+    if (index < 0 || echo.text === prompt) {
+      return echo;
+    }
+
+    const reworded = { ...echo, text: prompt };
+    this.replaceMessage(index, reworded);
+    return reworded;
+  }
+
+  withdraw(echo) {
+    const index = this.messages.indexOf(echo);
+
+    if (index >= 0) {
+      this.messages.splice(index, 1);
+      this.list.children[index].remove();
+    }
+  }
+
+  replaceMessage(index, message) {
+    this.messages[index] = message;
+    this.list.children[index].replaceWith(this.messageElement(message));
+  }
+
+  firstPending() {
+    return this.messages.findIndex(message => message.pending);
+  }
+
+  // Puts a message the server told of before the prompts that are still on their way to it, which came after it.
+  insertMessage(message) {
+    const pending = this.firstPending();
+    const element = this.messageElement(message);
+
+    if (pending < 0) {
+      this.messages.push(message);
+      this.list.append(element);
+    } else {
+      this.list.insertBefore(element, this.list.children[pending]);
+      this.messages.splice(pending, 0, message);
+    }
+
+    return element;
+  }
+
+  // The server's copy of a prompt takes the place of the one shown while it was on its way. It is no new output: the user saw it already.
+  arrived(told) {
+    const index = this.messages.findIndex(message => message.pending && message.text === told.text);
+
+    if (index < 0) {
+      return false;
+    }
+
+    if (index === this.firstPending()) {
+      this.replaceMessage(index, told);
+    } else {
+      this.withdraw(this.messages[index]);
+      this.insertMessage(told);
+    }
+
+    return true;
   }
 
   async cancelQueued() {

@@ -585,6 +585,219 @@ public sealed class ChatViewModelTests
         Assert.False(measured.HasMore);
     }
 
+    private ChatMessage Asked(string text) => new() { Role = MessageRole.User, Text = text, Time = new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero) };
+
+    // A server that has not answered a prompt yet, as one that is still working out whether and how to start on it.
+    private TaskCompletionSource HoldPrompts()
+    {
+        TaskCompletionSource answer = new();
+        connection.Setup(x => x.Prompt(workspaceId, It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(answer.Task);
+        // The runner waits for the command that sends, so a test that failed before it answered must not wait for ever.
+        _ = Task.Delay(TimeSpan.FromSeconds(10)).ContinueWith(_ => answer.TrySetResult(), TaskScheduler.Default);
+        return answer;
+    }
+
+    // A chat follows the server once it was started.
+    private async Task Started(params ChatMessage[] messages)
+    {
+        connection.Setup(x => x.GetSavedInputs(workspaceId, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        History(false, messages);
+        await chat.Start();
+    }
+
+    private void Submit(string text)
+    {
+        chat.Input = text;
+        chat.SendCommand.Execute(null);
+    }
+
+    private List<(string Text, bool Pending)> Shown() => [.. chat.Messages.Select(message => (message.Text, message.IsPending))];
+
+    [Fact]
+    public void ASentPromptShowsAtOnceBeforeTheServerAnswers()
+    {
+        TaskCompletionSource answer = HoldPrompts();
+        int arrived = 0;
+        chat.OutputArrived += () => arrived++;
+
+        Submit("  fix it  ");
+
+        ChatMessage shown = Assert.Single(chat.Messages);
+        Assert.Equal((MessageRole.User, "fix it", true, null), (shown.Role, shown.Text, shown.IsPending, shown.Time));
+        Assert.Equal((1, string.Empty), (arrived, chat.Input));
+        answer.SetResult();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheServersCopyTakesThePlaceOfTheOneShownWhicheverComesFirstItOrTheAnswer(bool answeredFirst)
+    {
+        await Started();
+        TaskCompletionSource answer = HoldPrompts();
+        Submit("fix it");
+        int arrived = 0;
+        chat.OutputArrived += () => arrived++;
+
+        if (answeredFirst)
+        {
+            answer.SetResult();
+            Assert.Equal([("fix it", true)], Shown());
+        }
+
+        connection.Raise(x => x.EventReceived += null, Added(Asked("fix it")));
+        answer.TrySetResult();
+
+        Assert.Equal([("fix it", false)], Shown());
+        Assert.NotNull(chat.Messages[0].Time);
+        Assert.Equal(0, arrived);
+    }
+
+    [Fact]
+    public async Task WhatArrivesWhileAPromptIsOnItsWayComesBeforeIt()
+    {
+        await Started();
+        TaskCompletionSource answer = HoldPrompts();
+        chat.ShowWork = true;
+        connection.Raise(x => x.EventReceived += null, Added(Said("working")));
+        Submit("also this");
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspaceId, Text = "still wri" });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.MessageDelta, WorkspaceId = workspaceId, Text = "ting" });
+        Assert.Equal([("working", false), ("still writing", false), ("also this", true)], Shown());
+
+        connection.Raise(x => x.EventReceived += null, Added(Said("still writing")));
+        connection.Raise(x => x.EventReceived += null, Added(Said("one more")));
+        connection.Raise(x => x.EventReceived += null, Added(Asked("also this")));
+        connection.Raise(x => x.EventReceived += null, Added(Said("after")));
+
+        Assert.Equal([("working", false), ("still writing", false), ("one more", false), ("also this", false), ("after", false)], Shown());
+        answer.SetResult();
+    }
+
+    [Fact]
+    public async Task EveryPromptOnItsWayIsReplacedOnceAlsoWhenTheyReadTheSameOrArriveOutOfOrder()
+    {
+        await Started();
+        TaskCompletionSource answer = HoldPrompts();
+        Submit("go");
+        Submit("stop");
+        Submit("go");
+
+        connection.Raise(x => x.EventReceived += null, Added(Asked("stop")));
+        Assert.Equal([("stop", false), ("go", true), ("go", true)], Shown());
+
+        connection.Raise(x => x.EventReceived += null, Added(Asked("go")));
+        Assert.Equal([("stop", false), ("go", false), ("go", true)], Shown());
+
+        connection.Raise(x => x.EventReceived += null, Added(Asked("go")));
+        Assert.Equal([("stop", false), ("go", false), ("go", false)], Shown());
+
+        // One sent from another client is simply added.
+        connection.Raise(x => x.EventReceived += null, Added(Asked("go")));
+        Assert.Equal(4, chat.Messages.Count);
+        answer.SetResult();
+    }
+
+    [Fact]
+    public async Task APromptTheServerDoesNotTakeLeavesTheChatAndComesBackToTheBox()
+    {
+        TaskCompletionSource answer = HoldPrompts();
+        Submit("fix it");
+
+        answer.SetException(new RemoteException("The workspace is busy."));
+        await Until(() => chat.Error is not null);
+
+        Assert.Empty(chat.Messages);
+        Assert.Equal(("fix it", "The workspace is busy."), (chat.Input, chat.Error));
+    }
+
+    [Fact]
+    public async Task APromptOverTheLimitLeavesTheChatUntilItIsConfirmed()
+    {
+        TaskCompletionSource confirmed = HoldPrompts();
+        Refuse("keep going");
+        connection.Setup(x => x.PromptOverLimit(workspaceId, "keep going", It.IsAny<CancellationToken>())).Returns(confirmed.Task);
+        Submit("keep going");
+        await Until(() => chat.IsAskingOverLimit);
+        Assert.Empty(chat.Messages);
+
+        chat.ConfirmOverLimitCommand.Execute(null);
+
+        Assert.Equal([("keep going", true)], Shown());
+        confirmed.SetResult();
+    }
+
+    [Fact]
+    public async Task APromptThatHasToWaitIsLeftToTheQueueBanner()
+    {
+        await Started();
+        TaskCompletionSource answer = HoldPrompts();
+        Submit("later");
+        Submit("not queued");
+
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = workspaceId, Queue = new QueueStatus { Position = 1, Text = "earlier\n\nlater" } });
+
+        Assert.Equal([("not queued", true)], Shown());
+        Assert.True(chat.IsQueued);
+        answer.SetResult();
+    }
+
+    [Fact]
+    public async Task AttachedFilesShowByNameWhileTheyUploadAndThePromptStillMeetsTheServersCopy()
+    {
+        await Started();
+        TaskCompletionSource<string> upload = new();
+        connection.Setup(x => x.UploadAttachment(workspaceId, "a.txt", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).Returns(upload.Task);
+        TaskCompletionSource answer = HoldPrompts();
+        chat.Attach("a.txt", new byte[] { 1 });
+        Submit("read this");
+        Assert.Equal([("read this\nAttached file: a.txt", true)], Shown());
+
+        upload.SetResult("/data/12345678-a.txt");
+        await Until(() => chat.Messages[0].Text.Contains("/data/", StringComparison.Ordinal));
+        connection.Raise(x => x.EventReceived += null, Added(Asked("read this\nAttached file: /data/12345678-a.txt")));
+
+        Assert.Equal([("read this\nAttached file: /data/12345678-a.txt", false)], Shown());
+        answer.SetResult();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReadingTheChatAgainKeepsAPromptOnItsWayUnlessWhatWasReadHoldsIt(bool arrived)
+    {
+        // The same words were said before, which are not the prompt on its way.
+        await Started(Asked("go"), Said("done"));
+        TaskCompletionSource answer = HoldPrompts();
+        Submit("go");
+        History(false, arrived ? [Asked("go"), Said("done"), Asked("go") with { Time = DateTimeOffset.UtcNow }] : [Asked("go"), Said("done")]);
+
+        await chat.Resync();
+
+        Assert.Equal([("go", false), ("done", false), ("go", !arrived)], Shown());
+        answer.SetResult();
+    }
+
+    [Fact]
+    public async Task TrimmingNeverDropsAPromptOnItsWayNorCountsItAsStored()
+    {
+        await WithHistory(1000, 20);
+        TaskCompletionSource answer = HoldPrompts();
+
+        // The second prompt alone is more text than a chunk holds, which would drop the first with everything before it.
+        Submit("first");
+        Submit(new string('x', 25_000));
+
+        Assert.Equal([true, true], chat.Messages.Select(message => message.IsPending));
+
+        // Only the stored messages were dropped and counted, so the older ones load from right where they ended.
+        Assert.True(await chat.LoadOlder());
+        Assert.Equal(("m980", "m999", 22), (chat.Messages[0].Text, chat.Messages[19].Text, chat.Messages.Count));
+        connection.Verify(x => x.GetHistory(workspaceId, "1000", It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>()), Times.Once);
+        answer.SetResult();
+    }
+
     private static ChatMessage Said(string text) => new() { Role = MessageRole.Assistant, Text = text };
 
     private static ChatMessage Did(string text) => new() { Role = MessageRole.Assistant, Text = text, IsWork = true };
