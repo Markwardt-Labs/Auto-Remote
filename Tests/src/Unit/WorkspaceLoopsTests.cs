@@ -98,7 +98,8 @@ public sealed class WorkspaceLoopsTests : IDisposable
         await Until(() => loops.Get(workspace.Id) is null);
 
         Assert.Equal(["again", "again", "again"], Session.Prompts.Select(prompt => prompt.Text).ToList());
-        Assert.Equal([0, 1, 2, 3], Changes().Where(change => change.Loop is not null).Select(change => change.Loop!.Runs).ToList());
+        // Each run is said to be under way before its prompt is sent, then counted, and said to be over before the next one.
+        Assert.Equal([(0, false), (0, true), (1, true), (1, false), (1, true), (2, true), (2, false), (2, true), (3, true)], Changes().Where(change => change.Loop is not null).Select(change => (change.Loop!.Runs, change.Loop.IsRunning)).ToList());
         Assert.Equal("The loop made all its runs.", Ended());
         Assert.False(prompts.IsBusy(workspace.Id));
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));

@@ -6,23 +6,83 @@ namespace Markwardt.AutoRemote.Server;
 internal interface ISavedInputs
 {
     /// <summary>
+    /// Gets the workspaces with queued inputs that are to be sent, as far as their inputs have been read.
+    /// </summary>
+    IReadOnlyList<Guid> Waiting { get; }
+
+    /// <summary>
+    /// Checks whether a workspace has any queued input, paused ones included.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if it has.</returns>
+    bool HasQueued(Guid id);
+
+    /// <summary>
     /// Lists the saved inputs of a workspace.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="cancellation">Cancels the read.</param>
-    /// <returns>The saved inputs, the last saved first.</returns>
+    /// <returns>The queued inputs in the order they are sent, followed by the others, the last saved first.</returns>
     /// <exception cref="RequestException">No such workspace exists.</exception>
     Task<IReadOnlyList<SavedInput>> List(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Stops counting the queued inputs of a workspace that is gone.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    void Forget(Guid id);
+
+    /// <summary>
+    /// Adds a queued input behind those already queued, resumes them all and tells every client.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The input.</param>
+    /// <param name="autoCommit">Whether the changes are committed after its work.</param>
+    /// <param name="cancellation">Cancels the save.</param>
+    /// <returns>The saved inputs now.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or the text is empty or too long.</exception>
+    Task<IReadOnlyList<SavedInput>> Queue(Guid id, string text, bool autoCommit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Pauses or resumes every queued input of a workspace and tells every client when that changes any of them.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="paused">Whether they are paused.</param>
+    /// <param name="cancellation">Cancels the change.</param>
+    /// <exception cref="RequestException">No such workspace exists.</exception>
+    Task SetPaused(Guid id, bool paused, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sends the next queued input that is not paused and removes it once it was sent; nothing else can take or delete it meanwhile.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="send">Sends the input. When it throws, the input stays queued. It must not use the saved inputs itself.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns><see langword="true" /> if there was one.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or what <paramref name="send" /> throws.</exception>
+    Task<bool> SendNext(Guid id, Func<SavedInput, Task> send, CancellationToken cancellation);
 
     /// <summary>
     /// Saves a chat input as the newest saved input and tells every client; the oldest entries are dropped beyond the limit.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The chat input.</param>
+    /// <param name="autoCommit">Whether the changes are committed after the work it starts.</param>
     /// <param name="cancellation">Cancels the save.</param>
-    /// <returns>The saved inputs now, the last saved first.</returns>
+    /// <returns>The saved inputs now.</returns>
     /// <exception cref="RequestException">No such workspace exists, or the text is empty or too long.</exception>
-    Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, CancellationToken cancellation);
+    Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, bool autoCommit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sets whether the changes are committed after the work a saved input starts, and tells every client.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="inputId">The saved input.</param>
+    /// <param name="autoCommit">Whether they are.</param>
+    /// <param name="cancellation">Cancels the change.</param>
+    /// <returns>The saved inputs now.</returns>
+    /// <exception cref="RequestException">No such workspace exists, or the saved input is gone.</exception>
+    Task<IReadOnlyList<SavedInput>> SetAutoCommit(Guid id, Guid inputId, bool autoCommit, CancellationToken cancellation);
 
     /// <summary>
     /// Saves a prompt that will not run, whatever its length, since waiting prompts joined together can be longer than a saved input a client may send.
@@ -30,7 +90,7 @@ internal interface ISavedInputs
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The prompt.</param>
     /// <param name="cancellation">Cancels the save.</param>
-    /// <returns>The saved inputs now, the last saved first.</returns>
+    /// <returns>The saved inputs now.</returns>
     /// <exception cref="RequestException">No such workspace exists, or the text is empty.</exception>
     Task<IReadOnlyList<SavedInput>> Keep(Guid id, string text, CancellationToken cancellation);
 
@@ -50,7 +110,7 @@ internal interface ISavedInputs
     /// <param name="id">The workspace identifier.</param>
     /// <param name="data">The base64 WAV recording.</param>
     /// <param name="cancellation">Cancels adding the entry, not the conversion.</param>
-    /// <returns>The saved inputs now, the last saved first, with the new entry.</returns>
+    /// <returns>The saved inputs now, with the new entry.</returns>
     /// <exception cref="RequestException">No such workspace exists, or the recording is empty.</exception>
     Task<IReadOnlyList<SavedInput>> Transcribe(Guid id, string data, CancellationToken cancellation);
 
@@ -60,7 +120,7 @@ internal interface ISavedInputs
     /// <param name="id">The workspace identifier.</param>
     /// <param name="inputId">The saved input.</param>
     /// <param name="cancellation">Cancels the removal.</param>
-    /// <returns>The saved inputs now, the last saved first.</returns>
+    /// <returns>The saved inputs now.</returns>
     /// <exception cref="RequestException">No such workspace exists.</exception>
     Task<IReadOnlyList<SavedInput>> Discard(Guid id, Guid inputId, CancellationToken cancellation);
 }
@@ -72,9 +132,23 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
     private readonly ConcurrentDictionary<Guid, Dictionary<Guid, Conversion>> conversions = new();
 
+    // Whether each workspace that has queued inputs has any that is to be sent.
+    private readonly ConcurrentDictionary<Guid, bool> queued = new();
+
+    private readonly ConcurrentDictionary<Guid, byte> sent = new();
+
     private readonly int maxEntries = 200;
 
     private readonly int maxLength = 100000;
+
+    /// <inheritdoc />
+    public IReadOnlyList<Guid> Waiting => [.. queued.Where(entry => entry.Value).Select(entry => entry.Key)];
+
+    /// <inheritdoc />
+    public bool HasQueued(Guid id) => queued.ContainsKey(id);
+
+    /// <inheritdoc />
+    public void Forget(Guid id) => queued.TryRemove(id, out _);
 
     /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> List(Guid id, CancellationToken cancellation)
@@ -85,7 +159,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
         try
         {
-            return Current(id, await store.LoadInputs(id, cancellation));
+            return Current(id, Track(id, await Load(id, cancellation)));
         }
         finally
         {
@@ -94,12 +168,145 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
     }
 
     /// <inheritdoc />
-    public Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, CancellationToken cancellation) => text.Length > maxLength
-        ? Task.FromException<IReadOnlyList<SavedInput>>(new RequestException($"The input is longer than {maxLength} characters."))
-        : Keep(id, text, cancellation);
+    public async Task<IReadOnlyList<SavedInput>> Queue(Guid id, string text, bool autoCommit, CancellationToken cancellation)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            throw new RequestException("There is nothing to queue.");
+        }
+
+        if (text.Length > maxLength)
+        {
+            throw new RequestException($"The input is longer than {maxLength} characters.");
+        }
+
+        await workspaces.Get(id, cancellation);
+        SemaphoreSlim gate = Gate(id);
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            IReadOnlyList<SavedInput> stored = await Load(id, cancellation);
+
+            if (stored.Count(input => input.IsQueued) >= maxEntries)
+            {
+                throw new RequestException($"{maxEntries} inputs are queued already.");
+            }
+
+            SavedInput added = new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow, IsQueued = true, AutoCommit = autoCommit };
+            IReadOnlyList<SavedInput> saved = Trim(Newest([.. stored.Select(input => input with { IsPaused = false }), added]), added.Id);
+            await store.SaveInputs(id, saved, cancellation);
+            return Publish(id, Current(id, Track(id, saved)));
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<SavedInput>> Keep(Guid id, string text, CancellationToken cancellation)
+    public async Task SetPaused(Guid id, bool paused, CancellationToken cancellation)
+    {
+        await workspaces.Get(id, cancellation);
+        SemaphoreSlim gate = Gate(id);
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            IReadOnlyList<SavedInput> stored = Track(id, await Load(id, cancellation));
+
+            if (stored.Any(input => input.IsQueued && input.IsPaused != paused))
+            {
+                IReadOnlyList<SavedInput> saved = [.. stored.Select(input => input.IsQueued ? input with { IsPaused = paused } : input)];
+                await store.SaveInputs(id, saved, cancellation);
+                Publish(id, Current(id, Track(id, saved)));
+            }
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<bool> SendNext(Guid id, Func<SavedInput, Task> send, CancellationToken cancellation)
+    {
+        await workspaces.Get(id, cancellation);
+        SemaphoreSlim gate = Gate(id);
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            IReadOnlyList<SavedInput> stored = Track(id, await Load(id, cancellation));
+
+            if (Newest(stored).FirstOrDefault(input => input.IsQueued && !input.IsPaused) is not { } next)
+            {
+                return false;
+            }
+
+            await send(next);
+            IReadOnlyList<SavedInput> left = [.. stored.Where(input => input.Id != next.Id)];
+            // It was sent, so it goes however the wait for it ends, also when that cannot be written down.
+            try
+            {
+                await store.SaveInputs(id, left, CancellationToken.None);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                sent[next.Id] = 0;
+            }
+
+            Publish(id, Current(id, Track(id, left)));
+            return true;
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SavedInput>> Save(Guid id, string text, bool autoCommit, CancellationToken cancellation) => text.Length > maxLength
+        ? Task.FromException<IReadOnlyList<SavedInput>>(new RequestException($"The input is longer than {maxLength} characters."))
+        : Add(id, text, autoCommit, cancellation);
+
+    /// <inheritdoc />
+    public Task<IReadOnlyList<SavedInput>> Keep(Guid id, string text, CancellationToken cancellation) => Add(id, text, true, cancellation);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> SetAutoCommit(Guid id, Guid inputId, bool autoCommit, CancellationToken cancellation)
+    {
+        await workspaces.Get(id, cancellation);
+        SemaphoreSlim gate = Gate(id);
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            IReadOnlyList<SavedInput> stored = await Load(id, cancellation);
+
+            if (Conversions(id).TryGetValue(inputId, out Conversion? conversion))
+            {
+                conversion.Entry = conversion.Entry with { AutoCommit = autoCommit };
+            }
+            else if (stored.Any(input => input.Id == inputId))
+            {
+                stored = [.. stored.Select(input => input.Id == inputId ? input with { AutoCommit = autoCommit } : input)];
+                await store.SaveInputs(id, stored, cancellation);
+            }
+            else
+            {
+                throw new RequestException("That saved input is gone.");
+            }
+
+            return Publish(id, Current(id, Track(id, stored)));
+        }
+        finally
+        {
+            gate.Release();
+        }
+    }
+
+    private async Task<IReadOnlyList<SavedInput>> Add(Guid id, string text, bool autoCommit, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -112,9 +319,10 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
         try
         {
-            IReadOnlyList<SavedInput> saved = [.. Newest([.. await store.LoadInputs(id, cancellation), new SavedInput { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow }]).Take(maxEntries)];
+            SavedInput added = new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow, AutoCommit = autoCommit };
+            IReadOnlyList<SavedInput> saved = Trim(Newest([.. await Load(id, cancellation), added]), added.Id);
             await store.SaveInputs(id, saved, cancellation);
-            return Publish(id, Current(id, saved));
+            return Publish(id, Current(id, Track(id, saved)));
         }
         finally
         {
@@ -131,7 +339,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
         try
         {
-            IReadOnlyList<SavedInput> saved = Newest(await store.LoadInputs(id, cancellation));
+            IReadOnlyList<SavedInput> saved = Newest(await Load(id, cancellation));
 
             if (Conversions(id).TryGetValue(inputId, out Conversion? conversion))
             {
@@ -141,8 +349,9 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
             SavedInput taken = saved.FirstOrDefault(input => input.Id == inputId) ?? throw new RequestException("That saved input is gone.");
             IReadOnlyList<SavedInput> left = [.. saved.Where(input => input.Id != inputId)];
             await store.SaveInputs(id, left, cancellation);
-            Publish(id, Current(id, left));
-            return taken;
+            Publish(id, Current(id, Track(id, left)));
+            // One that is taken back is the user's to edit and send like any other.
+            return taken with { IsQueued = false, IsPaused = false };
         }
         finally
         {
@@ -150,6 +359,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
         }
     }
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> Transcribe(Guid id, string data, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(data))
@@ -165,7 +375,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
         {
             Conversion conversion = new(new SavedInput { Id = Guid.NewGuid(), Text = string.Empty, Time = DateTimeOffset.UtcNow, IsConverting = true });
             Conversions(id)[conversion.Entry.Id] = conversion;
-            IReadOnlyList<SavedInput> saved = Publish(id, Current(id, await store.LoadInputs(id, cancellation)));
+            IReadOnlyList<SavedInput> saved = Publish(id, Current(id, await Load(id, cancellation)));
             _ = Convert(id, conversion, data);
             return saved;
         }
@@ -175,6 +385,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
         }
     }
 
+    /// <inheritdoc />
     public async Task<IReadOnlyList<SavedInput>> Discard(Guid id, Guid inputId, CancellationToken cancellation)
     {
         await workspaces.Get(id, cancellation);
@@ -183,7 +394,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
         try
         {
-            IReadOnlyList<SavedInput> stored = await store.LoadInputs(id, cancellation);
+            IReadOnlyList<SavedInput> stored = await Load(id, cancellation);
 
             if (Conversions(id).Remove(inputId, out Conversion? conversion))
             {
@@ -202,12 +413,42 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
                 return Current(id, stored);
             }
 
-            return Publish(id, Current(id, stored));
+            return Publish(id, Current(id, Track(id, stored)));
         }
         finally
         {
             gate.Release();
         }
+    }
+
+    // A queued input that was sent but could not be taken off the disk is gone all the same, so it is never sent twice.
+    private async Task<IReadOnlyList<SavedInput>> Load(Guid id, CancellationToken cancellation) => [.. (await store.LoadInputs(id, cancellation)).Where(input => !sent.ContainsKey(input.Id))];
+
+    // The oldest of the saved ones go first. Queued inputs and the one just added are never dropped, since they would be lost without a word.
+    private IReadOnlyList<SavedInput> Trim(IEnumerable<SavedInput> inputs, Guid added)
+    {
+        List<SavedInput> kept = [.. inputs];
+
+        while (kept.Count > maxEntries && kept.FindLastIndex(input => !input.IsQueued && input.Id != added) is int oldest and >= 0)
+        {
+            kept.RemoveAt(oldest);
+        }
+
+        return kept;
+    }
+
+    private IReadOnlyList<SavedInput> Track(Guid id, IReadOnlyList<SavedInput> stored)
+    {
+        if (stored.Any(input => input.IsQueued))
+        {
+            queued[id] = stored.Any(input => input.IsQueued && !input.IsPaused);
+        }
+        else
+        {
+            queued.TryRemove(id, out _);
+        }
+
+        return stored;
     }
 
     private SemaphoreSlim Gate(Guid id) => gates.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
@@ -259,7 +500,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
             // A workspace removed meanwhile keeps nothing, so nothing of it is written again.
             await workspaces.Get(id, CancellationToken.None);
-            IReadOnlyList<SavedInput> stored = await store.LoadInputs(id, CancellationToken.None);
+            IReadOnlyList<SavedInput> stored = await Load(id, CancellationToken.None);
 
             if (error is not null)
             {
@@ -268,7 +509,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
             else
             {
                 running.Remove(conversion.Entry.Id);
-                stored = [.. Newest([.. stored, conversion.Entry with { Text = text, IsConverting = false }]).Take(maxEntries)];
+                stored = Trim(Newest([.. stored, conversion.Entry with { Text = text, IsConverting = false }]), conversion.Entry.Id);
                 await store.SaveInputs(id, stored, CancellationToken.None);
             }
 
@@ -289,7 +530,8 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
         }
     }
 
-    private IReadOnlyList<SavedInput> Newest(IEnumerable<SavedInput> inputs) => [.. inputs.OrderByDescending(input => input.Time)];
+    // The queued ones come first, the next to be sent at the top.
+    private IReadOnlyList<SavedInput> Newest(IEnumerable<SavedInput> inputs) => [.. inputs.OrderByDescending(input => input.IsQueued).ThenBy(input => input.IsQueued ? input.Time.UtcTicks : -input.Time.UtcTicks)];
 
     private sealed class Conversion(SavedInput entry)
     {

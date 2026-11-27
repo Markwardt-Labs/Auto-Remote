@@ -34,10 +34,10 @@ public sealed class SavedInputsTests
     [Fact]
     public async Task Save_AddsTheNewestEntryFirstAndTellsEveryClient()
     {
-        await inputs.Save(id, "first", CancellationToken.None);
+        await inputs.Save(id, "first", true, CancellationToken.None);
         await Task.Delay(5);
 
-        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "second", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "second", true, CancellationToken.None);
 
         Assert.Equal(["second", "first"], saved.Select(input => input.Text).ToList());
         Assert.Equal(["second", "first"], (await inputs.List(id, CancellationToken.None)).Select(input => input.Text).ToList());
@@ -54,12 +54,126 @@ public sealed class SavedInputsTests
         Assert.Equal(["new", "middle", "old"], (await inputs.List(id, CancellationToken.None)).Select(input => input.Text).ToList());
     }
 
+    [Fact]
+    public async Task Queue_PutsQueuedInputsFirstInTheOrderTheyAreSentAndResumesThemAll()
+    {
+        await inputs.Save(id, "saved", true, CancellationToken.None);
+        await inputs.Queue(id, "first", true, CancellationToken.None);
+        await inputs.SetPaused(id, true, CancellationToken.None);
+        await Task.Delay(5);
+        await inputs.Save(id, "saved later", true, CancellationToken.None);
+
+        IReadOnlyList<SavedInput> queued = await inputs.Queue(id, "second", true, CancellationToken.None);
+
+        Assert.Equal(["first", "second", "saved later", "saved"], queued.Select(input => input.Text).ToList());
+        Assert.Equal([true, true, false, false], queued.Select(input => input.IsQueued).ToList());
+        Assert.All(queued, input => Assert.False(input.IsPaused));
+        Assert.True(inputs.HasQueued(id));
+        Assert.Equal([id], inputs.Waiting);
+    }
+
+    [Fact]
+    public async Task SetPaused_TellsOnlyOfAChangeAndAPausedQueueIsNotWaitingToBeSent()
+    {
+        await inputs.Queue(id, "first", true, CancellationToken.None);
+        published.Clear();
+
+        await inputs.SetPaused(id, true, CancellationToken.None);
+        await inputs.SetPaused(id, true, CancellationToken.None);
+
+        Assert.True(Assert.Single(Assert.Single(published).SavedInputs!).IsPaused);
+        Assert.True(inputs.HasQueued(id));
+        Assert.Empty(inputs.Waiting);
+        Assert.False(await inputs.SendNext(id, _ => throw new InvalidOperationException("Sent a paused input."), CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task SendNext_SendsTheOldestQueuedInputAndRemovesItOnlyOnceItWasSent()
+    {
+        await inputs.Save(id, "saved", true, CancellationToken.None);
+        await inputs.Queue(id, "first", true, CancellationToken.None);
+        await Task.Delay(5);
+        await inputs.Queue(id, "second", true, CancellationToken.None);
+        await Assert.ThrowsAsync<RequestException>(() => inputs.SendNext(id, _ => throw new RequestException("busy"), CancellationToken.None));
+        List<string> sent = [];
+
+        while (await inputs.SendNext(id, input =>
+        {
+            sent.Add(input.Text);
+            return Task.CompletedTask;
+        }, CancellationToken.None))
+        {
+        }
+
+        Assert.Equal(["first", "second"], sent);
+        Assert.Equal(["saved"], stored.Select(input => input.Text).ToList());
+        Assert.False(inputs.HasQueued(id));
+        Assert.Empty(inputs.Waiting);
+    }
+
+    [Fact]
+    public async Task SetAutoCommit_ChangesOneEntryWhichKeepsItWhenTakenAndTellsEveryClient()
+    {
+        SavedInput first = Assert.Single(await inputs.Save(id, "first", true, CancellationToken.None));
+        await Task.Delay(5);
+        await inputs.Queue(id, "second", false, CancellationToken.None);
+        published.Clear();
+
+        IReadOnlyList<SavedInput> changed = await inputs.SetAutoCommit(id, first.Id, false, CancellationToken.None);
+
+        Assert.Equal([("second", false), ("first", false)], changed.Select(input => (input.Text, input.AutoCommit)).ToList());
+        Assert.Single(published);
+        Assert.False((await inputs.Take(id, first.Id, CancellationToken.None)).AutoCommit);
+        await Assert.ThrowsAsync<RequestException>(() => inputs.SetAutoCommit(id, first.Id, true, CancellationToken.None));
+        Assert.True(inputs.HasQueued(id));
+    }
+
+    [Fact]
+    public async Task Keep_AndEntriesStoredBeforeTheyHadOneHaveAutoCommitOn()
+    {
+        Assert.True(Assert.Single(await inputs.Keep(id, "kept", CancellationToken.None)).AutoCommit);
+
+        SavedInput old = JsonSerializer.Deserialize<SavedInput>("{\"id\":\"0f8fad5b-d9cb-469f-a165-70867728950e\",\"text\":\"old\",\"time\":\"2026-01-01T00:00:00Z\"}", new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+
+        Assert.True(old.AutoCommit);
+        Assert.False(JsonSerializer.Deserialize<SavedInput>(JsonSerializer.Serialize(old with { AutoCommit = false }))!.AutoCommit);
+    }
+
+    [Fact]
+    public async Task Take_GivesAQueuedInputBackAsAnOrdinaryOneAndOutOfTheQueue()
+    {
+        SavedInput queued = Assert.Single(await inputs.Queue(id, "first", true, CancellationToken.None));
+
+        SavedInput taken = await inputs.Take(id, queued.Id, CancellationToken.None);
+
+        Assert.Equal(("first", false, false), (taken.Text, taken.IsQueued, taken.IsPaused));
+        Assert.False(inputs.HasQueued(id));
+        Assert.Empty(stored);
+    }
+
+    [Fact]
+    public async Task Save_DropsTheOldestSavedInputsBeforeAnyQueuedOne()
+    {
+        stored = [new SavedInput { Id = Guid.NewGuid(), Text = "queued long ago", Time = DateTimeOffset.UnixEpoch, IsQueued = true }, .. Enumerable.Range(1, 199).Select(index => new SavedInput { Id = Guid.NewGuid(), Text = $"saved {index}", Time = DateTimeOffset.UnixEpoch.AddMinutes(index) })];
+
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "newest", true, CancellationToken.None);
+
+        Assert.Equal(200, saved.Count);
+        Assert.Equal(["queued long ago", "newest"], saved.Take(2).Select(input => input.Text).ToList());
+        Assert.DoesNotContain(saved, input => input.Text == "saved 1");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   \n ")]
+    public async Task Queue_RefusesAnEmptyInput(string text) => await Assert.ThrowsAsync<RequestException>(() => inputs.Queue(id, text, true, CancellationToken.None));
+
     [Theory]
     [InlineData("")]
     [InlineData("   \n ")]
     public async Task Save_RefusesAnEmptyInput(string text)
     {
-        await Assert.ThrowsAsync<RequestException>(() => inputs.Save(id, text, CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => inputs.Save(id, text, true, CancellationToken.None));
 
         Assert.Empty(stored);
         Assert.Empty(published);
@@ -68,9 +182,9 @@ public sealed class SavedInputsTests
     [Fact]
     public async Task Save_RefusesATooLongInputAndKeepsTheTextExactly()
     {
-        await Assert.ThrowsAsync<RequestException>(() => inputs.Save(id, new string('x', 100001), CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => inputs.Save(id, new string('x', 100001), true, CancellationToken.None));
 
-        await inputs.Save(id, "  indented\n\ttext  ", CancellationToken.None);
+        await inputs.Save(id, "  indented\n\ttext  ", true, CancellationToken.None);
 
         Assert.Equal("  indented\n\ttext  ", Assert.Single(stored).Text);
     }
@@ -90,7 +204,7 @@ public sealed class SavedInputsTests
     {
         for (int number = 1; number <= 202; number++)
         {
-            await inputs.Save(id, $"entry {number}", CancellationToken.None);
+            await inputs.Save(id, $"entry {number}", true, CancellationToken.None);
         }
 
         Assert.Equal(200, stored.Count);
@@ -101,7 +215,7 @@ public sealed class SavedInputsTests
     [Fact]
     public async Task Take_RemovesTheEntryTellsEveryClientAndGivesItToOnlyOneCaller()
     {
-        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "later", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "later", true, CancellationToken.None);
         published.Clear();
 
         SavedInput taken = await inputs.Take(id, saved[0].Id, CancellationToken.None);
@@ -115,9 +229,9 @@ public sealed class SavedInputsTests
     [Fact]
     public async Task Take_LeavesTheOtherEntries()
     {
-        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "keep", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "keep", true, CancellationToken.None);
         await Task.Delay(5);
-        IReadOnlyList<SavedInput> both = await inputs.Save(id, "take", CancellationToken.None);
+        IReadOnlyList<SavedInput> both = await inputs.Save(id, "take", true, CancellationToken.None);
 
         await inputs.Take(id, both[0].Id, CancellationToken.None);
 
@@ -132,7 +246,7 @@ public sealed class SavedInputsTests
         workspaces.Setup(x => x.Get(other, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("No such workspace."));
 
         await Assert.ThrowsAsync<RequestException>(() => inputs.List(other, CancellationToken.None));
-        await Assert.ThrowsAsync<RequestException>(() => inputs.Save(other, "x", CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => inputs.Save(other, "x", true, CancellationToken.None));
         await Assert.ThrowsAsync<RequestException>(() => inputs.Take(other, Guid.NewGuid(), CancellationToken.None));
     }
 
@@ -239,7 +353,7 @@ public sealed class SavedInputsTests
     [Fact]
     public async Task Discard_RemovesAStoredEntryAndIgnoresOneThatIsGone()
     {
-        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "drop", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "drop", true, CancellationToken.None);
         published.Clear();
 
         Assert.Empty(await inputs.Discard(id, saved[0].Id, CancellationToken.None));
@@ -279,9 +393,46 @@ public sealed class SavedInputsTests
         speech.Setup(x => x.Transcribe(It.IsAny<string>(), It.IsAny<CancellationToken>())).Returns(new TaskCompletionSource<string>().Task);
         await inputs.Transcribe(id, "AQ==", CancellationToken.None);
 
-        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "typed", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "typed", true, CancellationToken.None);
 
         Assert.Equal([true, false], saved.Select(input => input.IsConverting).OrderByDescending(converting => converting));
         Assert.Equal(2, published[^1].SavedInputs!.Count);
+    }
+
+    [Fact]
+    public async Task Queue_RefusesMoreThanTheLimitAndSavingBesideAFullQueueLosesNothing()
+    {
+        stored = [.. Enumerable.Range(1, 200).Select(index => new SavedInput { Id = Guid.NewGuid(), Text = $"queued {index}", Time = DateTimeOffset.UnixEpoch.AddMinutes(index), IsQueued = true })];
+
+        RequestException refused = await Assert.ThrowsAsync<RequestException>(() => inputs.Queue(id, "one more", true, CancellationToken.None));
+        IReadOnlyList<SavedInput> saved = await inputs.Save(id, "kept", true, CancellationToken.None);
+
+        Assert.Equal("200 inputs are queued already.", refused.Message);
+        Assert.Equal(201, saved.Count);
+        Assert.Equal("kept", saved[^1].Text);
+    }
+
+    [Fact]
+    public async Task SendNext_NeverSendsAnInputTwiceThoughItCouldNotBeTakenOffTheDisk()
+    {
+        await inputs.Queue(id, "once", true, CancellationToken.None);
+        store.Setup(x => x.SaveInputs(id, It.IsAny<IReadOnlyList<SavedInput>>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("disk full"));
+
+        Assert.True(await inputs.SendNext(id, _ => Task.CompletedTask, CancellationToken.None));
+
+        Assert.False(await inputs.SendNext(id, _ => throw new InvalidOperationException("Sent it again."), CancellationToken.None));
+        Assert.Empty(await inputs.List(id, CancellationToken.None));
+        Assert.Empty(inputs.Waiting);
+    }
+
+    [Fact]
+    public async Task Forget_StopsCountingTheQueueOfAWorkspace()
+    {
+        await inputs.Queue(id, "left", true, CancellationToken.None);
+
+        inputs.Forget(id);
+
+        Assert.Empty(inputs.Waiting);
+        Assert.False(inputs.HasQueued(id));
     }
 }

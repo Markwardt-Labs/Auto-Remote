@@ -151,6 +151,16 @@ public sealed record AiEnvironment
     public double CodexMaxWindowPercent { get; init; } = 95;
 
     /// <summary>
+    /// Gets the prompt the review button sends in every workspace that has no review prompt of its own. It is never empty: an empty one is replaced by the default.
+    /// </summary>
+    public string ReviewPrompt { get; init; } = "review workspace and fix any problems or inconsistencies";
+
+    /// <summary>
+    /// Gets the prompt the expand button sends in every workspace that has no expand prompt of its own. It is never empty: an empty one is replaced by the default.
+    /// </summary>
+    public string ExpandPrompt { get; init; } = "expand upon content in workspace in areas that make sense";
+
+    /// <summary>
     /// Gets the maximum usage window share that applies to an AI provider.
     /// </summary>
     /// <param name="service">The provider.</param>
@@ -161,14 +171,4 @@ public sealed record AiEnvironment
         AiService.Codex => CodexMaxWindowPercent,
         _ => null
     };
-
-    /// <summary>
-    /// Gets the prompt the review button sends in every workspace that has no review prompt of its own. It is never empty: an empty one is replaced by the default.
-    /// </summary>
-    public string ReviewPrompt { get; init; } = "review workspace and fix any problems or inconsistencies";
-
-    /// <summary>
-    /// Gets the prompt the expand button sends in every workspace that has no expand prompt of its own. It is never empty: an empty one is replaced by the default.
-    /// </summary>
-    public string ExpandPrompt { get; init; } = "expand upon content in workspace in areas that make sense";
 }

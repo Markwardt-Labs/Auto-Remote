@@ -27,6 +27,23 @@ public sealed record SavedInput
     public bool IsConverting { get; init; }
 
     /// <summary>
+    /// Gets whether the changes are committed after the work the input starts, which the input takes with it into the message box and into the queue. On unless it was turned off.
+    /// </summary>
+    public bool AutoCommit { get; init; } = true;
+
+    /// <summary>
+    /// Gets whether the input is queued: the server sends it by itself once the work of the workspace is over, and commits the changes after it.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsQueued { get; init; }
+
+    /// <summary>
+    /// Gets whether the queued input is paused, since work was stopped, was cancelled or failed: it stays queued and is not sent until a user resumes the queue, work goes well again or another input is queued.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsPaused { get; init; }
+
+    /// <summary>
     /// Gets why a recording could not be turned into text, or <see langword="null" /> for every other entry. The entry only goes away when discarded.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
@@ -43,4 +60,16 @@ public sealed record SavedInput
     /// </summary>
     [JsonIgnore]
     public bool HasError => Error is not null;
+
+    /// <summary>
+    /// Gets what the auto commit button of a listed input says it does.
+    /// </summary>
+    [JsonIgnore]
+    public string AutoCommitTip => AutoCommit ? "Auto commit is on for this input. Press to turn it off." : "Auto commit is off for this input. Press to turn it on.";
+
+    /// <summary>
+    /// Gets what a list says about a queued input.
+    /// </summary>
+    [JsonIgnore]
+    public string QueueLabel => IsPaused ? "Queued, paused" : "Queued";
 }

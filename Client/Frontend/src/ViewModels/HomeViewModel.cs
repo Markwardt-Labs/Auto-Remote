@@ -417,9 +417,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets a value indicating whether the button that turns the ready notification on and off shows: the app can notify, and the focused workspace has work that is not over, being busy, looping, queued or waiting for tasks it delegated, or its notification is on.
+    /// Gets a value indicating whether the button that turns the ready notification on and off shows: the app can notify, and the focused workspace has work that is not over, being busy, looping, holding queued work or inputs or waiting for tasks it delegated, or its notification is on.
     /// </summary>
-    public bool CanNotify => notifier is not null && active is { } view && (view.NotifyWhenReady || view.State != WorkspaceState.Ready || view.IsLooping || view.Chat.IsQueued || HasTasksUnderWay(view.Workspace.Id));
+    public bool CanNotify => notifier is not null && active is { } view && (view.NotifyWhenReady || view.State != WorkspaceState.Ready || view.IsLooping || view.Chat.IsQueued || view.Chat.HasActiveQueued || HasTasksUnderWay(view.Workspace.Id));
 
     /// <summary>
     /// Gets a value indicating whether the user is told once the work of the focused workspace is over.
@@ -1412,7 +1412,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                     Conclude(created, workspace);
                 }
 
-                if (!created.IsLooping && time.GetUtcNow() - busySince >= minimumBusy)
+                if (!created.IsLooping && !created.Chat.HasActiveQueued && time.GetUtcNow() - busySince >= minimumBusy)
                 {
                     chime?.Play();
                 }
@@ -1435,9 +1435,22 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                 RaiseNotify();
             }
         };
+        bool hadQueued = created.Chat.HasActiveQueued;
         created.Chat.PropertyChanged += (_, args) =>
         {
-            if (created == active && args.PropertyName == nameof(ChatViewModel.IsQueued))
+            if (args.PropertyName == nameof(ChatViewModel.HasActiveQueued))
+            {
+                // The queued inputs can run out without the state changing, as when they are deleted or paused while the workspace is ready.
+                bool ranOut = hadQueued && !created.Chat.HasActiveQueued;
+                hadQueued = created.Chat.HasActiveQueued;
+
+                if (ranOut && created.State == WorkspaceState.Ready && !created.IsLooping && created.NotifyWhenReady)
+                {
+                    Conclude(created, workspace);
+                }
+            }
+
+            if (created == active && args.PropertyName is nameof(ChatViewModel.IsQueued) or nameof(ChatViewModel.HasActiveQueued))
             {
                 RaiseNotify();
             }
@@ -1493,8 +1506,8 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
         held.Remove(workspace.Id);
 
-        // Nor is it while a loop runs, between whose runs the workspace is ready.
-        if (view.IsLooping)
+        // Nor is it while queued inputs are still to be sent or work waits for the local AI (a queued input leaves the list only after it starts to wait there), or while a loop runs, between whose runs the workspace is ready.
+        if (view.Chat.HasActiveQueued || view.Chat.IsQueued || view.IsLooping)
         {
             return;
         }

@@ -120,6 +120,13 @@ internal interface ISwarmCoordinator
     Task Revoke(string peerId);
 
     /// <summary>
+    /// Checks whether the AI of a workspace delegated tasks whose outcome it has not been told yet, which its work goes on with.
+    /// </summary>
+    /// <param name="workspaceId">The workspace.</param>
+    /// <returns><see langword="true" /> if it has.</returns>
+    Task<bool> IsAwaited(Guid workspaceId);
+
+    /// <summary>
     /// Tells whether tasks a workspace delegated are still under way.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
@@ -661,6 +668,10 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
     }
 
     /// <inheritdoc />
+    public Task<bool> IsAwaited(Guid workspaceId)
+        => book.Read(document => document.Jobs.Any(job => job.WorkspaceId == workspaceId && !job.IsManual && !job.IsReported && document.Outgoing.Any(task => task.JobId == job.Id)));
+
+    /// <inheritdoc />
     public async Task<bool> IsUnderWay(Guid workspaceId)
         => await book.Read(document => document.Outgoing.Any(task => task.WorkspaceId == workspaceId && task.State is SwarmTaskState.Waiting or SwarmTaskState.Pending or SwarmTaskState.InTransit or SwarmTaskState.Queued or SwarmTaskState.Running)
             || document.Jobs.Any(job => job.WorkspaceId == workspaceId && !job.IsManual && !job.IsReported && document.Outgoing.Any(task => task.JobId == job.Id)));
@@ -1100,7 +1111,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         return changed.Count;
     }
 
-    private string? Limit(string? text, int limit) => text is { Length: var length } && length > limit ? $"{text[..limit]}..." : text;
+    private string? Limit(string? text, int limit) => text is not null && text.Length > limit ? $"{text[..limit]}..." : text;
 
     private async Task<string?> Folder(Guid workspaceId)
     {

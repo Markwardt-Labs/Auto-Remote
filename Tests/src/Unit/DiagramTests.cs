@@ -21,7 +21,7 @@ public sealed class DiagramTests(HeadlessFixture fixture)
         });
         DiagramSource source = new(connection.Object);
 
-        (DiagramPicture[] pictures, bool found, bool sameFound) = await fixture.RunAsync(async () =>
+        (DiagramPicture[] pictures, bool found, bool sameFound) = await fixture.Dispatch(async () =>
         {
             Task<DiagramPicture>[] waiting = [source.Draw("graph TD\n  A --> B", CancellationToken.None), source.Draw(" graph TD\n  A --> B ", CancellationToken.None)];
             DiagramPicture[] done = await Task.WhenAll(waiting);
@@ -42,7 +42,7 @@ public sealed class DiagramTests(HeadlessFixture fixture)
         connection.Setup(x => x.RenderDiagram(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20000\" height=\"400\"><rect width=\"20000\" height=\"400\" fill=\"#2D2D2D\"/></svg>");
         DiagramSource source = new(connection.Object);
 
-        DiagramPicture picture = await fixture.RunAsync(() => source.Draw("graph LR\n  A --> B", CancellationToken.None));
+        DiagramPicture picture = await fixture.Dispatch(() => source.Draw("graph LR\n  A --> B", CancellationToken.None));
 
         Assert.Equal((20000d, 400d), (picture.Width, picture.Height));
         Assert.InRange(picture.Width * picture.Scale, 1, 4096);
@@ -55,7 +55,7 @@ public sealed class DiagramTests(HeadlessFixture fixture)
         connection.Setup(x => x.RenderDiagram("odd", It.IsAny<CancellationToken>())).ReturnsAsync("this is not svg");
         DiagramSource source = new(connection.Object);
 
-        (RemoteException? refused, InvalidDataException? odd) = await fixture.RunAsync(async () =>
+        (RemoteException? refused, InvalidDataException? odd) = await fixture.Dispatch(async () =>
         {
             RemoteException? refused = null;
             InvalidDataException? odd = null;

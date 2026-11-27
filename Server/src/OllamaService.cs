@@ -64,6 +64,40 @@ internal interface IOllamaService : IAsyncDisposable
 /// <param name="unit">The systemd unit of Ollama, or <see langword="null" /> for the real one.</param>
 internal sealed class OllamaService(Func<Uri, CancellationToken, Task<bool>>? reachable = null, Func<string, IReadOnlyDictionary<string, string>, IOllamaRun?>? launch = null, IOllamaServiceUnit? unit = null) : IOllamaService
 {
+    private static async Task<bool> Answers(Uri server, CancellationToken cancellation)
+    {
+        try
+        {
+            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(2) };
+            using HttpResponseMessage response = await client.GetAsync(new Uri(server, "/api/version"), cancellation);
+            return response.IsSuccessStatusCode;
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellation.IsCancellationRequested)
+        {
+            return false;
+        }
+    }
+
+    private static IOllamaRun? Launch(string command, IReadOnlyDictionary<string, string> variables)
+    {
+        ProcessStartInfo info = new(command) { UseShellExecute = false };
+        info.ArgumentList.Add("serve");
+
+        foreach ((string name, string value) in variables)
+        {
+            info.Environment[name] = value;
+        }
+
+        try
+        {
+            return Process.Start(info) is { } process ? new OllamaProcess(process) : null;
+        }
+        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
     private readonly IOllamaServiceUnit systemd = unit ?? new OllamaServiceUnit();
 
     private bool control;
@@ -204,40 +238,6 @@ internal sealed class OllamaService(Func<Uri, CancellationToken, Task<bool>>? re
         run?.Dispose();
         run = null;
         return ValueTask.CompletedTask;
-    }
-
-    private static async Task<bool> Answers(Uri server, CancellationToken cancellation)
-    {
-        try
-        {
-            using HttpClient client = new() { Timeout = TimeSpan.FromSeconds(2) };
-            using HttpResponseMessage response = await client.GetAsync(new Uri(server, "/api/version"), cancellation);
-            return response.IsSuccessStatusCode;
-        }
-        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException && !cancellation.IsCancellationRequested)
-        {
-            return false;
-        }
-    }
-
-    private static IOllamaRun? Launch(string command, IReadOnlyDictionary<string, string> variables)
-    {
-        ProcessStartInfo info = new(command) { UseShellExecute = false };
-        info.ArgumentList.Add("serve");
-
-        foreach ((string name, string value) in variables)
-        {
-            info.Environment[name] = value;
-        }
-
-        try
-        {
-            return Process.Start(info) is { } process ? new OllamaProcess(process) : null;
-        }
-        catch (Exception exception) when (exception is Win32Exception or InvalidOperationException)
-        {
-            return null;
-        }
     }
 
     private Uri? Address(AiEnvironment environment) => Uri.TryCreate(environment.LocalServer, UriKind.Absolute, out Uri? address) && address.Scheme is "http" or "https" && address.IsLoopback ? address : null;

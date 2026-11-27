@@ -335,6 +335,47 @@ public sealed class WorkQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task YieldLoop_TakesTheWaitingRunOutOfTheLineWithoutCountingItAsDroppedAndLeavesOtherWorkWaiting()
+    {
+        Guid one = Workspace("one");
+        Guid looping = Workspace("looping");
+        Guid other = Workspace("other");
+        await Submit(one, "a");
+        WorkTicket run = await Submit(looping, "loop", WorkSource.Loop);
+        await Submit(other, "mine");
+        List<RemoteEvent> emptied = [];
+        events.Subscribe(remoteEvent =>
+        {
+            if (remoteEvent is { Kind: RemoteEventKind.QueueChanged, Queue: null })
+            {
+                lock (emptied)
+                {
+                    emptied.Add(remoteEvent);
+                }
+            }
+        });
+
+        await queue.YieldLoop(looping);
+        await queue.YieldLoop(other);
+
+        Assert.False(await run.Started);
+        Assert.Null(queue.Get(looping));
+        Assert.Equal("mine", queue.Get(other)?.Text);
+        await Until(() =>
+        {
+            lock (emptied)
+            {
+                return emptied.Any(remoteEvent => remoteEvent.WorkspaceId == looping);
+            }
+        });
+
+        lock (emptied)
+        {
+            Assert.Null(emptied.First(remoteEvent => remoteEvent.WorkspaceId == looping).Text);
+        }
+    }
+
+    [Fact]
     public async Task Withdraw_TakesOnlyTheGivenTextOutOfWhatWaitsAndDropsWhatHoldsNothingElse()
     {
         Guid one = Workspace("one");
@@ -599,5 +640,79 @@ public sealed class WorkQueueTests : IDisposable
         Assert.Empty(restarted.Waiting);
         Assert.Null(restarted.Get(third));
         Assert.Null(restarted.Get(looping));
+    }
+
+    [Fact]
+    public async Task SubmitWhenFree_JoinsNoOtherWorkAndSaysWhenThePromptIsTheWorkspaces()
+    {
+        Guid one = Workspace("one");
+        Guid two = Workspace("two");
+        await Submit(one, "a");
+        int taken = 0;
+
+        WorkTicket waiting = await queue.SubmitWhenFree(two, "b", () => taken++, CancellationToken.None);
+
+        Assert.True(waiting.Queued);
+        Assert.Equal(1, taken);
+        await Assert.ThrowsAsync<RequestException>(() => queue.SubmitWhenFree(two, "c", () => taken++, CancellationToken.None));
+        await Assert.ThrowsAsync<RequestException>(() => queue.SubmitWhenFree(one, "c", () => taken++, CancellationToken.None));
+        Assert.Equal(1, taken);
+        Assert.Equal("b", queue.Get(two)?.Text);
+    }
+
+    [Fact]
+    public async Task SubmitWhenFree_ThatStartsAtOnceIsSentOnlyToAnIdleAi()
+    {
+        Guid one = Workspace("one");
+        TaskCompletionSource held = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        prompts.Setup(x => x.PromptWhenIdle(one, "a", It.IsAny<Action>(), It.IsAny<CancellationToken>())).Returns(held.Task);
+
+        Task<WorkTicket> sending = queue.SubmitWhenFree(one, "a", () => { }, CancellationToken.None);
+
+        await Until(() => queue.IsStarting(one));
+        held.SetResult();
+        Assert.False((await sending).Queued);
+        Assert.False(queue.IsStarting(one));
+    }
+
+    [Theory]
+    [InlineData(AutoCommitState.On, true)]
+    [InlineData(AutoCommitState.Off, false)]
+    public async Task WaitingWorkThatIsToBeCommittedStillIsAfterARestart(AutoCommitState last, bool committed)
+    {
+        Guid running = Workspace("running");
+        Guid second = Workspace("second");
+        await queue.Open(temp.Path, CancellationToken.None);
+        await Submit(running, "a");
+        await Submit(second, "b");
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.AutoCommitChanged, WorkspaceId = second, AutoCommit = AutoCommitState.On });
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.AutoCommitChanged, WorkspaceId = second, AutoCommit = last });
+        string file = Path.Combine(temp.Path, "queue.json");
+        await Until(() => File.ReadAllText(file).Contains("autoCommit", StringComparison.Ordinal) == committed);
+        busy.Clear();
+        WorkQueue restarted = new(workspaces.Object, prompts.Object, host.Object, new WorkspaceActivity(events), savedInputs.Object, new EventHub());
+
+        await restarted.Open(temp.Path, CancellationToken.None);
+
+        Assert.Equal(committed ? [second] : [], restarted.RestoredCommits);
+    }
+
+    [Fact]
+    public async Task WaitingWorkThatCannotStartGivesUpOnWhatWasToFollowIt()
+    {
+        Mock<IWorkCompletion> completion = new();
+        // This one hears of the work like the queue of every other test, which has nothing of its own to start here.
+        WorkQueue followed = new(workspaces.Object, prompts.Object, host.Object, activity, savedInputs.Object, events, () => completion.Object);
+        Guid one = Workspace("one");
+        Guid two = Workspace("two");
+        await followed.Submit(one, "a", WorkSource.Direct, CancellationToken.None);
+        WorkTicket waiting = await followed.Submit(two, "b", WorkSource.Direct, CancellationToken.None);
+        refusal = "No model.";
+
+        Finish(one);
+
+        await Assert.ThrowsAsync<RequestException>(() => waiting.Started.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        completion.Verify(x => x.Abandon(two), Times.Once);
     }
 }

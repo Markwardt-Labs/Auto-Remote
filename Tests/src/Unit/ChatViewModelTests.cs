@@ -377,7 +377,7 @@ public sealed class ChatViewModelTests
     public async Task SaveInput_SavesTheTextOnTheServerShowsTheListAndClearsTheMessageBox()
     {
         SavedInput entry = Saved("later");
-        connection.Setup(x => x.SaveInput(workspaceId, "later", It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
+        connection.Setup(x => x.SaveInput(workspaceId, "later", true, It.IsAny<CancellationToken>())).ReturnsAsync([entry]);
         chat.Input = "later";
 
         chat.SaveInputCommand.Execute(null);
@@ -391,7 +391,7 @@ public sealed class ChatViewModelTests
     [Fact]
     public async Task SaveInput_KeepsTheTextAndShowsTheErrorWhenTheServerRefuses()
     {
-        connection.Setup(x => x.SaveInput(workspaceId, "later", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The input is too long."));
+        connection.Setup(x => x.SaveInput(workspaceId, "later", true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The input is too long."));
         chat.Input = "later";
 
         chat.SaveInputCommand.Execute(null);

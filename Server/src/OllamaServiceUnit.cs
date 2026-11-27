@@ -75,6 +75,34 @@ internal interface IOllamaServiceUnit
 /// <param name="read">Reads a text file, or gives <see langword="null" /> when it does not exist; <see langword="null" /> here reads the real file.</param>
 internal sealed class OllamaServiceUnit(Func<ProcessStartInfo, string?, CancellationToken, Task<(int Code, string Output, string Errors)>>? run = null, Func<string, bool>? exists = null, Func<string, string?>? read = null) : IOllamaServiceUnit
 {
+    private static async Task<(int Code, string Output, string Errors)> Execute(ProcessStartInfo info, string? input, CancellationToken cancellation)
+    {
+        info.RedirectStandardInput = true;
+        info.RedirectStandardOutput = true;
+        info.RedirectStandardError = true;
+        using Process process = Process.Start(info) ?? throw new Win32Exception("The process could not be started.");
+
+        try
+        {
+            Task<string> output = process.StandardOutput.ReadToEndAsync(cancellation);
+            Task<string> errors = process.StandardError.ReadToEndAsync(cancellation);
+
+            if (input is not null)
+            {
+                await process.StandardInput.WriteAsync(input.AsMemory(), cancellation);
+            }
+
+            process.StandardInput.Close();
+            await process.WaitForExitAsync(cancellation);
+            return (process.ExitCode, await output, await errors);
+        }
+        catch (OperationCanceledException)
+        {
+            process.Kill(true);
+            throw;
+        }
+    }
+
     private readonly Func<ProcessStartInfo, string?, CancellationToken, Task<(int Code, string Output, string Errors)>> execute = run ?? Execute;
 
     private readonly Func<string, bool> folderExists = exists ?? Directory.Exists;
@@ -178,34 +206,6 @@ internal sealed class OllamaServiceUnit(Func<ProcessStartInfo, string?, Cancella
             {
                 File.Delete(staged);
             }
-        }
-    }
-
-    private static async Task<(int Code, string Output, string Errors)> Execute(ProcessStartInfo info, string? input, CancellationToken cancellation)
-    {
-        info.RedirectStandardInput = true;
-        info.RedirectStandardOutput = true;
-        info.RedirectStandardError = true;
-        using Process process = Process.Start(info) ?? throw new Win32Exception("The process could not be started.");
-
-        try
-        {
-            Task<string> output = process.StandardOutput.ReadToEndAsync(cancellation);
-            Task<string> errors = process.StandardError.ReadToEndAsync(cancellation);
-
-            if (input is not null)
-            {
-                await process.StandardInput.WriteAsync(input.AsMemory(), cancellation);
-            }
-
-            process.StandardInput.Close();
-            await process.WaitForExitAsync(cancellation);
-            return (process.ExitCode, await output, await errors);
-        }
-        catch (OperationCanceledException)
-        {
-            process.Kill(true);
-            throw;
         }
     }
 

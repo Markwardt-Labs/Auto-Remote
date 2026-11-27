@@ -3,6 +3,8 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// A pairing found on the drive, with the button that confirms it after the fingerprints were compared.
 /// </summary>
+/// <param name="pairing">The pairing found on the drive.</param>
+/// <param name="confirm">Pairs with the server once the user confirms.</param>
 internal sealed class SwarmPairingViewModel(SwarmDrivePairing pairing, Func<SwarmDrivePairing, Task> confirm)
 {
     /// <summary>

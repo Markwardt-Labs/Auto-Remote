@@ -36,6 +36,7 @@ public interface IAppInfo
     }
 }
 
+/// <inheritdoc />
 internal sealed class AppInfo(string version) : IAppInfo
 {
     /// <inheritdoc />

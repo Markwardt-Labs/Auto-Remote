@@ -3026,7 +3026,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Avalonia.Threading.Dispatcher.UIThread.RunJobs();
             window.UpdateLayout();
             bool after = Visible<TextBlock>(block => block.Text).Contains("Listening...");
-            string[] listed = [.. Visible<TextBlock>(block => block.Text).Where(text => text is "Turning speech into text..." or "Nothing was heard." or "ready text"), .. Visible<TouchButton>(button => button.Content as string).Where(text => text is "Cancel" or "Dismiss")];
+            string[] listed = [.. Visible<TextBlock>(block => block.Text).Where(text => text is "Turning speech into text..." or "Nothing was heard." or "ready text"), .. Visible<TouchButton>(button => button.Classes.Contains("deleteSaved") ? "delete" : null)];
             window.Close();
             return (before, recording, after, listed);
         });
@@ -3034,7 +3034,8 @@ public sealed class ViewTests(HeadlessFixture fixture)
         Assert.False(before);
         Assert.Equal(["Listening...", "0:00", "Complete", "Cancel"], recording);
         Assert.False(after);
-        Assert.Equal(["Turning speech into text...", "Nothing was heard.", "ready text", "Cancel", "Dismiss"], listed);
+        // Every entry can be deleted, one still being converted too.
+        Assert.Equal(["Turning speech into text...", "Nothing was heard.", "ready text", "delete", "delete", "delete"], listed);
     }
 
     [Fact]
@@ -3174,7 +3175,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [] });
         connection.Setup(x => x.RenameWorkspace(workspace.Id, "other", It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
 
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             HomeViewModel model = new(connection.Object, ClientLayout.Panels);
             await model.Start(workspace.Id);
@@ -3264,6 +3265,138 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal((1, true), (dashed, named));
+    }
+
+    [Theory]
+    [InlineData(360, "")]
+    [InlineData(360, "some words")]
+    [InlineData(1280, "some words")]
+    public async Task ChatInputRow_KeepsEveryButtonOnScreenWithAutoCommitAndQueueAndMarksQueuedInputsInTheList(int width, string typed)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        SavedInput queued = new() { Id = Guid.NewGuid(), Text = "run next", Time = DateTimeOffset.UtcNow, IsQueued = true };
+        SavedInput saved = new() { Id = Guid.NewGuid(), Text = "kept", Time = DateTimeOffset.UtcNow, AutoCommit = false };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([queued, saved]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = true, AutoCommit = AutoCommitState.On });
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main" });
+
+        (string[] shown, double furthest, double box, bool toggled, string[] rows, bool asked, string[] question, bool[] commits, string chip) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, width < 600 ? ClientLayout.Tabs : ClientLayout.Panels, null, null, null, null, null, Mock.Of<IVoiceRecorder>());
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = width, Height = 800, Content = view };
+            window.Show();
+            model.IsDrawerOpen = false;
+            model.Active!.Chat.Input = typed;
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            Grid row = window.GetVisualDescendants().OfType<Grid>().Single(grid => grid.Name == "ChatInputRow");
+            List<TouchButton> buttons = [.. row.GetVisualDescendants().OfType<TouchButton>().Where(button => button.IsEffectivelyVisible)];
+            string[] shown = [.. buttons.Select(button => button.Name).Where(name => name is "AutoCommitButton" or "QueueButton").Select(name => name!)];
+            double furthest = buttons.Max(button => Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(button.Bounds.Width, 0), row)!.Value.X) - row.Bounds.Width;
+            double box = row.GetVisualDescendants().OfType<TextBox>().Single(found => found.Name == "ChatInput").Bounds.Width;
+            bool toggled = buttons.Single(button => button.Name == "AutoCommitButton").Classes.Contains("toggled");
+            model.Active.Chat.Input = string.Empty;
+            model.Active.Chat.ToggleSavedInputsCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            ItemsControl list = window.GetVisualDescendants().OfType<ItemsControl>().Single(found => found.Name == "SavedInputList");
+            string[] rows = [.. list.GetVisualDescendants().OfType<Border>().Where(border => border.Classes.Contains("savedRow")).Select(border => $"{(border.Classes.Contains("queued") ? "queued " : string.Empty)}{string.Join('/', border.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible && block.Text is "Queued" or "run next" or "kept").Select(block => block.Text))} {border.GetVisualDescendants().OfType<TouchButton>().Count(button => button.Classes.Contains("deleteSaved"))}")];
+            // Each entry says for itself whether it is committed after.
+            bool[] commits = [.. list.GetVisualDescendants().OfType<TouchButton>().Where(button => button.Classes.Contains("savedCommit") && button.IsEffectivelyVisible).Select(button => button.Classes.Contains("toggled"))];
+            connection.Setup(x => x.TakeSavedInput(workspace.Id, saved.Id, It.IsAny<CancellationToken>())).ReturnsAsync(saved);
+            model.Active.Chat.LoadSavedInputCommand.Execute(saved);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            TouchButton loaded = window.GetVisualDescendants().OfType<TouchButton>().Single(button => button.Name == "LoadedAutoCommitButton");
+            string chip = loaded.IsEffectivelyVisible ? string.Join(' ', loaded.GetVisualDescendants().OfType<TextBlock>().Select(block => block.Text)) : "hidden";
+            model.Active.Chat.Input = string.Empty;
+            model.Active.Chat.ToggleSavedInputsCommand.Execute(null);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            list = window.GetVisualDescendants().OfType<ItemsControl>().Single(found => found.Name == "SavedInputList");
+            TouchButton remove = list.GetVisualDescendants().OfType<TouchButton>().First(button => button.Classes.Contains("deleteSaved"));
+            remove.Command!.Execute(remove.CommandParameter);
+            Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+            window.UpdateLayout();
+            Border dialog = window.GetVisualDescendants().OfType<Border>().Single(found => found.Name == "DeleteSavedInputDialog");
+            bool asked = dialog.IsEffectivelyVisible;
+            string[] question = [.. dialog.GetVisualDescendants().OfType<TouchButton>().Select(button => (string)button.Content!)];
+            window.Close();
+            model.Dispose();
+            return (shown, furthest, box, toggled, rows, asked, question, commits, chip);
+        });
+
+        Assert.Equal(typed.Length > 0 ? ["AutoCommitButton", "QueueButton"] : ["AutoCommitButton"], shown);
+        Assert.True(furthest <= 0.5, $"A button reaches {furthest} past the row.");
+        Assert.True(box >= 60, $"The message box is {box} wide.");
+        Assert.True(toggled);
+        Assert.Equal(["queued Queued/run next 1", "kept 1"], rows);
+        Assert.True(asked);
+        Assert.Equal(["Delete", "Cancel"], question);
+        Assert.Equal([true, false], commits);
+        Assert.Equal("Auto Commit Already On for Current Work", chip);
+    }
+
+    [Theory]
+    [InlineData(360)]
+    [InlineData(1280)]
+    public async Task QueueAndLoopNotices_ShowWithAResumeButtonACountAndLabelledAutoCommitButtonsThatFit(int width)
+    {
+        WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
+        SavedInput paused = new() { Id = Guid.NewGuid(), Text = "later", Time = DateTimeOffset.UtcNow, IsQueued = true, IsPaused = true };
+        SavedInput loaded = new() { Id = Guid.NewGuid(), Text = "kept", Time = DateTimeOffset.UtcNow, AutoCommit = false };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [workspace] });
+        connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([paused, paused with { Id = Guid.NewGuid() }, loaded]);
+        connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [], Working = true, AutoCommit = AutoCommitState.On });
+        connection.Setup(x => x.GetUsage(AiService.ClaudeCode, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.ClaudeCode, Windows = [] });
+        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main" });
+        connection.Setup(x => x.TakeSavedInput(workspace.Id, loaded.Id, It.IsAny<CancellationToken>())).ReturnsAsync(loaded);
+
+        (string badge, string[] banner, string loop, string[] buttons, double furthest, double box) = await fixture.Run(() =>
+        {
+            HomeViewModel model = new(connection.Object, width < 600 ? ClientLayout.Tabs : ClientLayout.Panels);
+            model.Start().GetAwaiter().GetResult();
+            HomeView view = new() { DataContext = model };
+            Window window = new() { Width = width, Height = 800, Content = view };
+            window.Show();
+            model.IsDrawerOpen = false;
+
+            void Settle()
+            {
+                Avalonia.Threading.Dispatcher.UIThread.RunJobs();
+                window.UpdateLayout();
+            }
+
+            string[] Texts(Control root) => [.. root.GetVisualDescendants().OfType<TextBlock>().Where(block => block.IsEffectivelyVisible && !string.IsNullOrEmpty(block.Text)).Select(block => block.Text!)];
+            Control Named<T>(string name) where T : Control => window.GetVisualDescendants().OfType<T>().Single(found => found.Name == name);
+            Settle();
+            string badge = string.Join(' ', Texts(Named<Border>("QueuedBadge")));
+            string[] banner = Texts(Named<Border>("QueuePausedBanner"));
+            connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x" }, StartedAt = DateTimeOffset.UnixEpoch } });
+            Settle();
+            string loop = string.Join(' ', Texts(Named<Border>("LoopWaitingBanner")));
+            model.Active!.Chat.LoadSavedInputCommand.Execute(loaded);
+            Settle();
+            TouchButton upper = (TouchButton)Named<TouchButton>("LoadedAutoCommitButton");
+            Grid row = (Grid)Named<Grid>("ChatInputRow");
+            string[] buttons = [string.Join(' ', Texts(upper)), upper.IsEffectivelyEnabled ? "enabled" : "disabled", string.Join(' ', Texts(Named<TextBlock>("LoadedAutoCommitNote").Parent as Control ?? upper).Where(text => text.StartsWith("Queuing", StringComparison.Ordinal))), Named<TextBlock>("AutoCommitLabel").IsEffectivelyVisible ? ((TextBlock)Named<TextBlock>("AutoCommitLabel")).Text!.ReplaceLineEndings(" ") : "unlabelled"];
+            double furthest = row.GetVisualDescendants().OfType<TouchButton>().Where(button => button.IsEffectivelyVisible).Max(button => Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(button.Bounds.Width, 0), row)!.Value.X) - row.Bounds.Width;
+            double box = row.GetVisualDescendants().OfType<TextBox>().Single(found => found.Name == "ChatInput").Bounds.Width;
+            window.Close();
+            model.Dispose();
+            return (badge, banner, loop, buttons, furthest, box);
+        });
+
+        Assert.Equal("2", badge);
+        Assert.Equal(["Queue paused (2)", "Work was stopped, cancelled or failed, or the server restarted.", "Resume Queue"], banner);
+        Assert.Equal("Loop waiting for the current work to finish.", loop);
+        Assert.Equal(["Auto Commit Already On for Current Work", "disabled", "Queuing or saving it keeps its own setting: off.", "Current Work"], buttons);
+        Assert.True(furthest <= 0.5, $"A button reaches {furthest} past the row.");
+        Assert.True(box >= 60, $"The message box is {box} wide.");
     }
 
     [Fact]

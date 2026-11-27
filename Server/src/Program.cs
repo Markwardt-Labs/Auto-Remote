@@ -43,15 +43,16 @@ internal static class Program
         IUsageService usage = new UsageService(host);
         ISessionTools? tools = null;
         ISideIntegrations? integrations = null;
+        IFollowUps? followUps = null;
         IShellCommandLog shellCommands = new ShellCommandLog();
-        IPromptService prompts = new PromptService(workspaces, store, host, events, activity, snapshots, usage, () => tools, shellCommands);
+        IPromptService prompts = new PromptService(workspaces, store, host, events, activity, snapshots, usage, () => tools, shellCommands, () => followUps);
         ISpeechService speech = new SpeechService(new WhisperEngine());
         ISavedInputs savedInputs = new SavedInputs(store, workspaces, events, speech);
-        IWorkQueue queue = new WorkQueue(workspaces, prompts, host, activity, savedInputs, events);
+        IWorkQueue queue = new WorkQueue(workspaces, prompts, host, activity, savedInputs, events, () => followUps);
         IWorkspaceVersioning versioning = new WorkspaceVersioning(git, prompts, events, activity, queue);
         IScriptRunner scripts = new ScriptRunner(events);
         IWindowGuard guard = new WindowGuard(workspaces, prompts, usage, host, events);
-        IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events, null, null, null, guard, queue, id => integrations?.IsDelivering(id) == true);
+        IWorkspaceLoops loops = new WorkspaceLoops(workspaces, prompts, activity, usage, events, null, null, null, guard, queue, id => integrations?.IsDelivering(id) == true, () => followUps);
         ISwarmBook swarmBook = new SwarmBook(events, new ISwarmIdentity.Factory());
         ISwarmCourier courier = new SwarmCourier(swarmBook, new SwarmSealer());
         ISwarmRepository repository = new SwarmRepository(git);
@@ -66,8 +67,9 @@ internal static class Program
         IWorkspaceWatcher watcher = new WorkspaceWatcher(events, log);
         ISideSessionRepository sideRepository = new SideSessionRepository(git);
         ISideSessions sideSessions = new SideSessions(workspaces, sideRepository, store, prompts, queue, loops, scripts, guard, snapshots, watcher, events, log);
-        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, queue, activity, loops, scripts, guard, snapshots, events, log, swarm);
-        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater, log, queue, swarm, sideSessions, integrations, sideRepository, resources);
+        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, queue, activity, loops, scripts, guard, snapshots, events, log, swarm, null, null, () => followUps);
+        followUps = new FollowUps(workspaces, savedInputs, prompts, queue, activity, versioning, git, loops, guard, events, swarm.IsAwaited, id => integrations.IsDelivering(id) || swarm.IsDelegated(id), null, integrations.Reopen);
+        IRequestHandler requestHandler = new RequestHandler(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater, log, queue, swarm, sideSessions, integrations, sideRepository, resources, followUps);
         IApplication application = new Application(info, new ConfigLoader(), requestHandler, new ConnectionServer(new Handshake(info), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), requestHandler, events, log, new LocalListener(info, new LocalEndpoint(), new ILocalAccess.Factory(), log), link), Console.Out);
         int code;
 

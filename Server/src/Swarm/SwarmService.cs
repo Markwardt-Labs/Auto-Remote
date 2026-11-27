@@ -159,6 +159,13 @@ internal interface ISwarmService
     Task CancelByOwner(Guid workspaceId);
 
     /// <summary>
+    /// Checks whether the AI of a workspace delegated tasks whose outcome it has not been told yet.
+    /// </summary>
+    /// <param name="workspaceId">The workspace.</param>
+    /// <returns><see langword="true" /> if it has.</returns>
+    Task<bool> IsAwaited(Guid workspaceId);
+
+    /// <summary>
     /// Tells whether tasks a workspace delegated are still under way.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
@@ -438,6 +445,9 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
 
     /// <inheritdoc />
     public async Task<bool> IsDelegating(Guid workspaceId) => open && await coordinator.IsUnderWay(workspaceId);
+
+    /// <inheritdoc />
+    public async Task<bool> IsAwaited(Guid workspaceId) => open && await coordinator.IsAwaited(workspaceId);
 
     /// <inheritdoc />
     public async Task Forget(Guid workspaceId)

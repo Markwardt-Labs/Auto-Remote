@@ -11,7 +11,7 @@ public sealed class ClientScenarios(HeadlessFixture fixture)
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("follow", service);
 
-        (List<(MessageRole, string)> shown, List<(MessageRole, string)> stored) = await fixture.RunAsync<(List<(MessageRole, string)>, List<(MessageRole, string)>)>(async () =>
+        (List<(MessageRole, string)> shown, List<(MessageRole, string)> stored) = await fixture.Dispatch<(List<(MessageRole, string)>, List<(MessageRole, string)>)>(async () =>
         {
             IServerConnection connection = await new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>()).Connect(server.Settings, CancellationToken.None);
             WorkspaceViewModel model = new(connection, workspace, ClientLayout.Panels);

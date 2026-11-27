@@ -47,7 +47,8 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `workspaceId` | GUID | per command | The workspace targeted. |
 | `groupId` | GUID | per command | The group targeted; for `MoveWorkspace`, omitted means no group; for `CreateWorkspace` and `CloneWorkspace`, the group the new workspace is filed in (omitted: the top level), refused when it no longer exists. |
 | `parentId` | GUID | no | `CreateGroup` and `MoveGroup`: the group to put the group in; omitted means the top level. |
-| `inputId` | GUID | `TakeSavedInput`, `DiscardSavedInput` | The saved input to take or discard. |
+| `inputId` | GUID | `TakeSavedInput`, `DiscardSavedInput`, `SetSavedInputAutoCommit` | The saved input meant. |
+| `autoCommit` | bool | no | `SaveInput` and `QueueInput`: whether the work the input starts is committed, `true` when omitted. `Prompt`: `true` turns auto commit on for the work the prompt starts or joins, except during a run of a loop; otherwise it is left as it is. |
 | `before` | string | no | `GetHistory` only: read the messages before this cursor (the `older` of an earlier chunk); omitted means the newest. The cursor is the position, counted from the oldest message the client may be shown (work messages count only while the workspace shows its work), of the first message after it: a client that drops the oldest messages it holds adds their number to the cursor it has to read before the first message it keeps, and clients ask for 100 messages at a time. |
 | `characters` | number | no | `GetHistory`: the most characters of text to read, at least one message always; 20,000 when omitted, at most 400,000. A chunk ends at whichever of `limit` and `characters` is reached first. |
 | `limit` | number | no | `GetHistory`: the most messages to read; 50 when omitted, at most 200. `GetGitHistory`: the most commits to read; 30 when omitted, at most 200. |
@@ -58,19 +59,19 @@ Every message is one line of JSON. Property names are camelCase, enums are strin
 | `settings` | workspace settings | `SetWorkspaceSettings` | How the workspace's AI session is run. |
 | `aiEnvironment` | ai environment | `SetAiEnvironment` | The environment of the server's AI. |
 | `loop` | loop settings | `StartLoop` | What the loop sends, how often and when it ends. |
-| `name` | string | per command | A folder name, a group name, a branch or tag name, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
+| `name` | string | per command | A folder name, a group name, a side session name, a branch or tag name, the git user name for `GitSetIdentity`, the name of the folder `CloneWorkspace` creates, or the file name for `UploadAttachment`. |
 | `data` | string | `UploadAttachment`, `TranscribeSavedInput` | The file content or the WAV recording, base64 encoded. |
 | `path` | string | per command | A folder or file path; for `CloneWorkspace` the existing folder to clone into; for the script commands the `.cs` or `.task` file. |
 | `environment` | object, optional | `RunScript` | The client's `DISPLAY`, `WAYLAND_DISPLAY`, `XAUTHORITY` and `XDG_SESSION_TYPE`, when it has them. |
 | `url` | string | `CloneWorkspace`, `GitSetRemote`, `ListLocalModels`, `ListImageModels` | A git repository URL; for the two list commands the optional address of the model server or image server to ask, the one of the environment when omitted. |
-| `enabled` | bool | `ConfigureOllamaService`, `SetIntegrateWhenFinished` | Whether the Ollama service runs with the optimized context settings, or whether the side session is integrated once it is finished (required for both). |
+| `enabled` | bool | `ConfigureOllamaService`, `SetIntegrateWhenFinished`, `SetAutoCommit`, `SetSavedInputAutoCommit` | Whether the Ollama service runs with the optimized context settings, whether the side session is integrated once it is finished, or whether auto commit is on, for the work under way or for a saved input (required for each). |
 | `start` | string | `CreateSideSession` | What the session's files start from: `Commit` (main's current commit) or `Files` (main's files as they are, uncommitted changes included). |
 | `password` | string, optional | `ConfigureOllamaService` | The password of the account the server runs as, for `sudo`, when `ollamaServiceNeedsPassword` says it is needed. Handed to `sudo` on its standard input only; never stored, logged or put in a command line. |
 | `commit` | string | per command | A commit hash, 4 to 64 hexadecimal characters. |
 | `base` | string | per command | The branch to compare with, rebase onto, squash against or merge into. |
 | `email` | string | `GitSetIdentity` | The git email. |
 | `force` | bool | no | `GitCheckout` only: discard changes that are not committed first; omitted means false. |
-| `text` | string | `CreateSideSession` (optional first task), `Prompt`, `GitCommit`, `SaveInput`, `SendScriptInput`, `SearchFiles`, `RenderDiagram`, `GitSquash`, `GitRebase`, `GitMerge` | The prompt text, the commit message (of the squashed commit for the last three, optional for `GitRebase` and `GitMerge`), the chat input to save, the line written to a script, the text to search for or the Mermaid source. |
+| `text` | string | `CreateSideSession` (optional first task), `Prompt`, `GitCommit`, `SaveInput`, `QueueInput`, `SendScriptInput`, `SearchFiles`, `RenderDiagram`, `GitSquash`, `GitRebase`, `GitMerge` | The prompt text, the commit message (of the squashed commit for the last three, optional for `GitRebase` and `GitMerge`), the chat input to save, the line written to a script, the text to search for or the Mermaid source. |
 | `deleteFolder` | bool | no | `DeleteWorkspace` only; defaults to `true` when omitted. |
 | `showWork` | bool | `SetShowWork` | Whether the chat of the workspace shows the AI's work (required for that command). |
 | `ignoreLimit` | bool | no | `Prompt` only: the user confirmed that the work starts although a usage window is at or past the maximum; the workspace then ignores the maximum until the work is done. |
@@ -121,7 +122,7 @@ Exactly one payload property is set on success (commands whose response column b
 | `gitHistory` | git history | `GetGitHistory` |
 | `gitDiff` | git diff | `GetGitDiff`, `GetSessionDiff` |
 | `commitMessage` | string | `GenerateCommitMessage` |
-| `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput`, `TranscribeSavedInput`, `DiscardSavedInput` |
+| `savedInputs` | array of saved input | `GetSavedInputs`, `SaveInput`, `QueueInput`, `TranscribeSavedInput`, `DiscardSavedInput`, `SetSavedInputAutoCommit` |
 | `savedInput` | saved input | `TakeSavedInput` |
 | `errors` | array of error | `GetErrors` |
 | `overLimit` | limit pause | `Prompt`, together with `error`: the window that made the server refuse the prompt. |
@@ -133,7 +134,7 @@ Exactly one payload property is set on success (commands whose response column b
 
 ### Commands
 
-While a workspace runs a delegated task, `Prompt`, `UploadAttachment`, `StartLoop`, `RenameWorkspace`, `MoveWorkspaceToFolder`, `SetWorkspaceSettings`, `GenerateCommitMessage`, `RunScript`, `DelegateTask`, `CreateSideSession` and every git command except `GetGitStatus` (which answers that it is not a repository) and `GitCancel` are refused, and `StopWorkspace` and `CancelWorkspace` cancel the task.
+While a workspace runs a delegated task, `Prompt`, `QueueInput`, `ResumeQueue`, `SetAutoCommit`, `SetSavedInputAutoCommit`, `UploadAttachment`, `StartLoop`, `RenameWorkspace`, `MoveWorkspaceToFolder`, `SetWorkspaceSettings`, `GenerateCommitMessage`, `RunScript`, `DelegateTask`, `CreateSideSession` and every git command except `GetGitStatus` (which answers that it is not a repository) and `GitCancel` are refused, and `StopWorkspace` and `CancelWorkspace` cancel the task.
 
 A missing required property fails with a message that starts `The request needs` and names it (usually `a <field>.`; `workspaceId` reports `a workspace` and `groupId` reports `a group`).
 
@@ -155,7 +156,7 @@ A side session is a workspace to every command that takes a `workspaceId`, with 
 | `CreateSideSession` | `workspaceId` (the main workspace), `name`, `start`, optional `text` | `workspace` | Makes a side session, answering while it is still `Creating`; it turns `Ready` once its files are set up, and then `text` is sent to it. Needs the workspace to be the top folder of a git repository with a commit, and the side session storage to be outside every workspace. Names are unique among the workspace's sessions ignoring case, at most 60 characters, and not `Main`. |
 | `RenameSideSession` | `workspaceId` (the side session, as for the next six, which answer that it no longer exists for any other), `name` | `workspace` | Changes the label only, under the name rules of `CreateSideSession`. |
 | `DeleteSideSession` | `workspaceId` | none | Permanently discards the session. Refused while it is integrating. |
-| `IntegrateSideSession` | `workspaceId` | none | Starts integrating the session into its main workspace; permanent. Refused while the session has AI work, a loop, queued work, a running script, a delegated task under way or whose end its AI has yet to be told, or is paused at the usage limit. |
+| `IntegrateSideSession` | `workspaceId` | none | Starts integrating the session into its main workspace; permanent. Refused while the session has AI work, a loop, queued work, a running script, queued inputs (paused ones too), an automatic commit under way or still to come, a delegated task under way or whose end its AI has yet to be told, or is paused at the usage limit. |
 | `CancelIntegration` | `workspaceId` | none | Gives the session back; nothing main's AI already changed is undone. |
 | `SetIntegrateWhenFinished` | `workspaceId`, `enabled` | none | Whether the session is integrated by itself once its AI marked its task complete and nothing of it runs. |
 | `GetSessionChanges` | `workspaceId` | `gitChanges` | The files that differ from what the session started with, committed or not. |
@@ -165,7 +166,7 @@ A side session is a workspace to every command that takes a `workspaceId`, with 
 | `GetHistory` | `workspaceId`, optional `before`, `limit`, `characters` | `history` | One chunk, oldest first, of the chat the server keeps: the user's prompts and the AI's messages. |
 | `GetUsage` | `service` | `usage` | The service's usage limits as the server last read them, at most a minute old. A reading is kept for a little less than a minute, counted from when it began, so a client asking once a minute gets a new one each time. Clients ask once a minute for the focused workspace's service and as soon as they reconnect, and go on asking after a failed ask, since a lost connection reopens by itself. |
 | `GetResources` | none | `resources` | What the server's computer has and what the workspaces take of it now, at most 1.5 seconds old. Clients ask every 3 seconds, only while it is on screen. |
-| `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free. Refused unless the workspace is Ready or Working, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
+| `StartLoop` | `workspaceId`, `loop` | none | Starts a loop of the AI: the prompt is sent over and over on the interval until the condition ends it or it is cancelled. The first run starts when the AI and the workspace are free and no commit or queued input goes first. Refused unless the workspace is Ready or Working or the changes are being committed after work, while a loop already runs there, for settings that are not valid, and for a usage window the service does not report. |
 | `CancelLoop` | `workspaceId` | none | Cancels the loop at once without stopping the run in progress, which finishes, and removes a run that waits for the local AI unless a message of the user joined it; does nothing when no loop runs. |
 | `GetLoop` | `workspaceId` | `loop` | The loop that runs in the workspace, or none. |
 | `GetWorkspaceSettings` | `workspaceId` | `settings` | How the workspace's AI session is run, as the session stores it (the server keeps none of its own): the provider, capability, effort, whether the shell, files outside the workspace, the web and image generation are on, the instructions, the workspace's own review and expand prompts next to the global ones, and descriptors, which are lines the session writes about how it runs (the model it chose and so on). Makes the session when the workspace has none yet. |
@@ -176,12 +177,16 @@ A side session is a workspace to every command that takes a `workspaceId`, with 
 | `ListLocalModels` | optional `url` | `names` | The models the local model server offers (Ollama by default). Refused when the server cannot be reached. |
 | `ListImageModels` | optional `url` | `names` | The checkpoints the Stable Diffusion server offers. Refused when the server cannot be reached. |
 | `Prompt` | `workspaceId`, `text` | none, or `queue` | In a workspace on a local model the prompt may have to wait for the local AI: the answer then carries `queue`, its `MessageAdded` arrives once it starts, and further prompts join the waiting one. Otherwise answers as soon as the server has the text, also while the AI is working, when it is steered into the work in progress and, if the AI may have missed it, asked again as a turn of its own afterwards. The message and the AI's replies arrive as events. Refused unless the workspace is Ready or Working (so while a git action runs). Also refused, with `overLimit` in the response, while a usage window of the workspace's provider is at or past the maximum (or the workspace is in an automatic pause), unless `ignoreLimit` is true or the text is the pause prompt (`pause current work`). |
-| `CancelLimitPause` | `workspaceId` | none | Ends the automatic pause of the workspace without telling the AI to resume, and ends the loop of the workspace if it has one; the AI is not paused again while it finishes what it is doing. Nothing happens when the workspace is not paused. |
-| `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 20 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Refused unless the workspace is Ready or Working. |
+| `CancelLimitPause` | `workspaceId` | none | Ends the automatic pause of the workspace without telling the AI to resume, and gives up on what was to follow the work: auto commit goes off (unless the commit is under way), the queued inputs are paused, and the loop of the workspace ends if it has one. The AI is not paused again while it finishes what it is doing. |
+| `UploadAttachment` | `workspaceId`, `name`, `data` | `attachmentPath` | Stores the file in the data folder, outside the workspace, and answers its server path (up to 20 MB). A client sends one for each attachment and then a `Prompt` with a line `Attached file: <path>` for each, so the AI can read it. Accepted in any state, since an input queued during a git action may need it. |
 | `TranscribeSavedInput` | `workspaceId`, `data` (a 16 kHz, mono, 16 bit WAV recording) | `savedInputs` | Adds a saved input that is `isConverting` and answers the list with it at once; the server turns the recording (up to 4 MB) into text in the background with its built-in Whisper model, or its speech command when one is set (two minutes of processing at most), and every client gets a `SavedInputsChanged` event at each step. When the text is ready the entry keeps its `id` and `time` and gets the `text`, becoming a saved input like any other (subject to the same limits); when it fails, because nothing was heard, voice input is turned off on the server or its model cannot be loaded, it stays with the reason in `error`. Refused for an empty recording. A conversion that is not finished is not stored, so it does not survive a restart of the server. |
 | `DiscardSavedInput` | `workspaceId`, `inputId` | `savedInputs` | Removes the saved input without taking it: a conversion that is running is cancelled and its text is never saved, and an entry with an `error` is dismissed. Nothing happens when it is gone. Every client gets a `SavedInputsChanged` event. |
-| `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace, the last saved first. |
-| `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; the oldest entries beyond 200 are dropped. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |
+| `GetSavedInputs` | `workspaceId` | `savedInputs` | The chat inputs saved in the workspace: the queued ones first, in the order they will be sent, then the others, the last saved first. |
+| `QueueInput` | `workspaceId`, `text`, optional `autoCommit` | `savedInputs` | Adds a queued input behind those already queued and resumes any that are paused. The server sends it once nothing is in its way, at once when the workspace is free and ahead of further runs of a loop, with auto commit as the input says, and removes it from the list when it was sent. Refused for an empty text, one longer than 100000 characters, or when 200 inputs are queued already. Accepted in any state. |
+| `SetSavedInputAutoCommit` | `workspaceId`, `inputId`, `enabled` | `savedInputs` | Sets whether the work a saved or queued input starts is committed. Refused once it is gone. Every client gets a `SavedInputsChanged` event. |
+| `ResumeQueue` | `workspaceId` | none | Resumes the paused queued inputs, which the server then sends once nothing is in their way; nothing happens when none is paused. Accepted in any state. When any resumed, every client gets a `SavedInputsChanged` event. |
+| `SetAutoCommit` | `workspaceId`, `enabled` | none | Turns auto commit on or off for the work under way; every client gets `AutoCommitChanged`. Turning it on is refused unless the AI works (or its work is paused at the usage limit and to be resumed) and while a run of a loop is under way; once the commit is under way, turning it off is refused (turning it on changes nothing), since only stopping the workspace ends it. |
+| `SaveInput` | `workspaceId`, `text` | `savedInputs` | Saves the text exactly as it is as the newest saved input and answers the list; beyond 200 entries the oldest saved ones are dropped, never a queued one or the one just saved. Refused for an empty text or one longer than 100000 characters. Every client gets a `SavedInputsChanged` event. |
 | `SetShowWork` | `workspaceId`, `showWork` | `workspace` | Sets whether the chat of the workspace shows the AI's work, for every client: the server keeps it with the workspace (it starts as the `showWork` of `newWorkspaces`) and sends a `ShowWorkChanged` event when it changed. Nothing happens when it already is so. |
 | `GetErrors` | `workspaceId` | `errors` | The errors the AI of the workspace ended with in the last 30 days, the newest first. Entries older than that are removed by the server, when it starts, every 12 hours and whenever the list is read or an error is added. Only the errors of the workspace named are listed. |
 | `TakeSavedInput` | `workspaceId`, `inputId` | `savedInput` | Removes the saved input and answers it, so only one client gets it; refused once it is gone, and for an entry that is still being converted or has an `error`. Every client gets a `SavedInputsChanged` event. |
@@ -217,7 +222,7 @@ A side session is a workspace to every command that takes a `workspaceId`, with 
 | `StopWorkspace` | `workspaceId` | none | Ends the work of the AI or the git action at once and answers when the workspace is Ready again, keeping what the work did (a git action is undone). Refused when nothing runs or the workspace is already Stopping or Canceling. |
 | `CancelWorkspace` | `workspaceId` | none | Ends the AI's work and reverts what it did, answering when the workspace is Ready again. None of the clients sends it. Only for the AI's work: refused for a git action (stop it), when nothing runs, when it is already Stopping or Canceling, in a workspace that is not a git repository, and once the work under way finished integrating a side session, which reverting would lose. |
 | `GetQueuedWork` | `workspaceId` | `queue` | The work of the workspace that waits for the local AI. |
-| `CancelQueuedWork` | `workspaceId`, optional `keep` | `queue` | Removes what waits, never touching what runs, and answers what was removed; with `keep` its text becomes a saved input. For a delegated workspace it cancels the task. |
+| `CancelQueuedWork` | `workspaceId`, optional `keep` | `queue` | Removes what waits, never touching what runs, and answers what was removed. When anything waited, auto commit goes off and the queued inputs are paused; with `keep` its text becomes a saved input. For a delegated workspace it cancels the task. |
 | `GetSwarm` | none | `swarm` | The swarm settings, paired servers, pairings waiting on the drive and delegated tasks. |
 | `SetSwarm` | `swarmServer` | `swarm` | Changes the settings; `fingerprint` is ignored. Refused for a blank name, folders that are not full paths or a task limit outside 1 to 100. |
 | `SetSwarmPeer` | `swarmPeer` | `swarm` | Changes whether work is sent and accepted, the mode, the address and the permissions; the read only properties are ignored. A worker uses a sender's git remote only while its own mode for that sender is `GitRemote`. |
@@ -242,7 +247,7 @@ A side session is a workspace to every command that takes a `workspaceId`, with 
 
 ### Payload objects
 
-Nested objects are shown after the table of the object that contains them. Optional properties are omitted when null (or, for `truncated`, when false).
+Nested objects are shown after the table of the object that contains them. Optional properties are omitted when null.
 
 **workspace**
 
@@ -271,7 +276,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `startedFrom` | string | `Commit` or `Files`. |
 | `integrateWhenFinished` | bool | See `SetIntegrateWhenFinished`. |
 | `error` | string, optional | Why setting it up, or starting its integration, failed. |
-| `unsentTask` | string, optional | A first task that has not been sent: it waits for the setup while the session is `Creating`, and stays when the setup or sending it failed, or when the usage limit is reached. `error` and `unsentTask` are cleared when the session is prompted, a loop is started in it or its integration starts, and `unsentTask` when it is sent. |
+| `unsentTask` | string, optional | A first task that has not been sent: it waits for the setup while the session is `Creating`, and stays when the setup or sending it failed, or when the usage limit is reached. `error` and `unsentTask` are cleared when the session is prompted, an input is queued in it or a queued one is sent, a loop is started in it or its integration starts, and `unsentTask` when it is sent. |
 
 **catalog** (`ListWorkspaces`)
 
@@ -314,9 +319,10 @@ Nested objects are shown after the table of the object that contains them. Optio
 | --- | --- | --- |
 | `messages` | array of message | The chunk, oldest first. |
 | `older` | string, optional | The cursor to send as `before` to read the messages before this chunk, the decimal position of the chunk's first message; omitted when there are none. |
-| `working` | bool, optional | `true` while the AI is working in the workspace; omitted otherwise. |
+| `working` | bool | `true` while the AI is working in the workspace. |
+| `autoCommit` | string, optional | `Off` (also when omitted), `On` while the changes are to be committed once the work is over, or `Committing` while they are being committed. |
 | `limitPause` | limit pause, optional | The automatic pause the workspace is in because of a usage window; omitted when it is in none. A client takes it from here when it opens the workspace, reconnects or reads the history again, and follows it with `LimitPauseChanged` events. |
-| `showWork` | bool, optional | `true` when the workspace shows the AI's work: then `messages` include the work messages (`isWork`) and the chunks count them; otherwise they leave them out and the chunks count only what was said. Also the way a client learns the state, after it opens the workspace, reconnects or reads the history again on `ShowWorkChanged` or `MessageDelta`. |
+| `showWork` | bool | `true` when the workspace shows the AI's work: then `messages` include the work messages (`isWork`) and the chunks count them; otherwise they leave them out and the chunks count only what was said. Also the way a client learns the state, after it opens the workspace, reconnects or reads the history again on `ShowWorkChanged` or `MessageDelta`. |
 
 **limit pause** (`limitPause` of the history and of `LimitPauseChanged`)
 
@@ -350,6 +356,7 @@ Nested objects are shown after the table of the object that contains them. Optio
 | `startedAt` | string | When the loop was started, ISO 8601 UTC. |
 | `nextRunAt` | string, optional | The earliest time the next prompt is sent (the interval after the start of the last run), absent before the first run; it waits further while the workspace is busy. |
 | `limitCheckAt` | string, optional | While the loop waits because the usage limit stopped its prompts, the time it looks at the limit again (every 15 minutes); absent otherwise. |
+| `isRunning` | bool | `true` while a run is under way, from when its prompt is sent (also while it waits for the local AI) until its work is over. |
 | `runs` | number | How many runs the loop has made; a run the limit cut off is not counted. |
 
 **workspace settings** (`GetWorkspaceSettings`, `SetWorkspaceSettings`)
@@ -448,6 +455,9 @@ The client lists every window and colors each one, and the usage icon by the sho
 | `text` | string | The text that was in the chat input; empty while the entry is being converted from speech or when that failed. |
 | `time` | string | When it was saved (for a recording, when it was sent), ISO 8601 UTC. |
 | `isConverting` | bool, optional | `true` while the server turns the recording of the entry into text; omitted for `false`. |
+| `isQueued` | bool, optional | `true` for a queued input, which the server sends by itself; omitted for `false`. `TakeSavedInput` answers it without this. |
+| `isPaused` | bool, optional | `true` for a queued input that waits for `ResumeQueue`, for work to go well again or for another input to be queued; omitted for `false`. |
+| `autoCommit` | bool | Whether the work the input starts is committed; `true` unless turned off. |
 | `error` | string, optional | Why the recording could not be turned into text; omitted otherwise. |
 
 **error** (items of `errors`, and the `errors` of `ErrorsChanged` events)
@@ -498,7 +508,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | --- | --- | --- |
 | `path` | string | File path relative to the workspace folder. |
 | `text` | string | The file text, cut short when the file is large. |
-| `truncated` | bool, optional | `true` when `text` is only the start of the file; omitted otherwise. |
+| `truncated` | bool | `true` when `text` is only the start of the file. |
 
 **git status** (`GetGitStatus`)
 
@@ -511,7 +521,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | `message` | string | The head commit's subject. |
 | `hasChanges` | bool | Whether the working tree has changes that are not committed. |
 | `hasIdentity` | bool | Whether git knows who commits; clients ask for a name and email first when it is false. |
-| `busy` | bool, optional | `true` while a git action that the user waits for runs in the workspace, whichever client started it; the automatic fetch and pull do not count. |
+| `busy` | bool | `true` while a git action that the user waits for runs in the workspace, whichever client started it; the automatic fetch and pull do not count. |
 | `remote` | string, optional | The URL of `origin`. |
 
 **branch state** (`GetGitBranchState`)
@@ -540,7 +550,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | Property | Type | Meaning |
 | --- | --- | --- |
 | `commits` | array of commit | Newest first. |
-| `hasMore` | bool, optional | `true` when older commits exist beyond the chunk. |
+| `hasMore` | bool | `true` when older commits exist beyond the chunk. |
 
 **commit** (item of `gitHistory.commits`)
 
@@ -559,7 +569,7 @@ The client lists every window and colors each one, and the usage icon by the sho
 | --- | --- | --- |
 | `name` | string | The short name. |
 | `kind` | string | `Branch`, `Remote`, `Tag` or `Session`: the branch of a side session, named as the session; `isCurrent` marks it in that session's own history. |
-| `isCurrent` | bool, optional | `true` for the checked out branch. |
+| `isCurrent` | bool | `true` for the checked out branch. |
 
 **script runs** (`GetScripts`)
 
@@ -574,11 +584,11 @@ The client lists every window and colors each one, and the usage icon by the sho
 | `path` | string | The file relative to the workspace folder, which identifies the run. |
 | `name` | string | The file name without its extension. |
 | `state` | string | `Pending` (a script of a task waiting for its turn), `Running`, `Succeeded`, `Failed`, `Stopped` or `Skipped` (a script of a task that stopped before its turn). |
-| `isTask` | bool, optional | `true` for a `.task` file. |
+| `isTask` | bool | `true` for a `.task` file. |
 | `taskPath` | string, optional | The task that runs this script. |
 | `scripts` | array of string, optional | The scripts a task runs, in order. |
 | `output` | string, optional | Everything written so far, the earliest part cut beyond 500000 characters; omitted in events. |
-| `trimmed` | bool, optional | `true` when the earliest part of the output was cut. |
+| `trimmed` | bool | `true` when the earliest part of the output was cut. |
 
 **git diff** (`GetGitDiff`)
 
@@ -586,8 +596,8 @@ The client lists every window and colors each one, and the usage icon by the sho
 | --- | --- | --- |
 | `path` | string | The file. |
 | `lines` | array of line | The whole file in order, added and removed lines mixed in; empty for a binary file. |
-| `isBinary` | bool, optional | `true` for a binary file. |
-| `truncated` | bool, optional | `true` when `lines` is only the start (5000 lines). |
+| `isBinary` | bool | `true` for a binary file. |
+| `truncated` | bool | `true` when `lines` is only the start (5000 lines). |
 
 **line** (item of `gitDiff.lines`)
 
@@ -659,7 +669,7 @@ The server pushes events to every authenticated connection, as responses with `i
 
 | Property | Type | Meaning |
 | --- | --- | --- |
-| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged`, `ShowWorkChanged`, `LimitPauseChanged`, `MessageDelta`, `QueueChanged`, `SwarmChanged` or `SwarmTaskChanged`. |
+| `kind` | string | `MessageAdded`, `WorkingChanged`, `FilesChanged`, `GitChanged`, `Failed`, `ScriptChanged`, `ScriptOutput`, `ScriptRemoved`, `StateChanged`, `WorkspacesChanged`, `LoopChanged`, `SavedInputsChanged`, `ErrorsChanged`, `ShowWorkChanged`, `LimitPauseChanged`, `MessageDelta`, `QueueChanged`, `SwarmChanged`, `SwarmTaskChanged` or `AutoCommitChanged`. |
 | `workspaceId` | GUID | The workspace concerned; the empty GUID for `WorkspacesChanged`, which is about all of them, and for `SwarmChanged` and `SwarmTaskChanged`. |
 | `message` | message | `MessageAdded`: the message, from the user or the AI. |
 | `working` | bool | `WorkingChanged`: whether the AI is working now. |
@@ -668,7 +678,8 @@ The server pushes events to every authenticated connection, as responses with `i
 | `script` | script run | `ScriptChanged`: the run that started or changed state, without its output. |
 | `state` | string | `StateChanged`: the state the workspace entered: `Ready`, `Working`, `Managing`, `Stopping` or `Canceling`. |
 | `loop` | loop, optional | `LoopChanged`: the loop that runs in the workspace, absent once it ended. |
-| `savedInputs` | array of saved input | `SavedInputsChanged`: the saved inputs of the workspace now, the last saved first. |
+| `savedInputs` | array of saved input | `SavedInputsChanged`: the saved inputs of the workspace now, in the order of `GetSavedInputs`. |
+| `autoCommit` | string | `AutoCommitChanged`: `Off`, `On` or `Committing`. `Committing` is sent before the `WorkingChanged` that says the AI stopped, and the workspace goes from `Working` to `Managing` without being `Ready` in between, so a client counts a committing workspace as git working. |
 | `showWork` | bool | `ShowWorkChanged`: whether the workspace shows the AI's work now; a client reads the history again, which includes or leaves out the work messages. |
 | `errors` | array of error | `ErrorsChanged`: the errors of the workspace now, the newest first; sent right after the `Failed` event of the same workspace, and only for that workspace. |
 | `text` | string | `FilesChanged`: `all` when too much changed to say where, so everything is read again. `QueueChanged`: `dropped` when a waiting prompt was removed or could not start, as opposed to starting, so a client that sent it stops waiting for its result. `ScriptOutput`: what the run wrote since the last event. `LoopChanged`: why a loop ended by itself. `MessageDelta`: the next piece of the message the AI is writing, in order; only sent for a workspace that shows the AI's work, about every 100 milliseconds with what was written meanwhile. The finished message follows as `MessageAdded` (for the reasoning, the message with `isThought`), and a client puts it in the place of the pieces; pieces of a message that never finishes (the AI stopped or failed) are dropped, and nothing of them is stored. |

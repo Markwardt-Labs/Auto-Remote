@@ -16,7 +16,7 @@ internal sealed record ServerConfig
     public required string Key { get; init; }
 
     /// <summary>
-    /// Gets the folder holding everything the server stores: the workspaces file, the <c>history</c> folder and the generated certificate. Created when missing; the <c>AutoRemote</c> folder of the server user's application data unless set.
+    /// Gets the folder holding what the server stores, such as the workspaces file, their chats and the generated certificate. Created when missing; the <c>AutoRemote</c> folder of the server user's application data unless set.
     /// </summary>
     public string DataFolder { get; init; } = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AutoRemote");
 

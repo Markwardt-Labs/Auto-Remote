@@ -29,4 +29,9 @@ public sealed record LoopInfo
     /// Gets when the loop next looks at the usage limit while it waits because a usage window reached its limit and the AI cannot be prompted, or <see langword="null" /> when it does not wait. The loop stays alive meanwhile, checks every 15 minutes and goes on by itself once prompting works again.
     /// </summary>
     public DateTimeOffset? LimitCheckAt { get; init; }
+
+    /// <summary>
+    /// Gets whether a run of the loop is under way, from when its prompt is sent until its work is over. Between the runs, other work of the workspace goes on as without a loop.
+    /// </summary>
+    public bool IsRunning { get; init; }
 }

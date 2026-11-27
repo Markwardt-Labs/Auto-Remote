@@ -46,7 +46,7 @@ public sealed record RemoteEvent
     public LoopInfo? Loop { get; init; }
 
     /// <summary>
-    /// Gets the saved inputs of the workspace, the last saved first, for <see cref="RemoteEventKind.SavedInputsChanged" />.
+    /// Gets the saved inputs of the workspace, the queued ones first and then the others, the last saved first, for <see cref="RemoteEventKind.SavedInputsChanged" />.
     /// </summary>
     public IReadOnlyList<SavedInput>? SavedInputs { get; init; }
 
@@ -64,6 +64,11 @@ public sealed record RemoteEvent
     /// Gets the automatic pause the workspace is in, for <see cref="RemoteEventKind.LimitPauseChanged" />; <see langword="null" /> when the pause ended.
     /// </summary>
     public LimitPause? LimitPause { get; init; }
+
+    /// <summary>
+    /// Gets the new state for <see cref="RemoteEventKind.AutoCommitChanged" />.
+    /// </summary>
+    public AutoCommitState? AutoCommit { get; init; }
 
     /// <summary>
     /// Gets the work of the workspace that waits for the local AI, for <see cref="RemoteEventKind.QueueChanged" />; <see langword="null" /> when nothing waits any more.
@@ -200,5 +205,10 @@ public enum RemoteEventKind
     /// <summary>
     /// The conversation or the state of the delegated task <see cref="RemoteEvent.TaskId" /> changed. The workspace identifier is empty.
     /// </summary>
-    SwarmTaskChanged
+    SwarmTaskChanged,
+
+    /// <summary>
+    /// Whether the changes of a workspace are committed once its work is over changed; <see cref="RemoteEvent.AutoCommit" /> carries the new state. <see cref="AutoCommitState.Committing" /> is told before the AI is told to have stopped working.
+    /// </summary>
+    AutoCommitChanged
 }

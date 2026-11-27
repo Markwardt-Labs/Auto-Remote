@@ -257,6 +257,16 @@ internal interface IServerConnection : IAsyncDisposable
     Task PromptOverLimit(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Sends a prompt like <see cref="Prompt" />, turning auto commit on for the work it starts or joins.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="overLimit">Whether the prompt goes ahead although a usage window is at or past the maximum, as with <see cref="PromptOverLimit" />.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused, as with <see cref="Prompt" />.</exception>
+    Task PromptToCommit(Guid id, string text, bool overLimit, CancellationToken cancellation);
+
+    /// <summary>
     /// Has the server draw a Mermaid diagram.
     /// </summary>
     /// <param name="source">The Mermaid text.</param>
@@ -584,7 +594,7 @@ internal interface IServerConnection : IAsyncDisposable
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="cancellation">Cancels the call.</param>
-    /// <returns>The saved inputs, the last saved first.</returns>
+    /// <returns>The saved inputs: the queued ones first, in the order they are sent, then the others, the last saved first.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
     Task<IReadOnlyList<SavedInput>> GetSavedInputs(Guid id, CancellationToken cancellation);
 
@@ -593,10 +603,22 @@ internal interface IServerConnection : IAsyncDisposable
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="text">The chat input.</param>
+    /// <param name="autoCommit">Whether the changes are committed after the work it starts.</param>
     /// <param name="cancellation">Cancels the call.</param>
-    /// <returns>The saved inputs now, the last saved first.</returns>
+    /// <returns>The saved inputs now.</returns>
     /// <exception cref="RemoteException">The text is empty or too long, or the server refused.</exception>
-    Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation);
+    Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, bool autoCommit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sets whether the changes are committed after the work a saved input starts.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="inputId">The saved input.</param>
+    /// <param name="autoCommit">Whether they are.</param>
+    /// <param name="cancellation">Cancels the call.</param>
+    /// <returns>The saved inputs now.</returns>
+    /// <exception cref="RemoteException">The saved input is gone, or the server refused.</exception>
+    Task<IReadOnlyList<SavedInput>> SetSavedInputAutoCommit(Guid id, Guid inputId, bool autoCommit, CancellationToken cancellation);
 
     /// <summary>
     /// Lists the errors the AI of a workspace ended with in the last 30 days.
@@ -800,6 +822,34 @@ internal interface IServerConnection : IAsyncDisposable
     /// <returns>The report.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
     Task<ResourceReport> GetResources(CancellationToken cancellation);
+
+    /// <summary>
+    /// Queues an input, which the server sends once the work of the workspace is over, at once when there is none, ahead of further runs of a loop.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The input.</param>
+    /// <param name="autoCommit">Whether the changes are committed after its work.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The saved inputs now.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<IReadOnlyList<SavedInput>> QueueInput(Guid id, string text, bool autoCommit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Resumes the paused queued inputs of a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task ResumeQueue(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sets whether the changes of a workspace are committed once the AI's work is over.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="enabled">Whether they are.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task SetAutoCommit(Guid id, bool enabled, CancellationToken cancellation);
 
     /// <summary>
     /// Starts a loop of the AI in a workspace: the prompt is sent over and over on the interval until the condition ends the loop or it is cancelled.
@@ -1222,6 +1272,9 @@ internal sealed class ServerConnection : IServerConnection
     public async Task PromptOverLimit(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = true }, cancellation);
 
     /// <inheritdoc />
+    public async Task PromptToCommit(Guid id, string text, bool overLimit, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = overLimit ? true : null, AutoCommit = true }, cancellation);
+
+    /// <inheritdoc />
     public async Task<string> RenderDiagram(string source, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenderDiagram, Text = source }, cancellation)).Diagram ?? throw new IOException("The server sent no diagram.");
 
     /// <inheritdoc />
@@ -1338,7 +1391,10 @@ internal sealed class ServerConnection : IServerConnection
     public async Task SetShowWork(Guid id, bool show, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SetShowWork, WorkspaceId = id, ShowWork = show }, cancellation);
 
     /// <inheritdoc />
-    public async Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SaveInput, WorkspaceId = id, Text = text }, cancellation)).SavedInputs ?? throw Malformed();
+    public async Task<IReadOnlyList<SavedInput>> SaveInput(Guid id, string text, bool autoCommit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SaveInput, WorkspaceId = id, Text = text, AutoCommit = autoCommit }, cancellation)).SavedInputs ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> SetSavedInputAutoCommit(Guid id, Guid inputId, bool autoCommit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.SetSavedInputAutoCommit, WorkspaceId = id, InputId = inputId, Enabled = autoCommit }, cancellation)).SavedInputs ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<SavedInput> TakeSavedInput(Guid id, Guid inputId, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.TakeSavedInput, WorkspaceId = id, InputId = inputId }, cancellation)).SavedInput ?? throw Malformed();
@@ -1399,6 +1455,15 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task<ResourceReport> GetResources(CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetResources }, cancellation)).Resources ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<SavedInput>> QueueInput(Guid id, string text, bool autoCommit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.QueueInput, WorkspaceId = id, Text = text, AutoCommit = autoCommit }, cancellation)).SavedInputs ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task ResumeQueue(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ResumeQueue, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task SetAutoCommit(Guid id, bool enabled, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SetAutoCommit, WorkspaceId = id, Enabled = enabled }, cancellation);
 
     /// <inheritdoc />
     public async Task StartLoop(Guid id, LoopSettings loop, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.StartLoop, WorkspaceId = id, Loop = loop }, cancellation);

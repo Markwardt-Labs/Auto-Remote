@@ -3,6 +3,22 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// The app's root: decides which screen shows and owns the server connection.
 /// </summary>
+/// <param name="info">What is known about the app, such as its version.</param>
+/// <param name="factory">Makes the connections to servers.</param>
+/// <param name="store">Where the connection settings are kept.</param>
+/// <param name="layout">How a focused workspace lays out its conversation and files.</param>
+/// <param name="drafts">Where the text typed in each workspace's message box is kept, or <see langword="null" /> to keep none.</param>
+/// <param name="chime">Plays the ding when a workspace becomes ready again, or <see langword="null" /> for silence.</param>
+/// <param name="notifier">Tells the user outside the app that a workspace they gave work to is ready, or <see langword="null" /> for no notifications.</param>
+/// <param name="keeper">Keeps the app alive while work this client gave a workspace runs, or <see langword="null" /> when the app is not stopped in the background.</param>
+/// <param name="recorder">Records speech for voice input, or <see langword="null" /> when this client cannot record.</param>
+/// <param name="newWindow">Opens another window of the app as a process of its own, or <see langword="null" /> when this client cannot.</param>
+/// <param name="feed">Tells which releases there are to update to, or <see langword="null" /> when no update is offered.</param>
+/// <param name="updater">Installs a release in place of the app, or <see langword="null" /> when no update is offered.</param>
+/// <param name="retryInterval">How long to wait between attempts to connect again, or <see langword="null" /> for the default.</param>
+/// <param name="updateWait">How long to wait for an update, or <see langword="null" /> for the default.</param>
+/// <param name="locals">Finds the servers on this machine, or <see langword="null" /> when this client does not offer to connect to one.</param>
+/// <param name="preferences">Where display choices such as numbered markdown sections are kept, or <see langword="null" /> to keep none.</param>
 internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory factory, ISettingsStore store, ClientLayout layout = ClientLayout.Tabs, IDraftStore? drafts = null, IChime? chime = null, IReadyNotifier? notifier = null, IWorkKeeper? keeper = null, IVoiceRecorder? recorder = null, INewWindow? newWindow = null, IReleaseFeed? feed = null, IClientUpdater? updater = null, TimeSpan? retryInterval = null, TimeSpan? updateWait = null, ILocalServers? locals = null, IViewPreferences? preferences = null) : ViewModelBase
 {
     private IServerConnection? connection;

@@ -3,6 +3,10 @@ namespace Markwardt.AutoRemote.Server;
 /// <summary>
 /// The tools that let a workspace's AI delegate: listing the workers, delegating, following, cancelling, reviewing and applying its tasks. Delegating is only offered while the workspace allows it; the tools for the tasks stay while there are results to take. An AI only ever sees and touches the tasks of its own workspace, and the AI of a delegated task gets none of them.
 /// </summary>
+/// <param name="book">The delegated tasks.</param>
+/// <param name="coordinator">Delegates tasks and takes their results.</param>
+/// <param name="worker">Runs tasks delegated to this server.</param>
+/// <param name="workspaces">Knows the workspaces and what their AI may do.</param>
 internal sealed class DelegationTools(ISwarmBook book, ISwarmCoordinator coordinator, ISwarmWorker worker, IWorkspaceManager workspaces) : ISessionTools
 {
     private readonly ConcurrentDictionary<Guid, IReadOnlyList<PromptTool>> made = new();

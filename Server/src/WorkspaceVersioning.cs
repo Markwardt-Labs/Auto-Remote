@@ -31,6 +31,14 @@ internal interface IWorkspaceVersioning
     Task Perform(WorkspaceInfo workspace, bool revert, Func<CancellationToken, Task> action, CancellationToken cancellation, bool background = false);
 
     /// <summary>
+    /// Performs a git action like <see cref="Perform" /> in a workspace that was already put into <see cref="WorkspaceState.Managing" /> for it, which is left once the action ends, also when it cannot begin. An action of the server's own that still runs is waited for first.
+    /// </summary>
+    /// <param name="workspace">The workspace.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="cancellation">Cancels the action.</param>
+    Task PerformClaimed(WorkspaceInfo workspace, Func<CancellationToken, Task> action, CancellationToken cancellation);
+
+    /// <summary>
     /// Checks out a branch, tag or commit, creating a local branch for one that exists only on the remote.
     /// </summary>
     /// <param name="workspace">The workspace.</param>
@@ -148,6 +156,11 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
 
     private readonly TimeSpan aiPoll = TimeSpan.FromMilliseconds(200);
 
+    /// <summary>
+    /// Gets how long the AI has for a commit message once it is free to write it.
+    /// </summary>
+    internal TimeSpan MessagePatience { get; init; } = TimeSpan.FromMinutes(20);
+
     /// <inheritdoc />
     public async Task<string> CommitMessage(WorkspaceInfo workspace, CancellationToken cancellation)
     {
@@ -198,11 +211,6 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
         return count >= rejectWords ? throw new RequestException($"The AI wrote a commit message of {count} words, which is too long.") : message;
     }
 
-    /// <summary>
-    /// Gets how long the AI has for a commit message once it is free to write it.
-    /// </summary>
-    internal TimeSpan MessagePatience { get; init; } = TimeSpan.FromMinutes(20);
-
     /// <inheritdoc />
     public bool IsBusy(Guid id) => running.TryGetValue(id, out Running? current) && !current.Background;
 
@@ -228,8 +236,27 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
     /// <inheritdoc />
     public Task Perform(WorkspaceInfo workspace, bool revert, Func<CancellationToken, Task> action, CancellationToken cancellation, bool background = false) => Run(workspace, revert, true, (_, token) => action(token), cancellation, background);
 
+    /// <inheritdoc />
+    public async Task PerformClaimed(WorkspaceInfo workspace, Func<CancellationToken, Task> action, CancellationToken cancellation)
+    {
+        try
+        {
+            // Only an action in the background can be running, since the state was free of others.
+            while (running.TryGetValue(workspace.Id, out Running? other))
+            {
+                await other.Done.Task.WaitAsync(cancellation);
+            }
+
+            await Run(workspace, true, true, (_, token) => action(token), cancellation, false, true);
+        }
+        finally
+        {
+            activity.Leave(workspace.Id, WorkspaceState.Managing);
+        }
+    }
+
     // An undone action puts back only the branches it noted as written; a single command writes the checked out one.
-    private async Task Run(WorkspaceInfo workspace, bool revert, bool single, Func<Journal, CancellationToken, Task> action, CancellationToken cancellation, bool background = false)
+    private async Task Run(WorkspaceInfo workspace, bool revert, bool single, Func<Journal, CancellationToken, Task> action, CancellationToken cancellation, bool background = false, bool claimed = false)
     {
         using CancellationTokenSource source = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         Running record = new(source, background, new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously));
@@ -239,7 +266,7 @@ internal sealed class WorkspaceVersioning(IGitService git, IPromptService prompt
             throw new RequestException("A git action is already running in this workspace.");
         }
 
-        if (!background && !activity.TryEnter(workspace.Id, WorkspaceState.Managing))
+        if (!background && !claimed && !activity.TryEnter(workspace.Id, WorkspaceState.Managing))
         {
             running.TryRemove(workspace.Id, out _);
             throw new RequestException(activity.Describe(workspace.Id));

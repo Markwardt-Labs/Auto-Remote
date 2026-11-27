@@ -24,6 +24,11 @@ public sealed class MainActivity : AvaloniaMainActivity
     public static bool IsInFront => inFront;
 
     /// <summary>
+    /// Gets the name of the intent extra that carries the identifier of the workspace a notification opens.
+    /// </summary>
+    public static string WorkspaceKey => "workspace";
+
+    /// <summary>
     /// Keeps the installer of an update until the app is in front again, when it is opened.
     /// </summary>
     /// <param name="install">The intent that opens the installer.</param>
@@ -33,11 +38,6 @@ public sealed class MainActivity : AvaloniaMainActivity
         waiting = install;
         launched = opened;
     }
-
-    /// <summary>
-    /// Gets the name of the intent extra that carries the identifier of the workspace a notification opens.
-    /// </summary>
-    public static string WorkspaceKey => "workspace";
 
     /// <summary>
     /// Makes sure the app may use the microphone, asking the user if it has not been decided yet.

@@ -42,6 +42,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(ShowHaltButtons));
                 Raise(nameof(ShowSendButton));
+                Raise(nameof(ShowQueueButton));
                 Raise(nameof(ShowReviewButton));
                 Raise(nameof(ShowExpandButton));
                 Raise(nameof(ShowPauseButton));
@@ -49,13 +50,40 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowLoopButton));
             }
         };
+        Chat.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(ChatViewModel.HasLoadedInput) or nameof(ChatViewModel.IsLoadedAutoCommitOn))
+            {
+                RaiseFollowUps();
+            }
+
+            if (args.PropertyName == nameof(ChatViewModel.ActiveQueuedCount))
+            {
+                Raise(nameof(LoopWaiting));
+                Raise(nameof(IsLoopWaiting));
+            }
+
+            if (args.PropertyName == nameof(ChatViewModel.AutoCommit))
+            {
+                Chat.BlockReason = BlockReason(State);
+                UpdateState();
+            }
+        };
+        Git.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(GitViewModel.IsRepo))
+            {
+                RaiseFollowUps();
+            }
+        };
         Chat.PromptStarted += () =>
         {
             wasNotifying = NotifyWhenReady;
             NotifyWhenReady = true;
         };
-        // One that fails beside work still running, or between the runs of a loop that was waited for, leaves that work waited for.
-        Chat.PromptFailed += () => NotifyWhenReady &= Chat.IsAiWorking || (wasNotifying && IsLooping);
+        Chat.QueuedWorkDropped += () => wasNotifying = NotifyWhenReady;
+        // Work that does not start leaves the wait as it was before, which goes on only while something is still to come and was not announced meanwhile.
+        Chat.PromptFailed += () => NotifyWhenReady &= wasNotifying && (State != WorkspaceState.Ready || IsLooping || Chat.HasActiveQueued || Chat.IsQueued);
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
@@ -270,12 +298,62 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets what the workspace is doing: only one kind of work runs at a time, and more work only starts once it is <see cref="WorkspaceState.Ready" />, except AI input, which is also accepted while <see cref="WorkspaceState.Working" />. Scripts are not work in this sense: they run beside any state.
     /// </summary>
-    public WorkspaceState State => forced ?? (Git.IsWorking ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
+    public WorkspaceState State => forced ?? (Git.IsWorking || Chat.IsCommitting ? WorkspaceState.Managing : Chat.IsAiWorking ? WorkspaceState.Working : WorkspaceState.Ready);
 
     /// <summary>
     /// Gets a value indicating whether the work in the workspace can be stopped: the AI works or git works.
     /// </summary>
     public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Managing;
+
+    /// <summary>
+    /// Gets a value indicating whether the button that turns auto commit on and off shows: the workspace is a git repository, no run of a loop is under way, and the AI works, or auto commit is still on while the work goes on by other means, such as waiting to be resumed.
+    /// </summary>
+    public bool ShowAutoCommitButton => delegation is null && Git.IsRepo && activeLoop?.IsRunning != true && State is not (WorkspaceState.Stopping or WorkspaceState.Canceling) && (State == WorkspaceState.Working || Chat.IsAutoCommitOn);
+
+    /// <summary>
+    /// Gets a value indicating whether the button that turns auto commit of a loaded input on and off shows above the message box.
+    /// </summary>
+    public bool ShowLoadedAutoCommit => delegation is null && Git.IsRepo && Chat.HasLoadedInput;
+
+    /// <summary>
+    /// Gets a value indicating whether the auto commit button beside the message box says that it is about the current work, which it does while the button about a loaded input shows too.
+    /// </summary>
+    public bool LabelsAutoCommitButton => ShowAutoCommitButton && ShowLoadedAutoCommit;
+
+    /// <summary>
+    /// Gets what has to be known about the loaded input besides what its button says, or <see langword="null" /> when nothing has: what queuing it does while its button is about the current work, or that a run of a loop it would join is not committed.
+    /// </summary>
+    public string? LoadedAutoCommitNote => !ShowLoadedAutoCommit ? null
+        : Chat.IsAutoCommitOn ? Chat.IsLoadedAutoCommitOn ? null : "Queuing or saving it keeps its own setting: off."
+        : Chat.IsLoadedAutoCommitOn && activeLoop?.IsRunning == true ? "Sent now, it joins the loop's run, which is not committed. Queue it to have it committed."
+        : null;
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="LoadedAutoCommitNote" /> says anything.
+    /// </summary>
+    public bool HasLoadedAutoCommitNote => LoadedAutoCommitNote is not null;
+
+    /// <summary>
+    /// Gets what the loop waits for besides its interval, or what goes before its next run, in words, or <see langword="null" /> when nothing does.
+    /// </summary>
+    public string? LoopWaiting => DescribeWaiting(DateTimeOffset.UtcNow);
+
+    /// <summary>
+    /// Gets a value indicating whether <see cref="LoopWaiting" /> says anything.
+    /// </summary>
+    public bool IsLoopWaiting => LoopWaiting is not null;
+
+    /// <summary>
+    /// Gets a value indicating whether the button that queues what is typed shows beside the send button.
+    /// </summary>
+    public bool ShowQueueButton => delegation is null && Chat.HasContent;
+
+    /// <summary>
+    /// Gets what the queue button says it does, which includes a commit only when one follows: in a git repository, for an input whose auto commit is not turned off.
+    /// </summary>
+    public string QueueTip => Git.IsRepo && (!Chat.HasLoadedInput || Chat.IsLoadedAutoCommitOn)
+        ? "Queue: send once the current work is done, at once if there is none, and auto commit afterwards"
+        : "Queue: send once the current work is done, at once if there is none";
 
     /// <summary>
     /// Gets a value indicating whether the message box offers the work buttons instead of sending: git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand, pause and loop buttons.
@@ -308,6 +386,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             if (Set(ref activeLoop, value))
             {
                 Raise(nameof(IsLooping));
+                RaiseFollowUps();
                 Raise(nameof(LoopTip));
                 Raise(nameof(LoopNext));
                 FollowLoopClock();
@@ -345,7 +424,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a value indicating whether the message box shows the loop button next to the review or stop button: there is no loop yet and nothing is typed, while the AI is ready or working (a loop started during work waits for it to finish).
     /// </summary>
-    public bool ShowLoopButton => ShowReviewButton && activeLoop is null;
+    public bool ShowLoopButton => activeLoop is null && (ShowReviewButton || (Chat.IsCommitting && !Chat.HasContent));
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the button that cancels the loop, whatever else it shows.
@@ -656,14 +735,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Settings.IsLocked = delegation is not null;
         OpenLoopCommand.Refresh();
         Raise(nameof(StopTip));
-        Chat.BlockReason = delegation is { } task ? $"This workspace runs a task delegated by {task.From}" : state switch
-        {
-            WorkspaceState.Managing => "Git is working, wait for it to finish",
-            WorkspaceState.Stopping => "Stopping, wait for it to finish",
-            WorkspaceState.Canceling => "Cancelling and reverting, wait for it to finish",
-            _ => null
-        };
-        Git.IsLocked = state is WorkspaceState.Working or WorkspaceState.Stopping or WorkspaceState.Canceling;
+        Chat.BlockReason = BlockReason(state);
+        Git.IsLocked = Chat.IsCommitting || state is WorkspaceState.Working or WorkspaceState.Stopping or WorkspaceState.Canceling;
         Raise(nameof(State));
         Raise(nameof(CanHalt));
         Raise(nameof(ShowHaltButtons));
@@ -673,9 +746,68 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowPauseButton));
         Raise(nameof(ShowResumeButton));
         Raise(nameof(ShowLoopButton));
+        RaiseFollowUps();
+        Raise(nameof(ShowQueueButton));
         Raise(nameof(LoopNext));
         Raise(nameof(IsWorking));
     }
+
+    // What is shown about auto commit and about a loop's wait, which hang on much of the same.
+    private void RaiseFollowUps()
+    {
+        Raise(nameof(ShowAutoCommitButton));
+        Raise(nameof(ShowLoadedAutoCommit));
+        Raise(nameof(QueueTip));
+        Raise(nameof(LabelsAutoCommitButton));
+        Raise(nameof(LoadedAutoCommitNote));
+        Raise(nameof(HasLoadedAutoCommitNote));
+        Raise(nameof(LoopWaiting));
+        Raise(nameof(IsLoopWaiting));
+    }
+
+    private bool IsRunDue(DateTimeOffset now) => activeLoop?.NextRunAt is not { } next || next <= now;
+
+    // A loop only waits once its next run is due; until then it counts down, which queued inputs do not change.
+    private string? DescribeWaiting(DateTimeOffset now)
+    {
+        if (activeLoop is null)
+        {
+            return null;
+        }
+
+        int queued = Chat.ActiveQueuedCount;
+        string inputs = queued == 1 ? "1 queued input" : $"{queued} queued inputs";
+
+        if (activeLoop.IsRunning)
+        {
+            return queued > 0 ? $"{inputs} will run when this loop run ends." : null;
+        }
+
+        if (!IsRunDue(now))
+        {
+            return queued > 0 ? $"{inputs} {(queued == 1 ? "goes" : "go")} before the loop's next run." : null;
+        }
+
+        if (Chat.IsCommitting)
+        {
+            return queued > 0 ? $"Loop waiting for the commit and {inputs}." : "Loop waiting for the commit.";
+        }
+
+        if (queued > 0)
+        {
+            return State == WorkspaceState.Ready ? $"Loop waiting for {inputs}." : $"Loop waiting for the current work and {inputs}.";
+        }
+
+        return State is WorkspaceState.Working or WorkspaceState.Managing ? "Loop waiting for the current work to finish." : null;
+    }
+
+    private string? BlockReason(WorkspaceState state) => delegation is { } task ? $"This workspace runs a task delegated by {task.From}" : state switch
+    {
+        WorkspaceState.Managing => Chat.IsCommitting ? "Committing the changes, queue what comes next" : "Git is working, wait for it to finish",
+        WorkspaceState.Stopping => "Stopping, wait for it to finish",
+        WorkspaceState.Canceling => "Cancelling and reverting, wait for it to finish",
+        _ => null
+    };
 
     private void Resync()
     {
@@ -764,6 +896,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             while (await timer.WaitForNextTickAsync(cancellation))
             {
                 Raise(nameof(LoopNext));
+                // What it waits for changes as its next run comes due.
+                Raise(nameof(LoopWaiting));
+                Raise(nameof(IsLoopWaiting));
             }
         }
         catch (OperationCanceledException)
@@ -803,6 +938,12 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         }
 
         bool busy = State != WorkspaceState.Ready;
+
+        // What a due run waits for says more than that it waits for the workspace.
+        if (!Chat.HasLimitPause && activeLoop is { IsRunning: false, LimitCheckAt: null } && (Chat.ActiveQueuedCount > 0 || Chat.IsCommitting) && IsRunDue(now) && DescribeWaiting(now) is { } waiting)
+        {
+            return waiting;
+        }
 
         if (Chat.HasLimitPause)
         {

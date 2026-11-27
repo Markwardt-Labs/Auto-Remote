@@ -222,7 +222,7 @@ internal sealed class ResourcesViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task Poll(CancellationToken stopped)
+    private async Task Poll(CancellationToken cancellation)
     {
         using PeriodicTimer timer = new(interval);
 
@@ -230,22 +230,22 @@ internal sealed class ResourcesViewModel : ViewModelBase, IDisposable
         {
             do
             {
-                await Refresh(stopped);
+                await Refresh(cancellation);
             }
-            while (await timer.WaitForNextTickAsync(stopped));
+            while (await timer.WaitForNextTickAsync(cancellation));
         }
         catch (OperationCanceledException)
         {
         }
     }
 
-    private async Task Refresh(CancellationToken stopped)
+    private async Task Refresh(CancellationToken cancellation)
     {
         try
         {
-            ResourceReport read = await connection.GetResources(stopped);
+            ResourceReport read = await connection.GetResources(cancellation);
 
-            if (!stopped.IsCancellationRequested)
+            if (!cancellation.IsCancellationRequested)
             {
                 report = read;
                 failure = null;
@@ -255,7 +255,7 @@ internal sealed class ResourcesViewModel : ViewModelBase, IDisposable
         // Whatever a read fails with, the reading goes on, since the connection reopens by itself.
         catch (Exception exception)
         {
-            if (!stopped.IsCancellationRequested)
+            if (!cancellation.IsCancellationRequested)
             {
                 report = null;
                 failure = exception.Message;

@@ -28,12 +28,29 @@ internal interface IWorkspaceActivity
     void Leave(Guid id, WorkspaceState state);
 
     /// <summary>
+    /// Goes from one state straight into another, so that no other work finds the workspace ready in between.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="from">The state it must be in.</param>
+    /// <param name="to">The state it goes into.</param>
+    /// <returns><see langword="true" /> if it was in <paramref name="from" />.</returns>
+    bool Pass(Guid id, WorkspaceState from, WorkspaceState to);
+
+    /// <summary>
     /// Moves a workspace that is working or managing into <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />, which no other work can leave until it calls <see cref="Leave" />.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="halting">The state to enter: <see cref="WorkspaceState.Stopping" /> or <see cref="WorkspaceState.Canceling" />.</param>
     /// <returns>The state the workspace was in, or <see langword="null" /> when it was ready or already stopping or canceling, and nothing changed.</returns>
     WorkspaceState? Halt(Guid id, WorkspaceState halting);
+
+    /// <summary>
+    /// Runs an action while no workspace changes its state. A caller that holds a lock of its own while it reads or changes states takes that lock inside the action: a change of state is published while the lock of the states is held, to subscribers that may take the caller's, so the two are always taken in this order.
+    /// </summary>
+    /// <typeparam name="T">The type of the result.</typeparam>
+    /// <param name="action">The action, which must not wait for anything.</param>
+    /// <returns>What the action returns.</returns>
+    T Together<T>(Func<T> action);
 
     /// <summary>
     /// Describes what holds a workspace, for the refusal of work that cannot start.
@@ -94,6 +111,22 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
     }
 
     /// <inheritdoc />
+    public bool Pass(Guid id, WorkspaceState from, WorkspaceState to)
+    {
+        lock (gate)
+        {
+            if (states.GetValueOrDefault(id) != from || from == WorkspaceState.Ready)
+            {
+                return false;
+            }
+
+            states[id] = to;
+            Publish(id, to);
+            return true;
+        }
+    }
+
+    /// <inheritdoc />
     public WorkspaceState? Halt(Guid id, WorkspaceState halting)
     {
         lock (gate)
@@ -112,6 +145,15 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
     }
 
     /// <inheritdoc />
+    public T Together<T>(Func<T> action)
+    {
+        lock (gate)
+        {
+            return action();
+        }
+    }
+
+    /// <inheritdoc />
     public string Describe(Guid id) => Get(id) switch
     {
         WorkspaceState.Working => "The AI is working in this workspace right now.",
@@ -121,6 +163,6 @@ internal sealed class WorkspaceActivity(IEventHub events) : IWorkspaceActivity
         _ => "The workspace is ready."
     };
 
-    // Published while the lock is held so events leave in the order the states changed; the hub only queues them, so this never blocks.
+    // Published while the lock is held so events leave in the order the states changed. Subscribers run inside it, which Together is there for.
     private void Publish(Guid id, WorkspaceState state) => events.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = id, State = state });
 }

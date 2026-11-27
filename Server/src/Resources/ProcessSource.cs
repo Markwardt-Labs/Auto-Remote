@@ -181,7 +181,7 @@ internal sealed class ProcessSource(string root = "/proc", string groups = "/sys
     }
 
     private long? Kilobytes(string? text, string name)
-        => text?.Split('\n').FirstOrDefault(line => line.StartsWith(name, StringComparison.Ordinal))?[name.Length..].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is [var value, ..] ? Parse(value) * 1024 : null;
+        => text?.Split('\n').FirstOrDefault(line => line.StartsWith(name, StringComparison.Ordinal))?[name.Length..].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries) is [string value, ..] ? Parse(value) * 1024 : null;
 
     private long Parse(string value) => long.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed) ? parsed : 0;
 

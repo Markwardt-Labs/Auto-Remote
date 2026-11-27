@@ -3,6 +3,7 @@ namespace Markwardt.AutoRemote.Client;
 /// <summary>
 /// A delegated task as the list of the swarm screen shows it.
 /// </summary>
+/// <param name="Task">The delegated task.</param>
 internal sealed record SwarmTaskViewModel(SwarmTaskInfo Task)
 {
     /// <summary>

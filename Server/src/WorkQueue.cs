@@ -16,6 +16,20 @@ internal interface IWorkQueue
     int FreeDelegatedSlots { get; }
 
     /// <summary>
+    /// Gets the workspaces whose restored work is to be committed once it is done.
+    /// </summary>
+    IReadOnlyList<Guid> RestoredCommits { get; }
+
+    /// <summary>
+    /// Waits until the local AI may be used for work that is not a prompt of its own, such as writing a commit message, and holds it until the result is disposed.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>What gives the AI back when disposed.</returns>
+    /// <exception cref="RequestException">The waiting work was removed from the queue.</exception>
+    Task<IAsyncDisposable> Reserve(Guid id, CancellationToken cancellation);
+
+    /// <summary>
     /// Restores the work that waited when the server stopped and starts what may start.
     /// </summary>
     /// <param name="dataFolder">The data folder of the server.</param>
@@ -35,13 +49,22 @@ internal interface IWorkQueue
     Task<WorkTicket> Submit(Guid id, string text, WorkSource source, CancellationToken cancellation);
 
     /// <summary>
-    /// Waits until the local AI may be used for work that is not a prompt of its own, such as writing a commit message, and holds it until the result is disposed.
+    /// Gives a workspace a direct prompt like <see cref="Submit" />, but only when it has no work running, starting or waiting, so the prompt joins nothing.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="cancellation">Cancels the wait.</param>
-    /// <returns>What gives the AI back when disposed.</returns>
-    /// <exception cref="RequestException">The waiting work was removed from the queue.</exception>
-    Task<IAsyncDisposable> Reserve(Guid id, CancellationToken cancellation);
+    /// <param name="text">The prompt.</param>
+    /// <param name="taken">Called once the prompt is the workspace's work: when it takes the workspace, or as soon as it waits.</param>
+    /// <param name="cancellation">Cancels the wait for a start that happens at once.</param>
+    /// <returns>Whether the prompt waits, and a task that tells when it starts.</returns>
+    /// <exception cref="RequestException">The workspace has other work, or the prompt could not be sent.</exception>
+    Task<WorkTicket> SubmitWhenFree(Guid id, string text, Action taken, CancellationToken cancellation);
+
+    /// <summary>
+    /// Checks whether work of a workspace is on its way to the AI, so it neither waits any more nor works yet.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if it is.</returns>
+    bool IsStarting(Guid id);
 
     /// <summary>
     /// Removes everything of a workspace that waits; work that runs is not touched.
@@ -56,6 +79,12 @@ internal interface IWorkQueue
     /// <param name="id">The workspace identifier.</param>
     /// <returns>A task that completes once the run is removed.</returns>
     Task CancelLoop(Guid id);
+
+    /// <summary>
+    /// Takes the waiting run of a loop out of the line so that other work of the workspace can go first, without counting it as dropped by the user. A run that is starting already is left to start.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    Task YieldLoop(Guid id);
 
     /// <summary>
     /// Takes a prompt back out of the work that waits, also when it was put together with other work.
@@ -95,8 +124,10 @@ internal sealed class WorkQueue : IWorkQueue
     /// <param name="activity">Tells whether a workspace is busy with something else.</param>
     /// <param name="savedInputs">Keeps the text of a waiting prompt that could not start.</param>
     /// <param name="events">Tells clients about the queue and the queue about work ending.</param>
-    public WorkQueue(IWorkspaceManager workspaces, IPromptService prompts, IPrompterHost host, IWorkspaceActivity activity, ISavedInputs savedInputs, IEventHub events)
+    /// <param name="completion">Gives up on what was to follow waiting work that could not start.</param>
+    public WorkQueue(IWorkspaceManager workspaces, IPromptService prompts, IPrompterHost host, IWorkspaceActivity activity, ISavedInputs savedInputs, IEventHub events, Func<IWorkCompletion?>? completion = null)
     {
+        this.completion = completion;
         this.workspaces = workspaces;
         this.prompts = prompts;
         this.host = host;
@@ -117,6 +148,13 @@ internal sealed class WorkQueue : IWorkQueue
     private readonly ISavedInputs savedInputs;
 
     private readonly IEventHub events;
+
+    private readonly Func<IWorkCompletion?>? completion;
+
+    // The workspaces whose work is to be committed. Kept without the lock, since it is told while other locks are held.
+    private readonly ConcurrentDictionary<Guid, byte> committing = new();
+
+    private readonly List<Guid> restoredCommits = [];
 
     private readonly Lock gate = new();
 
@@ -157,6 +195,9 @@ internal sealed class WorkQueue : IWorkQueue
             }
         }
     }
+
+    /// <inheritdoc />
+    public IReadOnlyList<Guid> RestoredCommits => restoredCommits;
 
     /// <inheritdoc />
     public int FreeDelegatedSlots
@@ -204,6 +245,12 @@ internal sealed class WorkQueue : IWorkQueue
                 {
                     entries.Add(new Entry(workspace.Id, workspace.Name, false) { Text = waiting.Text, Source = waiting.Source, Sequence = ++sequence });
                 }
+
+                if (waiting.AutoCommit)
+                {
+                    committing[workspace.Id] = 0;
+                    restoredCommits.Add(workspace.Id);
+                }
             }
             catch (RequestException)
             {
@@ -221,13 +268,27 @@ internal sealed class WorkQueue : IWorkQueue
     }
 
     /// <inheritdoc />
-    public async Task<WorkTicket> Submit(Guid id, string text, WorkSource source, CancellationToken cancellation)
+    public Task<WorkTicket> Submit(Guid id, string text, WorkSource source, CancellationToken cancellation) => Place(id, text, source, null, cancellation);
+
+    /// <inheritdoc />
+    public Task<WorkTicket> SubmitWhenFree(Guid id, string text, Action taken, CancellationToken cancellation) => Place(id, text, WorkSource.Direct, taken, cancellation);
+
+    /// <inheritdoc />
+    public bool IsStarting(Guid id)
+    {
+        lock (gate)
+        {
+            return slots.TryGetValue(id, out Slot? slot) && slot.Starting;
+        }
+    }
+
+    private async Task<WorkTicket> Place(Guid id, string text, WorkSource source, Action? taken, CancellationToken cancellation)
     {
         WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
 
         if (workspace.Service != AiService.Local)
         {
-            await prompts.Prompt(id, text, source == WorkSource.Loop, cancellation);
+            await Send(id, text, source == WorkSource.Loop, taken, cancellation);
             return new WorkTicket(false, Task.FromResult(true));
         }
 
@@ -243,6 +304,11 @@ internal sealed class WorkQueue : IWorkQueue
 
         lock (gate)
         {
+            if (taken is not null && (prompts.IsBusy(id) || slots.TryGetValue(id, out Slot? taking) && taking.Starting || entries.Any(waiting => waiting.Workspace == id && !waiting.IsReservation)))
+            {
+                throw new RequestException("The AI is working.");
+            }
+
             if (prompts.IsBusy(id) || slots.TryGetValue(id, out Slot? occupied) && occupied.Starting)
             {
                 steering = true;
@@ -304,7 +370,7 @@ internal sealed class WorkQueue : IWorkQueue
         {
             try
             {
-                await prompts.Prompt(id, text, source == WorkSource.Loop, cancellation);
+                await Send(id, text, source == WorkSource.Loop, taken, cancellation);
             }
             catch
             {
@@ -318,12 +384,17 @@ internal sealed class WorkQueue : IWorkQueue
             return new WorkTicket(false, entry.Started.Task);
         }
 
+        taken?.Invoke();
         Changed();
         await Save();
         joined?.Started.TrySetResult(true);
         Pump();
         return new WorkTicket(true, entry!.Started.Task);
     }
+
+    private Task Send(Guid id, string text, bool onlyWhenIdle, Action? taken, CancellationToken cancellation) => taken is null
+        ? prompts.Prompt(id, text, onlyWhenIdle, cancellation)
+        : prompts.PromptWhenIdle(id, text, taken, cancellation);
 
     /// <inheritdoc />
     public async Task<IAsyncDisposable> Reserve(Guid id, CancellationToken cancellation)
@@ -429,6 +500,32 @@ internal sealed class WorkQueue : IWorkQueue
         }
 
         await Dropped(removed);
+    }
+
+    /// <inheritdoc />
+    public async Task YieldLoop(Guid id)
+    {
+        List<Entry> removed;
+
+        lock (gate)
+        {
+            removed = [.. entries.Where(entry => entry.Workspace == id && !entry.IsReservation && entry.Source == WorkSource.Loop)];
+            entries.RemoveAll(removed.Contains);
+        }
+
+        if (removed.Count == 0)
+        {
+            return;
+        }
+
+        foreach (Entry entry in removed)
+        {
+            entry.Started.TrySetResult(false);
+        }
+
+        Changed();
+        await Save();
+        Pump();
     }
 
     /// <inheritdoc />
@@ -600,6 +697,13 @@ internal sealed class WorkQueue : IWorkQueue
 
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = entry.Workspace, Time = DateTimeOffset.UtcNow, Error = $"The queued work could not start: {exception.Message}" });
             await Keep(entry);
+
+            // Said while the work still counts as starting, so no queued input is sent after work that failed.
+            if (entry.Source == WorkSource.Direct && completion?.Invoke() is { } followed)
+            {
+                await followed.Abandon(entry.Workspace);
+            }
+
             Settle(entry.Workspace, true);
             entry.Started.TrySetException(new RequestException(exception.Message));
             return;
@@ -647,9 +751,37 @@ internal sealed class WorkQueue : IWorkQueue
 
     private void Follow(RemoteEvent remoteEvent)
     {
-        if (remoteEvent.Kind is RemoteEventKind.WorkingChanged or RemoteEventKind.StateChanged)
+        if (remoteEvent.Kind == RemoteEventKind.AutoCommitChanged)
+        {
+            if (remoteEvent.AutoCommit == AutoCommitState.On)
+            {
+                committing[remoteEvent.WorkspaceId] = 0;
+            }
+            else
+            {
+                committing.TryRemove(remoteEvent.WorkspaceId, out _);
+            }
+
+            _ = Task.Run(() => SaveWaiting(remoteEvent.WorkspaceId));
+        }
+        else if (remoteEvent.Kind is RemoteEventKind.WorkingChanged or RemoteEventKind.StateChanged)
         {
             _ = Task.Run(() => Observe(remoteEvent.WorkspaceId));
+        }
+    }
+
+    private async Task SaveWaiting(Guid id)
+    {
+        bool waiting;
+
+        lock (gate)
+        {
+            waiting = entries.Any(entry => entry.Workspace == id && !entry.IsReservation);
+        }
+
+        if (waiting)
+        {
+            await Save();
         }
     }
 
@@ -799,7 +931,7 @@ internal sealed class WorkQueue : IWorkQueue
 
             lock (gate)
             {
-                queue = new StoredQueue { Entries = [.. Ordered().Where(entry => !entry.IsReservation).Select(entry => new StoredEntry { WorkspaceId = entry.Workspace, Text = entry.Text, Source = entry.Source })] };
+                queue = new StoredQueue { Entries = [.. Ordered().Where(entry => !entry.IsReservation).Select(entry => new StoredEntry { WorkspaceId = entry.Workspace, Text = entry.Text, Source = entry.Source, AutoCommit = committing.ContainsKey(entry.Workspace) })] };
             }
 
             await stored.Write(file, JsonSerializer.SerializeToNode(queue, options)!.AsObject(), CancellationToken.None);
@@ -883,5 +1015,8 @@ internal sealed class WorkQueue : IWorkQueue
         public required string Text { get; init; }
 
         public WorkSource Source { get; init; }
+
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+        public bool AutoCommit { get; init; }
     }
 }

@@ -27,10 +27,17 @@ internal interface IWorkspaceLoops
     /// <param name="id">The workspace identifier.</param>
     /// <returns>The loop, or <see langword="null" /> when none runs.</returns>
     LoopInfo? Get(Guid id);
+
+    /// <summary>
+    /// Checks whether a run of a loop is under way in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if one is.</returns>
+    bool IsRunning(Guid id);
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null, IWorkQueue? queue = null, Func<Guid, bool>? delivering = null) : IWorkspaceLoops
+internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptService prompts, IWorkspaceActivity activity, IUsageService usage, IEventHub events, TimeSpan? pollInterval = null, TimeSpan? windowInterval = null, TimeSpan? limitInterval = null, IWindowGuard? guard = null, IWorkQueue? queue = null, Func<Guid, bool>? delivering = null, Func<IFollowUps?>? following = null) : IWorkspaceLoops
 {
     private readonly ConcurrentDictionary<Guid, LoopRun> loops = new();
 
@@ -44,6 +51,9 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
     /// <inheritdoc />
     public LoopInfo? Get(Guid id) => loops.TryGetValue(id, out LoopRun? run) ? run.Info() : null;
+
+    /// <inheritdoc />
+    public bool IsRunning(Guid id) => loops.TryGetValue(id, out LoopRun? run) && run.Running;
 
     /// <inheritdoc />
     public async Task Start(Guid id, LoopSettings settings, CancellationToken cancellation)
@@ -74,7 +84,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
             await Validate(workspace.Service, settings, cancellation);
         }
 
-        if (activity.Get(id) is not (WorkspaceState.Ready or WorkspaceState.Working))
+        // A commit that follows work ends by itself, and the loop's first run waits for it like for any work.
+        if (activity.Get(id) is not (WorkspaceState.Ready or WorkspaceState.Working) && following?.Invoke()?.IsCommitting(id) != true)
         {
             throw new RequestException(activity.Describe(id));
         }
@@ -151,8 +162,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
             while (!run.Over)
             {
                 run.LastWindowCheck = DateTimeOffset.MinValue;
-                // A side session waiting to be integrated goes first.
-                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && queue?.Get(id) is null && guard?.IsPaused(id) != true && delivering?.Invoke(id) != true);
+                // A side session waiting to be integrated goes first, and so do a commit that is due and queued inputs.
+                string? reason = await Wait(run, () => activity.Get(id) == WorkspaceState.Ready && !prompts.IsBusy(id) && queue?.Get(id) is null && guard?.IsPaused(id) != true && delivering?.Invoke(id) != true && !GoesFirst(id));
 
                 if (run.Over || reason is not null)
                 {
@@ -167,6 +178,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                 }
 
                 run.Failure = null;
+                // Said before the prompt is sent, so nobody takes the work it starts for other work.
+                Turn(id, run, true);
                 WorkTicket? ticket = null;
 
                 try
@@ -188,13 +201,14 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                         return;
                     }
 
+                    Turn(id, run, false);
                     await Task.Delay(poll);
                     continue;
                 }
 
                 if (ticket is { Queued: true })
                 {
-                    reason = await Wait(run, () => ticket.Started.IsCompleted);
+                    reason = await Wait(run, () => ticket.Started.IsCompleted || GoesFirst(id));
 
                     if (run.Over || reason is not null)
                     {
@@ -202,8 +216,43 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                         return;
                     }
 
-                    if (!await ticket.Started)
+                    bool yielded = !ticket.Started.IsCompleted;
+
+                    if (yielded)
                     {
+                        // The run gives up its place in the line, and takes a new one once what goes first is done.
+                        await queue!.YieldLoop(id);
+
+                        // A user's message that joined the waiting run keeps its place, and the run goes with it.
+                        if (!ticket.Started.IsCompleted)
+                        {
+                            yielded = false;
+                            reason = await Wait(run, () => ticket.Started.IsCompleted);
+
+                            if (run.Over || reason is not null)
+                            {
+                                End(id, run, reason);
+                                return;
+                            }
+                        }
+                    }
+
+                    bool began = await ticket.Started;
+
+                    // It may have been cancelled meanwhile, and one that was is not said to run.
+                    if (run.Over)
+                    {
+                        return;
+                    }
+
+                    if (!began)
+                    {
+                        if (yielded)
+                        {
+                            Turn(id, run, false);
+                            continue;
+                        }
+
                         End(id, run, "The loop stopped: its waiting run was cancelled.");
                         return;
                     }
@@ -226,7 +275,10 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                     return;
                 }
 
-                if (run.Failure is { } failure)
+                // Read while the run still counts as under way, so no failure of other work is taken for the run's.
+                string? failed = run.Failure;
+
+                if (failed is { } failure)
                 {
                     if (!run.Settings.WaitForLimit || !await Limited(run, failure))
                     {
@@ -235,6 +287,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                     }
 
                     Interlocked.Decrement(ref run.Runs);
+                    run.Running = false;
                     reason = await WaitForLimit(id, run);
 
                     if (reason is not null)
@@ -252,6 +305,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
                     return;
                 }
 
+                Turn(id, run, false);
+
                 TimeSpan interval = TimeSpan.FromSeconds(run.Settings.IntervalSeconds);
                 reason = await Wait(run, () => DateTimeOffset.UtcNow - started >= interval);
 
@@ -265,6 +320,18 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
         catch (Exception exception) when (exception is not OutOfMemoryException)
         {
             End(id, run, $"The loop stopped: {exception.Message}");
+        }
+    }
+
+    private bool GoesFirst(Guid id) => following?.Invoke()?.GoesFirst(id) == true;
+
+    private void Turn(Guid id, LoopRun run, bool running)
+    {
+        run.Running = running;
+
+        if (!run.Over)
+        {
+            events.Publish(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = id, Loop = run.Info() });
         }
     }
 
@@ -385,6 +452,8 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
 
         public volatile bool Over;
 
+        public volatile bool Running;
+
         public LoopSettings Settings { get; } = settings;
 
         public AiService Service { get; } = service;
@@ -415,7 +484,7 @@ internal sealed class WorkspaceLoops(IWorkspaceManager workspaces, IPromptServic
         {
             lock (this)
             {
-                return new() { Settings = Settings, StartedAt = startedAt, Runs = Volatile.Read(ref Runs), NextRunAt = nextRunAt, LimitCheckAt = limitCheckAt };
+                return new() { Settings = Settings, StartedAt = startedAt, Runs = Volatile.Read(ref Runs), NextRunAt = nextRunAt, LimitCheckAt = limitCheckAt, IsRunning = Running };
             }
         }
     }

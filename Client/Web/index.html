@@ -165,6 +165,13 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .limit-banner > div { flex: 1; }
 .limit-banner button { flex: none; font-size: 12px; padding: 2px 8px; }
 .limit-banner[hidden] { display: none; }
+.paused-banner, .loop-banner { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); flex: none; }
+.paused-banner { border-bottom: 1px solid var(--warning); }
+.loop-banner { border-bottom: 1px solid var(--accent); }
+.paused-banner[hidden], .loop-banner[hidden] { display: none; }
+.paused-banner .info, .loop-banner > div { flex: 1; min-width: 0; }
+.paused-banner button { flex: none; font-size: 12px; padding: 5px 10px; }
+.loop-banner svg { flex: none; }
 .row-check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .topbar .title { user-select: none; -webkit-touch-callout: none; }
 .topbar.offline .title::after { content: "(reconnecting…)"; min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 6px; font-size: 12px; opacity: 0.8; }
@@ -190,11 +197,22 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .msg.assistant .stamp { margin-top: 2px; }
 .chat-error { max-width: 820px; width: 100%; margin: 0 auto; padding: 4px 20px; }
 .composer { max-width: 820px; width: 100%; margin: 0 auto; padding: 4px 12px 12px; }
-.composer .box { display: flex; align-items: center; gap: 6px; padding: 4px 0 4px 8px; box-sizing: border-box; height: 120px; min-height: 60px; }
-.composer textarea, .composer textarea:focus, .composer textarea:hover { flex: 1; background: transparent; border: 0; border-radius: 0; padding: 0; min-height: 0; max-height: 100%; height: auto; resize: none; outline: none; align-self: center; }
+.composer .box { display: flex; flex-wrap: wrap; align-content: center; justify-content: flex-end; align-items: center; gap: 6px; padding: 4px 0 4px 8px; box-sizing: border-box; height: 120px; min-height: 60px; }
+.composer textarea, .composer textarea:focus, .composer textarea:hover { flex: 1 1 100px; min-width: 100px; background: transparent; border: 0; border-radius: 0; padding: 0; min-height: 0; max-height: 100%; height: auto; resize: none; outline: none; align-self: center; }
 .composer .box button { align-self: center; }
 .composer .box button.act.saved { border-color: var(--accent); }
+.composer .box button.act.toggled { background: var(--selection); border: 2px solid var(--accent); }
+.composer .loaded-commit { width: auto; height: auto; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 6px 8px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.composer .loaded-commit[hidden] { display: none; }
+.composer .loaded-commit.toggled { background: var(--selection); border: 2px solid var(--accent); }
+.composer .loaded-commit:disabled { opacity: .65; }
+.composer .loaded-note { margin: 0 0 6px 8px; font-size: 12px; }
 .composer .box button.act { flex: none; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+.composer .box button.act.labelled { width: auto; gap: 5px; padding: 0 9px; }
+.composer .box button.act .caption { font-size: 10px; line-height: 12px; text-align: left; white-space: pre; }
+.composer .box button.act.load-saved { position: relative; }
+.composer .box .badge { position: absolute; top: 1px; right: 1px; min-width: 13px; height: 13px; box-sizing: border-box; border-radius: 7px; padding: 0 3px; font-size: 9px; line-height: 13px; background: var(--accent); color: #fff; }
+.composer .box .badge.paused { background: var(--warning); color: #1E1E1E; }
 .composer .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 0 0 4px 8px; }
 .composer .chip { display: flex; align-items: center; gap: 6px; background: var(--elevated); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 12px; }
 .composer .chip .name { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -393,12 +411,21 @@ button.refbtn .ref { margin: 0; }
 .saved-inputs .head h3 { margin: 0; font-size: 18px; }
 .saved-inputs .list { flex: 1; min-height: 0; overflow-y: auto; }
 .saved-inputs .none { color: var(--muted); }
-.saved-inputs .list button { display: block; width: 100%; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 10px 6px; color: inherit; cursor: pointer; font-size: 13px; line-height: 1.35; }
-.saved-inputs .list button:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
+.saved-inputs .saved-row { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--border); }
+.saved-inputs .saved-row.queued { border-left: 3px solid var(--accent); background: var(--elevated); }
+.saved-inputs .saved-row > button.load { display: block; flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; border-radius: 0; padding: 10px 6px; color: inherit; cursor: pointer; font-size: 13px; line-height: 1.35; }
+.saved-inputs .saved-row > button.load:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
+.saved-inputs .saved-row > button.delete, .saved-inputs .saved-row > button.saved-commit { flex: none; padding: 8px; }
+.saved-inputs .saved-row > button.saved-commit.toggled { background: var(--selection); border: 2px solid var(--accent); border-radius: 4px; padding: 6px; }
+.saved-inputs .queue-label { color: var(--accent); font-size: 11px; font-weight: 700; margin-bottom: 4px; }
+.saved-inputs .paused-note { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 12px; margin-bottom: 8px; }
+.saved-inputs .paused-note button { font-size: 12px; padding: 5px 10px; }
+.saved-inputs .confirm { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 24px; }
+.saved-inputs .confirm .card { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+.saved-inputs .confirm h3 { margin: 0; font-size: 18px; }
+.saved-inputs .confirm .preview-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
 .saved-inputs .text { display: -webkit-box; -webkit-line-clamp: 8; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; }
-.saved-inputs .pending { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--border); padding: 10px 6px; font-size: 13px; }
-.saved-inputs .pending .info { flex: 1; min-width: 0; }
-.saved-inputs .pending button { flex: none; }
+.saved-inputs .pending { flex: 1; min-width: 0; padding: 10px 6px; font-size: 13px; }
 .saved-inputs .bar { height: 3px; margin-top: 6px; border-radius: 2px; background: linear-gradient(90deg, transparent, var(--accent), transparent) 0 0 / 40% 100% no-repeat, var(--elevated); animation: saved-bar 1.2s linear infinite; }
 @keyframes saved-bar { from { background-position: -40% 0, 0 0; } to { background-position: 140% 0, 0 0; } }
 .voice-screen { position: fixed; inset: 0; z-index: 100; background: var(--background); display: flex; flex-direction: column; padding: 24px; max-width: 460px; margin: 0 auto; }
@@ -487,6 +514,7 @@ function writeNumbered(workspaceId, files) {
   }
 }
 const draftKey = "autoRemote.draft.";
+const draftCommitKey = "autoRemote.draftCommit.";
 const historyChunk = 30;
 const chatChunkMessages = 100;
 const chatChunkCharacters = 20000;
@@ -1630,7 +1658,12 @@ class Connection {
   getGitDiff(workspaceId, path, commit) { return this.request("GetGitDiff", { workspaceId, path, commit: commit ?? undefined }).then(r => r.gitDiff); }
   gitCommit(workspaceId, text) { return this.request("GitCommit", { workspaceId, text }); }
   getSavedInputs(workspaceId) { return this.request("GetSavedInputs", { workspaceId }).then(r => r.savedInputs); }
-  saveInput(workspaceId, text) { return this.request("SaveInput", { workspaceId, text }).then(r => r.savedInputs); }
+  saveInput(workspaceId, text, autoCommit) { return this.request("SaveInput", { workspaceId, text, autoCommit }).then(r => r.savedInputs); }
+  queueInput(workspaceId, text, autoCommit) { return this.request("QueueInput", { workspaceId, text, autoCommit }).then(r => r.savedInputs); }
+  setSavedInputAutoCommit(workspaceId, inputId, enabled) { return this.request("SetSavedInputAutoCommit", { workspaceId, inputId, enabled }).then(r => r.savedInputs); }
+  promptToCommit(workspaceId, text, overLimit) { return this.request("Prompt", { workspaceId, text, ignoreLimit: overLimit || undefined, autoCommit: true }); }
+  setAutoCommit(workspaceId, enabled) { return this.request("SetAutoCommit", { workspaceId, enabled }); }
+  resumeQueue(workspaceId) { return this.request("ResumeQueue", { workspaceId }); }
   takeSavedInput(workspaceId, inputId) { return this.request("TakeSavedInput", { workspaceId, inputId }).then(r => r.savedInput); }
   setShowWork(workspaceId, showWork) { return this.request("SetShowWork", { workspaceId, showWork }); }
   getErrors(workspaceId) { return this.request("GetErrors", { workspaceId }).then(r => r.errors); }
@@ -1795,6 +1828,9 @@ const icons = {
   resume: ["M3.5,1.5 L11.5,7 L3.5,12.5 Z", "1.5 1 12 12", 14],
   review: ["M6,1.5 A4.5,4.5 0 1 1 6,10.5 A4.5,4.5 0 1 1 6,1.5 Z M9.3,9.3 L12.5,12.5 M4,6 L5.4,7.4 L8,4.6", "1 1 12 12", 14],
   expand: ["M8.5,1.5 L12.5,1.5 L12.5,5.5 M12.5,1.5 L7.8,6.2 M5.5,12.5 L1.5,12.5 L1.5,8.5 M1.5,12.5 L6.2,7.8", "1 1 12 12", 14],
+  autoCommit: ["M1,10 L4,10 M10,10 L13,10 M10,10 A3,3 0 1 1 4,10 A3,3 0 1 1 10,10 Z M4.5,3 L6.5,5 L10,1", "0 0 14 14", 14],
+  queue: ["M1.5,1.5 L9,1.5 M1.5,7 L5.5,7 M1.5,12.5 L5.5,12.5 M10.5,13 L10.5,5.5 M8,8 L10.5,5.5 L13,8", "0.25 0.25 13.75 13.75", 15],
+  trash: ["M1.5,3.5 L12.5,3.5 M5,3.5 L5,1.5 L9,1.5 L9,3.5 M3.5,3.5 L4,12.5 L10,12.5 L10.5,3.5 M5.8,6 L5.8,10 M8.2,6 L8.2,10", "0.5 0.5 13 13", 14],
   saveInput: ["M2,2 L10,2 L12,4 L12,12 L2,12 Z M4.5,2 L4.5,5.5 L9,5.5 L9,2 M4.5,12 L4.5,8 L9.5,8 L9.5,12", "1 1 12 12", 14],
   loadInput: ["M1.5,8 L1.5,12.5 L12.5,12.5 L12.5,8 M1.5,8 L4.5,8 L5.5,10 L8.5,10 L9.5,8 L12.5,8 M7,1.5 L7,7 M4.5,4.5 L7,7 L9.5,4.5", "1 1 12 12", 14],
   mic: ["M7,1 A2.5,2.5 0 0 1 9.5,3.5 L9.5,7 A2.5,2.5 0 0 1 4.5,7 L4.5,3.5 A2.5,2.5 0 0 1 7,1 Z M2.5,6.5 A4.5,4.5 0 0 0 11.5,6.5 M7,11 L7,13.5 M4.5,13.5 L9.5,13.5", "2 0.75 10 13", 14],
@@ -2243,11 +2279,26 @@ class WorkspaceView {
     this.resumeButton = h("button", { class: "primary act", title: "Resume: ask the AI to resume its unfinished work", onclick: () => this.quick(resumePrompt) }, icon("resume"));
     this.loopButton = h("button", { class: "act", title: "Loop: send a prompt over and over", onclick: () => this.openLoop() }, icon("loop"));
     this.cancelLoopButton = h("button", { class: "act", hidden: true, title: "Cancel the loop (the work in progress keeps going)", onclick: () => this.cancelLoop() }, icon("loopcancel"));
+    this.autoCommitState = "Off";
+    this.autoCommitCaption = h("span", { class: "caption", hidden: true }, "Current\nWork");
+    this.autoCommitButton = h("button", { class: "act autocommit", hidden: true, onclick: () => this.toggleAutoCommit() }, icon("autoCommit"), this.autoCommitCaption);
+    this.queueButton = h("button", { class: "primary act queue", title: "Queue: send once the current work is done, at once if there is none, and auto commit afterwards", hidden: true, onclick: () => this.queueInput() }, icon("queue"));
+    this.deletingInput = null;
+    // What auto commit of a saved input loaded into the box is, or null when it holds nothing that was loaded.
+    this.loadedAutoCommit = null;
+    this.loadedText = h("span", {});
+    this.loadedButton = h("button", { class: "loaded-commit", hidden: true, onclick: () => this.toggleLoadedAutoCommit() }, icon("autoCommit"), this.loadedText);
+    this.loadedNote = h("div", { class: "loaded-note muted", hidden: true });
+    this.pausedText = h("b", {});
+    this.pausedBanner = h("div", { class: "paused-banner", hidden: true }, h("div", { class: "info" }, this.pausedText, h("div", { class: "muted" }, "Work was stopped, cancelled or failed, or the server restarted.")), h("button", { class: "primary", onclick: () => this.resumeQueue() }, "Resume Queue"));
+    this.loopWaitingText = h("div", {});
+    this.loopBanner = h("div", { class: "loop-banner", hidden: true }, icon("loop"), this.loopWaitingText);
     this.savedInputs = [];
     this.savedOpen = false;
     this.savedPanel = h("div", { class: "saved-inputs", hidden: true });
     this.saveInputButton = h("button", { class: "act", hidden: true, title: "Save the input for later and clear it", onclick: () => this.saveInput() }, icon("saveInput"));
-    this.loadInputButton = h("button", { class: "act", title: "Load a saved input", onclick: () => this.toggleSaved() }, icon("loadInput"));
+    this.queuedBadge = h("span", { class: "badge", hidden: true });
+    this.loadInputButton = h("button", { class: "act load-saved", title: "Load a saved input", onclick: () => this.toggleSaved() }, icon("loadInput"), this.queuedBadge);
     this.stopButton = h("button", { class: "primary act", hidden: true, title: "Stop the work and keep what it did", onclick: () => this.home.confirmHalt(this) }, icon("stop"));
     this.attachments = [];
     this.chips = h("div", { class: "chips", hidden: true });
@@ -2290,12 +2341,14 @@ class WorkspaceView {
       this.sideErrorBanner,
       this.limitBanner,
       this.queueBanner,
+      this.pausedBanner,
+      this.loopBanner,
       h("div", { class: "messages-wrap" }, this.scroller, this.workButton, this.chatAutoButton),
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
       this.savedPanel,
-      h("div", { class: "composer" }, this.gitBar, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.loopButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.sendButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.loadedButton, this.loadedNote, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.loopButton, this.cancelLoopButton, this.autoCommitButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.queueButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", hidden: !!this.sideInfo, onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", hidden: !!this.sideInfo, onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2744,9 +2797,12 @@ class WorkspaceView {
 
     try {
       const saved = localStorage.getItem(`${draftKey}${this.info.id}`);
+      const commit = localStorage.getItem(`${draftCommitKey}${this.info.id}`);
 
       if (saved && !this.input.value) {
         this.input.value = saved;
+        // A loaded input is not taken for a typed one after a restart.
+        this.loadedAutoCommit = commit === "on" ? true : commit === "off" ? false : null;
         this.inputChanged();
       }
     } catch (exception) {
@@ -2759,6 +2815,12 @@ class WorkspaceView {
         localStorage.setItem(`${draftKey}${this.info.id}`, this.input.value);
       } else {
         localStorage.removeItem(`${draftKey}${this.info.id}`);
+      }
+
+      if (this.input.value && this.loadedAutoCommit !== null) {
+        localStorage.setItem(`${draftCommitKey}${this.info.id}`, this.loadedAutoCommit ? "on" : "off");
+      } else {
+        localStorage.removeItem(`${draftCommitKey}${this.info.id}`);
       }
     } catch (exception) {
     }
@@ -2830,7 +2892,149 @@ class WorkspaceView {
   }
 
   workState() {
-    return this.gitWorking() ? "Managing" : this.working ? "Working" : "Ready";
+    return this.gitWorking() || this.autoCommitState === "Committing" ? "Managing" : this.working ? "Working" : "Ready";
+  }
+
+  setAutoCommitState(state) {
+    this.autoCommitState = state;
+    this.applyState();
+  }
+
+  hasContent() {
+    return this.input.value.trim().length > 0 || this.attachments.length > 0;
+  }
+
+  toggleLoadedAutoCommit() {
+    // While the current work is to be committed whatever the input says, there is nothing to choose for sending it.
+    if (this.autoCommitState === "On") {
+      return;
+    }
+
+    this.loadedAutoCommit = !this.loadedAutoCommit;
+    this.renderLoaded();
+    this.saveDraft();
+  }
+
+  // A loaded input keeps what it was loaded with for as long as any of it is in the box.
+  renderLoaded() {
+    if (!this.hasContent()) {
+      this.loadedAutoCommit = null;
+    }
+
+    this.loadedButton.hidden = this.loadedAutoCommit === null || !this.gitStatus.isRepo || !!this.delegation();
+    const already = this.autoCommitState === "On";
+    this.loadedButton.disabled = already;
+    this.loadedButton.classList.toggle("toggled", already || this.loadedAutoCommit === true);
+    this.loadedText.textContent = already ? "Auto Commit Already On for Current Work" : this.loadedAutoCommit === true ? "Auto Commit This Input: On" : "Auto Commit This Input: Off";
+    const note = this.loadedButton.hidden ? "" : already ? this.loadedAutoCommit === false ? "Queuing or saving it keeps its own setting: off." : ""
+      : this.loadedAutoCommit === true && this.loop?.isRunning === true ? "Sent now, it joins the loop's run, which is not committed. Queue it to have it committed." : "";
+    this.loadedNote.textContent = note;
+    this.loadedNote.hidden = note === "";
+    const commits = this.gitStatus.isRepo && this.loadedAutoCommit !== false;
+    this.queueButton.title = `Queue: send once the current work is done, at once if there is none${commits ? ", and auto commit afterwards" : ""}`;
+    this.renderAutoCommitCaption();
+  }
+
+  // The button beside the message box says that it is about the current work while the one about a loaded input shows too.
+  renderAutoCommitCaption() {
+    const labelled = !this.autoCommitButton.hidden && !this.loadedButton.hidden;
+    this.autoCommitCaption.hidden = !labelled;
+    this.autoCommitButton.classList.toggle("labelled", labelled);
+  }
+
+  // What the loop waits for besides its interval, or what goes before its next run, in words, or empty when nothing does.
+  loopWaiting() {
+    if (!this.loop) {
+      return "";
+    }
+
+    const queued = this.activeQueued();
+    const inputs = queued === 1 ? "1 queued input" : `${queued} queued inputs`;
+    const state = this.state();
+
+    if (this.loop.isRunning) {
+      return queued > 0 ? `${inputs} will run when this loop run ends.` : "";
+    }
+
+    // A loop only waits once its next run is due; until then it counts down, which queued inputs do not change.
+    if (!this.isRunDue()) {
+      return queued > 0 ? `${inputs} ${queued === 1 ? "goes" : "go"} before the loop's next run.` : "";
+    }
+
+    if (this.autoCommitState === "Committing") {
+      return queued > 0 ? `Loop waiting for the commit and ${inputs}.` : "Loop waiting for the commit.";
+    }
+
+    if (queued > 0) {
+      return state === "Ready" ? `Loop waiting for ${inputs}.` : `Loop waiting for the current work and ${inputs}.`;
+    }
+
+    return state === "Working" || state === "Managing" ? "Loop waiting for the current work to finish." : "";
+  }
+
+  activeQueued() {
+    return this.savedInputs.filter(entry => entry.isQueued && !entry.isPaused).length;
+  }
+
+  isRunDue() {
+    return !this.loop?.nextRunAt || new Date(this.loop.nextRunAt).getTime() <= Date.now();
+  }
+
+  renderLoopWaiting() {
+    const waiting = this.loopWaiting();
+    this.loopWaitingText.textContent = waiting;
+    this.loopBanner.hidden = waiting === "";
+    clearTimeout(this.runDueTimer);
+
+    // What it waits for changes as its next run comes due.
+    if (this.loop && !this.isRunDue()) {
+      this.runDueTimer = setTimeout(() => this.renderLoopWaiting(), Math.min(new Date(this.loop.nextRunAt).getTime() - Date.now() + 50, 2 ** 31 - 1));
+    }
+  }
+
+  renderQueueState() {
+    const queued = this.savedInputs.filter(entry => entry.isQueued);
+    const paused = queued.filter(entry => entry.isPaused).length;
+    this.queuedBadge.textContent = String(queued.length);
+    this.queuedBadge.hidden = queued.length === 0;
+    this.queuedBadge.classList.toggle("paused", paused > 0);
+    this.pausedText.textContent = `Queue paused (${paused})`;
+    this.pausedBanner.hidden = paused === 0;
+    this.renderLoopWaiting();
+  }
+
+  // Resuming gives the workspace work like queuing does, so its end is waited for in the same way.
+  async resumeQueue() {
+    this.chatNotice.hidden = true;
+    const waited = this.notifyWhenReady;
+    this.notifyWhenReady = true;
+    this.clearReady();
+    requestNotifications().then(() => this.home.updateNotify(this));
+
+    if (!(await attempt(() => this.connection.resumeQueue(this.info.id), this.chatError)).ok) {
+      this.settleNotify(waited);
+    }
+  }
+
+  restoreLoaded(loaded) {
+    if (loaded !== null && this.hasContent()) {
+      this.loadedAutoCommit = loaded;
+      this.renderLoaded();
+      this.saveDraft();
+    }
+  }
+
+  async toggleSavedAutoCommit(entry) {
+    // The list is left to what the server tells, since it may send a queued input meanwhile.
+    await attempt(() => this.connection.setSavedInputAutoCommit(this.info.id, entry.id, !entry.autoCommit), this.chatError);
+  }
+
+  async toggleAutoCommit() {
+    await attempt(() => this.connection.setAutoCommit(this.info.id, this.autoCommitState !== "On"), this.chatError);
+  }
+
+  hasActiveQueued() {
+    return this.savedInputs.some(entry => entry.isQueued && !entry.isPaused);
   }
 
   // Whether the user is told once the work is over, which giving it work from here turns on and the user can also turn on or off.
@@ -2841,6 +3045,11 @@ class WorkspaceView {
   set notifyWhenReady(value) {
     this.notifying = value;
     this.home.updateNotify(this);
+  }
+
+  // Work that does not start leaves the wait as it was before, which goes on only while something is still to come and was not announced meanwhile.
+  settleNotify(waited) {
+    this.notifyWhenReady &&= waited && (this.state() !== "Ready" || this.loop !== null || this.hasActiveQueued() || !!this.queue || this.home.held.has(this.info.id));
   }
 
   hasTasksUnderWay() {
@@ -2933,6 +3142,11 @@ class WorkspaceView {
 
     if (this.limitPause) {
       return "The loop is paused with the AI because a usage window is at or past the max usage window limit. It sends nothing until the AI resumes, and goes on then.";
+    }
+
+    // What a due run waits for says more than that it waits for the workspace.
+    if (!loop.isRunning && !loop.limitCheckAt && (this.activeQueued() > 0 || this.autoCommitState === "Committing") && this.isRunDue()) {
+      return this.loopWaiting();
     }
 
     if (loop.limitCheckAt) {
@@ -3377,8 +3591,8 @@ class WorkspaceView {
 
     this.home.held.delete(this.info.id);
 
-    // Nor is it while a loop runs, between whose runs the workspace is ready.
-    if (this.loop !== null) {
+    // Nor is it while queued inputs are still to be sent or work waits for the local AI (a queued input leaves the list only after it starts to wait there), or while a loop runs, between whose runs the workspace is ready.
+    if (this.hasActiveQueued() || this.queue || this.loop !== null) {
       return;
     }
 
@@ -3414,13 +3628,13 @@ class WorkspaceView {
     if (previous === "Ready" && state !== "Ready") {
       this.busySince = Date.now();
       this.clearReady();
-    } else if (previous !== "Ready" && state === "Ready" && Date.now() - this.busySince >= 2000) {
+    } else if (previous !== "Ready" && state === "Ready" && Date.now() - this.busySince >= 2000 && this.loop === null && !this.hasActiveQueued()) {
       ding();
     }
 
     this.gitBar.hidden = state !== "Managing";
     const delegated = this.delegation();
-    this.input.placeholder = delegated ? `This workspace runs a task delegated by ${delegated.from}` : { Managing: "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
+    this.input.placeholder = delegated ? `This workspace runs a task delegated by ${delegated.from}` : { Managing: this.autoCommitState === "Committing" ? "Committing the changes, queue what comes next" : "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
     this.showDelegation(delegated);
     this.updateSend();
     this.home.updateWorking(this);
@@ -3478,11 +3692,7 @@ class WorkspaceView {
   async loadChat(reach = null, characters = 0) {
     this.loading = true;
     const saved = await attempt(() => this.connection.getSavedInputs(this.info.id), this.chatError);
-
-    if (saved.ok) {
-      this.setSavedInputs(saved.value);
-    }
-
+    let unshown = saved.ok ? saved.value : null;
     const result = await attempt(() => this.connection.getHistory(this.info.id, null, chatChunkMessages, chatChunkCharacters), this.chatError);
     let lost = false;
 
@@ -3509,14 +3719,24 @@ class WorkspaceView {
       this.messages = [...window, ...unsent];
       this.start = messagePosition(older);
       this.setShowWork(result.value.showWork === true);
-      this.setWorking(result.value.working === true);
-      this.setLimitPause(result.value.limitPause ?? null);
       this.renderMessages();
       const waiting = await attempt(() => this.connection.getQueuedWork(this.info.id), this.chatError);
 
+      // Known before the state, since work that waits for the local AI keeps the workspace from counting as ready.
       if (waiting.ok) {
         this.setQueue(waiting.value);
       }
+
+      // Queued inputs still to be sent are shown before the state and none left only after it, so neither step looks like the end of the work.
+      if (unshown?.some(entry => entry.isQueued && !entry.isPaused)) {
+        this.setSavedInputs(unshown);
+        unshown = null;
+      }
+
+      // Both change before the state is applied once, so no state in between, such as ready, is ever seen.
+      this.autoCommitState = result.value.autoCommit ?? "Off";
+      this.setWorking(result.value.working === true);
+      this.setLimitPause(result.value.limitPause ?? null);
 
       if (lost) {
         this.chatAuto = true;
@@ -3524,6 +3744,10 @@ class WorkspaceView {
         this.trimToNewest();
         this.scrollToEnd(true);
       }
+    }
+
+    if (unshown) {
+      this.setSavedInputs(unshown);
     }
 
     this.flushEarly();
@@ -3731,7 +3955,7 @@ class WorkspaceView {
 
       // A queue emptied as "dropped" means the waiting prompt never starts.
       if (!event.queue && event.text === "dropped" && !this.working) {
-        this.notifyWhenReady = false;
+        this.settleNotify(this.notifyWhenReady);
       }
 
       return;
@@ -3811,6 +4035,8 @@ class WorkspaceView {
       }
     } else if (event.kind === "SavedInputsChanged" && event.savedInputs) {
       this.setSavedInputs(event.savedInputs);
+    } else if (event.kind === "AutoCommitChanged" && event.autoCommit) {
+      this.setAutoCommitState(event.autoCommit);
     }
   }
 
@@ -4033,35 +4259,86 @@ class WorkspaceView {
   }
 
   setSavedInputs(saved) {
+    const had = this.hasActiveQueued();
     this.savedInputs = [...saved];
     this.loadInputButton.classList.toggle("saved", this.savedInputs.length > 0);
+    this.renderQueueState();
+
+    // The question is dropped with what it asks about, which another client or the queue may have taken.
+    if (this.deletingInput && !this.savedInputs.some(entry => entry.id === this.deletingInput.id)) {
+      this.deletingInput = null;
+    }
+
     this.renderSaved();
+
+    // The queued inputs can run out without the state changing, as when they are deleted or paused while the workspace is ready.
+    if (had && !this.hasActiveQueued() && this.state() === "Ready" && this.loop === null && this.notifyWhenReady) {
+      this.conclude();
+    }
+
+    this.home.updateNotify(this);
   }
 
   renderSaved() {
+    // The list is built anew, so it takes over where it was scrolled to.
+    const scrolled = this.savedPanel.querySelector(".list")?.scrollTop ?? 0;
     this.savedPanel.hidden = !this.savedOpen;
     const when = entry => h("div", { class: "when", title: new Date(entry.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.time));
     const entryElement = entry => {
+      const remove = h("button", { class: "flat icon delete", title: "Delete", onclick: () => this.askDelete(entry) }, icon("trash"));
+      const commit = this.gitStatus.isRepo && !entry.error ? h("button", { class: `flat icon saved-commit${entry.autoCommit ? " toggled" : ""}`, title: entry.autoCommit ? "Auto commit is on for this input. Press to turn it off." : "Auto commit is off for this input. Press to turn it on.", onclick: () => this.toggleSavedAutoCommit(entry) }, icon("autoCommit")) : null;
+
       if (entry.isConverting || entry.error) {
-        return h("div", { class: "pending" },
-          h("div", { class: "info" },
+        return h("div", { class: "saved-row" },
+          h("div", { class: "pending" },
             entry.isConverting ? h("div", { class: "muted" }, "Turning speech into text...") : h("div", { class: "error" }, entry.error),
             entry.isConverting ? h("div", { class: "bar" }) : "",
             when(entry)),
-          h("button", { onclick: () => this.discardSaved(entry) }, entry.isConverting ? "Cancel" : "Dismiss"));
+          commit,
+          remove);
       }
 
-      return h("button", { onclick: () => this.takeSaved(entry) }, h("div", { class: "text" }, entry.text), when(entry));
+      return h("div", { class: `saved-row${entry.isQueued ? " queued" : ""}` },
+        h("button", { class: "load", onclick: () => this.takeSaved(entry) },
+          ...(entry.isQueued ? [h("div", { class: "queue-label" }, entry.isPaused ? "Queued, paused" : "Queued")] : []),
+          h("div", { class: "text" }, entry.text), when(entry)),
+        commit,
+        remove);
     };
+    const deleting = this.deletingInput;
+    const question = !deleting ? "" : deleting.isQueued ? "Delete this queued input? It will not be sent." : deleting.isConverting || deleting.error ? "Delete this recording? Its text is not kept." : "Delete this saved input? This cannot be undone.";
 
-    this.savedPanel.replaceChildren(
+    this.savedPanel.replaceChildren(...[
       h("div", { class: "head" }, h("h3", { class: "serif" }, "Saved inputs"), h("button", { class: "flat", onclick: () => this.toggleSaved() }, "Close")),
+      this.savedInputs.some(entry => entry.isQueued && entry.isPaused) ? h("div", { class: "paused-note" },
+        h("div", { class: "muted" }, "Queued inputs are paused because work was stopped, cancelled or failed, or the server restarted. They also go on after work ends well again or when you queue another input."),
+        h("button", { class: "primary", onclick: () => this.resumeQueue() }, "Resume Queue")) : null,
       h("div", { class: "list" }, ...(this.savedInputs.length === 0
         ? [h("div", { class: "none" }, "No saved inputs.")]
-        : this.savedInputs.map(entryElement))));
+        : this.savedInputs.map(entryElement))),
+      deleting ? h("div", { class: "confirm" },
+        h("div", { class: "card" },
+          h("h3", { class: "serif" }, question),
+          h("div", { class: "muted preview-text" }, deleting.text),
+          h("button", { class: "block danger", onclick: () => this.confirmDelete() }, "Delete"),
+          h("button", { class: "block", onclick: () => this.askDelete(null) }, "Cancel"))) : null
+    ].filter(node => node !== null));
+    this.savedPanel.querySelector(".list").scrollTop = scrolled;
   }
 
-  async discardSaved(entry) {
+  askDelete(entry) {
+    this.deletingInput = entry;
+    this.renderSaved();
+  }
+
+  async confirmDelete() {
+    const entry = this.deletingInput;
+
+    if (!entry) {
+      return;
+    }
+
+    this.askDelete(null);
     const result = await attempt(() => this.connection.discardSavedInput(this.info.id, entry.id), this.chatError);
 
     if (result.ok) {
@@ -4069,14 +4346,53 @@ class WorkspaceView {
     }
   }
 
+  // Queuing gives the workspace work like sending does, only that the server sends it when the work before it is over.
+  async queueInput() {
+    if (this.delegation() || (this.input.value.trim().length === 0 && this.attachments.length === 0)) {
+      return;
+    }
+
+    const text = this.input.value.trim();
+    const sending = this.attachments;
+    const loaded = this.loadedAutoCommit;
+    this.input.value = "";
+    this.attachments = [];
+    this.renderAttachments();
+    this.inputChanged();
+    this.chatNotice.hidden = true;
+    const waited = this.notifyWhenReady;
+    this.notifyWhenReady = true;
+    this.clearReady();
+    requestNotifications().then(() => this.home.updateNotify(this));
+
+    // The list is left to what the server tells, since it may send the input before this is answered.
+    const result = await attempt(async () => {
+      const paths = [];
+
+      for (const attachment of sending) {
+        paths.push(attachment.serverPath ?? await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file)));
+      }
+
+      await this.connection.queueInput(this.info.id, this.written(text, paths), loaded ?? true);
+    }, this.chatError);
+
+    if (!result.ok) {
+      this.settleNotify(waited);
+      this.giveBack(text, sending);
+      this.restoreLoaded(loaded);
+    }
+  }
+
   toggleSaved() {
     this.savedOpen = !this.savedOpen;
+    this.deletingInput = null;
     this.renderSaved();
   }
 
   async saveInput() {
     const text = this.input.value;
-    const result = await attempt(() => this.connection.saveInput(this.info.id, text), this.chatError);
+    const commits = this.loadedAutoCommit ?? true;
+    const result = await attempt(() => this.connection.saveInput(this.info.id, text, commits), this.chatError);
 
     if (result.ok) {
       this.setSavedInputs(result.value);
@@ -4095,6 +4411,7 @@ class WorkspaceView {
 
     if (result.ok) {
       this.input.value = this.input.value.trim().length > 0 ? `${result.value.text}\n${this.input.value}` : result.value.text;
+      this.loadedAutoCommit = result.value.autoCommit;
       this.inputChanged();
       this.input.focus();
     } else {
@@ -4142,8 +4459,11 @@ class WorkspaceView {
     this.pauseButton.hidden = !(empty && state === "Working");
     this.resumeButton.disabled = !this.takesAiInput();
     this.resumeButton.hidden = !(empty && state === "Ready");
-    this.loopButton.disabled = !this.takesAiInput();
-    this.loopButton.hidden = !prompting || this.loop !== null;
+    // A loop can also be started while the changes are committed after work.
+    const afterWork = this.autoCommitState === "Committing";
+    this.loopButton.disabled = !this.takesAiInput() && !afterWork;
+    this.loopButton.hidden = !(prompting || (afterWork && empty)) || this.loop !== null;
+    this.renderLoaded();
     this.cancelLoopButton.hidden = this.loop === null;
     const typed = this.input.value.trim().length > 0;
     this.saveInputButton.hidden = !typed;
@@ -4153,6 +4473,13 @@ class WorkspaceView {
       this.toggleSaved();
     }
 
+    this.queueButton.hidden = empty || !!this.delegation();
+    this.autoCommitButton.hidden = !!this.delegation() || !this.gitStatus.isRepo || this.loop?.isRunning === true || state === "Stopping" || state === "Canceling" || !(state === "Working" || this.autoCommitState === "On");
+    const committing = this.autoCommitState === "On";
+    this.autoCommitButton.classList.toggle("toggled", committing);
+    this.autoCommitButton.title = committing ? "The changes are committed when the current work is done. Press to turn auto commit off." : "Auto commit the changes when the current work is done";
+    this.renderAutoCommitCaption();
+    this.renderLoopWaiting();
     this.stopButton.hidden = !halt;
     this.stopButton.disabled = state === "Canceling";
     this.voiceButton.disabled = this.transcribing || (!this.voice && !this.takesAiInput());
@@ -4284,14 +4611,17 @@ class WorkspaceView {
       return;
     }
 
+    const loaded = this.loadedAutoCommit;
     this.input.value = "";
     this.fitInput();
     this.saveDraft();
     this.attachments = [];
     this.renderAttachments();
+    this.renderLoaded();
 
-    if (!await this.deliver(text, sending, true)) {
+    if (!await this.deliver(text, sending, true, loaded)) {
       this.giveBack(text, sending);
+      this.restoreLoaded(loaded);
     }
   }
 
@@ -4335,7 +4665,7 @@ class WorkspaceView {
     await this.deliver(prompt, []);
   }
 
-  async deliver(text, sending, fromBox = false) {
+  async deliver(text, sending, fromBox = false, loaded = null) {
     this.chatNotice.hidden = true;
     const waited = this.notifyWhenReady;
     this.notifyWhenReady = true;
@@ -4357,19 +4687,18 @@ class WorkspaceView {
 
       try {
         this.submitted.push(splitAttachments(prompt));
-        await this.connection.prompt(this.info.id, prompt);
+        await (loaded === true ? this.connection.promptToCommit(this.info.id, prompt, false) : this.connection.prompt(this.info.id, prompt));
       } catch (exception) {
         if (!exception.overLimit) {
           throw exception;
         }
 
-        refused = { pause: exception.overLimit, prompt, typed: fromBox ? text : "", attachments: sending };
+        refused = { pause: exception.overLimit, prompt, typed: fromBox ? text : "", attachments: sending, loaded };
       }
     }, this.chatError);
 
-    // A prompt that was not taken leaves the wait for earlier work as it was, unless that work was announced meanwhile.
     if (refused || !result.ok) {
-      this.notifyWhenReady &&= waited;
+      this.settleNotify(waited);
       this.withdraw(echo);
     }
 
@@ -4407,10 +4736,13 @@ class WorkspaceView {
 
       const echo = this.echo(ask.prompt);
 
-      if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
-        this.notifyWhenReady &&= waited;
+      this.renderLoaded();
+
+      if (!(await attempt(() => ask.loaded === true ? this.connection.promptToCommit(this.info.id, ask.prompt, true) : this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
+        this.settleNotify(waited);
         this.withdraw(echo);
         this.giveBack(boxed ? ask.typed : "", taken);
+        this.restoreLoaded(ask.loaded);
       }
     };
 
@@ -6857,7 +7189,7 @@ class Home {
   updateNotify(view) {
     if (view && view === this.active) {
       const on = view.notifyWhenReady && !this.notificationsBlocked();
-      this.notifyButton.hidden = !("Notification" in window) || !(view.notifyWhenReady || view.state() !== "Ready" || view.loop !== null || !!view.queue || view.hasTasksUnderWay());
+      this.notifyButton.hidden = !("Notification" in window) || !(view.notifyWhenReady || view.state() !== "Ready" || view.loop !== null || !!view.queue || view.hasActiveQueued() || view.hasTasksUnderWay());
       this.notifyButton.classList.toggle("on", on);
       this.notifyButton.title = on ? "You will be notified when this workspace is ready. Press to turn the notification off." : "Notify me when this workspace is ready";
     }

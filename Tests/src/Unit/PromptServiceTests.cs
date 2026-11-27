@@ -598,6 +598,65 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
     }
 
+    private PromptService Completing(IWorkCompletion completion)
+    {
+        PromptService completing = new(workspaces.Object, store.Object, host.Object, hub.Object, activity, snapshots.Object, null, null, null, () => completion);
+        completing.Configure(stopping.Token);
+        return completing;
+    }
+
+    [Theory]
+    [InlineData("answer", true)]
+    [InlineData("empty", false)]
+    [InlineData("fail", false)]
+    public async Task Prompt_TellsHowTheWorkEndedWhileTheWorkspaceIsStillTaken(string text, bool succeeded)
+    {
+        Mock<IWorkCompletion> completion = new();
+        WorkspaceState during = WorkspaceState.Ready;
+        completion.Setup(x => x.Complete(workspace.Id, It.IsAny<bool>())).Returns(() =>
+        {
+            during = activity.Get(workspace.Id);
+            return false;
+        });
+        service = Completing(completion.Object);
+        prompter.OnCreate = session => session.ReplyWith(prompt => prompt.Text == "empty" ? [] : prompt.Text == "fail" ? [new PromptFailureEvent { Message = "boom" }] : [new PromptMessageEvent { Text = "fine" }]);
+
+        await service.Prompt(workspace.Id, text, CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id) && activity.Get(workspace.Id) == WorkspaceState.Ready);
+
+        completion.Verify(x => x.Complete(workspace.Id, succeeded), Times.Once);
+        Assert.Equal(WorkspaceState.Working, during);
+    }
+
+    [Fact]
+    public async Task Prompt_LeavesTheWorkspaceTakenForWhatCommitsItsChanges()
+    {
+        Mock<IWorkCompletion> completion = new();
+        completion.Setup(x => x.Complete(workspace.Id, true)).Returns(() => activity.Pass(workspace.Id, WorkspaceState.Working, WorkspaceState.Managing));
+        service = Completing(completion.Object);
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptMessageEvent { Text = "fine" }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id) && completion.Invocations.Any(call => call.Method.Name == nameof(IWorkCompletion.Complete)) && activity.Get(workspace.Id) == WorkspaceState.Managing);
+        await Task.Delay(50);
+
+        Assert.Equal(WorkspaceState.Managing, activity.Get(workspace.Id));
+    }
+
+    [Fact]
+    public async Task Prompt_StartsNothingWhileTheChangesAreBeingCommitted()
+    {
+        Mock<IWorkCompletion> completion = new();
+        completion.Setup(x => x.IsCommitting(workspace.Id)).Returns(true);
+        service = Completing(completion.Object);
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
+
+        RequestException refused = await Assert.ThrowsAsync<RequestException>(() => service.Prompt(workspace.Id, "go", CancellationToken.None));
+
+        Assert.StartsWith("The changes of the workspace are being committed.", refused.Message);
+        Assert.Empty(prompter.Sessions);
+    }
+
     [Fact]
     public async Task Prompt_NotesTheShellCommandsOfASessionSoItsProcessesCanBeToldApart()
     {
@@ -783,6 +842,29 @@ public sealed class PromptServiceTests : IDisposable
     {
         ClaudeSetup setup = new() { WorkspacePath = workspace.Folder };
         return prompter.Create(setup).GetAwaiter().GetResult();
+    }
+
+    [Fact]
+    public async Task Prompt_ThatTookTheWorkspaceButNeverStartedSaysSoToWhatFollowsTheWork()
+    {
+        Mock<IWorkCompletion> completion = new();
+        PromptService followed = new(workspaces.Object, store.Object, host.Object, hub.Object, activity, snapshots.Object, null, null, null, () => completion.Object);
+        followed.Configure(stopping.Token);
+        Broken("The tool is missing.");
+        int taken = 0;
+
+        await Assert.ThrowsAsync<RequestException>(() => followed.PromptWhenIdle(workspace.Id, "hello", () => taken++, CancellationToken.None));
+
+        Assert.Equal(1, taken);
+        completion.Verify(x => x.Abort(workspace.Id), Times.Once);
+        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+
+        // One that never had the workspace turns nothing off and takes nothing.
+        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
+        await Assert.ThrowsAsync<RequestException>(() => followed.PromptWhenIdle(workspace.Id, "hello", () => taken++, CancellationToken.None));
+
+        Assert.Equal(1, taken);
+        completion.Verify(x => x.Abort(workspace.Id), Times.Once);
     }
 
     private void Broken(string message) => host.Mock.Setup(x => x.CreateSession(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException(message));

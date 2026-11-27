@@ -266,9 +266,13 @@ public sealed class SwarmCoordinatorTests : IAsyncLifetime
 
         Assert.Equal([WorkSource.Report], submitted);
         Assert.False(await book.Read(document => document.Jobs.Single().IsReported));
+        // The work of the AI that delegated goes on with the outcome until it is told.
+        Assert.True(await coordinator.IsAwaited(workspace.Id));
+        Assert.False(await coordinator.IsAwaited(Guid.NewGuid()));
 
         reportStarted.SetResult(true);
 
         await Until(() => book.Read(document => document.Jobs.Single().IsReported));
+        Assert.False(await coordinator.IsAwaited(workspace.Id));
     }
 }

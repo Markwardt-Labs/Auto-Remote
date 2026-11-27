@@ -29,4 +29,9 @@ public sealed record ChatHistory
     /// Gets the automatic pause the workspace is in because of a usage window, or <see langword="null" /> when it is in none.
     /// </summary>
     public LimitPause? LimitPause { get; init; }
+
+    /// <summary>
+    /// Gets whether the changes are committed once the work is over.
+    /// </summary>
+    public AutoCommitState AutoCommit { get; init; }
 }

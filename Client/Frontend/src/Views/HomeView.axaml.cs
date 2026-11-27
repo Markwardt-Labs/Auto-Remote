@@ -5,6 +5,8 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 public sealed partial class HomeView : UserControl
 {
+    private static FileNode? NodeOf(object? source) => (source as StyledElement)?.DataContext as FileNode;
+
     /// <summary>
     /// Initializes a new instance of the <see cref="HomeView" /> class.
     /// </summary>
@@ -142,6 +144,13 @@ public sealed partial class HomeView : UserControl
 
     private bool revealFocused;
 
+    /// <summary>
+    /// Gets or sets how long a finger has to stay on a script or task file of the file system on mobile before it is run.
+    /// </summary>
+    internal TimeSpan FileHoldDelay { get; set; } = TimeSpan.FromMilliseconds(500);
+
+    private ChatViewModel? Chat => (DataContext as HomeViewModel)?.Active?.Chat;
+
     /// <inheritdoc />
     protected override void OnDataContextChanged(EventArgs args)
     {
@@ -239,10 +248,6 @@ public sealed partial class HomeView : UserControl
         row.Height = new GridLength(height);
         fitting = false;
     }
-
-    private ChatViewModel? Chat => (DataContext as HomeViewModel)?.Active?.Chat;
-
-    private static FileNode? NodeOf(object? source) => (source as StyledElement)?.DataContext as FileNode;
 
     // A file that cannot be read must not take the app down, which an exception out of the click would.
     private async Task AttachFile(ChatViewModel chat, Avalonia.Platform.Storage.IStorageFile file)
@@ -436,11 +441,6 @@ public sealed partial class HomeView : UserControl
             args.Handled = true;
         }
     }
-
-    /// <summary>
-    /// Gets or sets how long a finger has to stay on a script or task file of the file system on mobile before it is run.
-    /// </summary>
-    internal TimeSpan FileHoldDelay { get; set; } = TimeSpan.FromMilliseconds(500);
 
     private void OnFileTapped(object? sender, Avalonia.Input.TappedEventArgs args)
     {

@@ -18,6 +18,27 @@ public sealed class DraftStoreTests : IDisposable
         Assert.Equal(string.Empty, await store.Load(first, CancellationToken.None));
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SaveAutoCommit_KeepsItBesideTheDraftAcrossInstancesUntilItIsRemoved(bool commits)
+    {
+        string path = temp.Combine("drafts.json");
+        await new DraftStore(path).Save(first, "loaded", CancellationToken.None);
+        await new DraftStore(path).SaveAutoCommit(first, commits, CancellationToken.None);
+
+        DraftStore reopened = new(path);
+
+        Assert.Equal(commits, await reopened.LoadAutoCommit(first, CancellationToken.None));
+        Assert.Equal("loaded", await reopened.Load(first, CancellationToken.None));
+        Assert.Null(await reopened.LoadAutoCommit(second, CancellationToken.None));
+
+        await reopened.SaveAutoCommit(first, null, CancellationToken.None);
+
+        Assert.Null(await new DraftStore(path).LoadAutoCommit(first, CancellationToken.None));
+        Assert.Equal("loaded", await reopened.Load(first, CancellationToken.None));
+    }
+
     [Fact]
     public async Task Save_KeepsADraftPerWorkspaceAcrossInstances()
     {

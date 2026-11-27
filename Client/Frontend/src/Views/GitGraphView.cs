@@ -5,6 +5,12 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 internal sealed class GitGraphView : Control
 {
+    static GitGraphView()
+    {
+        AffectsRender<GitGraphView>(RowProperty, LanesProperty);
+        AffectsMeasure<GitGraphView>(LanesProperty);
+    }
+
     /// <summary>
     /// Identifies the <see cref="Row" /> property.
     /// </summary>
@@ -14,12 +20,6 @@ internal sealed class GitGraphView : Control
     /// Identifies the <see cref="Lanes" /> property.
     /// </summary>
     public static readonly StyledProperty<int> LanesProperty = AvaloniaProperty.Register<GitGraphView, int>(nameof(Lanes), 1);
-
-    static GitGraphView()
-    {
-        AffectsRender<GitGraphView>(RowProperty, LanesProperty);
-        AffectsMeasure<GitGraphView>(LanesProperty);
-    }
 
     private readonly double rowHeight = 28;
 

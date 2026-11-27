@@ -131,7 +131,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task AHeldWordGetsAHandleAtEachEndAndABarInPlaceOfTheContextMenu()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
 
@@ -155,7 +155,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [InlineData(12, "charlie")]
     public async Task HoldingAnyLetterOfAWordSelectsThatWordAndNothingBeforeIt(int character, string word)
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
 
@@ -169,7 +169,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task TheHandlesDragTheEndsAcrossParagraphsListItemsAndCodeBothWays()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
             await screen.Hold(screen.At(1, 7));
@@ -193,7 +193,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task AHandleStopsShortOfTheOtherEndRatherThanCrossingIt()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
             await screen.Hold(screen.At(1, 7));
@@ -213,7 +213,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task TheHoldingFingerDraggedOnStretchesTheSelectionFromTheHeldWordInsteadOfScrolling()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message, below: 900);
             Avalonia.Point word = screen.At(1, 7);
@@ -243,7 +243,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task ScrollingKeepsTheSelectionAndMovesItsHandlesAndATapEndsIt()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message, below: 900);
             await screen.Hold(screen.At(1, 7));
@@ -278,7 +278,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task ATapOnTextEndsTheSelectionAndAnotherHoldStartsOverThere()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
             await screen.Hold(screen.At(0, 7));
@@ -300,7 +300,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task SelectAllTakesTheWholeMessageAndCopyPutsItsLinesOnTheClipboard()
     {
-        string? copied = await fixture.RunAsync(async () =>
+        string? copied = await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
             await screen.Hold(screen.At(0, 7));
@@ -323,7 +323,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task AHandleTakenToTheBottomEdgeScrollsOnAndReachesTextThatWasOutOfSight()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(string.Join("\n\n", Enumerable.Range(1, 60).Select(number => $"Paragraph number {number} here.")));
             await screen.Hold(screen.At(0, 2));
@@ -358,7 +358,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
         connection.Setup(x => x.GetSavedInputs(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
         connection.Setup(x => x.GetHistory(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync(new ChatHistory { Messages = [new ChatMessage { Role = MessageRole.Assistant, Text = answer }] });
 
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             HomeViewModel model = new(connection.Object, ClientLayout.Tabs);
             await model.Start(workspace.Id);
@@ -396,7 +396,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task ASelectionInPlainTextStaysWhileTheTextGrowsAndEndsWhenShorterTextReplacesIt()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             ScrollSafeTextBlock output = new() { Text = "first line of output", Margin = new Avalonia.Thickness(16, 80) };
             using Screen screen = new(output);
@@ -421,7 +421,7 @@ public sealed class TouchSelectionTests(HeadlessFixture fixture)
     [Fact]
     public async Task ASelectionEndsWhenItsMessageIsRenderedAgainOrHidden()
     {
-        await fixture.RunAsync(async () =>
+        await fixture.Dispatch(async () =>
         {
             using Screen screen = new(message);
             await screen.Hold(screen.At(0, 7));

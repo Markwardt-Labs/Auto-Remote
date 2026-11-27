@@ -132,7 +132,7 @@ public enum RemoteCommand
     GetUsage,
 
     /// <summary>
-    /// Starts a loop of the AI in <see cref="RemoteRequest.WorkspaceId" /> with <see cref="RemoteRequest.Loop" />: the prompt is sent over and over on the interval until the loop's condition ends it or it is cancelled. The first run starts at once, or when the AI and the workspace are free. Refused unless the workspace is Ready or Working, and while a loop already runs there. The runs and the loop's state arrive as <see cref="RemoteEvent" /> pushes (<see cref="RemoteEventKind.LoopChanged" />).
+    /// Starts a loop of the AI in <see cref="RemoteRequest.WorkspaceId" /> with <see cref="RemoteRequest.Loop" />: the prompt is sent over and over on the interval until the loop's condition ends it or it is cancelled. The first run starts at once, or when the AI and the workspace are free. Refused unless the workspace is Ready or Working or its changes are being committed after work, and while a loop already runs there. The runs and the loop's state arrive as <see cref="RemoteEvent" /> pushes (<see cref="RemoteEventKind.LoopChanged" />).
     /// </summary>
     StartLoop,
 
@@ -332,7 +332,7 @@ public enum RemoteCommand
     UpdateServer,
 
     /// <summary>
-    /// Lists the chat inputs saved in <see cref="RemoteRequest.WorkspaceId" />, the last saved first; answered in <see cref="RemoteResponse.SavedInputs" />.
+    /// Lists the chat inputs saved in <see cref="RemoteRequest.WorkspaceId" />, the queued ones first in the order they are sent and then the others, the last saved first; answered in <see cref="RemoteResponse.SavedInputs" />.
     /// </summary>
     GetSavedInputs,
 
@@ -357,7 +357,7 @@ public enum RemoteCommand
     SetShowWork,
 
     /// <summary>
-    /// Ends the automatic pause of a workspace without telling the AI to resume, and ends the loop of the workspace if it has one, so nothing goes on by itself.
+    /// Ends the automatic pause of a workspace without telling the AI to resume, turns auto commit off, pauses the queued inputs and ends the loop of the workspace if it has one, so nothing goes on by itself.
     /// </summary>
     CancelLimitPause,
 
@@ -494,5 +494,25 @@ public enum RemoteCommand
     /// <summary>
     /// Reads the memory and processor use of the server's computer and of the workspaces that are working or still have processes running, answered in <see cref="RemoteResponse.Resources" />.
     /// </summary>
-    GetResources
+    GetResources,
+
+    /// <summary>
+    /// Queues <see cref="RemoteRequest.Text" /> for <see cref="RemoteRequest.WorkspaceId" />: it is sent once the work of the workspace is over, at once when there is none, and its changes are committed after it. Resumes the paused queued inputs. Answered in <see cref="RemoteResponse.SavedInputs" />.
+    /// </summary>
+    QueueInput,
+
+    /// <summary>
+    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the changes of <see cref="RemoteRequest.WorkspaceId" /> are committed once the AI's work is over.
+    /// </summary>
+    SetAutoCommit,
+
+    /// <summary>
+    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the changes are committed after the work the saved input <see cref="RemoteRequest.InputId" /> of <see cref="RemoteRequest.WorkspaceId" /> starts, queued or not. Answered in <see cref="RemoteResponse.SavedInputs" />.
+    /// </summary>
+    SetSavedInputAutoCommit,
+
+    /// <summary>
+    /// Resumes the paused queued inputs of <see cref="RemoteRequest.WorkspaceId" />, which are then sent once nothing is in their way. Changes nothing when none are paused.
+    /// </summary>
+    ResumeQueue
 }

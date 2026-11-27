@@ -31,7 +31,7 @@ public sealed record RemoteRequest
     public Guid? ParentId { get; init; }
 
     /// <summary>
-    /// Gets the saved input <see cref="RemoteCommand.TakeSavedInput" /> takes.
+    /// Gets the saved input that <see cref="RemoteCommand.TakeSavedInput" />, <see cref="RemoteCommand.DiscardSavedInput" /> or <see cref="RemoteCommand.SetSavedInputAutoCommit" /> is about.
     /// </summary>
     public Guid? InputId { get; init; }
 
@@ -106,7 +106,7 @@ public sealed record RemoteRequest
     public SideSessionStart? Start { get; init; }
 
     /// <summary>
-    /// Gets whether <see cref="RemoteCommand.ConfigureOllamaService" /> turns the optimized context on (<see langword="true" />) or off, or whether <see cref="RemoteCommand.SetIntegrateWhenFinished" /> turns that on or off.
+    /// Gets whether <see cref="RemoteCommand.ConfigureOllamaService" /> turns the optimized context on (<see langword="true" />) or off, whether <see cref="RemoteCommand.SetIntegrateWhenFinished" /> turns that on or off, or whether <see cref="RemoteCommand.SetAutoCommit" /> or <see cref="RemoteCommand.SetSavedInputAutoCommit" /> turns auto commit on or off.
     /// </summary>
     public bool? Enabled { get; init; }
 
@@ -116,7 +116,7 @@ public sealed record RemoteRequest
     public string? Password { get; init; }
 
     /// <summary>
-    /// Gets the folder, group or side session name the command needs, if any.
+    /// Gets the name the command needs, if any: of a folder, group, side session, branch, tag or attached file, or the git user name.
     /// </summary>
     public string? Name { get; init; }
 
@@ -146,7 +146,7 @@ public sealed record RemoteRequest
     public int? Characters { get; init; }
 
     /// <summary>
-    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" />, the input for <see cref="RemoteCommand.SaveInput" /> the input line for <see cref="RemoteCommand.SendScriptInput" /> or the first task of <see cref="RemoteCommand.CreateSideSession" />.
+    /// Gets the prompt text for <see cref="RemoteCommand.Prompt" />, the message for <see cref="RemoteCommand.GitCommit" />, the input for <see cref="RemoteCommand.SaveInput" /> or <see cref="RemoteCommand.QueueInput" />, the text to search for, the Mermaid source to draw, the input line for <see cref="RemoteCommand.SendScriptInput" /> or the first task of <see cref="RemoteCommand.CreateSideSession" />.
     /// </summary>
     public string? Text { get; init; }
 
@@ -214,4 +214,9 @@ public sealed record RemoteRequest
     /// Gets the base64 file content for <see cref="RemoteCommand.UploadAttachment" /> and the base64 WAV audio for <see cref="RemoteCommand.TranscribeSavedInput" />.
     /// </summary>
     public string? Data { get; init; }
+
+    /// <summary>
+    /// Gets whether the changes are committed after the work an input starts: for <see cref="RemoteCommand.SaveInput" /> and <see cref="RemoteCommand.QueueInput" /> what the input is kept with, on when omitted, and for <see cref="RemoteCommand.Prompt" />, when <see langword="true" />, that auto commit is turned on for the work the prompt starts or joins.
+    /// </summary>
+    public bool? AutoCommit { get; init; }
 }

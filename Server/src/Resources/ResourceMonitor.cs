@@ -244,7 +244,7 @@ internal sealed class ResourceMonitor(IProcessSource processes, IShellCommandLog
     {
         string? folder = processes.Folder(item.Process.Id);
 
-        if (processes.Arguments(item.Process.Id) is ["/bin/sh", "-c", var command])
+        if (processes.Arguments(item.Process.Id) is ["/bin/sh", "-c", string command])
         {
             List<WorkspaceInfo> ran = [.. commands.Find(command).Select(id => placement.Sessions.FirstOrDefault(session => session.Id == id)).OfType<WorkspaceInfo>()];
 

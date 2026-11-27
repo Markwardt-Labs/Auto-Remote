@@ -131,7 +131,7 @@ public sealed record RemoteResponse
     public string? CommitMessage { get; init; }
 
     /// <summary>
-    /// Gets the saved inputs, the last saved first, answering <see cref="RemoteCommand.GetSavedInputs" /> or <see cref="RemoteCommand.SaveInput" />.
+    /// Gets the saved inputs, the queued ones first and then the others, the last saved first, answering <see cref="RemoteCommand.GetSavedInputs" />, <see cref="RemoteCommand.SaveInput" />, <see cref="RemoteCommand.QueueInput" />, <see cref="RemoteCommand.TranscribeSavedInput" />, <see cref="RemoteCommand.DiscardSavedInput" /> or <see cref="RemoteCommand.SetSavedInputAutoCommit" />.
     /// </summary>
     public IReadOnlyList<SavedInput>? SavedInputs { get; init; }
 

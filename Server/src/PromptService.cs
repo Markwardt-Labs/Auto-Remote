@@ -83,6 +83,16 @@ internal interface IPromptService
     Task Prompt(Guid id, string text, bool onlyWhenIdle, CancellationToken cancellation);
 
     /// <summary>
+    /// Sends a prompt only when the AI is not working, like <see cref="Prompt(Guid, string, bool, CancellationToken)" />, and says when the prompt has the workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="taken">Called once the workspace is the prompt's, before its work can end. The send can still fail after it.</param>
+    /// <param name="cancellation">Cancels the send.</param>
+    /// <exception cref="RequestException">The workspace is unknown, the prompt is empty, the AI could not take it, or the AI is working.</exception>
+    Task PromptWhenIdle(Guid id, string text, Action taken, CancellationToken cancellation);
+
+    /// <summary>
     /// Asks the AI of a workspace a question in a fork of its conversation, which is thrown away afterwards, so neither the conversation nor the state of the AI changes and it may be asked while the AI works.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -172,7 +182,7 @@ internal interface IPromptService
 }
 
 /// <inheritdoc />
-internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null, Func<ISessionTools?>? tools = null, IShellCommandLog? commands = null) : IPromptService
+internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStore store, IPrompterHost host, IEventHub events, IWorkspaceActivity activity, IWorkspaceSnapshots snapshots, IUsageService? usage = null, Func<ISessionTools?>? tools = null, IShellCommandLog? commands = null, Func<IWorkCompletion?>? completion = null) : IPromptService
 {
     private readonly ConcurrentDictionary<Guid, Live> lives = new();
 
@@ -333,7 +343,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     public Task Prompt(Guid id, string text, CancellationToken cancellation) => Prompt(id, text, false, cancellation);
 
     /// <inheritdoc />
-    public async Task Prompt(Guid id, string text, bool onlyWhenIdle, CancellationToken cancellation)
+    public Task Prompt(Guid id, string text, bool onlyWhenIdle, CancellationToken cancellation) => Deliver(id, text, onlyWhenIdle, null, cancellation);
+
+    /// <inheritdoc />
+    public Task PromptWhenIdle(Guid id, string text, Action taken, CancellationToken cancellation) => Deliver(id, text, true, taken, cancellation);
+
+    private async Task Deliver(Guid id, string text, bool onlyWhenIdle, Action? taken, CancellationToken cancellation)
     {
         if (string.IsNullOrWhiteSpace(text))
         {
@@ -343,6 +358,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         WorkspaceInfo workspace = await workspaces.Get(id, cancellation);
         Live live = lives.GetOrAdd(id, _ => new Live());
         await live.Gate.WaitAsync(cancellation);
+        bool took = false;
 
         try
         {
@@ -359,16 +375,27 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 throw new RequestException(activity.Describe(id));
             }
 
+            if (started && completion?.Invoke()?.IsCommitting(id) == true)
+            {
+                throw new RequestException("The changes of the workspace are being committed. Send it once that is done, or queue it.");
+            }
+
+            bool ready = activity.Get(id) == WorkspaceState.Ready;
+
             if (started && !activity.TryEnter(id, WorkspaceState.Working))
             {
                 throw new RequestException(activity.Describe(id));
             }
+
+            took = started && ready;
 
             // Looked at with the workspace taken, so a session being integrated or removed gets no prompt from anywhere in the server.
             if (workspaces.GetSide(id) is { State: not SideSessionState.Ready })
             {
                 throw new RequestException("The side session is not ready.");
             }
+
+            taken?.Invoke();
 
             if (started && activity.Get(id) == WorkspaceState.Working)
             {
@@ -489,6 +516,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         }
         catch (Exception) when (!live.Working)
         {
+            if (took)
+            {
+                completion?.Invoke()?.Abort(id);
+            }
+
             if (activity.Get(id) == WorkspaceState.Working)
             {
                 snapshots.Discard(id);
@@ -1653,7 +1685,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                     snapshots.Discard(id);
                 }
 
-                activity.Leave(id, WorkspaceState.Working);
+                // Told while the workspace is still taken, so what commits the changes goes straight on from the work.
+                if (completion?.Invoke()?.Complete(id, !live.Failed && !live.Stopped && live.Produced) != true)
+                {
+                    activity.Leave(id, WorkspaceState.Working);
+                }
             }
 
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = id, Working = working });

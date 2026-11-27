@@ -74,7 +74,7 @@ internal interface ISideIntegrations
 }
 
 /// <inheritdoc />
-internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessions sessions, ISideSessionRepository repository, IPromptService prompts, IWorkQueue queue, IWorkspaceActivity activity, IWorkspaceLoops loops, IScriptRunner scripts, IWindowGuard guard, IWorkspaceSnapshots snapshots, IEventHub events, ILog log, ISwarmService? swarm = null, TimeSpan? interval = null, TimeSpan? retryDelay = null) : ISideIntegrations
+internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessions sessions, ISideSessionRepository repository, IPromptService prompts, IWorkQueue queue, IWorkspaceActivity activity, IWorkspaceLoops loops, IScriptRunner scripts, IWindowGuard guard, IWorkspaceSnapshots snapshots, IEventHub events, ILog log, ISwarmService? swarm = null, TimeSpan? interval = null, TimeSpan? retryDelay = null, Func<IFollowUps?>? following = null) : ISideIntegrations
 {
     private readonly TimeSpan every = interval ?? TimeSpan.FromSeconds(5);
 
@@ -314,6 +314,11 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
             return "The side session is paused at the usage limit and resumes by itself. Let it, or cancel the automatic resume, first.";
         }
 
+        if (following?.Invoke()?.IsHolding(id) == true)
+        {
+            return "The side session has queued inputs or a commit still to come. Let them run, or load or delete the queued inputs, first.";
+        }
+
         return scripts.IsRunning(id) ? "A script runs in the side session. Stop it first." : null;
     }
 
@@ -530,7 +535,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
     {
         WorkspaceState state = activity.Get(side.ParentId);
 
-        if (state is not (WorkspaceState.Ready or WorkspaceState.Working) || integration.WaitsForWork && state == WorkspaceState.Ready || guard.IsPaused(side.ParentId) || notBefore.TryGetValue(id, out DateTimeOffset soonest) && DateTimeOffset.UtcNow < soonest)
+        if (state is not (WorkspaceState.Ready or WorkspaceState.Working) || integration.WaitsForWork && state == WorkspaceState.Ready || following?.Invoke()?.IsPending(side.ParentId) == true || guard.IsPaused(side.ParentId) || notBefore.TryGetValue(id, out DateTimeOffset soonest) && DateTimeOffset.UtcNow < soonest)
         {
             return;
         }

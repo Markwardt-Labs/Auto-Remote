@@ -61,6 +61,13 @@ internal interface IWindowGuard
     /// <param name="id">The workspace identifier.</param>
     /// <returns><see langword="true" /> if the workspace is paused.</returns>
     bool IsPaused(Guid id);
+
+    /// <summary>
+    /// Checks whether work of the workspace was paused at the limit and is still to be resumed, unlike new work that was only held back.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if work waits to be resumed.</returns>
+    bool IsSuspended(Guid id);
 }
 
 /// <inheritdoc />
@@ -173,6 +180,9 @@ internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService p
 
     /// <inheritdoc />
     public bool IsPaused(Guid id) => held.ContainsKey(id);
+
+    /// <inheritdoc />
+    public bool IsSuspended(Guid id) => held.TryGetValue(id, out Held? pause) && !pause.Idle;
 
     /// <summary>
     /// Reads the windows of the providers of the workspaces whose AI works, pauses the ones past the maximum, and does the check that is due of every paused workspace.

@@ -269,5 +269,9 @@ internal sealed class WorkspaceFileBrowser : IWorkspaceFileBrowser
         return full;
     }
 
-    private string Relative(string root, string full) => Path.GetRelativePath(root, full) is var relative && relative == "." ? string.Empty : relative.Replace(Path.DirectorySeparatorChar, '/');
+    private string Relative(string root, string full) => Path.GetRelativePath(root, full) switch
+    {
+        "." => string.Empty,
+        string relative => relative.Replace(Path.DirectorySeparatorChar, '/')
+    };
 }

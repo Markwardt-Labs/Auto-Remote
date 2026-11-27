@@ -5,16 +5,16 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 internal sealed class AndroidWorkKeeper : IWorkKeeper
 {
+    /// <summary>
+    /// Gets the name of the intent extra that carries the text of the notification to the service.
+    /// </summary>
+    public static string TextKey => "text";
+
     private readonly Context context = global::Android.App.Application.Context;
 
     private readonly Dictionary<Guid, string> held = [];
 
     private readonly Lock gate = new();
-
-    /// <summary>
-    /// Gets the name of the intent extra that carries the text of the notification to the service.
-    /// </summary>
-    public static string TextKey => "text";
 
     /// <inheritdoc />
     public void Hold(Guid workspace, string name)

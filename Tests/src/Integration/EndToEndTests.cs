@@ -5,6 +5,10 @@ public sealed class EndToEndTests : IAsyncLifetime
 {
     private readonly TempFolder temp = new();
 
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> gates = new();
+
+    private SemaphoreSlim? commitGate;
+
     private readonly CancellationTokenSource stopping = new();
 
     private Task running = Task.CompletedTask;
@@ -43,21 +47,23 @@ public sealed class EndToEndTests : IAsyncLifetime
         ISessionTools? tools = null;
         ISideIntegrations? integrations = null;
         ShellCommandLog shellCommands = new();
-        PromptService prompts = new(workspaces, store, host, hub, activity, snapshots, null, () => tools, shellCommands);
+        IFollowUps? followUps = null;
+        PromptService prompts = new(workspaces, store, host, hub, activity, snapshots, null, () => tools, shellCommands, () => followUps);
         SpeechService speech = new(Mock.Of<IWhisperEngine>());
         SavedInputs savedInputs = new(store, workspaces, hub, speech);
         WorkQueue queue = new(workspaces, prompts, host, activity, savedInputs, hub);
         WorkspaceVersioning versioning = new(git, prompts, hub, activity, queue);
         Mock<IUsageService> usage = usageOf = new();
-        WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub, null, null, null, null, queue);
+        WorkspaceLoops loops = new(workspaces, prompts, activity, usage.Object, hub, null, null, null, null, queue, null, () => followUps);
         ScriptRunner scripts = new(hub);
         tools = new SideSessionTools(() => integrations!, _ => false);
         WorkspaceWatcher watcher = new(hub, Mock.Of<ILog>(), TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(300));
         SideSessionRepository sideRepository = new(git);
         WindowGuard guard = new(workspaces, prompts, usage.Object, host, hub) { CheckEvery = TimeSpan.FromMilliseconds(50), RecheckEvery = TimeSpan.FromMilliseconds(1200) };
         SideSessions sideSessions = new(workspaces, sideRepository, store, prompts, queue, loops, scripts, guard, snapshots, watcher, hub, Mock.Of<ILog>());
-        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, queue, activity, loops, scripts, guard, snapshots, hub, Mock.Of<ILog>(), null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100));
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), guard, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()), sideSessions, integrations, sideRepository, new ResourceMonitor(new ProcessSource(), shellCommands, workspaces, activity, scripts));
+        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, queue, activity, loops, scripts, guard, snapshots, hub, Mock.Of<ILog>(), null, TimeSpan.FromMilliseconds(100), TimeSpan.FromMilliseconds(100), () => followUps);
+        followUps = new FollowUps(workspaces, savedInputs, prompts, queue, activity, versioning, git, loops, guard, hub, _ => Task.FromResult(false), id => integrations.IsDelivering(id), TimeSpan.FromMilliseconds(30));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, hub), guard, prompts, new DiagramService(), scripts, usage.Object, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, updater.Object, Mock.Of<ILog>(), queue, Mock.Of<ISwarmService>(swarm => swarm.Delegations == Array.Empty<WorkspaceDelegation>()), sideSessions, integrations, sideRepository, new ResourceMonitor(new ProcessSource(), shellCommands, workspaces, activity, scripts), followUps);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, hub, Mock.Of<ILog>());
         TaskCompletionSource<int> listening = new();
@@ -78,6 +84,17 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private IEnumerable<PromptEvent> Answer(FakePrompt prompt)
     {
+        if (prompt.Text.StartsWith("Write a git commit message", StringComparison.Ordinal))
+        {
+            commitGate?.Wait(TimeSpan.FromSeconds(10));
+            return [new PromptMessageEvent { Text = $"Add {string.Join(' ', Regex.Matches(prompt.Text, @"gated-[a-z]+").Select(match => match.Value).Distinct())}" }];
+        }
+
+        if (prompt.Text.StartsWith("gate", StringComparison.Ordinal))
+        {
+            return Gated(prompt.Text);
+        }
+
         if (prompt.Text.StartsWith("fail", StringComparison.Ordinal))
         {
             return [new PromptFailureEvent { Message = "boom: " + prompt.Text }];
@@ -100,6 +117,15 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         return [new PromptMessageEvent { Text = "reply to " + prompt.Text }];
     }
+
+    // Work that goes on until the test lets it end, and then fails when told to.
+    private IEnumerable<PromptEvent> Gated(string text)
+    {
+        Assert.True(Gate(text).Wait(TimeSpan.FromSeconds(20)), $"Nothing let '{text}' end.");
+        yield return text.EndsWith("badly", StringComparison.Ordinal) ? new PromptFailureEvent { Message = "boom" } : new PromptMessageEvent { Text = "reply to " + text };
+    }
+
+    private SemaphoreSlim Gate(string text) => gates.GetOrAdd(text, _ => new SemaphoreSlim(0));
 
     private IEnumerable<PromptEvent> Writing()
     {
@@ -148,6 +174,385 @@ public sealed class EndToEndTests : IAsyncLifetime
     [InlineData("my server")]
     public async Task Connect_ToAHostThatCannotBeOneFailsLikeAnyServerThatCannotBeReached(string host)
         => await Assert.ThrowsAsync<IOException>(() => new IServerConnection.Factory(new IMessageChannel.Factory(), Mock.Of<ILog>()).Connect(new ConnectionSettings { Host = host, Port = 5, AccessKey = "k" }, CancellationToken.None));
+
+    private async Task<(WorkspaceInfo Workspace, string Folder)> Repository(string name)
+    {
+        FolderListing folder = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, name, CancellationToken.None);
+        WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
+        await connection.GitSetRemote(workspace.Id, "/nonexistent/app.git", CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder.Path, "first.txt"), "first\n");
+        await connection.GitCommit(workspace.Id, "first", CancellationToken.None);
+        return (workspace, folder.Path);
+    }
+
+    private async Task<string[]> Commits(Guid id) => [.. (await connection.GetGitHistory(id, 0, 20, CancellationToken.None)).Commits.Select(commit => commit.Subject)];
+
+    private async Task Eventually(Func<Task<bool>> condition, string what)
+    {
+        for (int attempt = 0; attempt < 400; attempt++)
+        {
+            if (await condition())
+            {
+                return;
+            }
+
+            await Task.Delay(25);
+        }
+
+        lock (received)
+        {
+            Assert.Fail($"{what} never happened: " + string.Join(", ", received.Select(remoteEvent => $"{remoteEvent.Kind}:{remoteEvent.Message?.Text}{remoteEvent.State}{remoteEvent.Working}{remoteEvent.AutoCommit}{remoteEvent.Error}")));
+        }
+    }
+
+    private Task Working(Guid id) => Eventually(async () => await connection.GetWorkspaceState(id, CancellationToken.None) == WorkspaceState.Working, "The work");
+
+    private Task Idle(Guid id) => Eventually(async () => await connection.GetWorkspaceState(id, CancellationToken.None) == WorkspaceState.Ready && (await connection.GetHistory(id, null, null, null, CancellationToken.None)) is { Working: false, AutoCommit: AutoCommitState.Off }, "The end of the work");
+
+    private async Task<string[]> Said(Guid id) => [.. (await connection.GetHistory(id, null, 100, null, CancellationToken.None)).Messages.Where(message => message.Role == MessageRole.User).Select(message => message.Text)];
+
+    [Fact]
+    public async Task AutoCommit_CommitsTheChangesOnceTheWorkEndsWithNoReadyMomentInBetweenAndOnlyForThatWork()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("committed");
+        await Assert.ThrowsAsync<RemoteException>(() => connection.SetAutoCommit(workspace.Id, true, CancellationToken.None));
+        await connection.Prompt(workspace.Id, "gate one", CancellationToken.None);
+        await Working(workspace.Id);
+        Assert.Equal(AutoCommitState.Off, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        await connection.SetAutoCommit(workspace.Id, true, CancellationToken.None);
+        Assert.Equal(AutoCommitState.On, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        File.WriteAllText(Path.Combine(folder, "gated-one.txt"), "one\n");
+        commitGate = new SemaphoreSlim(0);
+        lock (received)
+        {
+            received.Clear();
+        }
+
+        Gate("gate one").Release();
+        await Eventually(async () => (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit == AutoCommitState.Committing, "The commit");
+
+        // Nothing else starts before the commit is done.
+        Assert.Equal(WorkspaceState.Managing, await connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.Prompt(workspace.Id, "too soon", CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.SetAutoCommit(workspace.Id, false, CancellationToken.None));
+
+        commitGate.Release();
+        await Idle(workspace.Id);
+
+        Assert.Equal(["Add gated-one", "first"], await Commits(workspace.Id));
+        List<RemoteEvent> events = await Received(items => items.Any(item => item.Kind == RemoteEventKind.AutoCommitChanged && item.AutoCommit == AutoCommitState.Off));
+        int committing = events.FindIndex(item => item.AutoCommit == AutoCommitState.Committing);
+        int stopped = events.FindIndex(item => item.Kind == RemoteEventKind.WorkingChanged && item.Working == false);
+        int ready = events.FindIndex(item => item.Kind == RemoteEventKind.StateChanged && item.State == WorkspaceState.Ready);
+        Assert.InRange(committing, 0, stopped - 1);
+        Assert.True(ready > stopped, "The workspace was ready between the work and the commit.");
+
+        commitGate = null;
+        await connection.Prompt(workspace.Id, "gate two", CancellationToken.None);
+        await Working(workspace.Id);
+        File.WriteAllText(Path.Combine(folder, "gated-two.txt"), "two\n");
+        Gate("gate two").Release();
+        await Idle(workspace.Id);
+
+        Assert.Equal(["Add gated-one", "first"], await Commits(workspace.Id));
+    }
+
+    [Fact]
+    public async Task QueuedInputs_RunInOrderAfterTheCurrentWorkAndEachIsCommittedBeforeTheNextStarts()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("queued");
+        await connection.Prompt(workspace.Id, "gate current", CancellationToken.None);
+        await Working(workspace.Id);
+        await connection.SaveInput(workspace.Id, "kept for later", true, CancellationToken.None);
+        await connection.QueueInput(workspace.Id, "gate next", true, CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await connection.QueueInput(workspace.Id, "gate last", true, CancellationToken.None);
+
+        Assert.Equal([("gate next", true), ("gate last", true), ("kept for later", false)], saved.Select(input => (input.Text, input.IsQueued)));
+        File.WriteAllText(Path.Combine(folder, "gated-current.txt"), "current\n");
+        Gate("gate current").Release();
+
+        await Eventually(async () => (await Said(workspace.Id)).Contains("gate next"), "The first queued input");
+        await Working(workspace.Id);
+        // The work the first one waited for was not to be committed; its own is.
+        Assert.Equal(["first"], await Commits(workspace.Id));
+        Assert.Equal(AutoCommitState.On, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        Assert.Equal(["gate last", "kept for later"], (await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).Select(input => input.Text));
+        File.WriteAllText(Path.Combine(folder, "gated-next.txt"), "next\n");
+        Gate("gate next").Release();
+
+        await Eventually(async () => (await Said(workspace.Id)).Contains("gate last"), "The second queued input");
+        Assert.Equal(["Add gated-current gated-next", "first"], await Commits(workspace.Id));
+        await Working(workspace.Id);
+        File.WriteAllText(Path.Combine(folder, "gated-last.txt"), "last\n");
+        Gate("gate last").Release();
+        await Idle(workspace.Id);
+
+        Assert.Equal(["Add gated-last", "Add gated-current gated-next", "first"], await Commits(workspace.Id));
+        Assert.Equal(["gate current", "gate next", "gate last"], await Said(workspace.Id));
+    }
+
+    [Fact]
+    public async Task QueuedInput_RunsAtOnceWhenNothingIsWorkingAndItsCommitCanBeTurnedOffWhileItWorks()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("immediate");
+
+        await connection.QueueInput(workspace.Id, "gate now", true, CancellationToken.None);
+
+        await Working(workspace.Id);
+        await Eventually(async () => (await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).Count == 0, "The removal from the queue");
+        await connection.SetAutoCommit(workspace.Id, false, CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder, "gated-now.txt"), "now\n");
+        Gate("gate now").Release();
+        await Idle(workspace.Id);
+        await Task.Delay(200);
+
+        Assert.Equal(["first"], await Commits(workspace.Id));
+        Assert.True((await connection.GetGitStatus(workspace.Id, CancellationToken.None)).HasChanges);
+    }
+
+    [Fact]
+    public async Task FailedWork_CommitsNothingAndPausesTheQueueUntilWorkGoesWellAgain()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("failing");
+        await connection.Prompt(workspace.Id, "gate goes badly", CancellationToken.None);
+        await Working(workspace.Id);
+        await connection.SetAutoCommit(workspace.Id, true, CancellationToken.None);
+        await connection.QueueInput(workspace.Id, "gate after", true, CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder, "gated-broken.txt"), "broken\n");
+        Gate("gate goes badly").Release();
+        await Idle(workspace.Id);
+        await Task.Delay(300);
+
+        Assert.Equal(["first"], await Commits(workspace.Id));
+        SavedInput waiting = Assert.Single(await connection.GetSavedInputs(workspace.Id, CancellationToken.None));
+        Assert.Equal(("gate after", true, true), (waiting.Text, waiting.IsQueued, waiting.IsPaused));
+        Assert.Equal(["gate goes badly"], await Said(workspace.Id));
+
+        await connection.Prompt(workspace.Id, "gate repair", CancellationToken.None);
+        await Working(workspace.Id);
+        Gate("gate repair").Release();
+
+        await Eventually(async () => (await Said(workspace.Id)).Contains("gate after"), "The paused input");
+        await Working(workspace.Id);
+        Gate("gate after").Release();
+        await Idle(workspace.Id);
+        Assert.Equal(["Add gated-broken", "first"], await Commits(workspace.Id));
+        Assert.Empty(await connection.GetSavedInputs(workspace.Id, CancellationToken.None));
+    }
+
+    [Fact]
+    public async Task StoppedWork_IsNotCommittedAndAPausedInputCanBeTakenBackOrDeletedWhileQueuingAnotherResumes()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("stopped");
+        await connection.Prompt(workspace.Id, "gate stopped", CancellationToken.None);
+        await Working(workspace.Id);
+        await connection.SetAutoCommit(workspace.Id, true, CancellationToken.None);
+        await connection.QueueInput(workspace.Id, "gate taken", true, CancellationToken.None);
+        await connection.QueueInput(workspace.Id, "gate deleted", true, CancellationToken.None);
+        await connection.QueueInput(workspace.Id, "gate kept", true, CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder, "gated-half.txt"), "half\n");
+
+        Task stopping = connection.StopWorkspace(workspace.Id, CancellationToken.None);
+        // Only once the stop has the work, or the AI could end it before the stop arrives.
+        await Halting(workspace.Id);
+        Gate("gate stopped").Release();
+        await stopping;
+        await Idle(workspace.Id);
+        await Task.Delay(300);
+
+        Assert.Equal(["first"], await Commits(workspace.Id));
+        IReadOnlyList<SavedInput> paused = await connection.GetSavedInputs(workspace.Id, CancellationToken.None);
+        Assert.All(paused, input => Assert.True(input is { IsQueued: true, IsPaused: true }));
+        SavedInput taken = await connection.TakeSavedInput(workspace.Id, paused[0].Id, CancellationToken.None);
+        Assert.Equal(("gate taken", false), (taken.Text, taken.IsQueued));
+        await connection.DiscardSavedInput(workspace.Id, paused[1].Id, CancellationToken.None);
+
+        await connection.QueueInput(workspace.Id, "gate new", true, CancellationToken.None);
+
+        await Eventually(async () => (await Said(workspace.Id)).Contains("gate kept"), "The resumed input");
+        await Working(workspace.Id);
+        Assert.Equal(["gate new"], (await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).Select(input => input.Text));
+        Gate("gate kept").Release();
+        await Eventually(async () => (await Said(workspace.Id)).Contains("gate new"), "The new input");
+        await Working(workspace.Id);
+        Gate("gate new").Release();
+        await Idle(workspace.Id);
+        Assert.Equal(["gate stopped", "gate kept", "gate new"], await Said(workspace.Id));
+    }
+
+    [Fact]
+    public async Task ResumeQueue_SendsTheInputsThatAStopPaused()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("resumed");
+        await connection.Prompt(workspace.Id, "gate given up", CancellationToken.None);
+        await Working(workspace.Id);
+        await connection.QueueInput(workspace.Id, "gate resumed", true, CancellationToken.None);
+        Task stopping = connection.StopWorkspace(workspace.Id, CancellationToken.None);
+        // Only once the stop has the work, or the AI could end it before the stop arrives.
+        await Halting(workspace.Id);
+        Gate("gate given up").Release();
+        await stopping;
+        await Idle(workspace.Id);
+        Assert.True(Assert.Single(await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).IsPaused);
+        await Task.Delay(300);
+        Assert.Equal(["gate given up"], await Said(workspace.Id));
+
+        await connection.ResumeQueue(workspace.Id, CancellationToken.None);
+
+        await Eventually(async () => (await Said(workspace.Id)).Contains("gate resumed"), "The resumed input");
+        await Working(workspace.Id);
+        File.WriteAllText(Path.Combine(folder, "gated-resumed.txt"), "resumed\n");
+        Gate("gate resumed").Release();
+        await Idle(workspace.Id);
+        Assert.Equal("Add gated-resumed", (await Commits(workspace.Id))[0]);
+        Assert.Empty(await connection.GetSavedInputs(workspace.Id, CancellationToken.None));
+    }
+
+    private Task Halting(Guid id) => Eventually(() =>
+    {
+        lock (received)
+        {
+            return Task.FromResult(received.Any(item => item.Kind == RemoteEventKind.StateChanged && item.WorkspaceId == id && item.State == WorkspaceState.Stopping));
+        }
+    }, "The stop");
+
+    private async Task<LoopInfo?> Loop(Guid id) => await connection.GetLoop(id, CancellationToken.None);
+
+    private async Task<int> SaidTimes(Guid id, string said) => (await Said(id)).Count(text => text == said);
+
+    // Waits until a prompt was sent as often as asked and its work is under way.
+    private async Task Sent(Guid id, string text, int times = 1)
+    {
+        await Eventually(async () => await SaidTimes(id, text) == times, $"Sending '{text}' {times} times");
+        await Working(id);
+    }
+
+    [Fact]
+    public async Task QueuedInputs_GoAheadOfTheNextRunOfALoopWhichGoesOnAfterThem()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("looped");
+        await connection.StartLoop(workspace.Id, new LoopSettings { Prompt = "gate looped" }, CancellationToken.None);
+        await Sent(workspace.Id, "gate looped");
+        await Eventually(async () => (await Loop(workspace.Id))?.IsRunning == true, "The run counting as under way");
+        // A run of the loop is not committed by itself.
+        await Assert.ThrowsAsync<RemoteException>(() => connection.SetAutoCommit(workspace.Id, true, CancellationToken.None));
+        await connection.QueueInput(workspace.Id, "gate first", true, CancellationToken.None);
+        await connection.QueueInput(workspace.Id, "gate second", true, CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder, "gated-run.txt"), "run\n");
+        await Task.Delay(200);
+        Assert.Equal(["gate looped"], await Said(workspace.Id));
+
+        Gate("gate looped").Release();
+
+        await Sent(workspace.Id, "gate first");
+        Assert.False((await Loop(workspace.Id))!.IsRunning);
+        Assert.Equal(AutoCommitState.On, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        File.WriteAllText(Path.Combine(folder, "gated-first.txt"), "first\n");
+        Gate("gate first").Release();
+        await Sent(workspace.Id, "gate second");
+        Assert.Equal(["Add gated-first gated-run", "first"], await Commits(workspace.Id));
+        File.WriteAllText(Path.Combine(folder, "gated-second.txt"), "second\n");
+        Gate("gate second").Release();
+
+        await Sent(workspace.Id, "gate looped", 2);
+        Assert.Equal(["gate looped", "gate first", "gate second", "gate looped"], await Said(workspace.Id));
+        Assert.Equal(["Add gated-second", "Add gated-first gated-run", "first"], await Commits(workspace.Id));
+
+        // One queued between two runs does not wait for the loop's turn to come round.
+        await connection.CancelLoop(workspace.Id, CancellationToken.None);
+        Gate("gate looped").Release();
+        await Idle(workspace.Id);
+        await connection.StartLoop(workspace.Id, new LoopSettings { Prompt = "gate resting", IntervalSeconds = 600 }, CancellationToken.None);
+        await Sent(workspace.Id, "gate resting");
+        Gate("gate resting").Release();
+        await Eventually(async () => (await Loop(workspace.Id)) is { IsRunning: false }, "The end of the run");
+
+        await connection.QueueInput(workspace.Id, "gate between", true, CancellationToken.None);
+
+        await Sent(workspace.Id, "gate between");
+        await connection.SetAutoCommit(workspace.Id, false, CancellationToken.None);
+        await connection.SetAutoCommit(workspace.Id, true, CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder, "gated-between.txt"), "between\n");
+        Gate("gate between").Release();
+        await Idle(workspace.Id);
+        Assert.Equal("Add gated-between", (await Commits(workspace.Id))[0]);
+        Assert.NotNull(await Loop(workspace.Id));
+        await connection.CancelLoop(workspace.Id, CancellationToken.None);
+    }
+
+    [Fact]
+    public async Task ALoopStartedWhileQueuedInputsRunMakesItsFirstRunOnceTheyAreDoneEvenWhenStartedDuringACommit()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("started");
+        await connection.QueueInput(workspace.Id, "gate one", true, CancellationToken.None);
+        await Sent(workspace.Id, "gate one");
+        await connection.QueueInput(workspace.Id, "gate two", true, CancellationToken.None);
+        File.WriteAllText(Path.Combine(folder, "gated-one.txt"), "one\n");
+        commitGate = new SemaphoreSlim(0);
+        Gate("gate one").Release();
+        await Eventually(async () => (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit == AutoCommitState.Committing, "The commit");
+
+        await connection.StartLoop(workspace.Id, new LoopSettings { Prompt = "gate loop", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+
+        await Task.Delay(200);
+        Assert.Equal(["gate one"], await Said(workspace.Id));
+        commitGate.Release(10);
+        await Sent(workspace.Id, "gate two");
+        // Starting a loop leaves the queued work to be committed.
+        Assert.Equal(AutoCommitState.On, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        await Task.Delay(200);
+        Assert.Equal(["gate one", "gate two"], await Said(workspace.Id));
+        File.WriteAllText(Path.Combine(folder, "gated-two.txt"), "two\n");
+        Gate("gate two").Release();
+
+        await Sent(workspace.Id, "gate loop");
+        Assert.Equal(["Add gated-two", "Add gated-one", "first"], await Commits(workspace.Id));
+        File.WriteAllText(Path.Combine(folder, "gated-loop.txt"), "loop\n");
+        Gate("gate loop").Release();
+        await Eventually(async () => await Loop(workspace.Id) is null, "The end of the loop");
+        await Idle(workspace.Id);
+        Assert.Equal(3, (await Commits(workspace.Id)).Length);
+    }
+
+    [Fact]
+    public async Task SavedInputs_KeepTheirOwnAutoCommitWhichQueuedAndSentWorkGoesBy()
+    {
+        (WorkspaceInfo workspace, string folder) = await Repository("choosing");
+        SavedInput plain = Assert.Single(await connection.SaveInput(workspace.Id, "saved", true, CancellationToken.None));
+        Assert.True(plain.AutoCommit);
+
+        Assert.False(Assert.Single(await connection.SetSavedInputAutoCommit(workspace.Id, plain.Id, false, CancellationToken.None)).AutoCommit);
+        Assert.False((await connection.TakeSavedInput(workspace.Id, plain.Id, CancellationToken.None)).AutoCommit);
+        await Assert.ThrowsAsync<RemoteException>(() => connection.SetSavedInputAutoCommit(workspace.Id, plain.Id, true, CancellationToken.None));
+
+        await connection.Prompt(workspace.Id, "gate current", CancellationToken.None);
+        await Working(workspace.Id);
+        await connection.QueueInput(workspace.Id, "gate quiet", false, CancellationToken.None);
+        SavedInput later = (await connection.QueueInput(workspace.Id, "gate loud", false, CancellationToken.None))[1];
+        await connection.SetSavedInputAutoCommit(workspace.Id, later.Id, true, CancellationToken.None);
+        Gate("gate current").Release();
+
+        await Sent(workspace.Id, "gate quiet");
+        Assert.Equal(AutoCommitState.Off, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        File.WriteAllText(Path.Combine(folder, "gated-quiet.txt"), "quiet\n");
+        Gate("gate quiet").Release();
+        await Sent(workspace.Id, "gate loud");
+        Assert.Equal(["first"], await Commits(workspace.Id));
+        Assert.Equal(AutoCommitState.On, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        File.WriteAllText(Path.Combine(folder, "gated-loud.txt"), "loud\n");
+        Gate("gate loud").Release();
+        await Idle(workspace.Id);
+        Assert.Equal(["Add gated-loud gated-quiet", "first"], await Commits(workspace.Id));
+
+        await connection.PromptToCommit(workspace.Id, "gate sent", false, CancellationToken.None);
+
+        await Working(workspace.Id);
+        Assert.Equal(AutoCommitState.On, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).AutoCommit);
+        File.WriteAllText(Path.Combine(folder, "gated-sent.txt"), "sent\n");
+        Gate("gate sent").Release();
+        await Idle(workspace.Id);
+        Assert.Equal("Add gated-sent", (await Commits(workspace.Id))[0]);
+    }
 
     [Fact]
     public async Task Git_AllActionsRunOnTheServerThroughProtocolMessages()
@@ -227,8 +632,8 @@ public sealed class EndToEndTests : IAsyncLifetime
             }
         };
 
-        await connection.SaveInput(workspace.Id, "first", CancellationToken.None);
-        IReadOnlyList<SavedInput> saved = await connection.SaveInput(workspace.Id, "second\nline", CancellationToken.None);
+        await connection.SaveInput(workspace.Id, "first", true, CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await connection.SaveInput(workspace.Id, "second\nline", true, CancellationToken.None);
 
         Assert.Equal(["second\nline", "first"], saved.Select(input => input.Text).ToList());
         Assert.Equal(["second\nline", "first"], (await other.GetSavedInputs(workspace.Id, CancellationToken.None)).Select(input => input.Text).ToList());
@@ -236,7 +641,7 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal("second\nline", taken.Text);
         await Assert.ThrowsAsync<RemoteException>(() => connection.TakeSavedInput(workspace.Id, saved[0].Id, CancellationToken.None));
         Assert.Equal(["first"], (await connection.GetSavedInputs(workspace.Id, CancellationToken.None)).Select(input => input.Text).ToList());
-        await Assert.ThrowsAsync<RemoteException>(() => connection.SaveInput(workspace.Id, "  ", CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => connection.SaveInput(workspace.Id, "  ", true, CancellationToken.None));
 
         for (int attempt = 0; attempt < 100; attempt++)
         {
@@ -303,7 +708,7 @@ public sealed class EndToEndTests : IAsyncLifetime
     {
         FolderListing app = await connection.CreateFolder((await connection.ListFolders(temp.Path, CancellationToken.None)).Path, "discard", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(app.Path, null, null, null, CancellationToken.None);
-        IReadOnlyList<SavedInput> saved = await connection.SaveInput(workspace.Id, "keep me", CancellationToken.None);
+        IReadOnlyList<SavedInput> saved = await connection.SaveInput(workspace.Id, "keep me", true, CancellationToken.None);
 
         IReadOnlyList<SavedInput> left = await connection.DiscardSavedInput(workspace.Id, saved[0].Id, CancellationToken.None);
 

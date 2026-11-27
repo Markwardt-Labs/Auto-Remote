@@ -5,6 +5,20 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 internal sealed class MarkdownView : ContentControl
 {
+    static MarkdownView()
+    {
+        SourceProperty.Changed.AddClassHandler<MarkdownView>((view, _) =>
+        {
+            view.collapsed.Clear();
+            view.Render();
+        });
+        CollapsibleProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+        AllCollapsedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.CollapseAll());
+        MatchesProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+        NumberedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.ShowNumbers());
+        DiagramsProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
+    }
+
     /// <summary>
     /// Identifies the <see cref="Source" /> property.
     /// </summary>
@@ -51,20 +65,6 @@ internal sealed class MarkdownView : ContentControl
     internal static readonly StyledProperty<IReadOnlyList<MarkdownHeading>> TrailProperty = AvaloniaProperty.Register<MarkdownView, IReadOnlyList<MarkdownHeading>>(nameof(Trail), [], defaultBindingMode: Avalonia.Data.BindingMode.OneWayToSource);
 
     private static readonly FontFamily mono = new("Menlo, Consolas, DejaVu Sans Mono, monospace");
-
-    static MarkdownView()
-    {
-        SourceProperty.Changed.AddClassHandler<MarkdownView>((view, _) =>
-        {
-            view.collapsed.Clear();
-            view.Render();
-        });
-        CollapsibleProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
-        AllCollapsedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.CollapseAll());
-        MatchesProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
-        NumberedProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.ShowNumbers());
-        DiagramsProperty.Changed.AddClassHandler<MarkdownView>((view, _) => view.Render());
-    }
 
     private readonly MarkdownPipeline pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
 
@@ -216,7 +216,7 @@ internal sealed class MarkdownView : ContentControl
 
         collapsed.RemoveRange(sections.Count, collapsed.Count - sections.Count);
 
-        if (Matches is { Navigate: true } && current is var (_, _, section))
+        if (Matches is { Navigate: true } && current is (_, _, int section))
         {
             for (int at = section; at >= 0; at = sections[at].Parent)
             {
@@ -227,7 +227,7 @@ internal sealed class MarkdownView : ContentControl
         Fold();
         Avalonia.Threading.Dispatcher.UIThread.Post(() => UpdateTrail(this.FindAncestorOfType<ScrollViewer>()?.Offset.Y ?? 0), Avalonia.Threading.DispatcherPriority.Loaded);
 
-        if (Matches is { Navigate: true } && current is var (target, offset, _))
+        if (Matches is { Navigate: true } && current is (ScrollSafeTextBlock target, int offset, _))
         {
             Avalonia.Threading.Dispatcher.UIThread.Post(() =>
             {

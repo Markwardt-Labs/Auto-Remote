@@ -5,23 +5,11 @@ namespace Markwardt.AutoRemote.Client;
 /// </summary>
 internal sealed class SyntaxView : ContentControl
 {
-    /// <summary>
-    /// Initializes a new instance of the <see cref="SyntaxView" /> class.
-    /// </summary>
-    public SyntaxView()
+    static SyntaxView()
     {
-        gutter = new TextBlock { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, IsHitTestVisible = false };
-        block = new ScrollSafeTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
-        sticky = new TranslateTransform();
-        numbers = new Border { Child = gutter, Padding = new Thickness(0, 0, 12, 0), RenderTransform = sticky, ZIndex = 1 };
-        Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
-        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Content = grid };
-        block.LayoutUpdated += (_, _) => NumberLines();
-        scroller.ScrollChanged += (_, _) => sticky.X = scroller.Offset.X;
-        Grid.SetColumn(block, 1);
-        grid.Children.Add(block);
-        grid.Children.Add(numbers);
-        Content = scroller;
+        WrapProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Rewrap());
+        FileProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Load());
+        MatchesProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Render());
     }
 
     /// <summary>
@@ -39,11 +27,23 @@ internal sealed class SyntaxView : ContentControl
     /// </summary>
     public static readonly StyledProperty<bool> WrapProperty = AvaloniaProperty.Register<SyntaxView, bool>(nameof(Wrap));
 
-    static SyntaxView()
+    /// <summary>
+    /// Initializes a new instance of the <see cref="SyntaxView" /> class.
+    /// </summary>
+    public SyntaxView()
     {
-        WrapProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Rewrap());
-        FileProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Load());
-        MatchesProperty.Changed.AddClassHandler<SyntaxView>((view, _) => view.Render());
+        gutter = new TextBlock { FontFamily = mono, FontSize = 12, TextAlignment = TextAlignment.Right, IsHitTestVisible = false };
+        block = new ScrollSafeTextBlock { FontFamily = mono, FontSize = 12, Background = Brushes.Transparent };
+        sticky = new TranslateTransform();
+        numbers = new Border { Child = gutter, Padding = new Thickness(0, 0, 12, 0), RenderTransform = sticky, ZIndex = 1 };
+        Grid grid = new() { ColumnDefinitions = new ColumnDefinitions("Auto,*") };
+        scroller = new ScrollViewer { HorizontalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, VerticalScrollBarVisibility = Avalonia.Controls.Primitives.ScrollBarVisibility.Auto, Content = grid };
+        block.LayoutUpdated += (_, _) => NumberLines();
+        scroller.ScrollChanged += (_, _) => sticky.X = scroller.Offset.X;
+        Grid.SetColumn(block, 1);
+        grid.Children.Add(block);
+        grid.Children.Add(numbers);
+        Content = scroller;
     }
 
     private readonly ISyntaxHighlighter highlighter = new SyntaxHighlighter(new SyntaxLanguages());

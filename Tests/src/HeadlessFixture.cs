@@ -8,7 +8,7 @@ public sealed class HeadlessFixture : IDisposable
 
     public Task<T> Run<T>(Func<T> action) => headless.Dispatch(action, CancellationToken.None);
 
-    public Task<T> RunAsync<T>(Func<Task<T>> action) => headless.Dispatch(action, CancellationToken.None);
+    public Task<T> Dispatch<T>(Func<Task<T>> action) => headless.Dispatch(action, CancellationToken.None);
 
     public void Dispose() => headless.Dispose();
 }
