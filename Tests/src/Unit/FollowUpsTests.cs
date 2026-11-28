@@ -234,6 +234,98 @@ public sealed class FollowUpsTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task SendToCommit_CommitsTheWorkOfTheMessageEvenWhenItEndsBeforeSendingDoes()
+    {
+        await Open();
+
+        int answer = await followUps.SendToCommit(workspace.Id, () =>
+        {
+            Send("do it");
+            End();
+            return Task.FromResult(7);
+        });
+
+        await Until(() => Commits() == 1);
+        Assert.Equal(7, answer);
+        Assert.NotNull(Assert.Single(await Entries()).Commit);
+    }
+
+    [Fact]
+    public async Task SendToCommit_CommitsOnlyThatWorkSoTheNextSentMessageIsNot()
+    {
+        await Open();
+        await followUps.SendToCommit(workspace.Id, () => Sending("do it"));
+        Assert.Equal(AutoCommitState.On, followUps.Get(workspace.Id));
+        End();
+        await Until(() => Commits() == 1 && !followUps.IsCommitting(workspace.Id));
+        await Until(() => activity.Get(workspace.Id) == WorkspaceState.Ready);
+
+        Send("and a question?");
+        End();
+        await Task.Delay(80);
+
+        Assert.Equal((1, AutoCommitState.Off), (Commits(), followUps.Get(workspace.Id)));
+    }
+
+    [Fact]
+    public async Task SendToCommit_OfAMessageThatJoinsWorkHasThatWorkCommittedAlsoOverTheUsersEarlierChoice()
+    {
+        await Open();
+        Send("long job");
+        followUps.SetAutoCommit(workspace.Id, false);
+
+        await followUps.SendToCommit(workspace.Id, () => Task.FromResult(true));
+        followUps.Reconsider(workspace.Id);
+
+        Assert.Equal(AutoCommitState.On, followUps.Get(workspace.Id));
+        End();
+        await Until(() => Commits() == 1);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SendToCommit_WhoseSendFails_LeavesTheCommitAsItWas(bool committing)
+    {
+        await Open();
+        Send("long job");
+
+        if (committing)
+        {
+            followUps.SetAutoCommit(workspace.Id, true);
+        }
+
+        await Assert.ThrowsAsync<RequestException>(() => followUps.SendToCommit<bool>(workspace.Id, () => Task.FromException<bool>(new RequestException("refused"))));
+
+        Assert.Equal(committing ? AutoCommitState.On : AutoCommitState.Off, followUps.Get(workspace.Id));
+        End();
+        await Until(() => activity.Get(workspace.Id) == WorkspaceState.Ready);
+        await Task.Delay(80);
+        Assert.Equal(committing ? 1 : 0, Commits());
+    }
+
+    [Fact]
+    public async Task SendToCommit_DoesNotUndoACommitTheUserTurnedOffWhileTheMessageWasOnItsWay()
+    {
+        await Open();
+
+        await followUps.SendToCommit(workspace.Id, () =>
+        {
+            Send("do it");
+            followUps.SetAutoCommit(workspace.Id, false);
+            return Task.FromResult(true);
+        });
+
+        Assert.Equal(AutoCommitState.Off, followUps.Get(workspace.Id));
+    }
+
+    private Task<bool> Sending(string text)
+    {
+        Send(text);
+        return Task.FromResult(true);
+    }
+
+    [Fact]
     public async Task QueueWithCommit_CommitsTheWorkUnderWayBeforeTheQueuedInputWhichGetsACommitOfItsOwn()
     {
         await Open();

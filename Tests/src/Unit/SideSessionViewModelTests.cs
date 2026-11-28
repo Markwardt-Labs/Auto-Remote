@@ -52,8 +52,13 @@ public sealed class SideSessionViewModelTests : IDisposable
 
     private SendOptionsViewModel Options => model.Active!.SendOptions;
 
-    // What the list's button does: the panel opens on a new session.
-    private void NewSession() => model.Sessions.NewCommand.Execute(null);
+    // How the user asks for one: Send Options for what is typed, with a new session as where it goes.
+    private void NewSession(string task = "do it")
+    {
+        model.Active!.Chat.Input = task;
+        model.Active.OpenSendOptionsCommand.Execute(null);
+        Options.IsNewSession = true;
+    }
 
     private SessionEntry Row(string name) => model.Sessions.Entries.Single(entry => entry.Name == name);
 
@@ -180,11 +185,10 @@ public sealed class SideSessionViewModelTests : IDisposable
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
         connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", true, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
-        model.Sessions.IsOpen = true;
 
-        NewSession();
+        NewSession(" do it ");
 
-        Assert.Equal((false, true, true, true, "Start Session"), (model.Sessions.IsOpen, Options.IsOpen, Options.IsNewSession, Options.UseCurrentFiles, Options.ConfirmText));
+        Assert.Equal((true, true, true, "Start Session"), (Options.IsOpen, Options.IsNewSession, Options.UseCurrentFiles, Options.ConfirmText));
 
         // What main does after the panel opened leaves the choice alone.
         Working(main.Id, true);
@@ -197,8 +201,6 @@ public sealed class SideSessionViewModelTests : IDisposable
         Options.ConfirmCommand.Execute(null);
         Assert.Equal("Enter a name.", Options.Error);
         Options.Name = " second ";
-        Assert.True(Options.KeepsSeparate);
-        model.Active!.Chat.Input = " do it ";
         Assert.True(Options.BringsIn);
         catalog = Catalog(side, made);
         Options.ConfirmCommand.Execute(null);
@@ -228,7 +230,7 @@ public sealed class SideSessionViewModelTests : IDisposable
         Assert.Equal((true, "Bring Into Main"), (Options.UseCurrentCommit, Options.BringInText));
         Options.ConfirmCommand.Execute(null);
 
-        connection.Verify(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Commit, null, false, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Commit, "do it", true, It.IsAny<CancellationToken>()), Times.Once);
         Assert.Equal(side.Id, view.Workspace.Id);
     }
 
@@ -236,7 +238,7 @@ public sealed class SideSessionViewModelTests : IDisposable
     public async Task ANewSessionIsNotSwitchedToWhenTheUserWentElsewhereMeanwhile()
     {
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
-        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, null, false, It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", true, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
         NewSession();
         Options.Name = "second";
@@ -254,7 +256,7 @@ public sealed class SideSessionViewModelTests : IDisposable
     public async Task ANewSessionMadeWhileAnotherSideSessionIsShownIsSwitchedToAsWell()
     {
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
-        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, null, false, It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", true, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
         model.Sessions.ChooseCommand.Execute(Row("fix-login"));
         NewSession();
@@ -272,14 +274,13 @@ public sealed class SideSessionViewModelTests : IDisposable
     {
         connection.Setup(x => x.CreateSideSession(main.Id, "x", It.IsAny<SideSessionStart>(), "task", true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("Side sessions need the repository to have a commit."));
         await Open();
-        NewSession();
+        NewSession("task");
         Options.Name = "x";
-        model.Active!.Chat.Input = "task";
 
         Options.ConfirmCommand.Execute(null);
         await Until(() => Options.HasError);
 
-        Assert.Equal((true, "Side sessions need the repository to have a commit.", "task"), (Options.IsOpen, Options.Error, model.Active.Chat.Input));
+        Assert.Equal((true, "Side sessions need the repository to have a commit.", "task"), (Options.IsOpen, Options.Error, model.Active!.Chat.Input));
     }
 
     [Fact]
@@ -455,7 +456,6 @@ public sealed class SideSessionViewModelTests : IDisposable
         await Open();
         NewSession();
         Options.Name = "second";
-        model.Active!.Chat.Input = "do it";
         catalog = Catalog(side, made);
         Options.ConfirmCommand.Execute(null);
         await Until(() => !Options.IsOpen);

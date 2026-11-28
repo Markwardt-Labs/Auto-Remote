@@ -1239,7 +1239,8 @@ public sealed class EndToEndTests : IAsyncLifetime
         FolderListing folder = await connection.CreateFolder(temp.Path, "limited", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
-        await connection.Prompt(workspace.Id, "long", CancellationToken.None);
+        // The work goes on until the AI was told to pause, however late a busy machine reads the usage.
+        await connection.Prompt(workspace.Id, "gate long", CancellationToken.None);
         usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(97));
         List<RemoteEvent> paused = await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged && remoteEvent.LimitPause is not null));
 
@@ -1247,12 +1248,15 @@ public sealed class EndToEndTests : IAsyncLifetime
         Assert.Equal(("5 hours", 97d, 95d), (pause.Window, pause.PercentUsed, pause.MaxPercent));
         Assert.Equal(pause.Window, (await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).LimitPause?.Window);
 
+        await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message?.Text == "pause current work"));
+        Gate("gate long").Release();
+
         usageOf.Setup(x => x.Get(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(40));
         usageOf.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(40));
         List<RemoteEvent> events = await Received(items => items.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.LimitPauseChanged && remoteEvent.LimitPause is null) && items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message?.Role == MessageRole.Assistant) >= 3);
 
         string[] said = [.. events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message?.Role == MessageRole.User).Select(remoteEvent => remoteEvent.Message!.Text)];
-        Assert.Equal(["long", "pause current work", "resume unfinished work"], said);
+        Assert.Equal(["gate long", "pause current work", "resume unfinished work"], said);
         Assert.Null((await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).LimitPause);
     }
 

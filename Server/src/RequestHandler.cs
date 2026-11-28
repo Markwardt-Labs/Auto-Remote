@@ -298,7 +298,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.Prompt:
                 RequireAiInput(request);
-                return await Prompt(RequireWorkspace(request), Require(request.Text, "text"), request.IgnoreLimit == true, cancellation);
+                return await Prompt(RequireWorkspace(request), Require(request.Text, "text"), request.IgnoreLimit == true, request.AutoCommit == true, cancellation);
             case RemoteCommand.UploadAttachment:
                 // An upload only keeps a file aside, which an input that is queued may need while git works.
                 return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
@@ -603,7 +603,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         };
     }
 
-    private async Task<RemoteResponse> Prompt(Guid id, string text, bool ignoreLimit, CancellationToken cancellation)
+    private async Task<RemoteResponse> Prompt(Guid id, string text, bool ignoreLimit, bool autoCommit, CancellationToken cancellation)
     {
         if (ignoreLimit)
         {
@@ -618,7 +618,8 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
 
         try
         {
-            ticket = await queue.Submit(id, text, WorkSource.Direct, cancellation);
+            Task<WorkTicket> Submit() => queue.Submit(id, text, WorkSource.Direct, cancellation);
+            ticket = autoCommit ? await followUps.SendToCommit(id, Submit) : await Submit();
         }
         catch (RequestException) when (ignoreLimit)
         {

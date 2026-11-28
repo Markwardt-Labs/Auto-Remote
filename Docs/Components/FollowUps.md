@@ -26,7 +26,7 @@ What the AI is sent for new work may get an addition the chat does not show: wha
 
 A commit is the one the Auto Commit action makes: the AI writes the message, then everything uncommitted is committed and pushed when there is an `origin`. It takes all uncommitted changes, whoever made them. Nothing is done outside a git repository or when there is nothing to commit. A commit or push that fails is flagged and told to the next turn.
 
-- **Send** never turns the commit on, so questions and unfinished replies are not committed. A message that joins running work is committed with it if its commit is on.
+- **Sent messages** are only committed when the user chose Commit for one (`Prompt` with `autoCommit`), so plain sends leave questions and unfinished replies uncommitted. That commit is turned on before the prompt is submitted, so its work cannot end ahead of it, and a send that fails leaves the commit as it was. A message that joins running work is committed with it if its commit is on, and one sent with Commit turns it on.
 - **Queued inputs** each keep their own setting, on unless turned off.
 - **Loops** commit each run when set to.
 - **Bringing in** commits by default, which can be turned off in the agenda.

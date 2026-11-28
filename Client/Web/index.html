@@ -464,6 +464,11 @@ details.section > .stack { padding: 4px 0 12px; }
 .segments button.on { background: var(--selection); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
 .segments button:disabled.on { opacity: .8; }
 .dialog .note { font-size: 12px; color: var(--muted); }
+.dialog .unavailable { white-space: pre-line; }
+.dialog:focus { outline: none; }
+.submission { background: var(--background); border: 1px solid var(--border); border-radius: 4px; padding: 6px 8px; display: flex; flex-direction: column; gap: 4px; }
+.submission-text { max-height: 90px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; color: var(--muted); }
+.submission-files { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
 .activity { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 12px; }
 .activity .inner { max-width: 820px; margin: 0 auto; }
 .activity-entry { border-bottom: 1px solid var(--border); }
@@ -1776,6 +1781,8 @@ class Connection {
   setBringInCommit(workspaceId, inputId, enabled) { return this.request("SetBringInCommit", { workspaceId, inputId, enabled }); }
   continueSwarmTask(taskId, name) { return this.request("ContinueSwarmTask", { taskId, name: name || undefined }).then(r => r.workspace); }
   promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
+  // The changes are committed once the work is done; a prompt that joins work under way has that work committed.
+  promptWithCommit(workspaceId, text, ignoreLimit) { return this.request("Prompt", { workspaceId, text, ignoreLimit: ignoreLimit || undefined, autoCommit: true }); }
   cancelLimitPause(workspaceId) { return this.request("CancelLimitPause", { workspaceId }); }
   swarm(command, fields = {}) { return this.request(command, fields).then(r => r.swarm); }
   getSwarmTask(taskId) { return this.request("GetSwarmTask", { taskId }).then(r => r.swarmTask); }
@@ -1966,7 +1973,6 @@ const icons = {
   review: ["M6,1.5 A4.5,4.5 0 1 1 6,10.5 A4.5,4.5 0 1 1 6,1.5 Z M9.3,9.3 L12.5,12.5 M4,6 L5.4,7.4 L8,4.6", "1 1 12 12", 14],
   expand: ["M8.5,1.5 L12.5,1.5 L12.5,5.5 M12.5,1.5 L7.8,6.2 M5.5,12.5 L1.5,12.5 L1.5,8.5 M1.5,12.5 L6.2,7.8", "1 1 12 12", 14],
   autoCommit: ["M1,10 L4,10 M10,10 L13,10 M10,10 A3,3 0 1 1 4,10 A3,3 0 1 1 10,10 Z M4.5,3 L6.5,5 L10,1", "0 0 14 14", 14],
-  queue: ["M1.5,1.5 L9,1.5 M1.5,7 L5.5,7 M1.5,12.5 L5.5,12.5 M10.5,13 L10.5,5.5 M8,8 L10.5,5.5 L13,8", "0.25 0.25 13.75 13.75", 15],
   trash: ["M1.5,3.5 L12.5,3.5 M5,3.5 L5,1.5 L9,1.5 L9,3.5 M3.5,3.5 L4,12.5 L10,12.5 L10.5,3.5 M5.8,6 L5.8,10 M8.2,6 L8.2,10", "0.5 0.5 13 13", 14],
   saveInput: ["M2,2 L10,2 L12,4 L12,12 L2,12 Z M4.5,2 L4.5,5.5 L9,5.5 L9,2 M4.5,12 L4.5,8 L9.5,8 L9.5,12", "1 1 12 12", 14],
   loadInput: ["M1.5,8 L1.5,12.5 L12.5,12.5 L12.5,8 M1.5,8 L4.5,8 L5.5,10 L8.5,10 L9.5,8 L12.5,8 M7,1.5 L7,7 M4.5,4.5 L7,7 L9.5,4.5", "1 1 12 12", 14],
@@ -2414,7 +2420,7 @@ class WorkspaceView {
     new ResizeObserver(() => this.keepAnchor()).observe(this.list);
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
-    this.sendButton = h("button", { class: "primary act", title: "Send. Right-click or hold for Send Options", hidden: true, onclick: () => this.send() }, "↑");
+    this.sendButton = h("button", { class: "primary act", title: "Send. Right-click or hold for Send Options", hidden: true, onclick: () => this.submit() }, "↑");
     this.reviewButton = h("button", { class: "primary act", title: "Review the workspace and its changes and fix any problems. Right-click or hold for Send Options", onclick: () => this.preset("review") }, icon("review"));
     this.expandButton = h("button", { class: "primary act", title: "Expand upon the content of the workspace. Right-click or hold for Send Options", onclick: () => this.preset("expand") }, icon("expand"));
     this.pauseButton = h("button", { class: "primary act", title: "Pause: ask the AI to pause its current work", onclick: () => this.quick(pausePrompt) }, icon("pause"));
@@ -2425,9 +2431,8 @@ class WorkspaceView {
     this.autoCommitButton = h("button", { class: "when-done", hidden: true, onclick: () => this.toggleAutoCommit() }, icon("autoCommit"), this.autoCommitText);
     this.joinNote = h("span", { class: "muted join-note", hidden: true }, "Send joins the running work.");
     this.workRow = h("div", { class: "work-row", hidden: true }, this.autoCommitButton, this.joinNote);
-    this.queueButton = h("button", { class: "primary act queue", title: "Queue: send once the current work is done, at once if there is none, and commit afterwards. Right-click or hold for Send Options", hidden: true, onclick: () => this.queueInput() }, icon("queue"));
-    for (const [button, repeat] of [[this.sendButton, null], [this.queueButton, null], [this.reviewButton, "Review"], [this.expandButton, "Expand"]]) {
-      offerOnHold(button, () => this.openSendOptions({ repeat }));
+    for (const [button, kind] of [[this.sendButton, "Custom"], [this.reviewButton, "Review"], [this.expandButton, "Expand"]]) {
+      offerOnHold(button, () => this.openSendOptions({ kind }));
     }
 
     this.deletingInput = null;
@@ -2488,7 +2493,7 @@ class WorkspaceView {
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
       this.savedPanel,
-      h("div", { class: "composer" }, this.gitBar, this.workRow, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.upNextButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.queueButton, this.sendButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.workRow, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.upNextButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", hidden: !!this.sideInfo, onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", hidden: !!this.sideInfo, onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -3059,9 +3064,6 @@ class WorkspaceView {
     if (!this.hasContent()) {
       this.loadedAutoCommit = null;
     }
-
-    const commits = this.gitStatus.isRepo && this.loadedAutoCommit !== false;
-    this.queueButton.title = `Queue: send once the current work is done, at once if there is none${commits ? ", and commit afterwards" : ""}. Right-click or hold for Send Options`;
   }
 
   queuedInputs() {
@@ -3310,9 +3312,9 @@ class WorkspaceView {
     await attempt(() => this.connection.cancelLoop(this.info.id), this.chatError);
   }
 
-  // The choices of when and where what is in the message box is sent and what happens afterwards. The list of sessions opens only the part that makes a new one.
-  async openSendOptions({ newSession = false, repeat = null } = {}) {
-    if (this.openingOptions || (!newSession && this.delegation())) {
+  // The choices of when and where something is sent and what happens afterwards.
+  async openSendOptions({ kind = "Custom" } = {}) {
+    if (this.openingOptions || this.delegation()) {
       return;
     }
 
@@ -3320,26 +3322,40 @@ class WorkspaceView {
 
     // A dialog that opens after another workspace was chosen would be taken as one about that workspace.
     try {
-      const read = async ask => {
+      let problem = null;
+      const read = async (ask, failed = () => {}) => {
         try {
           return this.home.active === this ? await ask() : null;
         } catch (exception) {
+          failed(exception);
           return null;
         }
       };
-      const settings = newSession ? null : await read(() => this.connection.getWorkspaceSettings(this.info.id));
-      const usage = newSession ? null : await read(() => this.connection.getUsage(this.info.service));
+      let prompt = "";
+
+      if (kind !== "Custom") {
+        const settings = await read(() => this.connection.getWorkspaceSettings(this.info.id), exception => { problem = `The prompt could not be read: ${exception.message}`; });
+        prompt = ((kind === "Review" ? settings?.reviewPrompt ?? settings?.globalReviewPrompt : settings?.expandPrompt ?? settings?.globalExpandPrompt) ?? "").trim();
+        problem ??= prompt ? null : "The prompt of this button is empty.";
+      }
+
+      const usage = await read(() => this.connection.getUsage(this.info.service));
       const swarm = await read(() => this.connection.swarm("GetSwarm"));
 
       if (this.home.active === this) {
-        this.showSendOptions(newSession, settings, (usage?.windows ?? []).map(window => window.name), (swarm?.peers ?? []).filter(peer => peer.sendWork), repeat);
+        this.showSendOptions({ kind, prompt, windows: (usage?.windows ?? []).map(window => window.name), peers: (swarm?.peers ?? []).filter(peer => peer.sendWork) });
+
+        if (problem) {
+          this.home.dialogError.set(problem);
+        }
       }
     } finally {
       this.openingOptions = false;
     }
   }
 
-  showSendOptions(newSession, settings, windows, peers, repeat = null) {
+  // Shows what is submitted (kind: what is in the message box, or the review or expand prompt) and when and where it goes.
+  showSendOptions({ kind: submission, prompt, windows, peers }) {
     const home = this.home;
     const main = home.workspaces.find(workspace => workspace.id === home.mainOf(this.info.id));
 
@@ -3348,39 +3364,37 @@ class WorkspaceView {
     }
 
     const repo = this.gitStatus.isRepo === true;
+    const custom = submission === "Custom";
     const typed = () => this.input.value.trim();
+    // What a new session or a delegated task is given.
+    const given = () => custom ? this.input.value : prompt;
     const field = (label, ...controls) => h("div", { class: "stack tight" }, h("div", { class: "muted" }, label), ...controls);
     const note = text => h("div", { class: "note" }, text);
+    const canSendNow = () => this.takesAiInput();
+    // Attached files can only go to this chat, now or next.
+    const hasFiles = () => custom && this.attachments.length > 0;
+    const canRepeat = () => this.loop === null && !hasFiles() && (canSendNow() || this.autoCommitState === "Committing");
     let update = () => {};
-    const mirrors = [];
-    const boxText = placeholder => {
-      const area = h("textarea", { rows: 3, placeholder, value: this.input.value, oninput: () => {
-        this.input.value = area.value;
-        this.inputChanged();
-        mirrors.filter(other => other !== area).forEach(other => { other.value = area.value; });
-        update();
-      } });
-      mirrors.push(area);
-      return area;
-    };
-    // Asked for with a prompt of the workspace, it is about repeating that prompt, which a loop that already runs leaves no room for.
-    const when = segments([["Now", "Now"], ["Next", "Next"], ["Repeat", "Repeat"]], repeat && this.loop === null ? "Repeat" : "Now", () => update());
-    const where = segments([["Chat", "This Chat"], ["New", "New Session"]], newSession ? "New" : "Chat", () => update());
-    const loopNote = note("A loop already runs, so Repeat is not offered.");
-    const whenField = field("When", when.element, loopNote);
-    const whereField = field("Where", where.element);
 
-    const nowBox = field("When Done", note("Send never turns on auto commit."));
+    const submittedText = h("div", { class: "submission-text" });
+    const submittedFiles = h("div", { class: "submission-files" });
+    const submitted = h("div", { class: "submission" }, h("strong", {}, submission), submittedText, submittedFiles);
+    const when = segments([["Now", "Now"], ["Next", "Next"], ["Repeat", "Repeat"]], canSendNow() ? "Now" : "Next", value => {
+      // Where this chat takes nothing at once, Now is about a new session.
+      where.set(value === "Now" && !canSendNow() ? "New" : value === "Now" ? where.value : "Chat");
+      update();
+    });
+    const where = segments([["Chat", "This Chat"], ["New", "New Session"]], "Chat", () => update());
+    const unavailable = h("div", { class: "note unavailable" });
+    const whenField = field("When", when.element);
+    const whereField = field("Where", where.element, unavailable);
 
-    const queued = segments([["Commit", "Commit"], ["Keep", "Keep Changes"]], this.loadedAutoCommit === false ? "Keep" : "Commit");
-    const nextBox = h("div", { class: "stack tight" }, repo ? field("When Done", queued.element) : null);
+    // Kept apart for each choice of when.
+    const commits = { Now: "Keep", Next: custom && this.loadedAutoCommit === false ? "Keep" : "Commit", Repeat: "Keep" };
+    const done = segments([["Commit", "Commit"], ["Keep", "Keep Changes"]], "Keep", value => { commits[when.value] = value; });
+    const joinsCommit = note("This joins the running work, which already commits when it is done.");
+    const doneField = field("When Done", done.element, joinsCommit);
 
-    const prompts = {
-      Review: (settings?.reviewPrompt ?? settings?.globalReviewPrompt ?? "").trim(),
-      Expand: (settings?.expandPrompt ?? settings?.globalExpandPrompt ?? "").trim()
-    };
-    const promptKind = segments([["Review", "Review"], ["Expand", "Expand"], ["Custom", "Custom"]], repeat ?? (typed() ? "Custom" : "Review"), () => update());
-    const customBox = boxText("Enter the prompt...");
     const interval = h("input", { type: "number", min: "0", max: "1440", step: "1", value: "15" });
     const conditions = [["Forever", "Until I cancel it"], ["UntilTime", "Until a time of day"], ["ForDuration", "For a length of time"], ["Runs", "For a number of runs"], ...(windows.length > 0 ? [["UntilWindow", "Until a usage limit reaches a share"]] : [])];
     const time = h("input", { type: "time", value: "23:00" });
@@ -3399,16 +3413,13 @@ class WorkspaceView {
     const kind = h("select", { onchange: () => showCondition() }, conditions.map(([value, label]) => h("option", { value }, label)));
     kind.value = "Forever";
     showCondition();
-    const commitEach = h("input", { type: "checkbox" });
     const repeatBox = h("div", { class: "stack tight" },
-      field("Prompt", promptKind.element, customBox),
       field("Minutes between runs", interval),
       field("Ends", kind),
-      ...Object.values(boxes),
-      repo ? h("label", { class: "check" }, commitEach, "Commit Each Run") : null);
+      ...Object.values(boxes));
 
     const nameLabel = h("div", { class: "muted" });
-    const name = h("input", { type: "text", onkeydown: event => { if (event.key === "Enter") { confirm.click(); } } });
+    const name = h("input", { type: "text" });
     const runOn = h("select", { onchange: () => update() }, h("option", { value: "" }, "This Server"), ...peers.map(peer => h("option", { value: `peer:${peer.id}` }, peer.name)), peers.length > 0 ? h("option", { value: "any" }, "Any Server") : null);
     // Decided as the dialog opens and left alone after that: unfinished work of a busy AI is best left behind.
     const working = home.busy.has(main.id) || !!home.opened.get(main.id)?.working;
@@ -3419,14 +3430,11 @@ class WorkspaceView {
     capability.value = "Balanced";
     let chosenAfterwards = null;
     const afterwards = segments([["Bring", "Bring Into Main"], ["Keep", "Keep Separate"]], "Keep", value => { chosenAfterwards = value; });
-    const taskLabel = h("div", { class: "muted" });
-    const taskBox = boxText("Work the session starts on once it is set up");
     const remoteNote = note("Instructions must be complete on their own: the other server does not see this conversation.");
     const remoteFields = h("div", { class: "stack tight" }, remoteNote, field("Expected Result (optional)", expected), field("Capability", capability));
     const newBox = h("div", { class: "stack tight" },
       h("div", { class: "stack tight" }, nameLabel, name),
       field("Run On", runOn),
-      h("div", { class: "stack tight" }, taskLabel, taskBox),
       remoteFields,
       startingField,
       field("When Done", afterwards.element));
@@ -3436,32 +3444,45 @@ class WorkspaceView {
     let running = false;
     const mode = () => where.value === "New" ? runOn.value ? "Delegate" : "Session" : when.value === "Now" ? "Send" : when.value === "Next" ? "Queue" : "Loop";
     update = () => {
-      const looping = this.loop !== null;
-      when.enable("Repeat", !looping);
-      loopNote.hidden = !looping;
+      const now = canSendNow();
+      const files = hasFiles();
+      submittedText.textContent = custom ? typed() : prompt;
+      submittedText.hidden = !submittedText.textContent;
+      submittedFiles.textContent = custom && this.attachments.length > 0 ? `Attached: ${this.attachments.map(attachment => attachment.name).join(", ")}` : "";
+      submittedFiles.hidden = !submittedFiles.textContent;
+      when.enable("Now", now || !files);
+      when.enable("Repeat", canRepeat());
 
       if (when.value !== "Now") {
         where.set("Chat");
       }
 
-      where.enable("New", when.value === "Now");
+      where.enable("Chat", when.value !== "Now" || now);
+      where.enable("New", when.value === "Now" && !files);
+      const reason = this.blockReason();
+      unavailable.textContent = [
+        reason ? `This chat cannot take it now: ${reason.charAt(0).toLowerCase()}${reason.slice(1)}.` : null,
+        this.loop !== null ? "A loop already runs, so Repeat is not offered." : null,
+        files ? "Attached files can only be sent to this chat, now or next." : null
+      ].filter(Boolean).join("\n");
+      unavailable.hidden = !unavailable.textContent;
       const chosen = mode();
       const remote = chosen === "Delegate";
-      nowBox.hidden = chosen !== "Send";
-      nextBox.hidden = chosen !== "Queue";
+      doneField.hidden = !(repo && where.value === "Chat");
+      done.set(commits[when.value]);
+      joinsCommit.hidden = !(when.value === "Now" && this.state() === "Working" && this.autoCommitState === "On");
       repeatBox.hidden = chosen !== "Loop";
-      customBox.hidden = promptKind.value !== "Custom";
       newBox.hidden = where.value !== "New";
       nameLabel.textContent = remote ? "Title" : "Name";
       name.placeholder = remote ? "Title" : "Name";
       startingField.hidden = remote;
       remoteFields.hidden = !remote;
-      taskLabel.textContent = remote ? "Instructions" : "First Task (optional)";
       afterwards.element.firstChild.textContent = remote ? home.bringInLabel(this.info.id) : "Bring Into Main";
-      // A session that is given a task is brought in when it is done, unless the user says otherwise.
-      afterwards.set(chosenAfterwards ?? (remote || typed() ? "Bring" : "Keep"));
+      // A new session is brought in when it is done, unless the user says otherwise.
+      afterwards.set(chosenAfterwards ?? "Bring");
       confirm.textContent = { Send: "Send", Queue: "Queue", Loop: "Start Loop", Session: "Start Session", Delegate: "Delegate Task" }[chosen];
-      confirm.disabled = running || ((chosen === "Send" || chosen === "Queue") && !this.hasContent()) || (chosen === "Loop" && looping);
+      const nothing = custom ? !this.hasContent() : !prompt;
+      confirm.disabled = running || nothing || (chosen === "Send" && !now) || (chosen === "Loop" && !canRepeat()) || ((chosen === "Session" || chosen === "Delegate") && files);
     };
     const fail = message => {
       if (home.dialogHost.firstChild === element) {
@@ -3477,20 +3498,13 @@ class WorkspaceView {
     };
 
     const startLoop = async () => {
-      const chosen = promptKind.value;
-      const custom = chosen === "Custom";
       const minutesBetween = Number(interval.value);
       const condition = kind.value;
       const used = this.input.value;
-
-      if (custom && this.attachments.length > 0) {
-        return fail("A loop cannot send attached files. Remove them first.");
-      }
-
-      const text = custom ? used.trim() : prompts[chosen];
+      const text = custom ? used.trim() : prompt;
 
       if (!text) {
-        return fail(custom ? "Write the prompt the loop sends." : `The ${chosen.toLowerCase()} prompt could not be read, so write the prompt the loop sends.`);
+        return fail("There is nothing for the loop to send.");
       }
 
       // An empty box counts as 0; a number box also reads as empty while it holds something that is no number.
@@ -3498,7 +3512,7 @@ class WorkspaceView {
         return fail("The minutes between runs must be between 0 and 1440.");
       }
 
-      const loop = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition, autoCommit: repo && commitEach.checked };
+      const loop = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition, autoCommit: repo && commits.Repeat === "Commit" };
 
       if (condition === "UntilTime") {
         const [hour, minute] = (time.value || "").split(":").map(Number);
@@ -3550,26 +3564,17 @@ class WorkspaceView {
     };
 
     const startSession = async () => {
-      const given = name.value.trim();
+      const called = name.value.trim();
 
-      if (!given) {
+      if (!called) {
         return fail("Enter a name.");
       }
 
-      if (this.attachments.length > 0) {
-        return fail("Attached files cannot go to a new session. Remove them first.");
-      }
-
-      const used = this.input.value;
-      const task = used.trim();
+      const used = given();
       const start = starting.value;
       const bringIn = afterwards.value === "Bring";
-
       // Browsers ask only while the user is clicking.
-      if (task) {
-        requestNotifications();
-      }
-
+      requestNotifications();
       // What was edited in main's settings applies to the session made next.
       const view = home.opened.get(main.id);
 
@@ -3577,37 +3582,33 @@ class WorkspaceView {
         return fail("The workspace's settings could not be saved.");
       }
 
-      const made = await this.connection.createSideSession(main.id, given, start, task, bringIn);
+      const made = await this.connection.createSideSession(main.id, called, start, used.trim(), bringIn);
 
-      if (task) {
+      if (custom) {
         this.clearSent(used);
       }
 
       close();
-      home.awaitSession(made, !!task);
+      home.awaitSession(made, true);
     };
 
     const delegate = async () => {
       const title = name.value.trim();
-      const used = this.input.value;
+      const used = given();
 
       if (!title) {
         return fail("Enter a title.");
-      }
-
-      if (!used.trim()) {
-        return fail("Write the instructions of the task.");
-      }
-
-      if (this.attachments.length > 0) {
-        return fail("Attached files cannot go to a new session. Remove them first.");
       }
 
       requestNotifications();
       const task = { title, instructions: used.trim(), expectedResult: expected.value.trim(), capability: capability.value, peerId: runOn.value.startsWith("peer:") ? runOn.value.slice(5) : undefined, dependsOn: [], bringIn: afterwards.value === "Bring" };
       const before = new Set(home.swarmTasks.map(item => item.id));
       const status = await this.connection.swarm("DelegateTask", { workspaceId: this.info.id, task });
-      this.clearSent(used);
+
+      if (custom) {
+        this.clearSent(used);
+      }
+
       close();
       this.chatNotice.textContent = "The task was delegated.";
       this.chatNotice.hidden = false;
@@ -3619,20 +3620,21 @@ class WorkspaceView {
       home.dialogError.set(null);
 
       if (chosen === "Send") {
-        if (!this.takesAiInput()) {
+        if (!canSendNow()) {
           return fail("The AI cannot take input right now. Queue it instead.");
         }
 
+        const commit = repo && commits.Now === "Commit";
         close();
-        return this.send();
+        return custom ? this.send(commit) : this.deliver(prompt, [], false, null, commit);
       }
 
       if (chosen === "Queue") {
         close();
-        return this.queueInput(repo ? queued.value === "Commit" : undefined);
+        return custom ? this.queueInput(repo ? commits.Next === "Commit" : undefined) : this.queuePrompt(prompt, commits.Next === "Commit");
       }
 
-      if (chosen === "Loop" && !this.takesAiInput() && this.autoCommitState !== "Committing") {
+      if (chosen === "Loop" && !canRepeat()) {
         return fail("A loop cannot be started right now.");
       }
 
@@ -3649,11 +3651,23 @@ class WorkspaceView {
       }
     });
 
-    home.dialog(newSession ? "New Session" : "Send Options", null, ...(newSession ? [] : [whenField, whereField, nowBox, nextBox, repeatBox]), newBox, confirm);
+    const focused = document.activeElement === this.input;
+    home.dialog("Send Options", null, submitted, whenField, whereField, doneField, repeatBox, newBox, confirm);
     element = home.dialogHost.firstChild;
     element.dataset.view = this.info.id;
-    element.dataset.buttonOnly = "true";
+    // Enter starts what is chosen and Escape cancels it.
+    element.startsOnEnter = confirm;
+    element.restoreFocus = focused ? this.input : null;
+    this.updateSendOptions = () => {
+      if (home.dialogHost.firstChild === element) {
+        update();
+      }
+    };
     update();
+
+    // It takes the keyboard, so that nothing is typed behind it.
+    element.tabIndex = -1;
+    element.focus();
   }
 
   // Takes out of the box what was sent from it, unless it was changed meanwhile.
@@ -4004,7 +4018,7 @@ class WorkspaceView {
 
     this.gitBar.hidden = state !== "Managing";
     const delegated = this.delegation();
-    this.input.placeholder = delegated ? `This workspace runs a task delegated by ${delegated.from}` : { Managing: this.autoCommitState === "Committing" ? "Committing the changes, queue what comes next" : "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
+    this.input.placeholder = this.blockReason() ?? "Enter query...";
     this.showDelegation(delegated);
     this.renderUpNextButton();
     this.updateSend();
@@ -4846,6 +4860,19 @@ class WorkspaceView {
     }
   }
 
+  // Queues a prompt that is not in the message box, such as the review prompt.
+  async queuePrompt(text, commits) {
+    this.chatNotice.hidden = true;
+    const waited = this.notifyWhenReady;
+    this.notifyWhenReady = true;
+    this.clearReady();
+    requestNotifications().then(() => this.home.updateNotify(this));
+
+    if (!(await attempt(() => this.connection.queueInput(this.info.id, text, commits), this.chatError)).ok) {
+      this.settleNotify(waited);
+    }
+  }
+
   showPanel(mode) {
     this.panelMode = mode;
     this.deletingInput = null;
@@ -4912,6 +4939,17 @@ class WorkspaceView {
     return this.home.delegations.get(this.info.id) ?? null;
   }
 
+  // Why the chat takes nothing at once, or null while it does.
+  blockReason() {
+    const delegated = this.delegation();
+
+    if (delegated) {
+      return `This workspace runs a task delegated by ${delegated.from}`;
+    }
+
+    return { Managing: this.autoCommitState === "Committing" ? "Committing the changes, queue what comes next" : "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[this.state()] ?? null;
+  }
+
   takesAiInput() {
     if (this.delegation()) {
       return false;
@@ -4925,8 +4963,7 @@ class WorkspaceView {
     const state = this.state();
     const empty = this.input.value.trim().length === 0 && this.attachments.length === 0;
     const halt = (state === "Working" && empty) || state === "Managing" || state === "Canceling";
-    this.sendButton.disabled = !this.takesAiInput();
-    this.sendButton.hidden = halt || empty;
+    this.sendButton.hidden = empty || !!this.delegation();
     this.reviewButton.disabled = !this.takesAiInput();
     const prompting = empty && state !== "Managing" && state !== "Canceling";
     this.reviewButton.hidden = !prompting;
@@ -4947,7 +4984,6 @@ class WorkspaceView {
       this.closePanel();
     }
 
-    this.queueButton.hidden = empty || !!this.delegation();
     this.autoCommitButton.hidden = !!this.delegation() || !this.gitStatus.isRepo || state === "Stopping" || state === "Canceling" || !(state === "Working" || this.autoCommitState === "On");
     const committing = this.autoCommitState === "On";
     this.autoCommitButton.classList.toggle("toggled", committing);
@@ -4964,6 +5000,19 @@ class WorkspaceView {
 
     if (this === this.home.active) {
       this.home.closeHaltDialogUnlessRunning(state);
+    }
+
+    this.updateSendOptions?.();
+  }
+
+  // What the send button and Shift+Enter do: send at once, or where the chat cannot take it now, offer the other ways.
+  submit() {
+    if (this.takesAiInput()) {
+      return this.send();
+    }
+
+    if (!this.delegation() && this.hasContent()) {
+      return this.openSendOptions();
     }
   }
 
@@ -5071,13 +5120,21 @@ class WorkspaceView {
   }
 
   keyed(event) {
-    if (event.key === "Enter" && event.shiftKey && !event.isComposing) {
-      event.preventDefault();
-      this.send();
+    if (event.key !== "Enter" || event.isComposing || event.shiftKey === event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+
+    // Alt+Enter queues, as Send Options does for Next when nothing is changed.
+    if (event.shiftKey) {
+      this.submit();
+    } else {
+      this.queueInput();
     }
   }
 
-  async send() {
+  async send(commit = false) {
     const text = this.input.value.trim();
     const sending = this.attachments;
 
@@ -5093,7 +5150,7 @@ class WorkspaceView {
     this.renderAttachments();
     this.renderLoaded();
 
-    if (!await this.deliver(text, sending, true, loaded)) {
+    if (!await this.deliver(text, sending, true, loaded, commit)) {
       this.giveBack(text, sending);
       this.restoreLoaded(loaded);
     }
@@ -5139,7 +5196,7 @@ class WorkspaceView {
     await this.deliver(prompt, []);
   }
 
-  async deliver(text, sending, fromBox = false, loaded = null) {
+  async deliver(text, sending, fromBox = false, loaded = null, commit = false) {
     this.chatNotice.hidden = true;
     const waited = this.notifyWhenReady;
     this.notifyWhenReady = true;
@@ -5161,13 +5218,13 @@ class WorkspaceView {
 
       try {
         this.submitted.push(splitAttachments(prompt));
-        await this.connection.prompt(this.info.id, prompt);
+        await (commit ? this.connection.promptWithCommit(this.info.id, prompt, false) : this.connection.prompt(this.info.id, prompt));
       } catch (exception) {
         if (!exception.overLimit) {
           throw exception;
         }
 
-        refused = { pause: exception.overLimit, prompt, typed: fromBox ? text : "", attachments: sending, loaded };
+        refused = { pause: exception.overLimit, prompt, typed: fromBox ? text : "", attachments: sending, loaded, commit };
       }
     }, this.chatError);
 
@@ -5212,7 +5269,7 @@ class WorkspaceView {
 
       this.renderLoaded();
 
-      if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
+      if (!(await attempt(() => ask.commit ? this.connection.promptWithCommit(this.info.id, ask.prompt, true) : this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
         this.settleNotify(waited);
         this.withdraw(echo);
         this.giveBack(boxed ? ask.typed : "", taken);
@@ -7029,8 +7086,7 @@ class Home {
     this.sessionsCard = h("div", { class: "sessions-card" },
       h("h3", { class: "serif" }, "Sessions"),
       this.sessionRows,
-      this.sessionError.element,
-      h("button", { class: "block", onclick: () => this.beginNewSession() }, "New Session"));
+      this.sessionError.element);
     this.taskView = new TaskView(this);
     this.sessionsWrap = h("div", { class: "sessions-wrap", hidden: true, onclick: event => event.target === this.sessionsWrap && this.toggleSessions(false) }, this.sessionsCard);
     this.usage = null;
@@ -7355,12 +7411,6 @@ class Home {
     if (ask.main !== this.selected?.id || ask.id && (!session || !ask.holds(session))) {
       this.closeDialog();
     }
-  }
-
-  // A new session is made with the same form as in the send options, which starts on what is typed in the chat on screen.
-  beginNewSession() {
-    this.toggleSessions(false);
-    this.active?.openSendOptions({ newSession: true });
   }
 
   beginRenameSession(session) {
@@ -8120,9 +8170,19 @@ class Home {
       return;
     }
 
+    const start = this.dialogHost.firstChild?.startsOnEnter;
+
     if (event.key === "Escape") {
       event.preventDefault();
       this.closeDialog();
+    } else if (event.key === "Enter" && start) {
+      // Cancel keeps its own Enter. Shift+Enter starts a new line where there are lines, as Enter does on a touch screen, whose keyboard has no other way to.
+      const lines = event.target.tagName === "TEXTAREA" && matchMedia("(pointer: coarse)").matches;
+
+      if (!event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey && event.target.textContent !== "Cancel" && !lines) {
+        event.preventDefault();
+        start.click();
+      }
     } else if (event.key === "Enter" && !this.dialogHost.firstChild?.getAttribute("data-button-only") && !["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(event.target.tagName)) {
       const submit = this.dialogHost.querySelector("button.primary");
 
@@ -8134,9 +8194,11 @@ class Home {
   }
 
   closeDialog() {
+    const restore = this.dialogHost.firstChild?.restoreFocus;
     this.dialogHost.hidden = true;
     this.dialogHost.replaceChildren();
     this.dialogError.set(null);
+    restore?.focus();
   }
 
   dialog(title, body, ...controls) {

@@ -902,11 +902,18 @@ public sealed class RequestHandlerTests
         Assert.Equal(AutoCommitState.On, history.History!.AutoCommit);
     }
 
-    [Fact]
-    public async Task Handle_Prompt_NeverTurnsAutoCommitOn()
+    [Theory]
+    [InlineData(null, 0)]
+    [InlineData(false, 0)]
+    [InlineData(true, 1)]
+    public async Task Handle_Prompt_IsSentToBeCommittedOnlyWhenAskedTo(bool? asked, int committed)
     {
-        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go", AutoCommit = true }, owner, CancellationToken.None);
+        followUps.Setup(x => x.SendToCommit(workspace.Id, It.IsAny<Func<Task<WorkTicket>>>())).Returns((Guid _, Func<Task<WorkTicket>> send) => send());
 
+        RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go", AutoCommit = asked }, owner, CancellationToken.None);
+
+        Assert.Null(response.Error);
+        followUps.Verify(x => x.SendToCommit(workspace.Id, It.IsAny<Func<Task<WorkTicket>>>()), Times.Exactly(committed));
         followUps.Verify(x => x.Arm(It.IsAny<Guid>()), Times.Never);
         followUps.Verify(x => x.SetAutoCommit(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Never);
     }

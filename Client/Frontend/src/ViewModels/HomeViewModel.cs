@@ -39,7 +39,6 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         Resources = new ResourcesViewModel(connection) { IsSectionShown = false };
         Resources.Updated += RefreshBadges;
         Sessions = new SessionsViewModel(connection);
-        Sessions.NewRequested += () => _ = NewSession();
         Sessions.Failed += message => active?.Chat.Show(message);
         Sessions.Discarding += Disarm;
         Sessions.Chosen += id => ShowSession(id);
@@ -986,18 +985,6 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         Sessions.Show(selected, rows, [.. swarmTasks.Where(task => task.WorkspaceId is { } owner && MainOf(owner) == selected.Id).OrderBy(task => task.CreatedAt)]);
     }
 
-    // A new session is described in Send Options of the chat on screen, which a delegated workspace does not offer.
-    private Task NewSession()
-    {
-        if (active?.Delegation is { } task)
-        {
-            active.Chat.Show($"This workspace runs a task delegated by {task.From}, so no session can be made of it.");
-            return Task.CompletedTask;
-        }
-
-        return active?.SendOptions.OpenNewSession() ?? Task.CompletedTask;
-    }
-
     private ResourceBadge Badge(Guid workspace)
     {
         if (!badges.TryGetValue(workspace, out ResourceBadge? badge))
@@ -1428,7 +1415,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             Delegation = delegations.GetValueOrDefault(workspace.Id)
         };
-        created.SessionMade += (made, hasTask) => Await(made, hasTask);
+        created.SessionMade += made => Await(made, true);
         created.Delegated += Follow;
         created.SessionNames = () => sideSessions.Where(session => session.Side!.ParentId == MainOf(workspace.Id)).Select(session => session.Side!.Name);
         // What was edited in main's settings applies to the session made next.

@@ -76,28 +76,6 @@ public sealed class QueuedInputViewModelTests
         Assert.True(view.ShowAutoCommitButton);
     }
 
-    [Theory]
-    [InlineData(true, null, true)]
-    [InlineData(true, true, true)]
-    [InlineData(true, false, false)]
-    [InlineData(false, null, false)]
-    public async Task QueueTip_MentionsACommitOnlyWhenOneFollows(bool isRepo, bool? loaded, bool mentioned)
-    {
-        connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = isRepo, Branch = "main" });
-        WorkspaceViewModel view = await Started();
-
-        if (loaded is { } commits)
-        {
-            await Load(Input("saved") with { AutoCommit = commits });
-        }
-        else
-        {
-            Chat.Input = "typed";
-        }
-
-        Assert.Equal($"Queue: send once the current work is done, at once if there is none{(mentioned ? ", and commit afterwards" : string.Empty)}. Right-click or hold for Send Options", view.QueueTip);
-    }
-
     [Fact]
     public async Task JoinNote_ShowsOnlyWhileTheAiWorksAndSomethingIsTyped()
     {
@@ -389,13 +367,13 @@ public sealed class QueuedInputViewModelTests
         Saved(draft);
         connection.Setup(x => x.TakeSavedInput(workspace.Id, draft.Id, It.IsAny<CancellationToken>())).ReturnsAsync(draft);
         connection.Setup(x => x.CreateSideSession(workspace.Id, "fix the login page today", SideSessionStart.Files, draft.Text, true, It.IsAny<CancellationToken>())).ReturnsAsync(Made());
-        bool? hadTask = null;
-        view.SessionMade += (_, hasTask) => hadTask = hasTask;
+        WorkspaceInfo? made = null;
+        view.SessionMade += session => made = session;
 
         view.RunInNewSessionCommand.Execute(draft);
         await Task.Delay(50);
 
-        Assert.True(hadTask);
+        Assert.NotNull(made);
         connection.Verify(x => x.SaveInput(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
         connection.Verify(x => x.QueueInput(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
     }
@@ -512,7 +490,8 @@ public sealed class QueuedInputViewModelTests
         Assert.Equal("Committing the changes, queue what comes next", Chat.Placeholder);
         Assert.False(view.ShowAutoCommitButton);
         Chat.Input = "after the commit";
-        Assert.True(view.ShowQueueButton);
+        Assert.True(view.ShowSendButton);
+        Assert.True(view.SubmitCommand.CanExecute(null));
         Assert.True(Chat.QueueCommand.CanExecute(null));
         Assert.False(Chat.SendCommand.CanExecute(null));
 
@@ -522,15 +501,15 @@ public sealed class QueuedInputViewModelTests
     }
 
     [Fact]
-    public async Task QueueButton_ShowsOnceSomethingIsTypedAndQueuesItWithItsAttachments()
+    public async Task Queue_TakesWhatIsTypedWithItsAttachmentsOutOfTheBox()
     {
         WorkspaceViewModel view = await Started();
-        Assert.False(view.ShowQueueButton);
+        Assert.False(view.ShowSendButton);
         connection.Setup(x => x.UploadAttachment(workspace.Id, "a.txt", It.IsAny<ReadOnlyMemory<byte>>(), It.IsAny<CancellationToken>())).ReturnsAsync("/data/0123abcd-a.txt");
         connection.Setup(x => x.QueueInput(workspace.Id, It.IsAny<string>(), true, It.IsAny<CancellationToken>())).ReturnsAsync([]);
         Chat.Input = "  do it  ";
         Chat.Attach("a.txt", new byte[] { 1 });
-        Assert.True(view.ShowQueueButton);
+        Assert.True(view.ShowSendButton);
 
         Chat.QueueCommand.Execute(null);
         await Task.Delay(50);
@@ -546,7 +525,7 @@ public sealed class QueuedInputViewModelTests
     }
 
     [Fact]
-    public async Task QueueButton_GivesBackWhatCouldNotBeQueued()
+    public async Task Queue_GivesBackWhatCouldNotBeQueued()
     {
         WorkspaceViewModel view = await Started();
         connection.Setup(x => x.QueueInput(workspace.Id, It.IsAny<string>(), true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));

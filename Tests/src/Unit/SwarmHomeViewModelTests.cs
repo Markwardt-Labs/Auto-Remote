@@ -215,9 +215,6 @@ public sealed class SwarmHomeViewModelTests
         Assert.False(home.Active.Chat.ToggleSavedInputsCommand.CanExecute(null));
         Assert.False(home.Active.OpenSendOptionsCommand.CanExecute(null));
         Assert.False(home.Active.Settings.CanEdit);
-        home.Sessions.NewCommand.Execute(null);
-        Assert.False(home.Active.SendOptions.IsOpen);
-        Assert.Equal("This workspace runs a task delegated by laptop, so no session can be made of it.", home.Active.Chat.Error);
         Assert.False(home.BeginRenameCommand.CanExecute(null));
         Assert.False(home.MoveWorkspaceToFolderCommand.CanExecute(null));
         Assert.True(home.BeginDeleteCommand.CanExecute(null));

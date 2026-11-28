@@ -129,6 +129,15 @@ internal interface IFollowUps : IWorkCompletion
     void SetAutoCommit(Guid id, bool enabled);
 
     /// <summary>
+    /// Sends a message of the user whose work is to be committed. The commit is turned on before the message is on its way, so that its work cannot end ahead of it; a message that joins work has that work committed. A send that fails leaves the commit as it was.
+    /// </summary>
+    /// <typeparam name="T">What sending answers.</typeparam>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="send">Sends the message.</param>
+    /// <returns>What <paramref name="send" /> answered.</returns>
+    Task<T> SendToCommit<T>(Guid id, Func<Task<T>> send);
+
+    /// <summary>
     /// Queues an input. One that is to be committed has the work under way committed before it too, so the two stay apart, unless the user turned that work's commit off, or it is a queued step that is kept uncommitted to go with the next.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -478,6 +487,68 @@ internal sealed class FollowUps(IWorkspaceManager workspaces, ISavedInputs saved
 
         Keep();
         Wake();
+    }
+
+    /// <inheritdoc />
+    public async Task<T> SendToCommit<T>(Guid id, Func<Task<T>> send)
+    {
+        bool wasArmed;
+        bool wasByQueue;
+        bool? choice;
+
+        lock (gate)
+        {
+            Following entry = Entry(id);
+            (wasArmed, wasByQueue, choice) = (entry.IsArmed, entry.IsArmedByQueue, entry.UserChoice);
+            Choose(id, entry);
+        }
+
+        Keep();
+        T sent;
+
+        try
+        {
+            sent = await send();
+        }
+        catch
+        {
+            lock (gate)
+            {
+                if (following.TryGetValue(id, out Following? entry) && !entry.IsCommitting)
+                {
+                    (entry.UserChoice, entry.IsArmedByQueue) = (choice, wasByQueue);
+
+                    if (!wasArmed)
+                    {
+                        entry.IsDue = false;
+                        Arm(id, entry, false);
+                    }
+                }
+            }
+
+            Keep();
+            Wake();
+            throw;
+        }
+
+        // Earlier work that ended while the message was on its way took the choice along, and the message started work of its own.
+        activity.Together(() =>
+        {
+            lock (gate)
+            {
+                Following entry = Entry(id);
+
+                if (entry.UserChoice != false && activity.Get(id) == WorkspaceState.Working)
+                {
+                    Choose(id, entry);
+                }
+
+                return true;
+            }
+        });
+
+        Keep();
+        return sent;
     }
 
     /// <inheritdoc />
@@ -1143,6 +1214,17 @@ internal sealed class FollowUps(IWorkspaceManager workspaces, ISavedInputs saved
         {
             entry.IsArmed = armed;
             Announce(id);
+        }
+    }
+
+    // Called with the lock held: the user chose a commit for the work, so nothing queued takes it back.
+    private void Choose(Guid id, Following entry)
+    {
+        if (!entry.IsCommitting)
+        {
+            entry.UserChoice = true;
+            entry.IsArmedByQueue = false;
+            Arm(id, entry, true);
         }
     }
 

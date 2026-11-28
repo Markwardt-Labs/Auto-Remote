@@ -28,9 +28,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Errors = new ErrorHistoryViewModel(connection, workspace.Id);
         Activity = new ActivityViewModel(connection, workspace.Id);
         SendOptions = new SendOptionsViewModel(connection, workspace, Chat, Git, () => IsLooping);
-        SendOptions.SessionMade += (made, hasTask) => SessionMade?.Invoke(made, hasTask);
+        SendOptions.SessionMade += made => SessionMade?.Invoke(made);
         SendOptions.Delegated += tasks => Delegated?.Invoke(tasks);
-        OpenSendOptionsCommand = new AsyncCommand(parameter => parameter is LoopPromptKind repeated ? SendOptions.OpenRepeating(repeated) : SendOptions.Open(), () => delegation is null, false);
+        OpenSendOptionsCommand = new AsyncCommand(parameter => SendOptions.Open(parameter is SubmissionKind kind ? kind : SubmissionKind.Custom), () => delegation is null, false);
+        SubmitCommand = new AsyncCommand(_ => Submit(), () => delegation is null && Chat.HasContent && (Chat.BlockReason is not null || Chat.SendCommand.CanExecute(null)), false);
+        Chat.SendCommand.CanExecuteChanged += (_, _) => SubmitCommand.Refresh();
         CancelLoopCommand = new AsyncCommand(_ => CancelLoop());
         RunInNewSessionCommand = new AsyncCommand(RunInNewSession, () => delegation is null, false);
         Chat.PropertyChanged += (_, args) =>
@@ -39,7 +41,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(ShowHaltButtons));
                 Raise(nameof(ShowSendButton));
-                Raise(nameof(ShowQueueButton));
                 Raise(nameof(ShowReviewButton));
                 Raise(nameof(ShowExpandButton));
                 Raise(nameof(ShowPauseButton));
@@ -234,9 +235,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     private WorkspaceTab beforeSettings;
 
     /// <summary>
-    /// Occurs when a side session was made from what this workspace holds, with whether it was given a first task.
+    /// Occurs when a side session was made from what this workspace holds, with a first task.
     /// </summary>
-    public event Action<WorkspaceInfo, bool>? SessionMade;
+    public event Action<WorkspaceInfo>? SessionMade;
 
     /// <summary>
     /// Occurs when a task was delegated from this workspace by hand, with the identifiers of what was added.
@@ -378,18 +379,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool HasMoreToCome => IsHeldBack || Chat.IsQueued;
 
     /// <summary>
-    /// Gets a value indicating whether the button that queues what is typed shows beside the send button.
-    /// </summary>
-    public bool ShowQueueButton => delegation is null && Chat.HasContent;
-
-    /// <summary>
-    /// Gets what the queue button says it does, which includes a commit only when one follows: in a git repository, for an input whose auto commit is not turned off.
-    /// </summary>
-    public string QueueTip => Git.IsRepo && (!Chat.HasLoadedInput || Chat.IsLoadedAutoCommitOn)
-        ? "Queue: send once the current work is done, at once if there is none, and commit afterwards. Right-click or hold for Send Options"
-        : "Queue: send once the current work is done, at once if there is none. Right-click or hold for Send Options";
-
-    /// <summary>
     /// Gets a value indicating whether the message box offers the work buttons instead of sending: git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand and pause buttons.
     /// </summary>
     public bool ShowHaltButtons => State is WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
@@ -398,6 +387,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the command that opens Send Options.
     /// </summary>
     public AsyncCommand OpenSendOptionsCommand { get; }
+
+    /// <summary>
+    /// Gets the command of the send button: it sends what is in the message box at once, and where the chat cannot take it now, opens Send Options for another way.
+    /// </summary>
+    public AsyncCommand SubmitCommand { get; }
 
     /// <summary>
     /// Gets the command that takes the draft, or the queued input of the <see cref="AgendaRowViewModel" />, given as its parameter and runs it in a new side session.
@@ -463,9 +457,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowCancelLoopButton => activeLoop is not null;
 
     /// <summary>
-    /// Gets a value indicating whether the message box shows the send button: something is typed or attached and the work buttons do not show.
+    /// Gets a value indicating whether the message box shows the send button: something is typed or attached, whatever the workspace does. A delegated workspace takes nothing.
     /// </summary>
-    public bool ShowSendButton => !ShowHaltButtons && Chat.HasContent;
+    public bool ShowSendButton => delegation is null && Chat.HasContent;
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the review button in place of the send button: nothing is typed or attached and no git action or cancellation is running. It also shows while the AI works, next to the stop button, since its prompt can be sent to work in progress.
@@ -782,6 +776,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Files.RunsScripts = delegation is null;
         Settings.IsLocked = delegation is not null;
         OpenSendOptionsCommand.Refresh();
+        SubmitCommand.Refresh();
         RunInNewSessionCommand.Refresh();
 
         if (delegation is not null)
@@ -791,6 +786,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
         Raise(nameof(StopTip));
         Chat.BlockReason = BlockReason(state);
+        SubmitCommand.Refresh();
         Git.IsLocked = Chat.IsCommitting || state is WorkspaceState.Working or WorkspaceState.Stopping or WorkspaceState.Canceling;
         Raise(nameof(State));
         Raise(nameof(CanHalt));
@@ -803,7 +799,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowJoinNote));
         Raise(nameof(ShowUpNextButton));
         RaiseFollowUps();
-        Raise(nameof(ShowQueueButton));
         Raise(nameof(LoopNext));
         Raise(nameof(IsWorking));
     }
@@ -812,7 +807,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     private void RaiseFollowUps()
     {
         Raise(nameof(ShowAutoCommitButton));
-        Raise(nameof(QueueTip));
     }
 
     // The input leaves its list before the session is made, so nothing else sends it meanwhile; one that no session could be made for goes back where it was.
@@ -857,7 +851,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 made = await connection.CreateSideSession(main, taken!.Text.ToSessionName(SessionNames?.Invoke() ?? []), SideSessionStart.Files, taken.Text, true, CancellationToken.None);
             }))
             {
-                SessionMade?.Invoke(made!, true);
+                SessionMade?.Invoke(made!);
                 return;
             }
 
@@ -877,6 +871,17 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             runningInNewSession = false;
         }
+    }
+
+    private Task Submit()
+    {
+        if (Chat.BlockReason is not null)
+        {
+            return SendOptions.Open(SubmissionKind.Custom);
+        }
+
+        Chat.SendCommand.Execute(null);
+        return Task.CompletedTask;
     }
 
     private string? BlockReason(WorkspaceState state) => delegation is { } task ? $"This workspace runs a task delegated by {task.From}" : state switch

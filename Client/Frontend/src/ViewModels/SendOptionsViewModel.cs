@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The Send Options panel of a workspace: when the work is given to the AI (now, next or over and over), where (in this chat or in a new session, on this server or a paired one) and what happens once it is done.
+/// The Send Options panel of a workspace: what is submitted (what is in the message box, or the review or expand prompt, as the button it is opened from says), when it is given to the AI (now, next or over and over), where (in this chat or in a new session, on this server or a paired one) and what happens once it is done.
 /// </summary>
 internal sealed class SendOptionsViewModel : ViewModelBase
 {
@@ -34,9 +34,9 @@ internal sealed class SendOptionsViewModel : ViewModelBase
         chat.QueueCommand.CanExecuteChanged += (_, _) => ConfirmCommand.Refresh();
         chat.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(ChatViewModel.HasText))
+            if (args.PropertyName is nameof(ChatViewModel.Input) or nameof(ChatViewModel.HasContent) or nameof(ChatViewModel.HasAttachments) or nameof(ChatViewModel.BlockReason) or nameof(ChatViewModel.IsAiWorking) or nameof(ChatViewModel.IsAutoCommitOn) or nameof(ChatViewModel.IsCommitting))
             {
-                RaiseBringIn();
+                RaiseModes();
             }
         };
         git.PropertyChanged += (_, args) =>
@@ -65,11 +65,20 @@ internal sealed class SendOptionsViewModel : ViewModelBase
 
     private bool isOpen;
 
+    private SubmissionKind submission;
+
+    // The review or expand prompt, once it is read.
+    private string prompt = string.Empty;
+
     private SendWhen when;
 
     private bool isNewSession;
 
+    private bool commitsNow;
+
     private bool commitsQueued = true;
+
+    private bool commitsRuns;
 
     private string name = string.Empty;
 
@@ -84,9 +93,9 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     private bool? bringInChoice;
 
     /// <summary>
-    /// Occurs when a side session was made, with whether it was given a first task.
+    /// Occurs when a side session was made, with what was submitted as its first task.
     /// </summary>
-    public event Action<WorkspaceInfo, bool>? SessionMade;
+    public event Action<WorkspaceInfo>? SessionMade;
 
     /// <summary>
     /// Occurs when a task was delegated to a paired server, with the identifiers of what was added.
@@ -118,6 +127,31 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     }
 
     /// <summary>
+    /// Gets what kind of thing is submitted, which cannot be changed: it follows from the button the panel is opened from.
+    /// </summary>
+    public string SubmissionTitle => submission.ToString();
+
+    /// <summary>
+    /// Gets what is submitted: what is typed, or the review or expand prompt once it is read.
+    /// </summary>
+    public string SubmissionText => submission == SubmissionKind.Custom ? chat.Input.Trim() : prompt;
+
+    /// <summary>
+    /// Gets a value indicating whether what is submitted has text.
+    /// </summary>
+    public bool HasSubmissionText => SubmissionText.Length > 0;
+
+    /// <summary>
+    /// Gets the files that are submitted along, or an empty text without any.
+    /// </summary>
+    public string SubmissionFiles => submission == SubmissionKind.Custom && chat.HasAttachments ? $"Attached: {string.Join(", ", chat.Attachments.Select(attachment => attachment.Name))}" : string.Empty;
+
+    /// <summary>
+    /// Gets a value indicating whether files are submitted along.
+    /// </summary>
+    public bool HasSubmissionFiles => SubmissionFiles.Length > 0;
+
+    /// <summary>
     /// Gets or sets a value indicating whether the work is given to the AI at once. Setting it to <see langword="false" /> changes nothing: another choice is made by setting that one.
     /// </summary>
     public bool IsNow
@@ -145,9 +179,19 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets a value indicating whether a loop can be started, which it cannot while one runs.
+    /// Gets a value indicating whether a loop can be started: not while one runs, nor with attached files, which a loop cannot send, nor while the server takes nothing for the AI, other than during a commit that follows work.
     /// </summary>
-    public bool CanRepeat => !isLooping();
+    public bool CanRepeat => !isLooping() && !HasFiles && (CanSendNow || chat.IsCommitting);
+
+    /// <summary>
+    /// Gets a value indicating whether Now can be chosen, which takes this chat taking a message at once or else a new session.
+    /// </summary>
+    public bool CanChooseNow => CanSendNow || !HasFiles;
+
+    /// <summary>
+    /// Gets a value indicating whether this chat can be chosen, which it cannot for Now while it takes nothing at once.
+    /// </summary>
+    public bool CanChooseThisChat => when != SendWhen.Now || CanSendNow;
 
     /// <summary>
     /// Gets or sets a value indicating whether the work goes to the chat on screen. Setting it to <see langword="false" /> changes nothing.
@@ -157,7 +201,7 @@ internal sealed class SendOptionsViewModel : ViewModelBase
         get => !isNewSession;
         set
         {
-            if (value)
+            if (value && CanChooseThisChat)
             {
                 SetNewSession(false);
             }
@@ -180,29 +224,39 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets a value indicating whether a new session can be chosen, which only work that is given at once can start.
+    /// Gets a value indicating whether a new session can be chosen, which only work that is given at once can start, and which cannot take attached files.
     /// </summary>
-    public bool CanChooseNewSession => when == SendWhen.Now;
+    public bool CanChooseNewSession => when == SendWhen.Now && !HasFiles;
 
     /// <summary>
-    /// Gets a value indicating whether the panel says that Send never turns on auto commit, since there is nothing to choose about what happens when the work is done.
+    /// Gets why choices are not offered, a line for each reason, or an empty text when all are.
     /// </summary>
-    public bool ShowSendNote => when == SendWhen.Now && !isNewSession;
+    public string UnavailableNote => string.Join('\n', new[]
+    {
+        chat.BlockReason is { Length: > 0 } reason ? $"This chat cannot take it now: {char.ToLowerInvariant(reason[0])}{reason[1..]}." : null,
+        isLooping() ? "A loop already runs, so Repeat is not offered." : null,
+        HasFiles ? "Attached files can only be sent to this chat, now or next." : null
+    }.OfType<string>());
 
     /// <summary>
-    /// Gets a value indicating whether it can be chosen whether a queued input is committed.
+    /// Gets a value indicating whether some choice is not offered.
     /// </summary>
-    public bool ShowQueueChoice => when == SendWhen.Next && git.IsRepo;
+    public bool HasUnavailableNote => UnavailableNote.Length > 0;
+
+    /// <summary>
+    /// Gets a value indicating whether it can be chosen whether work in this chat is committed once it is done.
+    /// </summary>
+    public bool ShowCommitChoice => !isNewSession && git.IsRepo;
+
+    /// <summary>
+    /// Gets a value indicating whether the panel says that what is sent now joins work that is committed anyway.
+    /// </summary>
+    public bool ShowJoinsCommit => ShowCommitChoice && when == SendWhen.Now && chat.IsAiWorking && chat.IsAutoCommitOn;
 
     /// <summary>
     /// Gets a value indicating whether the settings of a loop show.
     /// </summary>
     public bool ShowLoop => when == SendWhen.Repeat;
-
-    /// <summary>
-    /// Gets a value indicating whether it can be chosen whether every run of the loop is committed.
-    /// </summary>
-    public bool ShowCommitEachRun => ShowLoop && git.IsRepo;
 
     /// <summary>
     /// Gets a value indicating whether the new session goes to a paired server.
@@ -215,31 +269,36 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     public bool ShowStartingFiles => isNewSession && target.IsLocal;
 
     /// <summary>
-    /// Gets or sets a value indicating whether the queued input is committed after its work. Setting it to <see langword="false" /> changes nothing.
+    /// Gets or sets a value indicating whether the changes are committed after the work, kept apart for each choice of when: off for Now and for the runs of Repeat, and on for Next, unless a loaded draft says otherwise. Setting it to <see langword="false" /> changes nothing.
     /// </summary>
     public bool CommitsAfter
     {
-        get => commitsQueued;
+        get => when switch
+        {
+            SendWhen.Next => commitsQueued,
+            SendWhen.Repeat => commitsRuns,
+            _ => commitsNow
+        };
         set
         {
             if (value)
             {
-                SetCommitsQueued(true);
+                SetCommits(true);
             }
         }
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the changes of the queued input stay uncommitted. Setting it to <see langword="false" /> changes nothing.
+    /// Gets or sets a value indicating whether the changes of the work stay uncommitted. Setting it to <see langword="false" /> changes nothing.
     /// </summary>
     public bool KeepsChanges
     {
-        get => !commitsQueued;
+        get => !CommitsAfter;
         set
         {
             if (value)
             {
-                SetCommitsQueued(false);
+                SetCommits(false);
             }
         }
     }
@@ -257,11 +316,6 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     /// Gets what the name is called.
     /// </summary>
     public string NameLabel => IsRemote ? "Title" : "Name";
-
-    /// <summary>
-    /// Gets what the first work of the new session is called.
-    /// </summary>
-    public string TaskLabel => IsRemote ? "Instructions" : "First Task (optional)";
 
     /// <summary>
     /// Gets the places the new session can run in: this server, each paired one that receives work, and any of them when there is one.
@@ -337,11 +391,11 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the new session is brought into this workspace once its work is done. Until it is chosen, it is when the session is given work, as a delegated task always is. Setting it to <see langword="false" /> changes nothing.
+    /// Gets or sets a value indicating whether the new session is brought into this workspace once its work is done, which it is until another choice is made. Setting it to <see langword="false" /> changes nothing.
     /// </summary>
     public bool BringsIn
     {
-        get => bringInChoice ?? (IsRemote || chat.HasText);
+        get => bringInChoice ?? true;
         set
         {
             if (value)
@@ -393,42 +447,32 @@ internal sealed class SendOptionsViewModel : ViewModelBase
 
     private Guid MainId => workspace.Side?.ParentId ?? workspace.Id;
 
-    /// <summary>
-    /// Opens the panel on sending what is typed to this chat now.
-    /// </summary>
-    /// <returns>A task that completes once what the choices offer is read.</returns>
-    public Task Open() => Open(false, null);
+    private bool CanSendNow => chat.BlockReason is null;
 
-    /// <summary>
-    /// Shows the panel set to repeat one of the prompts of the workspace, as it is asked for from that prompt's button; while a loop runs it opens as usual instead.
-    /// </summary>
-    /// <param name="prompt">The prompt to repeat.</param>
-    /// <returns>A task that completes once what the panel offers is read.</returns>
-    public Task OpenRepeating(LoopPromptKind prompt) => Open(false, prompt);
-
-    /// <summary>
-    /// Opens the panel on a new session.
-    /// </summary>
-    /// <returns>A task that completes once what the choices offer is read.</returns>
-    public Task OpenNewSession() => Open(true, null);
+    // Attached files can only go to this chat, now or next.
+    private bool HasFiles => submission == SubmissionKind.Custom && chat.HasAttachments;
 
     /// <summary>
     /// Takes note that a loop started or ended.
     /// </summary>
-    public void LoopChanged()
-    {
-        Raise(nameof(CanRepeat));
-        ConfirmCommand.Refresh();
-    }
+    public void LoopChanged() => RaiseModes();
 
-    private async Task Open(bool newSession, LoopPromptKind? repeated)
+    /// <summary>
+    /// Opens the panel on sending to this chat now, or next while the chat takes nothing at once.
+    /// </summary>
+    /// <param name="kind">What it submits.</param>
+    /// <returns>A task that completes once what the panel shows and offers is read.</returns>
+    public async Task Open(SubmissionKind kind)
     {
         int mine = ++turn;
         Error = null;
-        // Asked for with a prompt of the workspace, it is about repeating that prompt, which a loop that already runs leaves no room for.
-        when = repeated is not null && CanRepeat ? SendWhen.Repeat : SendWhen.Now;
-        isNewSession = newSession;
-        commitsQueued = chat.LoadedAutoCommit ?? true;
+        submission = kind;
+        prompt = string.Empty;
+        when = CanSendNow ? SendWhen.Now : SendWhen.Next;
+        isNewSession = false;
+        commitsNow = false;
+        commitsQueued = kind != SubmissionKind.Custom || (chat.LoadedAutoCommit ?? true);
+        commitsRuns = false;
         bringInChoice = null;
         Name = string.Empty;
         ExpectedResult = string.Empty;
@@ -438,9 +482,37 @@ internal sealed class SendOptionsViewModel : ViewModelBase
         UseCurrentFiles = !(workspace.Side is null ? chat.IsAiWorking : IsMainWorking?.Invoke(MainId) == true);
         Raise(nameof(UseCurrentCommit));
         RaiseModes();
-        LoopChanged();
         IsOpen = true;
-        await Task.WhenAll(Loop.Prepare(chat.HasText, repeated), ReadTargets(mine));
+        await Task.WhenAll(ReadPrompt(mine), Loop.Prepare(), ReadTargets(mine));
+    }
+
+    private async Task ReadPrompt(int mine)
+    {
+        if (submission == SubmissionKind.Custom)
+        {
+            return;
+        }
+
+        string read = string.Empty;
+        string? problem = null;
+
+        try
+        {
+            WorkspaceSettings settings = await connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
+            read = (submission == SubmissionKind.Review ? settings.ReviewPrompt ?? settings.GlobalReviewPrompt : settings.ExpandPrompt ?? settings.GlobalExpandPrompt).Trim();
+            problem = read.Length == 0 ? "The prompt of this button is empty." : null;
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or RemoteException or ObjectDisposedException or InvalidDataException)
+        {
+            problem = $"The prompt could not be read: {exception.Message}";
+        }
+
+        if (mine == turn)
+        {
+            prompt = read;
+            Error = problem;
+            RaiseModes();
+        }
     }
 
     private async Task ReadTargets(int mine)
@@ -485,13 +557,14 @@ internal sealed class SendOptionsViewModel : ViewModelBase
 
     private void Choose(SendWhen chosen, bool selected)
     {
-        if (!selected || when == chosen || chosen == SendWhen.Repeat && !CanRepeat)
+        if (!selected || when == chosen || chosen == SendWhen.Repeat && !CanRepeat || chosen == SendWhen.Now && !CanChooseNow)
         {
             return;
         }
 
         when = chosen;
-        isNewSession &= chosen == SendWhen.Now;
+        // Where this chat takes nothing at once, Now is about a new session.
+        isNewSession = chosen == SendWhen.Now && (isNewSession || !CanSendNow);
         Error = null;
         RaiseModes();
     }
@@ -506,9 +579,21 @@ internal sealed class SendOptionsViewModel : ViewModelBase
         }
     }
 
-    private void SetCommitsQueued(bool value)
+    private void SetCommits(bool value)
     {
-        commitsQueued = value;
+        switch (when)
+        {
+            case SendWhen.Next:
+                commitsQueued = value;
+                break;
+            case SendWhen.Repeat:
+                commitsRuns = value;
+                break;
+            default:
+                commitsNow = value;
+                break;
+        }
+
         Raise(nameof(CommitsAfter));
         Raise(nameof(KeepsChanges));
     }
@@ -527,34 +612,40 @@ internal sealed class SendOptionsViewModel : ViewModelBase
 
     private void RaiseModes()
     {
-        Raise(nameof(IsNow));
-        Raise(nameof(IsNext));
-        Raise(nameof(IsRepeat));
-        Raise(nameof(IsThisChat));
-        Raise(nameof(IsNewSession));
-        Raise(nameof(CanChooseNewSession));
-        Raise(nameof(ShowSendNote));
-        Raise(nameof(ShowQueueChoice));
-        Raise(nameof(CommitsAfter));
-        Raise(nameof(KeepsChanges));
-        Raise(nameof(ShowLoop));
-        Raise(nameof(ShowCommitEachRun));
-        Raise(nameof(IsRemote));
-        Raise(nameof(ShowStartingFiles));
-        Raise(nameof(NameLabel));
-        Raise(nameof(TaskLabel));
-        Raise(nameof(BringInText));
-        Raise(nameof(ConfirmText));
+        foreach (string property in (string[])
+        [
+            nameof(SubmissionTitle), nameof(SubmissionText), nameof(HasSubmissionText), nameof(SubmissionFiles), nameof(HasSubmissionFiles),
+            nameof(IsNow), nameof(IsNext), nameof(IsRepeat), nameof(CanChooseNow), nameof(CanRepeat), nameof(IsThisChat), nameof(IsNewSession), nameof(CanChooseThisChat), nameof(CanChooseNewSession),
+            nameof(UnavailableNote), nameof(HasUnavailableNote), nameof(ShowCommitChoice), nameof(ShowJoinsCommit), nameof(CommitsAfter), nameof(KeepsChanges), nameof(ShowLoop),
+            nameof(IsRemote), nameof(ShowStartingFiles), nameof(NameLabel), nameof(BringInText), nameof(ConfirmText)
+        ])
+        {
+            Raise(property);
+        }
+
         RaiseBringIn();
         ConfirmCommand.Refresh();
     }
 
-    private bool CanConfirm() => isNewSession || when switch
+    private bool CanConfirm()
     {
-        SendWhen.Next => chat.QueueCommand.CanExecute(null),
-        SendWhen.Repeat => CanRepeat,
-        _ => chat.SendCommand.CanExecute(null)
-    };
+        if (submission == SubmissionKind.Custom ? !chat.HasContent : prompt.Length == 0)
+        {
+            return false;
+        }
+
+        if (isNewSession)
+        {
+            return CanChooseNewSession;
+        }
+
+        return when switch
+        {
+            SendWhen.Next => submission != SubmissionKind.Custom || chat.QueueCommand.CanExecute(null),
+            SendWhen.Repeat => CanRepeat,
+            _ => submission == SubmissionKind.Custom ? chat.SendCommand.CanExecute(null) : CanSendNow
+        };
+    }
 
     private async Task Confirm()
     {
@@ -577,29 +668,25 @@ internal sealed class SendOptionsViewModel : ViewModelBase
         {
             bool commit = commitsQueued;
             IsOpen = false;
-            await chat.QueueTyped(commit);
+            await (submission == SubmissionKind.Custom ? chat.QueueTyped(commit) : chat.QueuePrompt(prompt, commit));
         }
         else
         {
+            bool commit = git.IsRepo && commitsNow;
             IsOpen = false;
-            chat.SendCommand.Execute(null);
+            await (submission == SubmissionKind.Custom ? chat.SendTyped(commit) : chat.SendPrompt(prompt, commit));
         }
     }
 
     private async Task StartLoop()
     {
-        if (Loop.UseCustom && chat.HasAttachments)
-        {
-            Error = "A loop cannot send attached files. Remove them first.";
-            return;
-        }
-
         string typed = chat.Input;
+        bool sendsTyped = submission == SubmissionKind.Custom;
         LoopSettings settings;
 
         try
         {
-            settings = Loop.Build(DateTimeOffset.Now, typed);
+            settings = Loop.Build(DateTimeOffset.Now, SubmissionText);
         }
         catch (InvalidOperationException exception)
         {
@@ -607,8 +694,7 @@ internal sealed class SendOptionsViewModel : ViewModelBase
             return;
         }
 
-        bool sendsTyped = Loop.UseCustom;
-        settings = settings with { AutoCommit = settings.AutoCommit && git.IsRepo };
+        settings = settings with { AutoCommit = commitsRuns && git.IsRepo };
         await Request(async () => await connection.StartLoop(workspace.Id, settings, CancellationToken.None), () =>
         {
             chat.Notice = null;
@@ -623,8 +709,9 @@ internal sealed class SendOptionsViewModel : ViewModelBase
     private async Task StartSession()
     {
         string given = name.Trim();
+        bool fromBox = submission == SubmissionKind.Custom;
         string typed = chat.Input;
-        string? task = string.IsNullOrWhiteSpace(typed) ? null : typed.Trim();
+        string task = SubmissionText;
 
         if (given.Length == 0)
         {
@@ -632,23 +719,11 @@ internal sealed class SendOptionsViewModel : ViewModelBase
             return;
         }
 
-        if (IsRemote && task is null)
-        {
-            Error = "Write the instructions of the task.";
-            return;
-        }
-
-        if (chat.HasAttachments)
-        {
-            Error = "Attached files cannot go to a new session. Remove them first.";
-            return;
-        }
-
         bool bringIn = BringsIn;
 
         if (IsRemote)
         {
-            SwarmTaskRequest request = new() { Title = given, Instructions = task!, ExpectedResult = expectedResult.Trim(), Capability = selectedCapability.Value, PeerId = target.PeerId, BringIn = bringIn };
+            SwarmTaskRequest request = new() { Title = given, Instructions = task, ExpectedResult = expectedResult.Trim(), Capability = selectedCapability.Value, PeerId = target.PeerId, BringIn = bringIn };
             List<Guid> added = [];
             await Request(async () =>
             {
@@ -657,7 +732,11 @@ internal sealed class SendOptionsViewModel : ViewModelBase
                 added.AddRange(after.Tasks.Where(made => !made.IsIncoming && before.Tasks.All(old => old.Id != made.Id)).Select(made => made.Id));
             }, () =>
             {
-                Take(typed);
+                if (fromBox)
+                {
+                    Take(typed);
+                }
+
                 chat.Notice = "The task was delegated.";
                 Delegated?.Invoke(added);
             });
@@ -677,8 +756,12 @@ internal sealed class SendOptionsViewModel : ViewModelBase
             session = await connection.CreateSideSession(main, given, start, task, bringIn, CancellationToken.None);
         }, () =>
         {
-            Take(typed);
-            SessionMade?.Invoke(session!, task is not null);
+            if (fromBox)
+            {
+                Take(typed);
+            }
+
+            SessionMade?.Invoke(session!);
         });
     }
 

@@ -18,7 +18,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         this.connection = connection;
         this.workspaceId = workspaceId;
         this.drafts = drafts;
-        SendCommand = new AsyncCommand(_ => Send(), () => blockReason is null && HasContent);
+        SendCommand = new AsyncCommand(_ => Send(false), () => blockReason is null && HasContent);
         ReviewCommand = new AsyncCommand(_ => Preset(settings => settings.ReviewPrompt ?? settings.GlobalReviewPrompt), () => blockReason is null && !HasContent);
         ExpandCommand = new AsyncCommand(_ => Preset(settings => settings.ExpandPrompt ?? settings.GlobalExpandPrompt), () => blockReason is null && !HasContent);
         PauseCommand = new AsyncCommand(_ => Deliver(PausePrompt, [], false), () => blockReason is null && !HasContent);
@@ -1818,6 +1818,38 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>
+    /// Queues a prompt that is not in the message box, such as the review prompt.
+    /// </summary>
+    /// <param name="text">The prompt.</param>
+    /// <param name="commit">Whether the changes are committed after its work.</param>
+    /// <returns>A task that completes once it is queued, or the failure is shown.</returns>
+    public async Task QueuePrompt(string text, bool commit)
+    {
+        Notice = null;
+        PromptStarted?.Invoke();
+
+        if (!await Attempt(() => connection.QueueInput(workspaceId, text, commit, CancellationToken.None)))
+        {
+            PromptFailed?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// Sends a prompt that is not in the message box, such as the review prompt, to the AI at once.
+    /// </summary>
+    /// <param name="text">The prompt.</param>
+    /// <param name="commit">Whether the changes are committed after its work.</param>
+    /// <returns>A task that completes once the server has it, or the failure is shown.</returns>
+    public Task SendPrompt(string text, bool commit) => Deliver(text, [], false, null, commit);
+
+    /// <summary>
+    /// Sends what is typed and attached to the AI at once, as <see cref="SendCommand" /> does, with a choice of what happens when its work is done.
+    /// </summary>
+    /// <param name="commit">Whether the changes are committed after its work.</param>
+    /// <returns>A task that completes once the server has it, or it has come back to the message box with the failure shown.</returns>
+    public Task SendTyped(bool commit) => Send(commit);
+
     // A loaded input keeps what it was loaded with for as long as any of it is in the box.
     private void ForgetEmptied()
     {
@@ -1844,7 +1876,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task Send()
+    private async Task Send(bool commit)
     {
         string text = input.Trim();
         List<ChatAttachment> sending = [.. Attachments];
@@ -1852,7 +1884,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Input = string.Empty;
         Attachments.Clear();
 
-        if (!await Deliver(text, sending, true, loaded))
+        if (!await Deliver(text, sending, true, loaded, commit))
         {
             PutBack(text, sending);
             Restore(loaded);
@@ -1897,7 +1929,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private async Task<bool> Deliver(string text, List<ChatAttachment> sending, bool typed, bool? loaded = null)
+    private async Task<bool> Deliver(string text, List<ChatAttachment> sending, bool typed, bool? loaded = null, bool commit = false)
     {
         Notice = null;
         PromptStarted?.Invoke();
@@ -1922,11 +1954,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 submitted.Add(MessageParts.Parse(prompt));
 
-                await connection.Prompt(workspaceId, prompt, CancellationToken.None);
+                await (commit ? connection.PromptWithCommit(workspaceId, prompt, false, CancellationToken.None) : connection.Prompt(workspaceId, prompt, CancellationToken.None));
             }
             catch (RemoteException exception) when (exception.OverLimit is { } pause)
             {
-                refused = new OverLimitAsk(pause, prompt, typed ? text : null, typed ? sending : [], loaded);
+                refused = new OverLimitAsk(pause, prompt, typed ? text : null, typed ? sending : [], loaded, commit);
             }
         });
 
@@ -2074,7 +2106,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         PromptStarted?.Invoke();
         ChatMessage echo = Echo(ask.Prompt);
 
-        if (!await Attempt(() => connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
+        if (!await Attempt(() => ask.Commit ? connection.PromptWithCommit(workspaceId, ask.Prompt, true, CancellationToken.None) : connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
         {
             Withdraw(echo);
             PutBack(cleared ? ask.Typed! : string.Empty, taken);
@@ -2145,5 +2177,5 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
     }
 
-    private sealed record OverLimitAsk(LimitPause Pause, string Prompt, string? Typed, IReadOnlyList<ChatAttachment> Attached, bool? Loaded);
+    private sealed record OverLimitAsk(LimitPause Pause, string Prompt, string? Typed, IReadOnlyList<ChatAttachment> Attached, bool? Loaded, bool Commit);
 }

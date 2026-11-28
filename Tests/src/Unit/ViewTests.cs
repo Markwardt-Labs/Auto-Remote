@@ -729,15 +729,15 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Fact]
-    public async Task HomeView_SendOptionsRepeatHasACommitEachRunSwitchThatIsOffWheneverItOpensAndNoneForTheUsageLimit()
+    public async Task HomeView_SendOptionsRepeatChoosesWhatHappensWhenEachRunIsDoneStartingAsKeepChangesWheneverItOpens()
     {
-        WorkspaceInfo workspace = Repository();
-        connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review" });
+        Repository();
 
-        (bool shown, bool offAtFirst, bool builtOn, string[] switches, bool offAgain) = await fixture.Run(() =>
+        (string[] first, string[] chosen, string[] again, int switches) = await fixture.Run(() =>
         {
             using Screen screen = new(connection.Object, 1200);
-            SendOptionsViewModel options = screen.Model.Active!.SendOptions;
+            screen.Model.Active!.Chat.Input = "go";
+            SendOptionsViewModel options = screen.Model.Active.SendOptions;
 
             void OpenPanel()
             {
@@ -747,22 +747,23 @@ public sealed class ViewTests(HeadlessFixture fixture)
                 screen.Settle();
             }
 
+            string[] Done() => [.. screen.Named<Grid>("SendOptionsPanel").GetVisualDescendants().OfType<RadioButton>().Where(radio => radio.IsEffectivelyVisible && radio.GroupName == "SendDone").Select(radio => $"{radio.Content}{(radio.IsChecked == true ? "*" : string.Empty)}")];
+
             OpenPanel();
-            ToggleSwitch toggle = screen.Named<ToggleSwitch>("CommitEachRunSwitch");
-            bool shown = toggle.IsEffectivelyVisible && Equals(toggle.Content, "Commit Each Run");
-            bool off = toggle.IsChecked != true;
-            toggle.IsChecked = true;
+            string[] first = Done();
+            screen.Named<Grid>("SendOptionsPanel").GetVisualDescendants().OfType<RadioButton>().Single(radio => Equals(radio.Content, "Commit")).IsChecked = true;
             screen.Settle();
-            bool built = options.Loop.Build(DateTimeOffset.Now, string.Empty).AutoCommit;
-            string[] switches = [.. screen.Named<Grid>("SendOptionsPanel").GetVisualDescendants().OfType<ToggleSwitch>().Where(item => item.IsEffectivelyVisible).Select(item => $"{item.Content}")];
+            string[] chosen = Done();
+            int switches = screen.Named<Grid>("SendOptionsPanel").GetVisualDescendants().OfType<ToggleSwitch>().Count(item => item.IsEffectivelyVisible);
             options.CancelCommand.Execute(null);
             OpenPanel();
-            bool again = toggle.IsChecked != true;
-            return (shown, off, built, switches, again);
+            return (first, chosen, Done(), switches);
         });
 
-        Assert.Equal((true, true, true, true), (shown, offAtFirst, builtOn, offAgain));
-        Assert.Equal(["Commit Each Run"], switches);
+        Assert.Equal(["Commit", "Keep Changes*"], first);
+        Assert.Equal(["Commit*", "Keep Changes"], chosen);
+        Assert.Equal(first, again);
+        Assert.Equal(0, switches);
     }
 
     [Fact]
@@ -1900,18 +1901,21 @@ public sealed class ViewTests(HeadlessFixture fixture)
             RightClick(window, screen.Named<TouchButton>("ReviewButton"));
             screen.Settle();
             SendOptionsViewModel panel = model.Active!.SendOptions;
-            bool opened = panel.IsOpen && panel.IsRepeat && panel.Loop.UseReview;
+            bool opened = panel.IsOpen && panel.IsNow && screen.Named<TextBlock>("SubmissionTitle").Text == "Review" && screen.Named<TextBlock>("SubmissionText").Text == "review it";
+            panel.IsRepeat = true;
+            screen.Settle();
             Grid shown = screen.Named<Grid>("SendOptionsPanel");
             bool Shown<T>() where T : Avalonia.Visual => shown.GetVisualDescendants().OfType<T>().Any(item => item.IsEffectivelyVisible);
             int conditions = panel.Loop.Conditions.Count;
-            bool radios = shown.GetVisualDescendants().OfType<RadioButton>().Count(radio => radio.IsEffectivelyVisible && radio.GroupName == "LoopPrompt") == 3;
+            // What is submitted is shown and cannot be changed: nothing offers another prompt or a box to write one.
+            bool fixedPrompt = !shown.GetVisualDescendants().OfType<RadioButton>().Any(radio => radio.IsEffectivelyVisible && radio.Content is "Review" or "Expand" or "Custom") && !shown.GetVisualDescendants().OfType<TextBox>().Any(box => box.IsEffectivelyVisible && box.AcceptsReturn);
             panel.Loop.SelectedCondition = panel.Loop.Conditions.Single(choice => choice.Condition == LoopCondition.UntilTime);
             screen.Settle();
             bool timePicker = Shown<TimePicker>();
             panel.Loop.SelectedCondition = panel.Loop.Conditions.Single(choice => choice.Condition == LoopCondition.UntilWindow);
             screen.Settle();
             bool windowPicker = shown.GetVisualDescendants().OfType<ComboBox>().Any(box => box.IsEffectivelyVisible && box.ItemsSource is IReadOnlyList<string>);
-            bool[] fields = [opened, radios, timePicker, windowPicker, Equals(screen.Named<Button>("SendOptionsConfirm").Content, "Start Loop")];
+            bool[] fields = [opened, fixedPrompt, timePicker, windowPicker, Equals(screen.Named<Button>("SendOptionsConfirm").Content, "Start Loop")];
             panel.CancelCommand.Execute(null);
 
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x", IntervalSeconds = 600, Condition = LoopCondition.Runs, Runs = 4 }, StartedAt = DateTimeOffset.UtcNow, Runs = 2 } });
@@ -1938,27 +1942,24 @@ public sealed class ViewTests(HeadlessFixture fixture)
     }
 
     [Theory]
-    [InlineData("SendButton", "do it", false)]
-    [InlineData("SendButton", "do it", true)]
-    [InlineData("QueueButton", "do it", false)]
-    [InlineData("QueueButton", "do it", true)]
-    [InlineData("ReviewButton", "", false)]
-    [InlineData("ReviewButton", "", true)]
-    [InlineData("ExpandButton", "", false)]
-    [InlineData("ExpandButton", "", true)]
-    public async Task MessageBox_ARightClickOrAHeldFingerOnASubmitButtonOpensSendOptionsAndSubmitsNothing(string name, string typed, bool touch)
+    [InlineData("SendButton", "do it", false, "Custom", "do it")]
+    [InlineData("SendButton", "do it", true, "Custom", "do it")]
+    [InlineData("ReviewButton", "", false, "Review", "review it")]
+    [InlineData("ReviewButton", "", true, "Review", "review it")]
+    [InlineData("ExpandButton", "", false, "Expand", "expand it")]
+    [InlineData("ExpandButton", "", true, "Expand", "expand it")]
+    public async Task MessageBox_ARightClickOrAHeldFingerOnASubmitButtonOpensSendOptionsForWhatItSubmitsAndSubmitsNothing(string name, string typed, bool touch, string kind, string submitted)
     {
         WorkspaceInfo workspace = Repository();
         connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "review it", GlobalExpandPrompt = "expand it" });
 
-        (bool open, bool repeat, bool stayed, string input) = await fixture.Run(() =>
+        (bool open, bool now, string shownKind, string shownText, string input) = await fixture.Run(() =>
         {
             using Screen screen = new(connection.Object, 390, ClientLayout.Tabs);
             screen.Model.Active!.Chat.Input = typed;
             screen.Settle();
             TouchButton button = screen.Named<TouchButton>(name);
             SendOptionsViewModel panel = screen.Model.Active.SendOptions;
-            bool stayed;
 
             if (touch)
             {
@@ -1974,14 +1975,197 @@ public sealed class ViewTests(HeadlessFixture fixture)
                 RightClick(screen.Window, button);
             }
 
+            Wait(() => panel.HasSubmissionText, 10000);
             screen.Settle();
-            stayed = panel.IsOpen;
-            return (panel.IsOpen, panel.IsRepeat, stayed, screen.Model.Active.Chat.Input);
+            return (panel.IsOpen, panel.IsNow, screen.Named<TextBlock>("SubmissionTitle").Text!, screen.Named<TextBlock>("SubmissionText").Text!, screen.Model.Active.Chat.Input);
         });
 
-        Assert.Equal((true, typed.Length == 0, true, typed), (open, repeat, stayed, input));
+        Assert.Equal((true, true, kind, submitted, typed), (open, now, shownKind, shownText, input));
         connection.Verify(x => x.Prompt(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         connection.Verify(x => x.QueueInput(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("shift", false, "sent")]
+    [InlineData("alt", false, "queued")]
+    [InlineData("alt", true, "queued")]
+    [InlineData("shift", true, "options")]
+    [InlineData("button", true, "options")]
+    [InlineData("button", false, "sent")]
+    public async Task MessageBox_ShiftEnterAndTheSendButtonSendNowOrOfferTheOtherWaysAndAltEnterQueuesToCommit(string how, bool gitWorks, string happens)
+    {
+        WorkspaceInfo workspace = Repository();
+        List<string> did = [];
+        connection.Setup(x => x.Prompt(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback(() => did.Add("sent")).Returns(Task.CompletedTask);
+        connection.Setup(x => x.QueueInput(workspace.Id, "do it", true, It.IsAny<CancellationToken>())).Callback(() => did.Add("queued")).ReturnsAsync([]);
+
+        if (gitWorks)
+        {
+            connection.Setup(x => x.GetGitStatus(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main", Busy = true });
+            connection.Setup(x => x.GetGitChanges(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        }
+
+        (string shown, bool open, string[] problems, string note) = await fixture.Run(() =>
+        {
+            using Screen screen = new(connection.Object, 390, ClientLayout.Tabs);
+            Wait(() => !gitWorks || screen.Model.Active!.State == WorkspaceState.Managing, 10000);
+            TextBox box = screen.Named<TextBox>("ChatInput");
+            screen.Model.Active!.Chat.Input = "do it";
+            screen.Settle();
+            TouchButton send = screen.Named<TouchButton>("SendButton");
+            string shown = $"{screen.Model.Active.State}|{send.IsEffectivelyVisible}|{send.IsEffectivelyEnabled}|{screen.Model.Active.Chat.BlockReason}";
+            SendOptionsViewModel panel = screen.Model.Active.SendOptions;
+
+            if (how == "button")
+            {
+                screen.Window.MouseDown(Center(screen.Window, send), Avalonia.Input.MouseButton.Left);
+                screen.Window.MouseUp(Center(screen.Window, send), Avalonia.Input.MouseButton.Left);
+            }
+            else
+            {
+                box.Focus();
+                box.CaretIndex = 5;
+                screen.Window.KeyPress(Avalonia.Input.Key.Enter, how == "shift" ? Avalonia.Input.RawInputModifiers.Shift : Avalonia.Input.RawInputModifiers.Alt, Avalonia.Input.PhysicalKey.Enter, null);
+            }
+
+            Wait(() => did.Count > 0 || panel.IsOpen, 10000);
+            screen.Settle();
+            string[] problems = panel.IsOpen ? screen.Misplaced(screen.Named<Border>("SendOptionsCard")) : [];
+            return (shown, panel.IsOpen, problems, panel.IsOpen ? screen.Named<TextBlock>("SendOptionsUnavailable").Text! : string.Empty);
+        });
+
+        Assert.Equal(gitWorks ? "Managing|True|True|Git is working, wait for it to finish" : "Ready|True|True|", shown);
+        Assert.Equal(happens == "options", open);
+        Assert.Equal(happens == "options" ? [] : [happens], did);
+        Assert.Empty(problems);
+        Assert.Equal(open ? "This chat cannot take it now: git is working, wait for it to finish." : string.Empty, note);
+    }
+
+    [Theory]
+    [InlineData("enter", "sent", false)]
+    [InlineData("enter on a choice", "queued", false)]
+    [InlineData("enter on cancel", "", false)]
+    [InlineData("escape", "", false)]
+    [InlineData("shift enter", "", true)]
+    [InlineData("enter in the minutes", "looped 7", false)]
+    [InlineData("enter in an open list", "", true)]
+    public async Task SendOptions_EnterStartsWhatIsChosenAndEscapeCancelsWhileThePanelHasTheKeyboard(string how, string happens, bool stays)
+    {
+        WorkspaceInfo workspace = Repository();
+        List<string> did = [];
+        connection.Setup(x => x.Prompt(workspace.Id, "do it", It.IsAny<CancellationToken>())).Callback(() => did.Add("sent")).Returns(Task.CompletedTask);
+        connection.Setup(x => x.QueueInput(workspace.Id, "do it", true, It.IsAny<CancellationToken>())).Callback(() => did.Add("queued")).ReturnsAsync([]);
+        connection.Setup(x => x.StartLoop(workspace.Id, It.IsAny<LoopSettings>(), It.IsAny<CancellationToken>())).Callback((Guid _, LoopSettings settings, CancellationToken _) => did.Add($"looped {settings.IntervalSeconds / 60}")).Returns(Task.CompletedTask);
+
+        (bool tookKeyboard, bool open, bool gaveBack, string input) = await fixture.Run(() =>
+        {
+            using Screen screen = new(connection.Object, 1200);
+            TextBox box = screen.Named<TextBox>("ChatInput");
+            screen.Model.Active!.Chat.Input = "do it";
+            screen.Settle();
+            box.Focus();
+            screen.Model.Active.OpenSendOptionsCommand.Execute(null);
+            screen.Settle();
+            SendOptionsViewModel panel = screen.Model.Active.SendOptions;
+            Border card = screen.Named<Border>("SendOptionsCard");
+            Wait(() => card.IsFocused, 10000);
+            bool tookKeyboard = card.IsFocused;
+            Avalonia.Input.Key key = how == "escape" ? Avalonia.Input.Key.Escape : Avalonia.Input.Key.Enter;
+            Avalonia.Input.RawInputModifiers modifiers = how == "shift enter" ? Avalonia.Input.RawInputModifiers.Shift : Avalonia.Input.RawInputModifiers.None;
+
+            switch (how)
+            {
+                case "enter on a choice":
+                    RadioButton next = card.GetVisualDescendants().OfType<RadioButton>().Single(radio => Equals(radio.Content, "Next"));
+                    next.Focus();
+                    next.IsChecked = true;
+                    break;
+                case "enter on cancel":
+                    screen.Named<TouchButton>("SendOptionsCancel").Focus();
+                    break;
+                case "enter in the minutes":
+                    panel.IsRepeat = true;
+                    screen.Settle();
+                    TextBox minutes = card.GetVisualDescendants().OfType<NumericUpDown>().First(item => item.IsEffectivelyVisible).GetVisualDescendants().OfType<TextBox>().Single();
+                    minutes.Focus();
+                    minutes.SelectAll();
+                    screen.Window.KeyTextInput("7");
+                    break;
+                case "enter in an open list":
+                    panel.IsRepeat = true;
+                    screen.Settle();
+                    ComboBox ends = card.GetVisualDescendants().OfType<ComboBox>().First(item => item.IsEffectivelyVisible);
+                    ends.Focus();
+                    ends.IsDropDownOpen = true;
+                    screen.Settle();
+                    ((Control)ends.ContainerFromIndex(1)!).Focus();
+                    break;
+            }
+
+            screen.Settle();
+            screen.Window.KeyPress(key, modifiers, key == Avalonia.Input.Key.Escape ? Avalonia.Input.PhysicalKey.Escape : Avalonia.Input.PhysicalKey.Enter, null);
+            Wait(() => !panel.IsOpen, stays ? 150 : 10000);
+            screen.Settle();
+
+            if (!panel.IsOpen)
+            {
+                Wait(() => box.IsFocused, 10000);
+            }
+
+            return (tookKeyboard, panel.IsOpen, box.IsFocused, screen.Model.Active.Chat.Input);
+        });
+
+        Assert.True(tookKeyboard);
+        Assert.Equal((stays, !stays), (open, gaveBack));
+        Assert.Equal(happens.Length > 0 ? [happens] : [], did);
+        Assert.Equal(happens.Length > 0 ? string.Empty : "do it", input);
+    }
+
+    [Theory]
+    [InlineData(1200, true)]
+    [InlineData(390, false)]
+    public async Task SendOptions_ABoxWithLinesStartsANewOneOnShiftEnterAndOnAPhoneOnEnterToo(int width, bool computer)
+    {
+        WorkspaceInfo workspace = Repository();
+        connection.Setup(x => x.GetSwarm(It.IsAny<CancellationToken>())).ReturnsAsync(new SwarmStatus { Server = new SwarmServer { Name = "here" }, Peers = [new SwarmPeer { Id = "p", Name = "box", Fingerprint = "f", Mode = SwarmMode.Direct, SendWork = true }] });
+        List<SwarmTaskRequest> delegated = [];
+        connection.Setup(x => x.DelegateTask(workspace.Id, It.IsAny<SwarmTaskRequest>(), It.IsAny<CancellationToken>())).Callback((Guid _, SwarmTaskRequest request, CancellationToken _) => delegated.Add(request)).ReturnsAsync(new SwarmStatus { Server = new SwarmServer(), Peers = [] });
+
+        (string typed, bool open) = await fixture.Run(() =>
+        {
+            using Screen screen = new(connection.Object, width, computer ? ClientLayout.Panels : ClientLayout.Tabs);
+            screen.Model.Active!.Chat.Input = "port it";
+            screen.Settle();
+            screen.Model.Active.OpenSendOptionsCommand.Execute(null);
+            screen.Settle();
+            SendOptionsViewModel panel = screen.Model.Active.SendOptions;
+            // The panel takes the keyboard once it shows, which must not happen after the box was chosen.
+            Border card = screen.Named<Border>("SendOptionsCard");
+            Wait(() => card.IsFocused, 10000);
+            panel.IsNewSession = true;
+            Wait(() => panel.Targets.Count > 1, 10000);
+            panel.Target = panel.Targets[1];
+            panel.Name = "docs";
+            screen.Settle();
+            TextBox expected = card.GetVisualDescendants().OfType<TextBox>().Single(found => found.PlaceholderText == "Expected result and how to check it");
+            expected.Focus();
+            screen.Window.KeyTextInput("one");
+            screen.Window.KeyPress(Avalonia.Input.Key.Enter, computer ? Avalonia.Input.RawInputModifiers.Shift : Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Enter, null);
+            screen.Window.KeyTextInput("two");
+            screen.Settle();
+            string typed = expected.Text!.Replace("\r\n", "\n");
+
+            if (computer)
+            {
+                screen.Window.KeyPress(Avalonia.Input.Key.Enter, Avalonia.Input.RawInputModifiers.None, Avalonia.Input.PhysicalKey.Enter, null);
+                Wait(() => !panel.IsOpen, 10000);
+            }
+
+            return (typed, panel.IsOpen);
+        });
+
+        Assert.Equal(("one\ntwo", !computer), (typed, open));
+        Assert.Equal(computer ? ["one\ntwo"] : [], delegated.Select(request => request.ExpectedResult!.Replace("\r\n", "\n")));
     }
 
     [Theory]
@@ -2536,7 +2720,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             HomeView view = new() { DataContext = model };
             Window window = new() { Width = 390, Height = 800, Content = view };
             window.Show();
-            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.Chat.SendCommand ? "send" : button.Command == model.Active?.Chat.ReviewCommand ? "review" : button.Command == model.BeginStopCommand ? "stop" : string.Empty).Where(name => name.Length > 0)];
+            string[] Shown() => [.. window.GetVisualDescendants().OfType<Button>().Where(button => button.IsEffectivelyVisible).Select(button => button.Command == model.Active?.SubmitCommand ? "send" : button.Command == model.Active?.Chat.ReviewCommand ? "review" : button.Command == model.BeginStopCommand ? "stop" : string.Empty).Where(name => name.Length > 0)];
             string[] ready = Shown();
             connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
             string[] working = Shown();
@@ -3216,6 +3400,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { Service = AiService.Local });
         connection.Setup(x => x.GetGitStatus(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new GitStatus { IsRepo = true, Branch = "main" });
         connection.Setup(x => x.GetGitChanges(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        connection.Setup(x => x.GetUsage(AiService.Local, It.IsAny<CancellationToken>())).ReturnsAsync(new UsageStatus { Service = AiService.Local, Windows = [] });
 
         await fixture.Run(() =>
         {
@@ -3252,12 +3437,15 @@ public sealed class ViewTests(HeadlessFixture fixture)
             dots.Command!.Execute(dots.CommandParameter);
             Settle();
 
-            foreach (string action in (string[])["Bring Into Main", "When Done: Bring Into Main", "Changes Since Session Start", "Rename", "Delete", "New Session"])
+            foreach (string action in (string[])["Bring Into Main", "When Done: Bring Into Main", "Changes Since Session Start", "Rename", "Delete"])
             {
                 Button button = Labelled(list, action);
                 Avalonia.Point corner = Avalonia.VisualExtensions.TranslatePoint(button, new Avalonia.Point(button.Bounds.Width, 0), window)!.Value;
                 Assert.InRange(corner.X, button.Bounds.Width, width);
             }
+
+            // Sessions are started from the message box, so the list only has the ones there are.
+            Assert.DoesNotContain(Buttons(list), button => Equals(button.Content, "New Session"));
 
             model.Sessions.ChooseCommand.Execute(model.Sessions.Entries[1]);
             Settle();
@@ -3279,7 +3467,10 @@ public sealed class ViewTests(HeadlessFixture fixture)
             Assert.DoesNotContain("Side sessions", sections);
             Assert.Contains("AI", sections);
 
-            model.Sessions.NewCommand.Execute(null);
+            model.Active.Chat.Input = "do it";
+            model.Active.OpenSendOptionsCommand.Execute(null);
+            Settle();
+            model.Active.SendOptions.IsNewSession = true;
             Settle();
             Grid panel = Named<Grid>("SendOptionsPanel");
             Assert.True(panel.IsEffectivelyVisible);
@@ -3287,7 +3478,6 @@ public sealed class ViewTests(HeadlessFixture fixture)
             panel.GetVisualDescendants().OfType<RadioButton>().First(radio => radio.GroupName == "SessionStart").IsChecked = true;
             Settle();
             Assert.True(model.Active!.SendOptions.UseCurrentCommit);
-            Assert.True(Shows("First Task (optional)"));
             Assert.Equal("Start Session", Named<Button>("SendOptionsConfirm").Content);
             model.Active.SendOptions.CancelCommand.Execute(null);
             model.Sessions.CancelIntegrationCommand.Execute(model.Sessions.Entries[2]);
@@ -3448,7 +3638,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
             return (shown, problems, box, above);
         });
 
-        string[] expected = typed.Length > 0 ? ["CancelLoopButton", "SaveDraftButton", "QueueButton", "SendButton"] : working ? ["DraftsButton", "UpNextButton", "CancelLoopButton", "ReviewButton", "ExpandButton", "Pause", "Stop"] : ["DraftsButton", "UpNextButton", "CancelLoopButton", "ReviewButton", "ExpandButton", "Resume"];
+        string[] expected = typed.Length > 0 ? ["CancelLoopButton", "SaveDraftButton", "SendButton"] : working ? ["DraftsButton", "UpNextButton", "CancelLoopButton", "ReviewButton", "ExpandButton", "Pause", "Stop"] : ["DraftsButton", "UpNextButton", "CancelLoopButton", "ReviewButton", "ExpandButton", "Resume"];
         Assert.Equal(expected, shown);
         Assert.Empty(problems);
         Assert.True(box >= 70, $"The message box is {box} wide.");
@@ -3554,7 +3744,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
         });
 
         Assert.Equal(["Send", "Queue", "Start Loop", "Start Session", "Delegate Task"], confirms);
-        Assert.Equal(["", "Commit*,Keep Changes", "", "Current Commit,Current Files*,Bring Into Main*,Keep Separate", "Bring Into Main*,Keep Separate"], choices);
+        Assert.Equal(["Commit,Keep Changes*", "Commit*,Keep Changes", "Commit,Keep Changes*", "Current Commit,Current Files*,Bring Into Main*,Keep Separate", "Bring Into Main*,Keep Separate"], choices);
         Assert.Equal(["This Server", "a-server-with-a-rather-long-name", "Any Server"], targets);
         Assert.Empty(problems);
     }

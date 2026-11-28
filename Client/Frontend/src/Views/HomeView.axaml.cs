@@ -74,6 +74,29 @@ public sealed partial class HomeView : UserControl
             };
         }
 
+        if (this.FindControl<Grid>("SendOptionsPanel") is { } sendOptions && this.FindControl<Border>("SendOptionsCard") is { } optionsCard && this.FindControl<TextBox>("ChatInput") is { } messageBox)
+        {
+            bool typing = false;
+            // It takes the keyboard, so that Enter and Escape are about it and nothing is typed behind it. The message box gets it back if it had it.
+            sendOptions.PropertyChanged += (_, args) =>
+            {
+                if (args.Property != Visual.IsVisibleProperty)
+                {
+                    return;
+                }
+
+                if (sendOptions.IsVisible)
+                {
+                    typing = messageBox.IsFocused;
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => optionsCard.Focus(), Avalonia.Threading.DispatcherPriority.Background);
+                }
+                else if (typing)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => messageBox.Focus(), Avalonia.Threading.DispatcherPriority.Background);
+                }
+            };
+        }
+
         if (this.FindControl<Border>("TaskDetailOverlay") is { } taskDetail)
         {
             // It takes the keyboard, so that Escape closes it.
@@ -305,13 +328,14 @@ public sealed partial class HomeView : UserControl
 
     private void OnChatKeyDown(object? sender, Avalonia.Input.KeyEventArgs args)
     {
-        if (args.Key == Avalonia.Input.Key.Enter && args.KeyModifiers == Avalonia.Input.KeyModifiers.Shift)
+        if (args.Key == Avalonia.Input.Key.Enter && args.KeyModifiers is Avalonia.Input.KeyModifiers.Shift or Avalonia.Input.KeyModifiers.Alt)
         {
             args.Handled = true;
 
-            if (Chat is { } chat && chat.SendCommand.CanExecute(null))
+            // Shift+Enter is the send button; Alt+Enter queues, as Send Options does for Next when nothing is changed.
+            if ((DataContext as HomeViewModel)?.Active is { } active && (args.KeyModifiers == Avalonia.Input.KeyModifiers.Shift ? active.SubmitCommand : active.Chat.QueueCommand) is { } command && command.CanExecute(null))
             {
-                chat.SendCommand.Execute(null);
+                command.Execute(null);
             }
 
             return;
@@ -428,8 +452,39 @@ public sealed partial class HomeView : UserControl
         return submit is not null;
     }
 
+    // Enter goes ahead with what Send Options shows and Escape cancels it. A list or picker that is open over it keeps both, as Cancel keeps Enter, and a box with lines on a phone, whose keyboard has no other way to start a new one.
+    private bool SendOptionsKey(HomeViewModel home, Avalonia.Input.KeyEventArgs args)
+    {
+        if (home.Active?.SendOptions is not { IsOpen: true } options || args.Source is Visual source && source != this && !this.IsVisualAncestorOf(source) || this.FindControl<Border>("SendOptionsCard") is not { } card)
+        {
+            return false;
+        }
+
+        if (args.Key == Avalonia.Input.Key.Escape)
+        {
+            options.CancelCommand.Execute(null);
+            return true;
+        }
+
+        if (args.Key != Avalonia.Input.Key.Enter || args.Source is Control { Name: "SendOptionsCancel" } || !home.IsDesktop && args.Source is TextBox { AcceptsReturn: true })
+        {
+            return false;
+        }
+
+        // Leaving a field has it take what was typed into it.
+        card.Focus();
+        options.ConfirmCommand.Execute(null);
+        return true;
+    }
+
     private void OnPromptKeyDown(object? sender, Avalonia.Input.KeyEventArgs args)
     {
+        if (DataContext is HomeViewModel sending && args.KeyModifiers == Avalonia.Input.KeyModifiers.None && SendOptionsKey(sending, args))
+        {
+            args.Handled = true;
+            return;
+        }
+
         if (DataContext is HomeViewModel shown && args.KeyModifiers == Avalonia.Input.KeyModifiers.None && (SessionKey(shown, args.Key) || args.Key == Avalonia.Input.Key.Enter && shown.IsEditing && NameKey(shown, args.Source)))
         {
             args.Handled = true;

@@ -258,6 +258,16 @@ internal interface IServerConnection : IAsyncDisposable
     Task PromptOverLimit(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
+    /// Sends a prompt whose changes are committed once its work is done; one that joins work under way has that work committed.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="ignoreLimit">Whether the user confirmed that the work starts although a usage window is at or past the maximum.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused, as <see cref="Prompt" /> says.</exception>
+    Task PromptWithCommit(Guid id, string text, bool ignoreLimit, CancellationToken cancellation);
+
+    /// <summary>
     /// Has the server draw a Mermaid diagram.
     /// </summary>
     /// <param name="source">The Mermaid text.</param>
@@ -1311,6 +1321,9 @@ internal sealed class ServerConnection : IServerConnection
 
     /// <inheritdoc />
     public async Task PromptOverLimit(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = true }, cancellation);
+
+    /// <inheritdoc />
+    public async Task PromptWithCommit(Guid id, string text, bool ignoreLimit, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = ignoreLimit ? true : null, AutoCommit = true }, cancellation);
 
     /// <inheritdoc />
     public async Task<string> RenderDiagram(string source, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenderDiagram, Text = source }, cancellation)).Diagram ?? throw new IOException("The server sent no diagram.");

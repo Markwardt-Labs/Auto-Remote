@@ -52,16 +52,6 @@ internal sealed class SessionsViewModel : ViewModelBase
 
             return Task.CompletedTask;
         });
-        NewCommand = new AsyncCommand(_ =>
-        {
-            if (main is not null)
-            {
-                IsOpen = false;
-                NewRequested?.Invoke();
-            }
-
-            return Task.CompletedTask;
-        });
         OpenTaskCommand = new AsyncCommand(parameter => parameter is SwarmTaskViewModel row ? OpenTask(row.Task) : Task.CompletedTask, null, false);
         RenameCommand = new AsyncCommand(entry => Begin(SessionDialog.Rename, entry as SessionEntry));
         DeleteCommand = new AsyncCommand(entry => Begin(SessionDialog.Delete, entry as SessionEntry));
@@ -117,11 +107,6 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// Occurs when a side session was made to go on with a delegated task.
     /// </summary>
     public event Action<WorkspaceInfo>? Made;
-
-    /// <summary>
-    /// Occurs when the user asks for a new session, which Send Options describes.
-    /// </summary>
-    public event Action? NewRequested;
 
     /// <summary>
     /// Occurs when a request of a dialog that is no longer on screen failed.
@@ -314,11 +299,6 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// Gets the command that shows what a row's session changed since it started.
     /// </summary>
     public AsyncCommand ChangesCommand { get; }
-
-    /// <summary>
-    /// Gets the command that asks for a new session.
-    /// </summary>
-    public AsyncCommand NewCommand { get; }
 
     /// <summary>
     /// Gets the command that asks for a row's new name.
