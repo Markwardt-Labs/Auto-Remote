@@ -159,12 +159,12 @@ public sealed class HomeViewModelTests
         connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
         connection.Setup(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, WorkspaceSettings given, CancellationToken _) => given);
         await model.Start();
-        model.Active!.Settings.IsShellAllowed = true;
+        model.Active!.Settings.IsSandboxed = true;
 
         model.Selected = second;
 
         await Task.Delay(300);
-        connection.Verify(x => x.SetWorkspaceSettings(first.Id, It.Is<WorkspaceSettings>(sent => sent.IsShellAllowed), It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetWorkspaceSettings(first.Id, It.Is<WorkspaceSettings>(sent => sent.IsSandboxed), It.IsAny<CancellationToken>()), Times.Once);
         connection.Verify(x => x.SetWorkspaceSettings(second.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -174,7 +174,7 @@ public sealed class HomeViewModelTests
         connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
         connection.Setup(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, WorkspaceSettings given, CancellationToken _) => given);
         await model.Start();
-        model.Active!.Settings.IsShellAllowed = true;
+        model.Active!.Settings.IsSandboxed = true;
         WorkspaceInfo? requested = null;
         model.MoveWorkspaceRequested += workspace => requested = workspace;
 
@@ -185,7 +185,7 @@ public sealed class HomeViewModelTests
         }
 
         Assert.Equal(first, requested);
-        connection.Verify(x => x.SetWorkspaceSettings(first.Id, It.Is<WorkspaceSettings>(sent => sent.IsShellAllowed), It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetWorkspaceSettings(first.Id, It.Is<WorkspaceSettings>(sent => sent.IsSandboxed), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -194,7 +194,7 @@ public sealed class HomeViewModelTests
         connection.Setup(x => x.GetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings());
         connection.Setup(x => x.SetWorkspaceSettings(It.IsAny<Guid>(), It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
         await model.Start();
-        model.Active!.Settings.IsShellAllowed = true;
+        model.Active!.Settings.IsSandboxed = true;
         bool requested = false;
         model.MoveWorkspaceRequested += _ => requested = true;
 

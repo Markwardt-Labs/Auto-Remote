@@ -73,7 +73,7 @@ public sealed class SwarmRepositoryTests : IDisposable
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ATaskTravelsAsABundleIsDoneInAFolderThatIsNoRepositoryAndComesBackAsABranchThatApplies(bool noPrefix)
+    public async Task ATaskTravelsAsABundleIsDoneInAFolderThatIsNoRepositoryAndItsResultIsWrittenOutWithoutTouchingTheProject(bool noPrefix)
     {
         string project = await Project("origin");
         await Git(project, "config", "diff.noprefix", noPrefix ? "true" : "false");
@@ -84,7 +84,7 @@ public sealed class SwarmRepositoryTests : IDisposable
         string cache = temp.Combine("cache.git");
         string work = temp.Combine("work");
 
-        Assert.True(await repository.Receive(cache, bundle, task, snapshot, CancellationToken.None));
+        Assert.True(await repository.Receive(cache, bundle, task, snapshot, [], CancellationToken.None));
         await repository.Export(cache, work, snapshot, CancellationToken.None);
 
         Assert.False(Directory.Exists(Path.Combine(work, ".git")));
@@ -103,16 +103,19 @@ public sealed class SwarmRepositoryTests : IDisposable
         string changes = await repository.Changes(project, snapshot, commit, null, 10000, CancellationToken.None);
         Assert.Contains("added.bin", changes);
         Assert.DoesNotContain("secret.txt", changes);
-        await File.WriteAllTextAsync(Path.Combine(project, "a.txt"), "one\ntwo\nthree\nlocal\nlater\n");
-        string index = await Git(project, "diff", "--cached", "--name-only");
+        string status = await Git(project, "status", "--porcelain");
+        string copy = temp.Combine("copy");
 
-        SwarmApplyResult applied = await repository.Apply(project, snapshot, commit, CancellationToken.None);
+        IReadOnlyList<string> changed = await repository.Materialize(project, copy, snapshot, commit, "The report.", CancellationToken.None);
 
-        Assert.Empty(applied.Conflicts);
-        Assert.Equal(2, applied.Files);
-        Assert.Equal("ONE\ntwo\nthree\nlocal\nlater\n", await File.ReadAllTextAsync(Path.Combine(project, "a.txt")));
-        Assert.True(File.Exists(Path.Combine(project, "added.bin")));
-        Assert.Equal(index, await Git(project, "diff", "--cached", "--name-only"));
+        Assert.Equal(["M\ta.txt", "A\tadded.bin"], changed.OrderBy(line => line[2..], StringComparer.Ordinal));
+        Assert.Equal("ONE\ntwo\nthree\nlocal\n", await File.ReadAllTextAsync(Path.Combine(copy, "files", "a.txt")));
+        Assert.False(Directory.Exists(Path.Combine(copy, "files", ".git")));
+        Assert.Contains("diff --git a/added.bin b/added.bin", await File.ReadAllTextAsync(Path.Combine(copy, "changes.diff")));
+        Assert.Contains("+ONE", await File.ReadAllTextAsync(Path.Combine(copy, "changes.diff")));
+        Assert.Equal("The report.\n", await File.ReadAllTextAsync(Path.Combine(copy, "report.md")));
+        Assert.Equal(status, await Git(project, "status", "--porcelain"));
+        Assert.Equal("one\ntwo\nthree\nlocal\n", await File.ReadAllTextAsync(Path.Combine(project, "a.txt")));
 
         await repository.Release(project, task, branch, CancellationToken.None);
 
@@ -120,27 +123,60 @@ public sealed class SwarmRepositoryTests : IDisposable
     }
 
     [Fact]
-    public async Task Apply_LeavesConflictMarkersWhereBothChangedTheSameLines()
+    public async Task Materialize_NeverMakesLinksFromAResultInARepositoryThatWouldAndLeavesAToolsConfigurationOut()
     {
-        string project = await Project("conflict");
-        Guid task = Guid.NewGuid();
-        (string snapshot, _) = await repository.Snapshot(project, task, CancellationToken.None);
-        string cache = temp.Combine("conflict.git");
-        string work = temp.Combine("conflict-work");
-        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, CancellationToken.None);
+        string project = await Project("copy-links");
+        File.CreateSymbolicLink(Path.Combine(project, "link"), "/etc/hostname");
+        await File.WriteAllTextAsync(Path.Combine(project, "opencode.json"), "{}\n");
+        await Git(project, "add", "-A");
+        await Git(project, "commit", "--quiet", "-m", "link");
+        string head = await Git(project, "rev-parse", "HEAD");
+        string copy = temp.Combine("links-copy");
+
+        await repository.Materialize(project, copy, head, head, "r", CancellationToken.None);
+
+        Assert.Null(new FileInfo(Path.Combine(copy, "files", "link")).LinkTarget);
+        Assert.Equal("/etc/hostname", await File.ReadAllTextAsync(Path.Combine(copy, "files", "link")));
+        Assert.False(File.Exists(Path.Combine(copy, "files", "opencode.json")));
+        Assert.Equal(string.Empty, await Git(project, "status", "--porcelain"));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TheResultsATaskBuildsOnTravelBesideItsBaseAlsoWhenTheWorkerHasTheBaseAndLeaveWithTheTask(bool knowsBase)
+    {
+        string project = await Project("dependencies");
+        Guid first = Guid.NewGuid();
+        (string snapshot, _) = await repository.Snapshot(project, first, CancellationToken.None);
+        string cache = temp.Combine("dependencies.git");
+        string work = temp.Combine("dependencies-work");
+        await repository.Receive(cache, await repository.Bundle(project, first, [], CancellationToken.None), first, snapshot, [], CancellationToken.None);
         await repository.Export(cache, work, snapshot, CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(work, "a.txt"), "one\ntheirs\nthree\n");
-        await repository.Collect(cache, work, task, snapshot, "change", CancellationToken.None);
-        (string commit, _) = await repository.Import(project, await repository.BundleResult(cache, task, snapshot, CancellationToken.None), task, snapshot, "swarm/x", CancellationToken.None);
-        await File.WriteAllTextAsync(Path.Combine(project, "a.txt"), "one\nmine\nthree\n");
+        await File.WriteAllTextAsync(Path.Combine(work, "first.txt"), "first\n");
+        string collected = (await repository.Collect(cache, work, first, snapshot, "first", CancellationToken.None))!;
+        (string result, _) = await repository.Import(project, await repository.BundleResult(cache, first, snapshot, CancellationToken.None), first, snapshot, "swarm/first", CancellationToken.None);
+        Guid second = Guid.NewGuid();
+        await repository.Pin(project, second, snapshot, CancellationToken.None);
+        await repository.PinDependency(project, second, first, result, CancellationToken.None);
+        SwarmDependency dependency = new() { TaskId = first, Title = "first", BaseCommit = snapshot, ResultCommit = result };
 
-        SwarmApplyResult applied = await repository.Apply(project, snapshot, commit, CancellationToken.None);
+        ReadOnlyMemory<byte> bundle = await repository.Bundle(project, second, knowsBase ? [snapshot] : [], CancellationToken.None);
 
-        Assert.Equal(["a.txt"], applied.Conflicts);
-        string content = await File.ReadAllTextAsync(Path.Combine(project, "a.txt"));
-        Assert.Contains("<<<<<<<", content);
-        Assert.Contains("theirs", content);
-        Assert.Contains("mine", content);
+        string other = temp.Combine("dependencies-other.git");
+        Assert.Equal(!knowsBase, await repository.Receive(other, bundle, second, snapshot, [dependency], CancellationToken.None));
+        string receiving = knowsBase ? cache : other;
+        await repository.Forget(cache, first, CancellationToken.None);
+        Assert.True(await repository.Receive(receiving, bundle, second, snapshot, [dependency], CancellationToken.None));
+        Assert.Equal(collected, await Git(receiving, "rev-parse", $"refs/task-dependencies/{second:N}/{first:N}"));
+        await repository.Materialize(receiving, temp.Combine("dependency-copy"), snapshot, result, "r", CancellationToken.None);
+        Assert.Equal("first\n", await File.ReadAllTextAsync(Path.Combine(temp.Combine("dependency-copy"), "files", "first.txt")));
+
+        await repository.Forget(receiving, second, CancellationToken.None);
+        await repository.Release(project, second, null, CancellationToken.None);
+
+        Assert.Equal(string.Empty, await Git(receiving, "for-each-ref", "refs/task-dependencies"));
+        Assert.Equal(string.Empty, await Git(project, "for-each-ref", "refs/auto-remote/dependencies"));
     }
 
     [Fact]
@@ -150,21 +186,21 @@ public sealed class SwarmRepositoryTests : IDisposable
         Guid first = Guid.NewGuid();
         (string known, _) = await repository.Snapshot(project, first, CancellationToken.None);
         string cache = temp.Combine("incremental.git");
-        await repository.Receive(cache, await repository.Bundle(project, first, [], CancellationToken.None), first, known, CancellationToken.None);
+        await repository.Receive(cache, await repository.Bundle(project, first, [], CancellationToken.None), first, known, [], CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(project, "b.txt"), "b\n");
         Guid second = Guid.NewGuid();
         (string snapshot, _) = await repository.Snapshot(project, second, CancellationToken.None);
 
         ReadOnlyMemory<byte> small = await repository.Bundle(project, second, [known], CancellationToken.None);
 
-        Assert.False(await repository.Receive(temp.Combine("other.git"), small, second, snapshot, CancellationToken.None));
-        Assert.True(await repository.Receive(cache, small, second, snapshot, CancellationToken.None));
+        Assert.False(await repository.Receive(temp.Combine("other.git"), small, second, snapshot, [], CancellationToken.None));
+        Assert.True(await repository.Receive(cache, small, second, snapshot, [], CancellationToken.None));
         Guid same = Guid.NewGuid();
         await repository.Pin(project, same, snapshot, CancellationToken.None);
         ReadOnlyMemory<byte> nothing = await repository.Bundle(project, same, [snapshot], CancellationToken.None);
         Assert.True(nothing.IsEmpty);
-        Assert.True(await repository.Receive(cache, nothing, same, snapshot, CancellationToken.None));
-        Assert.False(await repository.Receive(temp.Combine("third.git"), nothing, same, snapshot, CancellationToken.None));
+        Assert.True(await repository.Receive(cache, nothing, same, snapshot, [], CancellationToken.None));
+        Assert.False(await repository.Receive(temp.Combine("third.git"), nothing, same, snapshot, [], CancellationToken.None));
     }
 
     [Fact]
@@ -175,7 +211,7 @@ public sealed class SwarmRepositoryTests : IDisposable
         (string snapshot, _) = await repository.Snapshot(project, task, CancellationToken.None);
         string cache = temp.Combine("refuse.git");
         string work = temp.Combine("refuse-work");
-        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, CancellationToken.None);
+        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, [], CancellationToken.None);
         await repository.Export(cache, work, snapshot, CancellationToken.None);
         await File.WriteAllTextAsync(Path.Combine(work, "a.txt"), "changed\n");
         await repository.Collect(cache, work, task, snapshot, "change", CancellationToken.None);
@@ -199,7 +235,7 @@ public sealed class SwarmRepositoryTests : IDisposable
         (string snapshot, _) = await repository.Snapshot(project, task, CancellationToken.None);
         string cache = temp.Combine("links.git");
         string work = temp.Combine("links-work");
-        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, CancellationToken.None);
+        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, [], CancellationToken.None);
 
         await repository.Export(cache, work, snapshot, CancellationToken.None);
 
@@ -220,7 +256,7 @@ public sealed class SwarmRepositoryTests : IDisposable
         (string snapshot, _) = await repository.Snapshot(project, task, CancellationToken.None);
         string cache = temp.Combine("nested.git");
         string work = temp.Combine("nested-work");
-        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, CancellationToken.None);
+        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, [], CancellationToken.None);
         await repository.Export(cache, work, snapshot, CancellationToken.None);
         string marker = temp.Combine("PWNED");
 
@@ -255,7 +291,7 @@ public sealed class SwarmRepositoryTests : IDisposable
         (string snapshot, _) = await repository.Snapshot(project, task, CancellationToken.None);
         string cache = temp.Combine("tools.git");
         string work = temp.Combine("tools-work");
-        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, CancellationToken.None);
+        await repository.Receive(cache, await repository.Bundle(project, task, [], CancellationToken.None), task, snapshot, [], CancellationToken.None);
 
         await repository.Export(cache, work, snapshot, CancellationToken.None);
 
@@ -293,28 +329,6 @@ public sealed class SwarmRepositoryTests : IDisposable
 
         Assert.Contains("configuration of an AI tool", refused.Message);
         Assert.Equal("main", await Git(project, "branch", "--format=%(refname:short)"));
-    }
-
-    [Fact]
-    public async Task Merge_BuildsTheBaseOfATaskOnTheChangesOfAnotherAndRefusesConflicts()
-    {
-        string project = await Project("merge");
-        Guid task = Guid.NewGuid();
-        (string snapshot, _) = await repository.Snapshot(project, task, CancellationToken.None);
-        await Git(project, "checkout", "--quiet", "-b", "side");
-        await File.WriteAllTextAsync(Path.Combine(project, "a.txt"), "one\ntwo\nTHREE\n");
-        await Git(project, "commit", "--quiet", "-am", "side");
-        string side = await Git(project, "rev-parse", "HEAD");
-        await Git(project, "checkout", "--quiet", "main");
-
-        string merged = await repository.Merge(project, snapshot, snapshot, side, CancellationToken.None);
-
-        Assert.Contains("THREE", await Git(project, "show", $"{merged}:a.txt"));
-        await File.WriteAllTextAsync(Path.Combine(project, "a.txt"), "one\ntwo\nother\n");
-        await Git(project, "commit", "--quiet", "-am", "other");
-        string other = await Git(project, "rev-parse", "HEAD");
-        RequestException conflict = await Assert.ThrowsAsync<RequestException>(() => repository.Merge(project, other, snapshot, side, CancellationToken.None));
-        Assert.Contains("conflict", conflict.Message);
     }
 
     [Theory]

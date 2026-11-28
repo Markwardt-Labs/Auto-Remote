@@ -14,7 +14,7 @@ public sealed class LoopViewModelTests
     {
         Windows();
         LoopViewModel panel = Panel();
-        panel.Open().GetAwaiter().GetResult();
+        panel.Prepare(false).GetAwaiter().GetResult();
         return panel;
     }
 
@@ -27,14 +27,13 @@ public sealed class LoopViewModelTests
     {
         Windows();
         LoopViewModel panel = Panel();
-        await panel.Open();
+        await panel.Prepare(false);
         panel.IntervalMinutes = 0;
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.Forever);
 
-        LoopSettings review = panel.Build(now);
+        LoopSettings review = panel.Build(now, string.Empty);
         panel.UseCustom = true;
-        panel.CustomPrompt = "  check the logs  ";
-        LoopSettings custom = panel.Build(now);
+        LoopSettings custom = panel.Build(now, "  check the logs  ");
 
         Assert.Equal(("review it", 0, LoopCondition.Forever), (review.Prompt, review.IntervalSeconds, review.Condition));
         Assert.Equal("check the logs", custom.Prompt);
@@ -49,15 +48,15 @@ public sealed class LoopViewModelTests
         panel.PropertyChanged += (_, args) => changed.Add(args.PropertyName);
 
         panel.UseExpand = true;
-        LoopSettings expand = panel.Build(now);
+        LoopSettings expand = panel.Build(now, string.Empty);
         bool afterExpand = panel.UseReview || panel.UseCustom;
         panel.UseExpand = false;
         bool ignoredFalse = panel.UseExpand;
         panel.UseCustom = true;
         panel.UseReview = true;
         panel.UseCustom = false;
-        LoopSettings review = panel.Build(now);
-        await panel.Open();
+        LoopSettings review = panel.Build(now, string.Empty);
+        await panel.Prepare(false);
 
         Assert.Equal(("expand it", false, true), (expand.Prompt, afterExpand, ignoredFalse));
         Assert.Equal("review it", review.Prompt);
@@ -66,26 +65,26 @@ public sealed class LoopViewModelTests
     }
 
     [Fact]
-    public async Task Open_ReadsTheReviewPromptOfTheWorkspaceOrTheGlobalOneAndBuildRefusesWhenItCouldNotBeRead()
+    public async Task Prepare_ReadsTheReviewPromptOfTheWorkspaceOrTheGlobalOneAndBuildRefusesWhenItCouldNotBeRead()
     {
         Windows();
         connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { ReviewPrompt = "  custom review ", ExpandPrompt = " custom expand ", GlobalReviewPrompt = "global review", GlobalExpandPrompt = "global expand" });
         LoopViewModel own = Panel();
-        await own.Open();
+        await own.Prepare(false);
 
         connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceSettings { GlobalReviewPrompt = "global review", GlobalExpandPrompt = "global expand" });
         LoopViewModel global = Panel();
-        await global.Open();
+        await global.Prepare(false);
 
         connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("down"));
         LoopViewModel unread = Panel();
-        await unread.Open();
+        await unread.Prepare(false);
 
         Assert.Equal(("custom review", "global review", string.Empty), (own.ReviewPrompt, global.ReviewPrompt, unread.ReviewPrompt));
         Assert.Equal(("custom expand", "global expand", string.Empty), (own.ExpandPrompt, global.ExpandPrompt, unread.ExpandPrompt));
-        Assert.Contains("review prompt could not be read", Assert.Throws<InvalidOperationException>(() => unread.Build(now)).Message);
+        Assert.Contains("review prompt could not be read", Assert.Throws<InvalidOperationException>(() => unread.Build(now, string.Empty)).Message);
         unread.UseExpand = true;
-        Assert.Contains("expand prompt could not be read", Assert.Throws<InvalidOperationException>(() => unread.Build(now)).Message);
+        Assert.Contains("expand prompt could not be read", Assert.Throws<InvalidOperationException>(() => unread.Build(now, string.Empty)).Message);
     }
 
     [Fact]
@@ -96,11 +95,11 @@ public sealed class LoopViewModelTests
 
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.Runs);
         panel.Runs = 7;
-        LoopSettings runs = panel.Build(now);
+        LoopSettings runs = panel.Build(now, string.Empty);
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.ForDuration);
         panel.Hours = 2;
         panel.Minutes = 30;
-        LoopSettings duration = panel.Build(now);
+        LoopSettings duration = panel.Build(now, string.Empty);
 
         Assert.Equal((150, LoopCondition.Runs, 7), (runs.IntervalSeconds, runs.Condition, runs.Runs));
         Assert.Equal((LoopCondition.ForDuration, 9000), (duration.Condition, duration.DurationSeconds));
@@ -114,9 +113,9 @@ public sealed class LoopViewModelTests
         DateTimeOffset local = new(new DateTime(2026, 11, 3, 15, 0, 0));
 
         panel.EndTime = new TimeSpan(17, 30, 0);
-        DateTimeOffset later = panel.Build(local).Until!.Value;
+        DateTimeOffset later = panel.Build(local, string.Empty).Until!.Value;
         panel.EndTime = new TimeSpan(9, 0, 0);
-        DateTimeOffset tomorrow = panel.Build(local).Until!.Value;
+        DateTimeOffset tomorrow = panel.Build(local, string.Empty).Until!.Value;
 
         Assert.Equal(new DateTime(2026, 11, 3, 17, 30, 0), later.LocalDateTime);
         Assert.Equal(new DateTime(2026, 11, 4, 9, 0, 0), tomorrow.LocalDateTime);
@@ -130,13 +129,12 @@ public sealed class LoopViewModelTests
     {
         LoopViewModel panel = Panel();
         panel.UseCustom = true;
-        panel.CustomPrompt = prompt;
         panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == condition);
         panel.Runs = amount;
         panel.Hours = 0;
         panel.Minutes = 0;
 
-        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => panel.Build(now));
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => panel.Build(now, prompt));
 
         Assert.Contains(expected, exception.Message);
     }
@@ -147,7 +145,7 @@ public sealed class LoopViewModelTests
         LoopViewModel panel = Opened();
         panel.IntervalMinutes = null;
 
-        Assert.Equal(0, panel.Build(now).IntervalSeconds);
+        Assert.Equal(0, panel.Build(now, string.Empty).IntervalSeconds);
         Assert.Null(panel.IntervalMinutes);
     }
 
@@ -157,40 +155,38 @@ public sealed class LoopViewModelTests
         LoopViewModel panel = Opened();
         panel.IntervalMinutes = 2000;
 
-        Assert.Contains("between 0 and 1440", Assert.Throws<InvalidOperationException>(() => panel.Build(now)).Message);
+        Assert.Contains("between 0 and 1440", Assert.Throws<InvalidOperationException>(() => panel.Build(now, string.Empty)).Message);
     }
 
     [Fact]
-    public async Task Open_OffersTheUsageWindowConditionOnlyWhenTheServiceReportsWindows()
+    public async Task Prepare_OffersTheUsageWindowConditionOnlyWhenTheServiceReportsWindows()
     {
         Windows();
         LoopViewModel without = Panel();
-        await without.Open();
+        await without.Prepare(false);
         Windows("Session", "Week");
         LoopViewModel with = Panel();
-        await with.Open();
+        await with.Prepare(false);
 
         Assert.DoesNotContain(without.Conditions, choice => choice.Condition == LoopCondition.UntilWindow);
         Assert.Contains(with.Conditions, choice => choice.Condition == LoopCondition.UntilWindow);
         Assert.Equal(["Session", "Week"], with.Windows);
         Assert.Equal("Session", with.SelectedWindow);
-        Assert.True(with.IsOpen);
     }
 
     [Fact]
-    public async Task Open_StartsFromTheReviewPromptEveryFifteenMinutesUntilCancelledEvenAfterEarlierChanges()
+    public async Task Prepare_StartsFromTheReviewPromptEveryFifteenMinutesUntilCancelledEvenAfterEarlierChanges()
     {
         Windows();
         LoopViewModel fresh = Opened();
-        LoopSettings initial = fresh.Build(now);
+        LoopSettings initial = fresh.Build(now, string.Empty);
         LoopViewModel changed = Panel();
         changed.UseCustom = true;
-        changed.CustomPrompt = "other";
         changed.IntervalMinutes = 1;
         changed.SelectedCondition = changed.Conditions.Single(choice => choice.Condition == LoopCondition.Runs);
 
-        await changed.Open();
-        LoopSettings reset = changed.Build(now);
+        await changed.Prepare(false);
+        LoopSettings reset = changed.Build(now, string.Empty);
 
         Assert.Equal(("review it", 900, LoopCondition.Forever), (initial.Prompt, initial.IntervalSeconds, initial.Condition));
         Assert.Equal(initial, reset);
@@ -198,94 +194,29 @@ public sealed class LoopViewModelTests
     }
 
     [Fact]
-    public async Task WaitForLimit_IsOnWheneverThePanelOpensAndGoesIntoTheSettingsOfTheLoop()
+    public async Task CommitEachRun_IsOffWheneverTheSettingsArePreparedAndGoesIntoTheSettingsOfTheLoop()
     {
         Windows();
         LoopViewModel panel = Opened();
-        LoopSettings defaults = panel.Build(now);
-        panel.WaitForLimit = false;
-        LoopSettings without = panel.Build(now);
+        LoopSettings defaults = panel.Build(now, string.Empty);
+        panel.CommitEachRun = true;
+        LoopSettings committing = panel.Build(now, string.Empty);
 
-        await panel.Open();
+        await panel.Prepare(false);
 
-        Assert.True(defaults.WaitForLimit);
-        Assert.False(without.WaitForLimit);
-        Assert.True(panel.WaitForLimit);
-        Assert.True(panel.Build(now).WaitForLimit);
+        Assert.Equal((false, true, false), (defaults.AutoCommit, committing.AutoCommit, panel.CommitEachRun));
     }
 
-    [Fact]
-    public void WaitForLimit_IsOnInTheSettingsOfALoopThatDoesNotSayAndOffWhenItSaysSo()
-    {
-        JsonSerializerOptions options = new(JsonSerializerDefaults.Web);
-
-        Assert.True(JsonSerializer.Deserialize<LoopSettings>("""{"prompt":"x"}""", options)!.WaitForLimit);
-        Assert.False(JsonSerializer.Deserialize<LoopSettings>("""{"prompt":"x","waitForLimit":false}""", options)!.WaitForLimit);
-        Assert.Contains("\"waitForLimit\":true", JsonSerializer.Serialize(new LoopSettings { Prompt = "x" }, options));
-    }
-
-    [Fact]
-    public async Task Start_SendsTheSettingsToTheServerAndClosesThePanel()
-    {
-        Windows("Session", "Week");
-        LoopViewModel panel = Panel();
-        await panel.Open();
-        panel.SelectedCondition = panel.Conditions.Single(choice => choice.Condition == LoopCondition.UntilWindow);
-        panel.SelectedWindow = "Week";
-        panel.Percent = 80;
-        LoopSettings? sent = null;
-        connection.Setup(x => x.StartLoop(workspace.Id, It.IsAny<LoopSettings>(), It.IsAny<CancellationToken>())).Callback<Guid, LoopSettings, CancellationToken>((_, settings, _) => sent = settings).Returns(Task.CompletedTask);
-        bool started = false;
-        panel.Started += () => started = true;
-
-        panel.StartCommand.Execute(null);
-        for (int attempt = 0; attempt < 100 && !started; attempt++)
-        {
-            await Task.Delay(10);
-        }
-
-        Assert.True(started);
-        Assert.False(panel.IsOpen);
-        Assert.Equal((LoopCondition.UntilWindow, "Week", 80d, "review it"), (sent!.Condition, sent.Window, sent.Percent, sent.Prompt));
-    }
-
-    [Fact]
-    public async Task Start_KeepsThePanelOpenAndShowsWhyWhenTheServerRefusesOrTheInputIsNotEnough()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Prepare_ChoosesWhatIsTypedWhenSomethingIs(bool typed)
     {
         Windows();
         LoopViewModel panel = Panel();
-        await panel.Open();
-        connection.Setup(x => x.StartLoop(workspace.Id, It.IsAny<LoopSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("A loop already runs in this workspace."));
 
-        panel.StartCommand.Execute(null);
-        for (int attempt = 0; attempt < 100 && !panel.HasError; attempt++)
-        {
-            await Task.Delay(10);
-        }
+        await panel.Prepare(typed);
 
-        Assert.True(panel.IsOpen);
-        Assert.Equal("A loop already runs in this workspace.", panel.Error);
-
-        panel.UseCustom = true;
-        panel.CustomPrompt = " ";
-        panel.StartCommand.Execute(null);
-        for (int attempt = 0; attempt < 100 && panel.Error != "Write the prompt the loop sends."; attempt++)
-        {
-            await Task.Delay(10);
-        }
-
-        Assert.Equal("Write the prompt the loop sends.", panel.Error);
-    }
-
-    [Fact]
-    public void Cancel_ClosesThePanelWithoutStartingAnything()
-    {
-        LoopViewModel panel = Panel();
-        panel.IsOpen = true;
-
-        panel.CancelCommand.Execute(null);
-
-        Assert.False(panel.IsOpen);
-        connection.Verify(x => x.StartLoop(It.IsAny<Guid>(), It.IsAny<LoopSettings>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal((typed, !typed), (panel.UseCustom, panel.UseReview));
     }
 }

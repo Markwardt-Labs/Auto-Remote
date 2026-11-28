@@ -38,10 +38,16 @@ public sealed class QueuedInputViewModelTests
 
     private void Saved(params SavedInput[] inputs) => Raise(new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspace.Id, SavedInputs = inputs });
 
-    private SavedInput Input(string text, bool queued = false, bool paused = false) => new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow, IsQueued = queued, IsPaused = paused };
+    private SavedInput Input(string text, bool queued = false) => new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow, IsQueued = queued };
+
+    private void Told(Agenda agenda) => Raise(new RemoteEvent { Kind = RemoteEventKind.AgendaChanged, WorkspaceId = workspace.Id, Agenda = agenda });
+
+    private AgendaItem Item(AgendaKind kind, string title, Guid? id = null, bool? commit = null) => new() { Kind = kind, Title = title, Id = id, AutoCommit = commit };
+
+    private Agenda Pending(params AgendaItem[] items) => new() { Items = items };
 
     [Fact]
-    public async Task AutoCommitButton_ShowsWhileTheAiWorksInARepositoryWithoutALoopAndTogglesOnTheServer()
+    public async Task CommitButton_ShowsWhileTheAiWorksLoopRunsIncludedAndTogglesOnTheServer()
     {
         WorkspaceViewModel view = await Started();
         Assert.False(view.ShowAutoCommitButton);
@@ -49,7 +55,7 @@ public sealed class QueuedInputViewModelTests
         Working(true);
 
         Assert.True(view.ShowAutoCommitButton);
-        Assert.False(Chat.IsAutoCommitOn);
+        Assert.Equal((false, "When Done: Keep Changes"), (Chat.IsAutoCommitOn, Chat.AutoCommitText));
 
         Chat.ToggleAutoCommitCommand.Execute(null);
 
@@ -57,7 +63,7 @@ public sealed class QueuedInputViewModelTests
         // Only what the server says turns it on.
         Assert.False(Chat.IsAutoCommitOn);
         AutoCommit(AutoCommitState.On);
-        Assert.True(Chat.IsAutoCommitOn);
+        Assert.Equal((true, "When Done: Commit"), (Chat.IsAutoCommitOn, Chat.AutoCommitText));
         Assert.StartsWith("The changes are committed", Chat.AutoCommitTip);
 
         Chat.ToggleAutoCommitCommand.Execute(null);
@@ -66,11 +72,6 @@ public sealed class QueuedInputViewModelTests
 
         LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "x" }, StartedAt = DateTimeOffset.UnixEpoch, IsRunning = true };
         Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop });
-
-        Assert.False(view.ShowAutoCommitButton);
-
-        // Between the runs, other work of a looping workspace can be committed.
-        Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop with { IsRunning = false } });
 
         Assert.True(view.ShowAutoCommitButton);
     }
@@ -94,27 +95,26 @@ public sealed class QueuedInputViewModelTests
             Chat.Input = "typed";
         }
 
-        Assert.Equal(mentioned, view.QueueTip.Contains("auto commit", StringComparison.Ordinal));
+        Assert.Equal($"Queue: send once the current work is done, at once if there is none{(mentioned ? ", and commit afterwards" : string.Empty)}. Right-click or hold for Send Options", view.QueueTip);
     }
 
     [Fact]
-    public async Task LoopButton_StaysOfferedWhileTheChangesAreCommittedAfterWork()
+    public async Task JoinNote_ShowsOnlyWhileTheAiWorksAndSomethingIsTyped()
     {
         WorkspaceViewModel view = await Started();
-        Working(true);
-        AutoCommit(AutoCommitState.Committing);
-        Working(false);
-
-        Assert.True(view.ShowLoopButton);
-
         Chat.Input = "typed";
+        Assert.False(view.ShowJoinNote);
 
-        Assert.False(view.ShowLoopButton);
+        Working(true);
+        Assert.True(view.ShowJoinNote);
+
+        Chat.Input = string.Empty;
+        Assert.False(view.ShowJoinNote);
     }
 
     private async Task Load(SavedInput saved)
     {
-        connection.Setup(x => x.TakeSavedInput(workspace.Id, saved.Id, It.IsAny<CancellationToken>())).ReturnsAsync(saved with { IsQueued = false, IsPaused = false });
+        connection.Setup(x => x.TakeSavedInput(workspace.Id, saved.Id, It.IsAny<CancellationToken>())).ReturnsAsync(saved with { IsQueued = false });
         Saved(saved);
         Chat.LoadSavedInputCommand.Execute(saved);
         await Task.Delay(50);
@@ -123,34 +123,25 @@ public sealed class QueuedInputViewModelTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task LoadedInput_TakesItsAutoCommitWithItAndShowsItAboveTheMessageBox(bool commits)
+    public async Task LoadedInput_KeepsItsCommitSettingForQueuingWhileEditedAndLosesItOnceTheBoxIsEmptied(bool commits)
     {
-        WorkspaceViewModel view = await Started();
-        Assert.False(view.ShowLoadedAutoCommit);
+        await Started();
 
         await Load(Input("loaded") with { AutoCommit = commits });
-
-        Assert.True(view.ShowLoadedAutoCommit);
-        Assert.Equal(commits, Chat.IsLoadedAutoCommitOn);
-        Assert.Equal(commits ? "Auto Commit This Input: On" : "Auto Commit This Input: Off", Chat.LoadedAutoCommitText);
-
-        Chat.ToggleLoadedAutoCommitCommand.Execute(null);
-
-        Assert.Equal(!commits, Chat.IsLoadedAutoCommitOn);
-
-        // Editing keeps it, and emptying the box lets it go.
         Chat.Input = "loaded and edited";
-        Assert.True(view.ShowLoadedAutoCommit);
+
+        Assert.Equal((bool?)commits, Chat.LoadedAutoCommit);
+
         Chat.Input = string.Empty;
-        Assert.False(view.ShowLoadedAutoCommit);
         Chat.Input = "typed anew";
+
         Assert.Null(Chat.LoadedAutoCommit);
     }
 
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task LoadedInput_IsSentWithAutoCommitTurnedOnOnlyWhenItsOwnIsOn(bool commits)
+    public async Task Send_NeverTurnsOnAutoCommitAlsoForALoadedInput(bool commits)
     {
         await Started();
         await Load(Input("loaded") with { AutoCommit = commits });
@@ -158,8 +149,8 @@ public sealed class QueuedInputViewModelTests
         Chat.SendCommand.Execute(null);
         await Task.Delay(50);
 
-        connection.Verify(x => x.PromptToCommit(workspace.Id, "loaded", false, It.IsAny<CancellationToken>()), commits ? Times.Once() : Times.Never());
-        connection.Verify(x => x.Prompt(workspace.Id, "loaded", It.IsAny<CancellationToken>()), commits ? Times.Never() : Times.Once());
+        connection.Verify(x => x.Prompt(workspace.Id, "loaded", It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetAutoCommit(It.IsAny<Guid>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Null(Chat.LoadedAutoCommit);
     }
 
@@ -177,7 +168,6 @@ public sealed class QueuedInputViewModelTests
         await Task.Delay(50);
 
         connection.Verify(x => x.Prompt(workspace.Id, "typed", It.IsAny<CancellationToken>()), Times.Once);
-        connection.Verify(x => x.PromptToCommit(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
         connection.Verify(x => x.QueueInput(workspace.Id, "queued", true, It.IsAny<CancellationToken>()), Times.Once);
         connection.Verify(x => x.SaveInput(workspace.Id, "saved", true, It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -205,7 +195,7 @@ public sealed class QueuedInputViewModelTests
     public async Task LoadedInput_ThatCouldNotBeSentComesBackWithItsAutoCommit(bool queued)
     {
         await Started();
-        connection.Setup(x => x.PromptToCommit(workspace.Id, "loaded", false, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
+        connection.Setup(x => x.Prompt(workspace.Id, "loaded", It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
         connection.Setup(x => x.QueueInput(workspace.Id, "loaded", true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
         await Load(Input("loaded"));
 
@@ -237,176 +227,235 @@ public sealed class QueuedInputViewModelTests
     }
 
     [Fact]
-    public async Task QueueCounts_FeedTheBadgeAndTheBannerOfAPausedQueue()
+    public async Task Drafts_AreTheInputsThatAreNotQueuedAndTheQueuedOnesAreCountedBesideThem()
     {
-        await Started();
+        WorkspaceViewModel view = await Started();
+        Assert.False(view.ShowUpNextButton);
 
         Saved(Input("a", true), Input("b", true), Input("c"));
 
-        Assert.Equal((2, true, 2, false), (Chat.QueuedCount, Chat.HasQueuedInputs, Chat.ActiveQueuedCount, Chat.HasPausedQueued));
+        Assert.Equal(["c"], Chat.Drafts.Select(draft => draft.Text));
+        Assert.Equal((2, true, true, false), (Chat.QueuedCount, view.ShowUpNextButton, Chat.HasDrafts, Chat.HasNoDrafts));
 
-        Saved(Input("a", true, true), Input("b", true, true));
+        Chat.Input = "typed";
+        Assert.False(view.ShowUpNextButton);
+        Chat.Input = string.Empty;
 
-        Assert.Equal((2, 0, true), (Chat.QueuedCount, Chat.ActiveQueuedCount, Chat.HasPausedQueued));
-        Assert.Equal("Queue paused (2)", Chat.QueuePausedText);
+        Saved(Input("a", true));
 
-        Saved(Input("c"));
-
-        Assert.Equal((0, false, false), (Chat.QueuedCount, Chat.HasQueuedInputs, Chat.HasPausedQueued));
+        Assert.Equal((false, true), (Chat.HasDrafts, Chat.HasNoDrafts));
     }
 
     [Fact]
-    public async Task ResumeQueue_AsksTheServerAndWaitsForTheWorkLikeQueuingDoes()
+    public async Task UpNextAndDrafts_ShowOneAtATime()
+    {
+        await Started();
+
+        Chat.ToggleSavedInputsCommand.Execute(null);
+        Chat.ToggleUpNextCommand.Execute(null);
+        Assert.Equal((false, true), (Chat.IsSavedInputsOpen, Chat.IsUpNextOpen));
+
+        Chat.ToggleSavedInputsCommand.Execute(null);
+        Assert.Equal((true, false), (Chat.IsSavedInputsOpen, Chat.IsUpNextOpen));
+    }
+
+    [Fact]
+    public async Task Agenda_IsReadOnOpeningAndFollowedAsItChanges()
+    {
+        connection.Setup(x => x.GetAgenda(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(Pending(Item(AgendaKind.Queued, "first", Guid.NewGuid(), true)) with { Status = "1 up next" });
+        await Started();
+
+        Assert.Equal(("1 up next", true, false), (Chat.StatusText, Chat.HasStatusLine, Chat.HasStatusButtons));
+        Assert.Equal(["first"], Chat.UpNext.Select(row => row.Title));
+
+        Told(new Agenda());
+
+        Assert.Equal((false, true), (Chat.HasStatusLine, Chat.HasNoUpNext));
+    }
+
+    [Fact]
+    public async Task Agenda_IsReadAgainAfterAReconnect()
+    {
+        await Started();
+        connection.Setup(x => x.GetAgenda(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new Agenda { Status = "Stopped", IsStopped = true });
+
+        connection.Raise(x => x.Reconnected += null);
+        await Task.Delay(100);
+
+        Assert.Equal(("Stopped", true), (Chat.StatusText, Chat.IsStopped));
+    }
+
+    [Fact]
+    public async Task StatusLine_OffersWhatAppliesAndSaysItItselfWhileTheServerHasNotSaid()
+    {
+        await Started();
+        Assert.False(Chat.HasStatusLine);
+
+        Told(new Agenda { IsStopped = true });
+        Assert.Equal(("Stopped", true, true), (Chat.StatusText, Chat.HasStatusLine, Chat.HasStatusButtons));
+
+        Told(new Agenda());
+        Raise(new RemoteEvent { Kind = RemoteEventKind.LimitPauseChanged, WorkspaceId = workspace.Id, LimitPause = new LimitPause { Window = "Week", PercentUsed = 96, MaxPercent = 95, PausedAt = DateTimeOffset.UtcNow, NextCheckAt = DateTimeOffset.UtcNow } });
+        Assert.Equal(("Paused at the usage limit", true), (Chat.StatusText, Chat.HasStatusButtons));
+    }
+
+    [Fact]
+    public async Task Resume_AsksTheServerAndWaitsForTheWorkLikeQueuingDoes()
     {
         WorkspaceViewModel view = await Started();
-        Saved(Input("a", true, true));
+        Told(new Agenda { IsStopped = true, Status = "Stopped · 1 up next" });
 
-        Chat.ResumeQueueCommand.Execute(null);
+        Chat.ResumeAutomationCommand.Execute(null);
         await Task.Delay(50);
 
-        connection.Verify(x => x.ResumeQueue(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.ResumeAutomation(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
         Assert.True(view.NotifyWhenReady);
         keeper.Verify(x => x.Hold(workspace.Id, "app"), Times.Once);
     }
 
     [Fact]
-    public async Task ResumeQueue_ThatIsRefusedWaitsForNothing()
+    public async Task Resume_ThatIsRefusedWaitsForNothing()
     {
         WorkspaceViewModel view = await Started();
-        connection.Setup(x => x.ResumeQueue(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
+        connection.Setup(x => x.ResumeAutomation(workspace.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("refused"));
 
-        Chat.ResumeQueueCommand.Execute(null);
+        Chat.ResumeAutomationCommand.Execute(null);
         await Task.Delay(50);
 
         Assert.False(view.NotifyWhenReady);
         Assert.Equal("refused", Chat.Error);
     }
 
-    [Theory]
-    [InlineData(true, null)]
-    [InlineData(false, "Queuing or saving it keeps its own setting: off.")]
-    public async Task LoadedInputButton_SaysAutoCommitIsAlreadyOnForTheCurrentWorkAndCannotBePressedThen(bool commits, string? note)
+    [Fact]
+    public async Task UpNextRows_SayWhyAndWhenTheyWaitAndOfferWhatTheirKindAllows()
     {
-        WorkspaceViewModel view = await Started();
-        Working(true);
-        await Load(Input("loaded") with { AutoCommit = commits });
-        Assert.False(view.HasLoadedAutoCommitNote);
+        await Started();
+        DateTimeOffset now = DateTimeOffset.UtcNow;
 
-        AutoCommit(AutoCommitState.On);
+        Told(Pending(
+            Item(AgendaKind.Retry, "again") with { Waiting = "usage limit reached", At = now },
+            Item(AgendaKind.BringIn, "Bring in fix", Guid.NewGuid(), true),
+            Item(AgendaKind.Queued, "next", Guid.NewGuid(), false),
+            Item(AgendaKind.Loop, "Loop: check")));
 
-        Assert.Equal("Auto Commit Already On for Current Work", Chat.LoadedAutoCommitText);
-        Assert.True(Chat.ShowsLoadedAutoCommitOn);
-        Assert.False(Chat.ToggleLoadedAutoCommitCommand.CanExecute(null));
-        Assert.Equal(note, view.LoadedAutoCommitNote);
-        // Both buttons show, so the one beside the message box says what it is about.
-        Assert.True(view.LabelsAutoCommitButton);
-        Assert.Equal(commits, Chat.LoadedAutoCommit);
-
-        AutoCommit(AutoCommitState.Off);
-
-        Assert.True(Chat.ToggleLoadedAutoCommitCommand.CanExecute(null));
-        Assert.Equal(commits, Chat.ShowsLoadedAutoCommitOn);
-        Assert.Null(view.LoadedAutoCommitNote);
+        Assert.Equal($"usage limit reached - at {now.ToStamp(now)}", Chat.UpNext[0].Describe(now));
+        Assert.Equal([(false, false, false), (false, true, true), (true, true, false), (false, false, false)], Chat.UpNext.Select(row => (row.IsQueued, row.HasCommitChoice, row.IsCommitOn)));
     }
 
     [Fact]
-    public async Task AutoCommitButton_IsOnlyLabelledWhileTheButtonAboutALoadedInputShowsToo()
+    public async Task UpNextCommitToggle_TellsTheQueuedInputOrTheBringIn()
     {
-        WorkspaceViewModel view = await Started();
-        Working(true);
-        Assert.False(view.LabelsAutoCommitButton);
-        Chat.Input = "typed";
-        Assert.False(view.LabelsAutoCommitButton);
-        Chat.Input = string.Empty;
+        await Started();
+        Guid bringIn = Guid.NewGuid();
+        Guid queued = Guid.NewGuid();
+        Told(Pending(Item(AgendaKind.BringIn, "Bring in fix", bringIn, true), Item(AgendaKind.Queued, "next", queued, false)));
 
-        await Load(Input("loaded"));
+        Chat.ToggleAgendaCommitCommand.Execute(Chat.UpNext[0]);
+        Chat.ToggleAgendaCommitCommand.Execute(Chat.UpNext[1]);
 
-        Assert.True(view.LabelsAutoCommitButton);
-
-        Working(false);
-
-        Assert.False(view.LabelsAutoCommitButton);
-    }
-
-    private void Looping(bool running) => Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x" }, StartedAt = DateTimeOffset.UnixEpoch, IsRunning = running } });
-
-    [Theory]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public async Task LoadedInput_ThatWouldJoinARunOfALoopSaysTheRunIsNotCommitted(bool commits, bool warned)
-    {
-        WorkspaceViewModel view = await Started();
-        Looping(true);
-        Working(true);
-
-        await Load(Input("loaded") with { AutoCommit = commits });
-
-        Assert.Equal(warned ? "Sent now, it joins the loop's run, which is not committed. Queue it to have it committed." : null, view.LoadedAutoCommitNote);
-
-        Looping(false);
-
-        Assert.Null(view.LoadedAutoCommitNote);
-    }
-
-    [Theory]
-    [InlineData(false, 2, false, AutoCommitState.Off, "Loop waiting for 2 queued inputs.")]
-    [InlineData(false, 1, false, AutoCommitState.Off, "Loop waiting for 1 queued input.")]
-    [InlineData(false, 2, true, AutoCommitState.On, "Loop waiting for the current work and 2 queued inputs.")]
-    [InlineData(false, 0, true, AutoCommitState.Off, "Loop waiting for the current work to finish.")]
-    [InlineData(false, 0, false, AutoCommitState.Committing, "Loop waiting for the commit.")]
-    [InlineData(false, 1, false, AutoCommitState.Committing, "Loop waiting for the commit and 1 queued input.")]
-    [InlineData(true, 2, true, AutoCommitState.Off, "2 queued inputs will run when this loop run ends.")]
-    [InlineData(true, 0, true, AutoCommitState.Off, null)]
-    [InlineData(false, 0, false, AutoCommitState.Off, null)]
-    public async Task LoopWaiting_SaysWhatGoesBeforeTheNextRun(bool running, int queued, bool working, AutoCommitState autoCommit, string? expected)
-    {
-        WorkspaceViewModel view = await Started();
-        Looping(running);
-        Working(working);
-        AutoCommit(autoCommit);
-
-        Saved([.. Enumerable.Range(0, queued).Select(index => Input($"q{index}", true)), Input("paused does not count")]);
-
-        Assert.Equal(expected, view.LoopWaiting);
-        Assert.Equal(expected is not null, view.IsLoopWaiting);
-
-        if (!running && (queued > 0 || autoCommit == AutoCommitState.Committing))
-        {
-            Assert.Equal(expected, view.LoopNext);
-        }
-    }
-
-    [Theory]
-    [InlineData(2, "2 queued inputs go before the loop's next run.")]
-    [InlineData(1, "1 queued input goes before the loop's next run.")]
-    [InlineData(0, null)]
-    public async Task LoopWaiting_DoesNotSayTheLoopWaitsBeforeItsNextRunIsDue(int queued, string? expected)
-    {
-        WorkspaceViewModel view = await Started();
-        Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x", IntervalSeconds = 600 }, StartedAt = DateTimeOffset.UtcNow, Runs = 1, NextRunAt = DateTimeOffset.UtcNow.AddMinutes(9) } });
-        Working(true);
-
-        Saved([.. Enumerable.Range(0, queued).Select(index => Input($"q{index}", true))]);
-
-        Assert.Equal(expected, view.LoopWaiting);
-        // The loop's icon goes on counting down.
-        Assert.StartsWith("The next prompt is sent in", view.LoopNext);
+        connection.Verify(x => x.SetBringInCommit(workspace.Id, bringIn, false, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetSavedInputAutoCommit(workspace.Id, queued, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
-    public async Task LoopWaiting_IsSilentWithoutALoopOrForAPausedQueueWhichTheLoopDoesNotWaitFor()
+    public async Task UpNext_EditTakesTheQueuedInputIntoTheMessageBoxAndDeleteAsksFirst()
+    {
+        await Started();
+        SavedInput edited = Input("edit me", true) with { AutoCommit = false };
+        SavedInput deleted = Input("delete me", true);
+        Saved(edited, deleted);
+        Told(Pending(Item(AgendaKind.Queued, "edit me", edited.Id, false), Item(AgendaKind.Queued, "delete me", deleted.Id, true)));
+        connection.Setup(x => x.TakeSavedInput(workspace.Id, edited.Id, It.IsAny<CancellationToken>())).ReturnsAsync(edited with { IsQueued = false });
+        Chat.ToggleUpNextCommand.Execute(null);
+
+        Chat.AskDeleteQueuedCommand.Execute(Chat.UpNext[1]);
+
+        Assert.Equal(("Delete this queued input? It will not be sent.", "delete me"), (Chat.DeleteQuestion, Chat.DeletePreview));
+        connection.Verify(x => x.DiscardSavedInput(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+
+        Chat.EditQueuedCommand.Execute(Chat.UpNext[0]);
+        await Task.Delay(50);
+
+        Assert.Equal(("edit me", (bool?)false, false), (Chat.Input, Chat.LoadedAutoCommit, Chat.IsUpNextOpen));
+    }
+
+    private WorkspaceInfo Made() => new() { Id = Guid.NewGuid(), Folder = "/data/sessions/new", Side = new SideSession { ParentId = workspace.Id, ParentName = "app", Name = "new", State = SideSessionState.Creating } };
+
+    [Fact]
+    public async Task RunInNewSession_TakesTheInputAndStartsASessionNamedAfterItFromTheCurrentFilesToBeBroughtIn()
     {
         WorkspaceViewModel view = await Started();
-        Saved(Input("a", true));
-        Assert.Null(view.LoopWaiting);
-        Looping(false);
-        List<string?> changes = [];
-        view.PropertyChanged += (_, args) => changes.Add(args.PropertyName);
+        SavedInput draft = Input("fix the login page today please now\nand test it");
+        Saved(draft);
+        connection.Setup(x => x.TakeSavedInput(workspace.Id, draft.Id, It.IsAny<CancellationToken>())).ReturnsAsync(draft);
+        connection.Setup(x => x.CreateSideSession(workspace.Id, "fix the login page today", SideSessionStart.Files, draft.Text, true, It.IsAny<CancellationToken>())).ReturnsAsync(Made());
+        bool? hadTask = null;
+        view.SessionMade += (_, hasTask) => hadTask = hasTask;
 
-        Saved(Input("a", true, true));
+        view.RunInNewSessionCommand.Execute(draft);
+        await Task.Delay(50);
 
-        Assert.Null(view.LoopWaiting);
-        Assert.Contains(nameof(WorkspaceViewModel.LoopWaiting), changes);
+        Assert.True(hadTask);
+        connection.Verify(x => x.SaveInput(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+        connection.Verify(x => x.QueueInput(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task RunInNewSession_ThatFailsPutsTheInputBackWhereItWasAndSaysWhy(bool queued)
+    {
+        WorkspaceViewModel view = await Started();
+        SavedInput input = Input("do it", queued) with { AutoCommit = false };
+        Saved(input);
+        Told(queued ? Pending(Item(AgendaKind.Queued, "do it", input.Id, false)) : new Agenda());
+        connection.Setup(x => x.TakeSavedInput(workspace.Id, input.Id, It.IsAny<CancellationToken>())).ReturnsAsync(input with { IsQueued = false });
+        connection.Setup(x => x.CreateSideSession(workspace.Id, It.IsAny<string>(), It.IsAny<SideSessionStart>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("not a repository"));
+
+        view.RunInNewSessionCommand.Execute(queued ? Chat.UpNext[0] : input);
+        await Task.Delay(50);
+
+        connection.Verify(x => x.QueueInput(workspace.Id, "do it", false, It.IsAny<CancellationToken>()), queued ? Times.Once() : Times.Never());
+        connection.Verify(x => x.SaveInput(workspace.Id, "do it", false, It.IsAny<CancellationToken>()), queued ? Times.Never() : Times.Once());
+        Assert.Equal(("not a repository", string.Empty), (Chat.Error, Chat.Input));
+    }
+
+    [Fact]
+    public async Task RunInNewSession_ThatCanNotEvenPutTheInputBackKeepsItInTheMessageBox()
+    {
+        WorkspaceViewModel view = await Started();
+        SavedInput draft = Input("do it");
+        Saved(draft);
+        connection.Setup(x => x.TakeSavedInput(workspace.Id, draft.Id, It.IsAny<CancellationToken>())).ReturnsAsync(draft);
+        connection.Setup(x => x.CreateSideSession(workspace.Id, It.IsAny<string>(), It.IsAny<SideSessionStart>(), It.IsAny<string?>(), It.IsAny<bool>(), It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("down"));
+        connection.Setup(x => x.SaveInput(workspace.Id, "do it", true, It.IsAny<CancellationToken>())).ThrowsAsync(new IOException("down"));
+
+        view.RunInNewSessionCommand.Execute(draft);
+        await Task.Delay(50);
+
+        Assert.Equal(("do it", "down"), (Chat.Input, Chat.Error));
+    }
+
+    [Theory]
+    [InlineData("Fix the bug", "Fix the bug")]
+    [InlineData("one two three four five six seven", "one two three four five")]
+    [InlineData("\n  spaced\tout   words \nsecond line", "spaced out words")]
+    [InlineData("Attached file: /data/a.txt", "Session")]
+    [InlineData("main", "main 2")]
+    [InlineData("taken", "taken 3")]
+    [InlineData("supercalifragilisticexpialidocious_and_even_longer_than_that", "supercalifragilisticexpialidocious_and_e")]
+    public void SessionNames_AreTheFirstWordsAndOfTheirOwn(string text, string expected) => Assert.Equal(expected, text.ToSessionName(["Taken", "taken 2"]));
+
+    [Fact]
+    public async Task LoopNext_SaysTheLoopIsPausedWhileTheWorkIsStopped()
+    {
+        WorkspaceViewModel view = await Started();
+        Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x", AutoCommit = true }, StartedAt = DateTimeOffset.UtcNow } });
+        Assert.Contains("committing each run", view.LoopTip);
+
+        Told(new Agenda { IsStopped = true, Items = [Item(AgendaKind.Loop, "Loop: x")] });
+
+        Assert.Equal("The loop is paused since the work was stopped. It goes on after Resume.", view.LoopNext);
     }
 
     [Fact]
@@ -532,7 +581,7 @@ public sealed class QueuedInputViewModelTests
         connection.Verify(x => x.DiscardSavedInput(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
 
         Chat.AskDeleteSavedInputCommand.Execute(second);
-        Assert.Equal("Delete this saved input? This cannot be undone.", Chat.DeleteQuestion);
+        Assert.Equal("Delete this draft? This cannot be undone.", Chat.DeleteQuestion);
         Chat.ConfirmDeleteSavedInputCommand.Execute(null);
         await Task.Delay(50);
 
@@ -554,37 +603,21 @@ public sealed class QueuedInputViewModelTests
     }
 
     [Fact]
-    public async Task QueuedInputs_AreToldApartByWhetherTheyArePaused()
-    {
-        await Started();
-
-        Saved(Input("a", true), Input("b"));
-        Assert.True(Chat.HasActiveQueued);
-        Assert.False(Chat.HasPausedQueued);
-        Assert.Equal("Queued", Chat.SavedInputs[0].QueueLabel);
-
-        Saved(Input("a", true, true));
-        Assert.False(Chat.HasActiveQueued);
-        Assert.True(Chat.HasPausedQueued);
-        Assert.Equal("Queued, paused", Chat.SavedInputs[0].QueueLabel);
-    }
-
-    [Fact]
-    public async Task Notification_WaitsUntilTheQueuedInputsHaveAllBeenWorkedOn()
+    public async Task Notification_WaitsWhileTheAgendaHoldsMoreWork()
     {
         WorkspaceViewModel view = await Started();
         Working(true);
         model.ToggleNotifyCommand.Execute(null);
-        Saved(Input("next", true));
+        Told(Pending(Item(AgendaKind.Queued, "next", Guid.NewGuid(), true)));
 
         Working(false);
 
         notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
         Assert.True(view.NotifyWhenReady);
 
-        // The queued input starts, and only then leaves the list.
+        // The queued input starts, and only then leaves the agenda.
         Working(true);
-        Saved();
+        Told(new Agenda());
         notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
         Working(false);
 
@@ -595,28 +628,77 @@ public sealed class QueuedInputViewModelTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task Notification_IsGivenWhenTheQueueIsPausedOrEmptiedWhileTheWorkspaceIsReady(bool paused)
+    public async Task Notification_IsGivenWhenWhatWasUpNextIsStoppedOrRemovedWhileTheWorkspaceIsReady(bool stopped)
     {
         await Started();
         Working(true);
         model.ToggleNotifyCommand.Execute(null);
-        SavedInput queued = Input("next", true);
-        Saved(queued);
+        Agenda pending = Pending(Item(AgendaKind.Queued, "next", Guid.NewGuid(), true));
+        Told(pending);
         Working(false);
 
-        Saved(paused ? [queued with { IsPaused = true }] : []);
+        Told(stopped ? pending with { IsStopped = true } : new Agenda());
 
         notifier.Verify(x => x.Notify(workspace.Id, "app"), Times.Once);
     }
 
     [Fact]
-    public async Task NotifyButton_ShowsWhileQueuedInputsWaitToBeSent()
+    public async Task Notification_ReadsTheAgendaAgainAsWorkEndsBeforeTheServerHasToldOfWhatFollows()
+    {
+        WorkspaceViewModel view = await Started();
+        Working(true);
+        model.ToggleNotifyCommand.Execute(null);
+        connection.Setup(x => x.GetAgenda(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(Pending(Item(AgendaKind.Retry, "again")));
+
+        Working(false);
+
+        notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
+        Assert.True(view.NotifyWhenReady);
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task Notification_WaitsForALoopUnlessItIsStopped(bool stopped, bool notified)
+    {
+        await Started();
+        Working(true);
+        model.ToggleNotifyCommand.Execute(null);
+        Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = new LoopInfo { Settings = new LoopSettings { Prompt = "x" }, StartedAt = DateTimeOffset.UnixEpoch } });
+        Told(new Agenda { IsStopped = stopped, Items = [Item(AgendaKind.Loop, "Loop: x")] });
+
+        Working(false);
+
+        notifier.Verify(x => x.Notify(workspace.Id, "app"), notified ? Times.Once() : Times.Never());
+    }
+
+    [Fact]
+    public async Task NotifyButton_ShowsWhileMoreIsUpNext()
     {
         await Started();
         Assert.False(model.CanNotify);
 
-        Saved(Input("next", true));
+        Told(Pending(Item(AgendaKind.BringIn, "Bring in fix", Guid.NewGuid(), true)));
 
         Assert.True(model.CanNotify);
+    }
+
+    private ActivityEntry Entry(bool attention, bool ended) => new() { Id = Guid.NewGuid(), StartedAt = DateTimeOffset.UtcNow, EndedAt = ended ? DateTimeOffset.UtcNow : null, Source = ActivitySource.Queue, Title = "t", NeedsAttention = attention };
+
+    private void Activity(ActivityEntry entry) => Raise(new RemoteEvent { Kind = RemoteEventKind.ActivityChanged, WorkspaceId = workspace.Id, ActivityEntry = entry });
+
+    [Fact]
+    public async Task EndedActivityThatNeedsAttention_IsAnnouncedOncePerEntry()
+    {
+        await Started();
+        ActivityEntry entry = Entry(true, true);
+
+        Activity(entry);
+        Activity(entry with { Notes = ["more"] });
+        Activity(Entry(true, false));
+        Activity(Entry(false, true));
+
+        notifier.Verify(x => x.Announce(workspace.Id, "app needs attention"), Times.Once);
+        notifier.Verify(x => x.Announce(It.IsAny<Guid>(), It.IsAny<string>()), Times.Once);
     }
 }

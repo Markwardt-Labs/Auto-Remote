@@ -25,6 +25,8 @@ internal sealed class SwarmTestServer : IAsyncDisposable
 
     public SwarmCoordinator Coordinator { get; private set; } = null!;
 
+    public IFollowUps FollowUps { get; private set; } = null!;
+
     public int Port { get; private set; }
 
     /// <summary>
@@ -148,30 +150,38 @@ internal sealed class SwarmTestServer : IAsyncDisposable
         WorkspaceManager workspaces = new(store, folders, events, host);
         UsageService usage = new(host);
         ISessionTools? delegation = null;
-        prompts = new PromptService(workspaces, store, host, events, activity, snapshots, null, () => delegation);
+        IFollowUps? followUps = null;
+        ISideIntegrations? integrations = null;
+        ISwarmBringIns? bringIns = null;
+        ShellCommandLog shellCommands = new();
+        prompts = new PromptService(workspaces, store, host, events, activity, snapshots, null, () => delegation, shellCommands, () => followUps);
         SpeechService speech = new(Mock.Of<IWhisperEngine>());
         SavedInputs savedInputs = new(store, workspaces, events, speech);
-        Queue = new WorkQueue(workspaces, prompts, host, activity, savedInputs, events);
+        Queue = new WorkQueue(workspaces, prompts, host, activity, savedInputs, events, () => followUps);
         WorkspaceVersioning versioning = new(git, prompts, events, activity, Queue);
         ScriptRunner scripts = new(events);
         WindowGuard guard = new(workspaces, prompts, usage, host, events);
-        WorkspaceLoops loops = new(workspaces, prompts, activity, usage, events, TimeSpan.FromMilliseconds(20), null, null, guard, Queue);
+        WorkspaceLoops loops = new(workspaces, prompts, activity, usage, events, TimeSpan.FromMilliseconds(20), null, null, guard, Queue, id => integrations?.IsDelivering(id) == true || bringIns?.IsDelivering(id) == true, () => followUps);
         SwarmBook book = new(events, new ISwarmIdentity.Factory());
         SwarmCourier courier = new(book, new SwarmSealer());
         SwarmRepository repository = new(git) { AllowLocalRemotes = true };
         SwarmWorker worker = new(book, courier, repository, workspaces, prompts, Queue, store, host, events, (_, _) => System.Threading.Tasks.Task.FromResult<IReadOnlyList<string>>([]));
-        Coordinator = new SwarmCoordinator(book, courier, repository, workspaces, Queue, activity) { ReportRetry = TimeSpan.FromMilliseconds(50) };
+        Coordinator = new SwarmCoordinator(book, courier, repository, workspaces);
         WorkspaceWatcher watcher = new(events, Mock.Of<ILog>());
-        ISideIntegrations? integrations = null;
-        delegation = new CombinedSessionTools([new DelegationTools(book, Coordinator, worker, workspaces), new SideSessionTools(() => integrations!, worker.IsDelegated)]);
+        delegation = new CombinedSessionTools([new DelegationTools(book, Coordinator, worker, workspaces), new SideSessionTools(() => integrations!, worker.IsDelegated), new OutcomeTools(() => followUps!, worker.Unfinished)]);
         SideSessionRepository sideRepository = new(git);
-        SideSessions sideSessions = new(workspaces, sideRepository, store, prompts, Queue, loops, scripts, guard, snapshots, watcher, events, Mock.Of<ILog>());
+        SideSessions sideSessions = new(workspaces, sideRepository, store, prompts, Queue, loops, scripts, guard, snapshots, watcher, events, Mock.Of<ILog>(), () => followUps);
+        ActivityLog journal = new(events, Mock.Of<ILog>());
+        bringIns = new SwarmBringIns(book, Coordinator, repository, workspaces, prompts, Queue, activity, guard, snapshots, events, Mock.Of<ILog>(), sideSessions, () => followUps, journal, id => integrations!.Reopen(id)) { RetryDelay = TimeSpan.FromMilliseconds(100), Interval = TimeSpan.FromMilliseconds(40), Patience = TimeSpan.FromSeconds(5) };
         SwarmExchange exchange = new(book, courier, worker, Coordinator);
         SwarmDialer dialer = new(new IMessageChannel.Factory());
         SwarmLink link = new(book, courier, exchange, dialer, Mock.Of<ILog>()) { BusyInterval = TimeSpan.FromMilliseconds(40), QuietInterval = TimeSpan.FromMilliseconds(80) };
-        SwarmService swarm = new(book, courier, worker, Coordinator, new SwarmDrive(book, exchange), link, dialer, workspaces, activity, store, Mock.Of<ILog>());
-        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, Queue, activity, loops, scripts, guard, snapshots, events, Mock.Of<ILog>(), swarm, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(100));
-        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, loops, versioning, snapshots), speech, host, loops, watcher, Mock.Of<IServerUpdater>(), Mock.Of<ILog>(), Queue, swarm, sideSessions, integrations, sideRepository, Mock.Of<IResourceMonitor>(), Mock.Of<IFollowUps>());
+        SwarmService swarm = new(book, courier, worker, Coordinator, bringIns, new SwarmDrive(book, exchange), link, dialer, workspaces, store, Mock.Of<ILog>());
+        integrations = new SideIntegrations(workspaces, sideSessions, sideRepository, prompts, Queue, activity, loops, scripts, guard, snapshots, events, Mock.Of<ILog>(), swarm, TimeSpan.FromMilliseconds(50), TimeSpan.FromMilliseconds(100), () => followUps, journal, bringIns.Finish);
+        followUps = new FollowUps(workspaces, savedInputs, prompts, Queue, activity, versioning, git, loops, guard, events, journal, new AutomationStore(Mock.Of<ILog>()), new FailureKinds([TimeSpan.FromMilliseconds(200)]), swarm.IsAwaited, id => integrations.IsDelivering(id) || bringIns.IsDelivering(id) || swarm.IsDelegated(id), TimeSpan.FromMilliseconds(30), integrations.Reopen, swarm.IsDelegated);
+        FollowUps = followUps;
+        AgendaService agenda = new(workspaces, followUps, savedInputs, loops, Queue, guard, activity, events, id => [.. integrations.Pending(id), .. bringIns.Pending(id)], TimeSpan.FromMilliseconds(50));
+        RequestHandler handler = new(workspaces, folders, new WorkspaceFileBrowser(), git, versioning, savedInputs, new ErrorHistory(store, workspaces, events), guard, prompts, new DiagramService(), scripts, usage, activity, new WorkspaceControl(activity, prompts, versioning, snapshots), speech, host, loops, watcher, Mock.Of<IServerUpdater>(), Mock.Of<ILog>(), Queue, swarm, sideSessions, integrations, sideRepository, Mock.Of<IResourceMonitor>(), followUps, journal, agenda);
         await handler.Open(config, stopping.Token);
         ConnectionServer server = new(new Handshake(Mock.Of<IAppInfo>(info => info.Version == "1.2.3")), new IMessageChannel.Factory(), new WebSocketUpgrade(), new CertificateProvider(), handler, events, Mock.Of<ILog>(), null, link);
         TaskCompletionSource<int> listening = new();

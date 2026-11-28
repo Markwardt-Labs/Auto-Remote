@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// The tasks this server delegates: it snapshots the workspace, gives each task to a worker when the tasks it builds on are done and a worker is free (an air gapped task to the worker it names), takes the results back as branches of the workspace, and tells the workspace's AI once every task of a job it delegated has ended.
+/// The tasks this server delegates: it snapshots the workspace, gives each task to a worker when the tasks it builds on are done and a worker is free (an air gapped task to the worker it names), and takes the results back as branches of the workspace.
 /// </summary>
 internal interface ISwarmCoordinator
 {
@@ -17,7 +17,7 @@ internal interface ISwarmCoordinator
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
     /// <param name="tasks">The tasks.</param>
-    /// <param name="manual">Whether the user delegates them, so no AI is told when they end.</param>
+    /// <param name="manual">Whether the user delegates them, so no AI is told that they ended.</param>
     /// <param name="cancellation">Cancels the work.</param>
     /// <returns>The identifiers of the tasks, in order.</returns>
     /// <exception cref="RequestException">A task cannot be delegated.</exception>
@@ -72,15 +72,6 @@ internal interface ISwarmCoordinator
     Task<Guid> Retry(Guid taskId, CancellationToken cancellation);
 
     /// <summary>
-    /// Applies the changes of a finished task to the files of its workspace.
-    /// </summary>
-    /// <param name="taskId">The task.</param>
-    /// <param name="cancellation">Cancels the work.</param>
-    /// <returns>What was applied.</returns>
-    /// <exception cref="RequestException">The task has no changes to apply, or they cannot be applied.</exception>
-    Task<SwarmApplyResult> Apply(Guid taskId, CancellationToken cancellation);
-
-    /// <summary>
     /// Removes an ended task with its result branch.
     /// </summary>
     /// <param name="taskId">The task.</param>
@@ -88,6 +79,13 @@ internal interface ISwarmCoordinator
     /// <returns>A task that completes once removed.</returns>
     /// <exception cref="RequestException">No such ended task exists.</exception>
     Task Discard(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Removes a task whose result was taken over, with its result branch and, in the git remote mode, its branches on the remote. Tasks still waiting to build on it keep its result.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <returns>A task that completes once removed.</returns>
+    Task Complete(Guid taskId);
 
     /// <summary>
     /// Describes the changes of a finished task.
@@ -120,7 +118,7 @@ internal interface ISwarmCoordinator
     Task Revoke(string peerId);
 
     /// <summary>
-    /// Checks whether the AI of a workspace delegated tasks whose outcome it has not been told yet, which its work goes on with.
+    /// Checks whether the AI of a workspace delegated tasks that are still under way, whose results its work goes on with. Once they ended, telling it and bringing the results in is work of the workspace that waits for its turn.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
     /// <returns><see langword="true" /> if it has.</returns>
@@ -130,7 +128,7 @@ internal interface ISwarmCoordinator
     /// Tells whether tasks a workspace delegated are still under way.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
-    /// <returns>Whether any is waiting, on its way or running, or its AI has yet to be told how they ended.</returns>
+    /// <returns>Whether any is waiting, on its way or running, its AI has yet to be told how they ended, or a result is still to be brought in.</returns>
     Task<bool> IsUnderWay(Guid workspaceId);
 
     /// <summary>
@@ -142,19 +140,15 @@ internal interface ISwarmCoordinator
 }
 
 /// <inheritdoc />
-internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, ISwarmRepository repository, IWorkspaceManager workspaces, IWorkQueue queue, IWorkspaceActivity activity, IWindowGuard? guard = null, ILog? log = null) : ISwarmCoordinator
+internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, ISwarmRepository repository, IWorkspaceManager workspaces, ILog? log = null) : ISwarmCoordinator
 {
     private readonly SemaphoreSlim dispatching = new(1, 1);
-
-    private readonly ConcurrentDictionary<Guid, int> reporting = new();
 
     private readonly ConcurrentDictionary<Guid, (DateTimeOffset Since, int Attempts)> failing = new();
 
     private readonly int leastAttempts = 3;
 
     private readonly TimeSpan takePatience = TimeSpan.FromMinutes(30);
-
-    private readonly TimeSpan longestReportPause = TimeSpan.FromMinutes(15);
 
     private readonly TimeSpan freshness = TimeSpan.FromSeconds(90);
 
@@ -168,18 +162,13 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
 
     private DateTimeOffset checkedAt = DateTimeOffset.UtcNow;
 
-    private readonly int summaryLimit = 1500;
-
     private readonly int chatLimit = 2000;
 
     private readonly int reportLimit = 100_000;
 
-    private readonly int errorLimit = 4000;
+    private readonly int dependencyReportLimit = 20_000;
 
-    /// <summary>
-    /// Gets how long to wait before telling the AI again after its workspace could not take the message.
-    /// </summary>
-    internal TimeSpan ReportRetry { get; init; } = TimeSpan.FromSeconds(5);
+    private readonly int errorLimit = 4000;
 
     /// <inheritdoc />
     public Task Open(CancellationToken cancellation)
@@ -282,6 +271,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
                 SnapshotCommit = snapshot,
                 BaseCommit = snapshot,
                 IsManual = manual,
+                BringIn = request.BringIn,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
             });
@@ -318,9 +308,10 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             dispatching.Release();
         }
 
-        foreach (Guid job in await book.Read(document => document.Jobs.Where(job => !job.IsReported).Select(job => job.Id).ToList()))
+        // Nobody is told about the jobs the user delegated by hand.
+        if (await book.Read(document => document.Jobs.Any(job => job is { IsManual: true, IsReported: false } && document.IsOver(job.Id))))
         {
-            await FollowUp(job);
+            await book.Change(document => document.Jobs.Where(job => job is { IsManual: true, IsReported: false } && document.IsOver(job.Id)).ToList().ForEach(job => job.IsReported = true), false);
         }
     }
 
@@ -385,7 +376,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             {
                 try
                 {
-                    await repository.DeleteRemote(abandoned, Branches(task.Id), CancellationToken.None);
+                    await repository.DeleteRemote(abandoned, Branches(task), CancellationToken.None);
                 }
                 catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException)
                 {
@@ -416,7 +407,8 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         string? error = result.Error;
         SwarmTaskState state = result.Outcome switch { SwarmOutcome.Done => SwarmTaskState.Done, SwarmOutcome.Cancelled => SwarmTaskState.Cancelled, _ => SwarmTaskState.Failed };
 
-        if (state == SwarmTaskState.Done && result.ResultCommit is not null)
+        // A task the AI could not finish still sends back what it changed.
+        if (state is SwarmTaskState.Done or SwarmTaskState.Failed && result.ResultCommit is not null)
         {
             try
             {
@@ -443,8 +435,8 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
                     throw new RequestException($"The result could not be taken yet: {exception.Message}") { IsTemporary = true };
                 }
 
+                error = state == SwarmTaskState.Failed && error is not null ? $"{error} Its changes could not be taken: {exception.Message}" : $"The result could not be taken: {exception.Message}";
                 state = SwarmTaskState.Failed;
-                error = $"The result could not be taken: {exception.Message}";
                 commit = null;
                 branch = null;
             }
@@ -530,9 +522,16 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         string folder = await Folder(task.WorkspaceId) ?? throw new RequestException("The workspace of the task is gone.");
         Guid id = Guid.NewGuid();
         await repository.Pin(folder, id, task.SnapshotCommit, cancellation);
+        List<SwarmDependency> kept = await book.Read(document => task.Dependencies.ToList());
+
+        foreach (SwarmDependency dependency in kept.Where(dependency => dependency.ResultCommit is not null))
+        {
+            await repository.PinDependency(folder, id, dependency.TaskId, dependency.ResultCommit!, cancellation);
+        }
+
         await book.Change(document =>
         {
-            document.Outgoing.Add(new SwarmOutgoing { Id = id, JobId = task.JobId, WorkspaceId = task.WorkspaceId, Title = task.Title, Instructions = task.Instructions, ExpectedResult = task.ExpectedResult, Capability = task.Capability, RequestedPeerId = task.RequestedPeerId, PeerName = task.RequestedPeerId is null ? string.Empty : task.PeerName, DependsOn = [.. task.DependsOn], State = task.DependsOn.Count > 0 ? SwarmTaskState.Waiting : SwarmTaskState.Pending, RepoKey = task.RepoKey, SnapshotCommit = task.SnapshotCommit, BaseCommit = task.SnapshotCommit, IsManual = task.IsManual, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
+            document.Outgoing.Add(new SwarmOutgoing { Id = id, JobId = task.JobId, WorkspaceId = task.WorkspaceId, Title = task.Title, Instructions = task.Instructions, ExpectedResult = task.ExpectedResult, Capability = task.Capability, RequestedPeerId = task.RequestedPeerId, PeerName = task.RequestedPeerId is null ? string.Empty : task.PeerName, DependsOn = [.. task.DependsOn], Dependencies = kept, State = task.DependsOn.Count > 0 ? SwarmTaskState.Waiting : SwarmTaskState.Pending, RepoKey = task.RepoKey, SnapshotCommit = task.SnapshotCommit, BaseCommit = task.SnapshotCommit, IsManual = task.IsManual, BringIn = task.BringIn, CommitBringIn = task.CommitBringIn, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
 
             // The tasks that waited for the failed one wait for its replacement.
             foreach (SwarmOutgoing waiting in document.Outgoing.Where(other => other.State == SwarmTaskState.Waiting && other.DependsOn.Contains(taskId)))
@@ -548,34 +547,6 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         });
         await DispatchSoon();
         return id;
-    }
-
-    /// <inheritdoc />
-    public async Task<SwarmApplyResult> Apply(Guid taskId, CancellationToken cancellation)
-    {
-        SwarmOutgoing task = await Find(taskId);
-
-        if (task is not { State: SwarmTaskState.Done, ResultCommit: { } result })
-        {
-            throw new RequestException(task.State == SwarmTaskState.Done ? "The task changed no files." : "Only a finished task has changes to apply.");
-        }
-
-        if (task.IsApplied)
-        {
-            throw new RequestException("The changes of this task were already applied.");
-        }
-
-        RequireOpen(task.WorkspaceId);
-        string folder = await Folder(task.WorkspaceId) ?? throw new RequestException("The workspace of the task is gone.");
-        SwarmApplyResult applied = await repository.Apply(folder, task.BaseCommit, result, cancellation);
-        await Update(entry => entry.Id == taskId, entry => entry.IsApplied = true);
-
-        if (task.Mode == SwarmMode.GitRemote)
-        {
-            await repository.DeleteRemote(folder, Branches(taskId), cancellation);
-        }
-
-        return applied;
     }
 
     /// <inheritdoc />
@@ -611,9 +582,9 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         {
             await repository.Release(folder, taskId, task.Branch, cancellation);
 
-            if (task.Mode == SwarmMode.GitRemote && task.RemoteUrl is not null && !task.IsApplied)
+            if (task.Mode == SwarmMode.GitRemote && task.RemoteUrl is not null)
             {
-                await repository.DeleteRemote(folder, Branches(taskId), cancellation);
+                await repository.DeleteRemote(folder, Branches(task), cancellation);
             }
         }
 
@@ -624,6 +595,59 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             document.Jobs.RemoveAll(job => document.Outgoing.All(entry => entry.JobId != job.Id));
         });
         await DispatchSoon();
+    }
+
+    /// <inheritdoc />
+    public async Task Complete(Guid taskId)
+    {
+        SwarmOutgoing task = await Find(taskId);
+        string? folder = await Folder(task.WorkspaceId);
+
+        if (folder is not null && task.ResultCommit is { } result)
+        {
+            foreach (Guid waiting in await book.Read(document => document.Outgoing.Where(other => other.State == SwarmTaskState.Waiting && other.DependsOn.Contains(taskId)).Select(other => other.Id).ToList()))
+            {
+                try
+                {
+                    await repository.PinDependency(folder, waiting, taskId, result, CancellationToken.None);
+                }
+                catch (RequestException exception)
+                {
+                    log?.Write($"A result a waiting task builds on could not be kept: {exception.Message}");
+                }
+            }
+        }
+
+        await book.Change(document =>
+        {
+            if (document.Outgoing.FirstOrDefault(entry => entry.Id == taskId) is not { } done)
+            {
+                return;
+            }
+
+            foreach (SwarmOutgoing waiting in document.Outgoing.Where(other => other.State == SwarmTaskState.Waiting && other.DependsOn.Contains(taskId)))
+            {
+                waiting.Dependencies = [.. waiting.Dependencies.Where(dependency => dependency.TaskId != taskId), Capture(done)];
+            }
+
+            document.Outgoing.Remove(done);
+            document.Jobs.RemoveAll(job => document.Outgoing.All(entry => entry.JobId != job.Id));
+        });
+        book.DeleteChat(taskId);
+        book.AnnounceTask(taskId);
+
+        if (folder is not null)
+        {
+            await repository.Release(folder, taskId, task.Branch, CancellationToken.None);
+
+            if (task.Mode == SwarmMode.GitRemote && task.RemoteUrl is not null)
+            {
+                // Whoever took the result over does not wait for a remote that may be slow or unreachable.
+                _ = DeleteRemoteApart(folder, Branches(task));
+            }
+        }
+
+        _ = Schedule();
     }
 
     /// <inheritdoc />
@@ -669,12 +693,13 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
 
     /// <inheritdoc />
     public Task<bool> IsAwaited(Guid workspaceId)
-        => book.Read(document => document.Jobs.Any(job => job.WorkspaceId == workspaceId && !job.IsManual && !job.IsReported && document.Outgoing.Any(task => task.JobId == job.Id)));
+        => book.Read(document => document.Jobs.Any(job => job.WorkspaceId == workspaceId && job is { IsManual: false, IsReported: false } && document.Outgoing.Any(task => task.JobId == job.Id) && !document.IsOver(job.Id)));
 
     /// <inheritdoc />
     public async Task<bool> IsUnderWay(Guid workspaceId)
         => await book.Read(document => document.Outgoing.Any(task => task.WorkspaceId == workspaceId && task.State is SwarmTaskState.Waiting or SwarmTaskState.Pending or SwarmTaskState.InTransit or SwarmTaskState.Queued or SwarmTaskState.Running)
-            || document.Jobs.Any(job => job.WorkspaceId == workspaceId && !job.IsManual && !job.IsReported && document.Outgoing.Any(task => task.JobId == job.Id)));
+            || document.Outgoing.Any(task => task.WorkspaceId == workspaceId && (task.TurnId is not null || task is { BringIn: true, State: SwarmTaskState.Done, ResultCommit: not null }))
+            || document.Jobs.Any(job => job.WorkspaceId == workspaceId && job is { IsManual: false, IsReported: false } && document.Outgoing.Any(task => task.JobId == job.Id)));
 
     /// <inheritdoc />
     public async Task Forget(Guid workspaceId)
@@ -741,10 +766,13 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
 
         foreach (SwarmOutgoing task in waiting)
         {
-            List<SwarmOutgoing?> dependencies = await book.Read(document => task.DependsOn.Select(id => document.Outgoing.FirstOrDefault(other => other.Id == id)).ToList());
+            // A finished task whose result was brought in is gone, but what was taken of it is kept with this one.
+            List<(SwarmTaskState? State, SwarmDependency? Result)> dependencies = await book.Read(document => task.DependsOn.Select(id => document.Outgoing.FirstOrDefault(other => other.Id == id) is { } other
+                ? ((SwarmTaskState?)other.State, other.State == SwarmTaskState.Done ? Capture(other) : null)
+                : task.Dependencies.FirstOrDefault(kept => kept.TaskId == id) is { } taken ? (SwarmTaskState.Done, taken) : ((SwarmTaskState?)null, (SwarmDependency?)null)).ToList());
 
             // A lost task may still come back, so what builds on it keeps waiting.
-            if (dependencies.Any(dependency => dependency is null || dependency.State is SwarmTaskState.Failed or SwarmTaskState.Cancelled))
+            if (dependencies.Any(dependency => dependency.State is null or SwarmTaskState.Failed or SwarmTaskState.Cancelled))
             {
                 await Update(entry => entry.Id == task.Id && entry.State == SwarmTaskState.Waiting, entry =>
                 {
@@ -754,7 +782,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
                 continue;
             }
 
-            if (dependencies.Any(dependency => dependency!.State != SwarmTaskState.Done))
+            if (dependencies.Any(dependency => dependency.State != SwarmTaskState.Done))
             {
                 continue;
             }
@@ -762,17 +790,18 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             try
             {
                 string folder = await Folder(task.WorkspaceId) ?? throw new RequestException("The workspace of the task is gone.");
-                string start = task.SnapshotCommit;
+                List<SwarmDependency> results = [.. dependencies.Select(dependency => dependency.Result!)];
 
-                foreach (SwarmOutgoing dependency in dependencies.Select(dependency => dependency!).Where(dependency => dependency.ResultCommit is not null))
+                foreach (SwarmDependency dependency in results.Where(dependency => dependency.ResultCommit is not null))
                 {
-                    start = await repository.Merge(folder, start, dependency.BaseCommit, dependency.ResultCommit!, CancellationToken.None);
+                    await repository.PinDependency(folder, task.Id, dependency.TaskId, dependency.ResultCommit!, CancellationToken.None);
                 }
 
-                await repository.Pin(folder, task.Id, start, CancellationToken.None);
+                await repository.Pin(folder, task.Id, task.SnapshotCommit, CancellationToken.None);
                 await Update(entry => entry.Id == task.Id && entry.State == SwarmTaskState.Waiting, entry =>
                 {
-                    entry.BaseCommit = start;
+                    entry.Dependencies = results;
+                    entry.BaseCommit = entry.SnapshotCommit;
                     entry.State = SwarmTaskState.Pending;
                 });
             }
@@ -787,19 +816,23 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         }
     }
 
+    private SwarmDependency Capture(SwarmOutgoing task) => new() { TaskId = task.Id, Title = task.Title, BaseCommit = task.BaseCommit, ResultCommit = task.ResultCommit, Report = Limit(task.Report, dependencyReportLimit), Includes = task.ResultCommit is null ? [] : task.Dependencies.Included() };
+
     private async Task<string?> Choose(Guid taskId)
     {
-        (SwarmOutgoing? task, string? chosen, string? failure) = await book.Read<(SwarmOutgoing?, string?, string?)>(document =>
+        (SwarmOutgoing? task, string? chosen, string? failure, string? held) = await book.Read<(SwarmOutgoing?, string?, string?, string?)>(document =>
         {
             if (document.Outgoing.FirstOrDefault(task => task.Id == taskId && task.State == SwarmTaskState.Pending) is not { } task)
             {
-                return (null, null, null);
+                return (null, null, null, null);
             }
 
             // What a worker said some time ago says nothing about one that has since been switched off.
             bool Fresh(SwarmPeerRecord peer) => peer.LastSeen is { } seen && DateTimeOffset.UtcNow - seen < freshness;
             bool Offers(SwarmPeerRecord peer) => peer.Profile is { } profile && profile.Capabilities.Any(capability => capability.Capability == task.Capability);
             int Available(SwarmPeerRecord peer) => (peer.Profile?.FreeSlots ?? 0) - document.Outgoing.Count(other => other.PeerId == peer.Identity.Id && other.State == SwarmTaskState.InTransit);
+            bool needs = task.Dependencies.HasChanges;
+            bool Builds(SwarmPeerRecord peer) => !needs || peer.Profile?.Version >= SwarmProfileBody.DependencyVersion;
 
             if (task.RequestedPeerId is { } requested)
             {
@@ -807,28 +840,51 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
 
                 if (peer is not { SendWork: true })
                 {
-                    return (task, null, "Its worker is no longer set to receive work.");
+                    return (task, null, "Its worker is no longer set to receive work.", null);
+                }
+
+                if (!Builds(peer))
+                {
+                    // What is known of an air gapped worker only changes with the drive, so there is nothing to wait for.
+                    if (peer is { Mode: SwarmMode.AirGapped, Profile: not null })
+                    {
+                        return (task, null, $"It builds on the changes of other tasks, which {peer.Name} cannot take with its version of Auto Remote. Update it, sync the drive both ways, and retry.", null);
+                    }
+
+                    return (task, null, null, peer.Profile is null
+                        ? $"It builds on the changes of other tasks, and it is not known yet whether {peer.Name} can take that{(peer.Mode == SwarmMode.AirGapped ? "; sync the drive to find out" : string.Empty)}."
+                        : $"It builds on the changes of other tasks, which {peer.Name} cannot take with its version of Auto Remote. Update it.");
                 }
 
                 bool ready = peer.Mode == SwarmMode.AirGapped || Fresh(peer) && peer.Profile is { AcceptsWork: true } && Offers(peer) && Available(peer) > 0;
-                return (task, ready ? requested : null, null);
+                return (task, ready ? requested : null, null, null);
             }
 
-            string? any = document.Peers.Where(peer => peer.SendWork && peer.Mode != SwarmMode.AirGapped && Fresh(peer) && peer.Profile is { AcceptsWork: true } && Offers(peer) && Available(peer) > 0)
+            List<SwarmPeerRecord> able = [.. document.Peers.Where(peer => peer.SendWork && peer.Mode != SwarmMode.AirGapped && Fresh(peer) && peer.Profile is { AcceptsWork: true } && Offers(peer))];
+            string? any = able.Where(peer => Builds(peer) && Available(peer) > 0)
                 .OrderByDescending(peer => peer.Profile!.LoadedCapabilities.Contains(task.Capability))
                 .ThenByDescending(Available)
                 .ThenBy(peer => peer.Name, StringComparer.OrdinalIgnoreCase)
                 .FirstOrDefault()?.Identity.Id;
-            return (task, any, null);
+            return (task, any, null, able.Count > 0 && !able.Any(Builds) ? "It builds on the changes of other tasks, which no worker that could take it can do with its version of Auto Remote. Update one." : null);
         });
 
-        if (task is not null && failure is not null)
+        if (task is null)
+        {
+            return null;
+        }
+
+        if (failure is not null)
         {
             await Update(entry => entry.Id == taskId && entry.State == SwarmTaskState.Pending, entry =>
             {
                 entry.State = SwarmTaskState.Failed;
                 entry.Error = failure;
             });
+        }
+        else if (chosen is null && await book.Read(document => document.Outgoing.Any(entry => entry.Id == taskId && entry.State == SwarmTaskState.Pending && entry.Error != held)))
+        {
+            await Update(entry => entry.Id == taskId && entry.State == SwarmTaskState.Pending, entry => entry.Error = held);
         }
 
         return chosen;
@@ -846,9 +902,9 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
                 await repository.Release(folder, task.Id, null, patience.Token);
             }
 
-            foreach (SwarmOutgoing task in tasks.Where(task => task.Mode == SwarmMode.GitRemote && task.RemoteUrl is not null && !task.IsApplied))
+            foreach (SwarmOutgoing task in tasks.Where(task => task.Mode == SwarmMode.GitRemote && task.RemoteUrl is not null))
             {
-                await repository.DeleteRemote(folder, Branches(task.Id), patience.Token);
+                await repository.DeleteRemote(folder, Branches(task), patience.Token);
             }
         }
         catch (Exception exception) when (exception is OperationCanceledException or RequestException or IOException or UnauthorizedAccessException)
@@ -876,13 +932,18 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
             {
                 url = await repository.Remote(folder, CancellationToken.None);
                 await repository.Push(folder, "origin", task.BaseCommit, $"swarm/tasks/{taskId:N}", CancellationToken.None);
+
+                foreach (SwarmDependency dependency in task.Dependencies.Where(dependency => dependency.ResultCommit is not null))
+                {
+                    await repository.Push(folder, "origin", dependency.ResultCommit!, DependencyBranch(taskId, dependency.TaskId), CancellationToken.None);
+                }
             }
             else
             {
                 bundle = await repository.Bundle(folder, taskId, known, CancellationToken.None);
             }
 
-            SwarmTaskBody body = new() { TaskId = taskId, JobId = task.JobId, Title = task.Title, Instructions = task.Instructions, ExpectedResult = task.ExpectedResult, Capability = task.Capability, Mode = mode, RepoKey = task.RepoKey, BaseCommit = task.BaseCommit, RemoteUrl = url };
+            SwarmTaskBody body = new() { TaskId = taskId, JobId = task.JobId, Title = task.Title, Instructions = task.Instructions, ExpectedResult = task.ExpectedResult, Capability = task.Capability, Mode = mode, RepoKey = task.RepoKey, BaseCommit = task.BaseCommit, RemoteUrl = url, Dependencies = [.. task.Dependencies] };
             Guid message = await courier.Post(peerId, SwarmMessageKind.Task, body, bundle);
             bool sent = await book.Change(document =>
             {
@@ -948,122 +1009,6 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         }
     }, false);
 
-    // A job is told once all its tasks ended; it counts as told only after the message started, so a restart in between tells it again.
-    private async Task FollowUp(Guid jobId)
-    {
-        (bool IsManual, int Revision, List<SwarmOutgoing> Tasks)? ended = await book.Read<(bool, int, List<SwarmOutgoing>)?>(document =>
-        {
-            if (document.Jobs.FirstOrDefault(job => job.Id == jobId) is not { IsReported: false } job)
-            {
-                return null;
-            }
-
-            List<SwarmOutgoing> tasks = [.. document.Outgoing.Where(task => task.JobId == jobId).OrderBy(task => task.CreatedAt)];
-            return tasks.Count > 0 && tasks.All(task => Over(task, tasks)) ? (job.IsManual, job.Revision, tasks) : null;
-        });
-
-        if (ended is not { } report)
-        {
-            return;
-        }
-
-        if (report.IsManual)
-        {
-            await Reported(jobId, report.Revision);
-        }
-        else if (reporting.TryAdd(jobId, report.Revision))
-        {
-            _ = Report(jobId, report.Revision, report.Tasks);
-        }
-    }
-
-    // Over means nothing more happens to it by itself: it ended, or it waits on a task that was lost.
-    private bool Over(SwarmOutgoing task, IReadOnlyList<SwarmOutgoing> job) => task.State is SwarmTaskState.Done or SwarmTaskState.Failed or SwarmTaskState.Cancelled or SwarmTaskState.Lost
-        || task.State == SwarmTaskState.Waiting && task.DependsOn.Any(id => job.FirstOrDefault(other => other.Id == id) is { } dependency && (dependency.State == SwarmTaskState.Lost || dependency.State == SwarmTaskState.Waiting && Over(dependency, job)));
-
-    private Task Reported(Guid jobId, int revision) => book.Change(document =>
-    {
-        if (document.Jobs.FirstOrDefault(job => job.Id == jobId) is { } job && job.Revision == revision)
-        {
-            job.IsReported = true;
-        }
-    }, false);
-
-    private async Task Report(Guid jobId, int revision, IReadOnlyList<SwarmOutgoing> tasks)
-    {
-        Guid workspace = tasks[0].WorkspaceId;
-        StringBuilder text = new($"[Auto Remote] Your delegated tasks have ended (job {jobId:N}).\n");
-
-        foreach (SwarmOutgoing task in tasks)
-        {
-            text.Append(CultureInfo.InvariantCulture, $"\n- Task {task.Id:N} \"{task.Title}\" on {(task.PeerName.Length > 0 ? task.PeerName : "no worker")}: {task.State}{(task.Error is { } error ? $" ({error})" : string.Empty)}");
-
-            if (task.State == SwarmTaskState.Waiting)
-            {
-                text.Append(" (it waits on a lost task; it runs if that one comes back)");
-            }
-
-            if (task.Branch is { } branch)
-            {
-                text.Append(CultureInfo.InvariantCulture, $"\n  Changes are on the branch {branch}.");
-            }
-
-            if (!string.IsNullOrWhiteSpace(task.Report))
-            {
-                string report = task.Report.Length > summaryLimit ? $"{task.Report[..summaryLimit]}..." : task.Report;
-                text.Append(CultureInfo.InvariantCulture, $"\n  Report: {report.Replace("\n", "\n  ", StringComparison.Ordinal)}");
-            }
-        }
-
-        text.Append("\n\nCheck each finished task with review_task and apply the changes you accept to this workspace with apply_task, which does not commit them. Do not take a report on trust: check the changes.");
-        string prompt = text.ToString();
-
-        TimeSpan pause = ReportRetry;
-
-        try
-        {
-            while (await Folder(workspace) is not null && await book.Read(document => document.Jobs.Any(job => job.Id == jobId && job.Revision == revision)))
-            {
-                try
-                {
-                    if (!await Free(workspace, prompt))
-                    {
-                        await Task.Delay(ReportRetry);
-                        continue;
-                    }
-
-                    // It counts as told once it started, or once the user removed it from the queue, which keeps its text.
-                    await (await queue.Submit(workspace, prompt, WorkSource.Report, CancellationToken.None)).Started;
-                    await Reported(jobId, revision);
-                    return;
-                }
-                catch (RequestException)
-                {
-                    // Each attempt that reaches the AI leaves the message in the chat, so failures are tried ever more rarely.
-                    await Task.Delay(pause);
-                    pause = pause * 2 < longestReportPause ? pause * 2 : longestReportPause;
-                }
-            }
-        }
-        finally
-        {
-            reporting.TryRemove(jobId, out _);
-        }
-
-        // The job changed while it was being told, so it is looked at again.
-        if (await book.Read(document => document.Jobs.Any(job => job.Id == jobId && job.Revision != revision)))
-        {
-            await FollowUp(jobId);
-        }
-    }
-
-    // Nothing but the user may give a workspace work past a usage limit, and git must not have the files.
-    private async Task<bool> Free(Guid workspaceId, string prompt)
-    {
-        WorkspaceInfo workspace = await workspaces.Get(workspaceId, CancellationToken.None);
-        return activity.Get(workspaceId) is WorkspaceState.Ready or WorkspaceState.Working && queue.Get(workspaceId) is null && (guard is null || await guard.Over(workspaceId, workspace.Service, prompt, CancellationToken.None) is null);
-    }
-
     private Task Schedule() => Task.Run(async () =>
     {
         try
@@ -1082,7 +1027,7 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
     {
         if (workspaces.GetSide(workspaceId) is { State: not SideSessionState.Ready })
         {
-            throw new RequestException("The side session of this task is being set up, integrated or removed.");
+            throw new RequestException("The side session of this task is being set up, brought into main or removed.");
         }
     }
 
@@ -1125,7 +1070,23 @@ internal sealed class SwarmCoordinator(ISwarmBook book, ISwarmCourier courier, I
         }
     }
 
-    private IReadOnlyList<string> Branches(Guid taskId) => [$"swarm/tasks/{taskId:N}", $"swarm/results/{taskId:N}"];
+    private async Task DeleteRemoteApart(string folder, IReadOnlyList<string> branches)
+    {
+        using CancellationTokenSource patience = new(tidyPatience);
+
+        try
+        {
+            await repository.DeleteRemote(folder, branches, patience.Token);
+        }
+        catch (Exception exception) when (exception is OperationCanceledException or RequestException or IOException or UnauthorizedAccessException)
+        {
+            log?.Write($"The branches of a delegated task were left on the remote: {exception.Message}");
+        }
+    }
+
+    private string DependencyBranch(Guid taskId, Guid dependencyId) => $"swarm/dependencies/{taskId:N}/{dependencyId:N}";
+
+    private IReadOnlyList<string> Branches(SwarmOutgoing task) => [$"swarm/tasks/{task.Id:N}", $"swarm/results/{task.Id:N}", .. task.Dependencies.Where(dependency => dependency.ResultCommit is not null).Select(dependency => DependencyBranch(task.Id, dependency.TaskId))];
 
     private string Slug(string title)
     {

@@ -50,6 +50,11 @@ public sealed class SideSessionViewModelTests : IDisposable
 
     private async Task Open() => await model.Start(main.Id);
 
+    private SendOptionsViewModel Options => model.Active!.SendOptions;
+
+    // What the list's button does: the panel opens on a new session.
+    private void NewSession() => model.Sessions.NewCommand.Execute(null);
+
     private SessionEntry Row(string name) => model.Sessions.Entries.Single(entry => entry.Name == name);
 
     private async Task Until(Func<bool> condition)
@@ -112,7 +117,7 @@ public sealed class SideSessionViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ASessionBeingSetUpOrIntegratedCannotBeOpenedAndAShownOneThatIsIntegratedGivesWayToMain()
+    public async Task ASessionBeingSetUpOrBroughtInCannotBeOpenedAndAShownOneThatIsBroughtInGivesWayToMain()
     {
         await Open();
         model.Sessions.ChooseCommand.Execute(Row("fix-login"));
@@ -121,7 +126,7 @@ public sealed class SideSessionViewModelTests : IDisposable
         Change(Catalog(With(side, current => current with { State = SideSessionState.Integrating }), setting));
 
         Assert.Equal((main.Id, "app"), (model.Active!.Workspace.Id, model.Title));
-        Assert.Equal(("Integrating", false, true, false), (Row("fix-login").Status, Row("fix-login").CanOpen, Row("fix-login").IsIntegrating, Row("fix-login").HasActions));
+        Assert.Equal(("Bringing In", false, true, false), (Row("fix-login").Status, Row("fix-login").CanOpen, Row("fix-login").IsIntegrating, Row("fix-login").HasActions));
         Assert.Equal(("Setting Up", false, true, false), (Row("new").Status, Row("new").CanOpen, Row("new").CanDelete, Row("new").CanManage));
 
         model.Sessions.ChooseCommand.Execute(Row("fix-login"));
@@ -173,30 +178,33 @@ public sealed class SideSessionViewModelTests : IDisposable
     public async Task ANewSessionDefaultsByWhetherMainsAiWorksWhenAskedAndIsSwitchedToOnceItIsSetUp()
     {
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
-        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", true, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
+        model.Sessions.IsOpen = true;
 
-        model.Sessions.NewCommand.Execute(null);
+        NewSession();
 
-        Assert.Equal((SessionDialog.New, true, false, "New session", "Create Session", "Cancel"), (model.Sessions.Dialog, model.Sessions.UseCurrentFiles, model.Sessions.UseCurrentCommit, model.Sessions.DialogTitle, model.Sessions.ConfirmText, model.Sessions.DismissText));
+        Assert.Equal((false, true, true, true, "Start Session"), (model.Sessions.IsOpen, Options.IsOpen, Options.IsNewSession, Options.UseCurrentFiles, Options.ConfirmText));
 
-        // What main does after the dialog opened leaves the choice alone.
-        State(main.Id, WorkspaceState.Working);
-        Assert.True(model.Sessions.UseCurrentFiles);
-        model.Sessions.DismissCommand.Execute(null);
-        model.Sessions.NewCommand.Execute(null);
-        Assert.True(model.Sessions.UseCurrentCommit);
-        model.Sessions.UseCurrentFiles = true;
+        // What main does after the panel opened leaves the choice alone.
+        Working(main.Id, true);
+        Assert.True(Options.UseCurrentFiles);
+        Options.CancelCommand.Execute(null);
+        NewSession();
+        Assert.True(Options.UseCurrentCommit);
+        Options.UseCurrentFiles = true;
 
-        model.Sessions.ConfirmCommand.Execute(null);
-        Assert.Equal("Enter a name.", model.Sessions.Error);
-        model.Sessions.Name = " second ";
-        model.Sessions.FirstTask = " do it ";
+        Options.ConfirmCommand.Execute(null);
+        Assert.Equal("Enter a name.", Options.Error);
+        Options.Name = " second ";
+        Assert.True(Options.KeepsSeparate);
+        model.Active!.Chat.Input = " do it ";
+        Assert.True(Options.BringsIn);
         catalog = Catalog(side, made);
-        model.Sessions.ConfirmCommand.Execute(null);
-        await Until(() => model.Sessions.Dialog == SessionDialog.None);
+        Options.ConfirmCommand.Execute(null);
+        await Until(() => !Options.IsOpen);
 
-        Assert.Equal(main.Id, model.Active!.Workspace.Id);
+        Assert.Equal((main.Id, string.Empty), (model.Active!.Workspace.Id, model.Active.Chat.Input));
         model.Sessions.IsOpen = true;
 
         Change(Catalog(side, With(made, current => current with { State = SideSessionState.Ready })));
@@ -208,15 +216,32 @@ public sealed class SideSessionViewModelTests : IDisposable
     }
 
     [Fact]
+    public async Task ANewSessionAskedForFromASideSessionIsOneOfMainAndStartsFromTheCommitWhileMainWorks()
+    {
+        await Open();
+        State(main.Id, WorkspaceState.Working);
+        model.Sessions.ChooseCommand.Execute(Row("fix-login"));
+        WorkspaceViewModel view = model.Active!;
+
+        NewSession();
+        Options.Name = "second";
+        Assert.Equal((true, "Bring Into Main"), (Options.UseCurrentCommit, Options.BringInText));
+        Options.ConfirmCommand.Execute(null);
+
+        connection.Verify(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Commit, null, false, It.IsAny<CancellationToken>()), Times.Once);
+        Assert.Equal(side.Id, view.Workspace.Id);
+    }
+
+    [Fact]
     public async Task ANewSessionIsNotSwitchedToWhenTheUserWentElsewhereMeanwhile()
     {
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
-        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, null, It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, null, false, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
-        model.Sessions.NewCommand.Execute(null);
-        model.Sessions.Name = "second";
+        NewSession();
+        Options.Name = "second";
         catalog = Catalog(side, made);
-        model.Sessions.ConfirmCommand.Execute(null);
+        Options.ConfirmCommand.Execute(null);
         Change(catalog);
 
         model.Sessions.ChooseCommand.Execute(Row("fix-login"));
@@ -229,13 +254,13 @@ public sealed class SideSessionViewModelTests : IDisposable
     public async Task ANewSessionMadeWhileAnotherSideSessionIsShownIsSwitchedToAsWell()
     {
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
-        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, null, It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, null, false, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
         model.Sessions.ChooseCommand.Execute(Row("fix-login"));
-        model.Sessions.NewCommand.Execute(null);
-        model.Sessions.Name = "second";
+        NewSession();
+        Options.Name = "second";
         catalog = Catalog(side, made);
-        model.Sessions.ConfirmCommand.Execute(null);
+        Options.ConfirmCommand.Execute(null);
 
         Change(Catalog(side, With(made, current => current with { State = SideSessionState.Ready })));
 
@@ -243,21 +268,22 @@ public sealed class SideSessionViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task ARefusedNewSessionKeepsTheDialogWithTheReason()
+    public async Task ARefusedNewSessionKeepsThePanelWithTheReason()
     {
-        connection.Setup(x => x.CreateSideSession(main.Id, "x", It.IsAny<SideSessionStart>(), null, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("Side sessions need the repository to have a commit."));
+        connection.Setup(x => x.CreateSideSession(main.Id, "x", It.IsAny<SideSessionStart>(), "task", true, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("Side sessions need the repository to have a commit."));
         await Open();
-        model.Sessions.NewCommand.Execute(null);
-        model.Sessions.Name = "x";
+        NewSession();
+        Options.Name = "x";
+        model.Active!.Chat.Input = "task";
 
-        model.Sessions.ConfirmCommand.Execute(null);
-        await Until(() => model.Sessions.HasError);
+        Options.ConfirmCommand.Execute(null);
+        await Until(() => Options.HasError);
 
-        Assert.Equal((SessionDialog.New, "Side sessions need the repository to have a commit."), (model.Sessions.Dialog, model.Sessions.Error));
+        Assert.Equal((true, "Side sessions need the repository to have a commit.", "task"), (Options.IsOpen, Options.Error, model.Active.Chat.Input));
     }
 
     [Fact]
-    public async Task RenamingDeletingAndIntegratingAskFirst()
+    public async Task RenamingDeletingAndBringingInAskFirst()
     {
         await Open();
 
@@ -274,6 +300,7 @@ public sealed class SideSessionViewModelTests : IDisposable
         model.Sessions.ConfirmCommand.Execute(null);
 
         model.Sessions.IntegrateCommand.Execute(Row("fix-login"));
+        Assert.Equal(("Bring Into Main?", "Bring Into Main"), (model.Sessions.DialogTitle, model.Sessions.ConfirmText));
         Assert.Contains("cannot be undone", model.Sessions.DialogText);
         connection.Verify(x => x.IntegrateSideSession(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         model.Sessions.ConfirmCommand.Execute(null);
@@ -284,7 +311,7 @@ public sealed class SideSessionViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task TurningOnIntegrateWhenFinishedWarnsAndTurningItOffDoesNot()
+    public async Task TurningOnWhenDoneBringIntoMainWarnsAndTurningItOffDoesNot()
     {
         await Open();
 
@@ -297,7 +324,7 @@ public sealed class SideSessionViewModelTests : IDisposable
         connection.Verify(x => x.SetIntegrateWhenFinished(side.Id, true, It.IsAny<CancellationToken>()), Times.Once);
 
         Change(Catalog(With(side, current => current with { IntegrateWhenFinished = true })));
-        Assert.Equal(("✓ Integrate When Finished", "Ready - Integrates when finished"), (Row("fix-login").WhenFinishedText, Row("fix-login").Detail));
+        Assert.Equal(("✓ When Done: Bring Into Main", "Ready - When Done: Bring Into Main"), (Row("fix-login").WhenFinishedText, Row("fix-login").Detail));
         model.Sessions.WhenFinishedCommand.Execute(Row("fix-login"));
 
         Assert.Equal(SessionDialog.None, model.Sessions.Dialog);
@@ -305,14 +332,14 @@ public sealed class SideSessionViewModelTests : IDisposable
     }
 
     [Fact]
-    public async Task CancellingAnIntegrationWarnsInTheseWordsAndTheQuestionGoesWhenItFinishesFirst()
+    public async Task CancellingABringInWarnsInTheseWordsAndTheQuestionGoesWhenItFinishesFirst()
     {
         catalog = Catalog(With(side, current => current with { State = SideSessionState.Integrating }));
         await Open();
 
         model.Sessions.CancelIntegrationCommand.Execute(Row("fix-login"));
 
-        Assert.Equal(("Cancel Integration?", "Main may already contain some of this session's changes. They will not be undone, and you may need to clean up main yourself. The AI may make a few more edits before it stops.", "Cancel Integration", "Keep Integrating"),
+        Assert.Equal(("Cancel Bring In?", "Main may already contain some of this session's changes. They will not be undone, and you may need to clean up main yourself. The AI may make a few more edits before it stops.", "Cancel Bring In", "Keep Bringing In"),
             (model.Sessions.DialogTitle, model.Sessions.DialogText, model.Sessions.ConfirmText, model.Sessions.DismissText));
         model.Sessions.DismissCommand.Execute(null);
         connection.Verify(x => x.CancelIntegration(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
@@ -424,14 +451,14 @@ public sealed class SideSessionViewModelTests : IDisposable
     public async Task AFirstTaskIsFollowedHoweverFarTheUserGoesWhileTheSessionIsSetUp()
     {
         WorkspaceInfo made = Side("second", SideSessionState.Creating);
-        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        connection.Setup(x => x.CreateSideSession(main.Id, "second", SideSessionStart.Files, "do it", true, It.IsAny<CancellationToken>())).ReturnsAsync(made);
         await Open();
-        model.Sessions.NewCommand.Execute(null);
-        model.Sessions.Name = "second";
-        model.Sessions.FirstTask = "do it";
+        NewSession();
+        Options.Name = "second";
+        model.Active!.Chat.Input = "do it";
         catalog = Catalog(side, made);
-        model.Sessions.ConfirmCommand.Execute(null);
-        await Until(() => model.Sessions.Dialog == SessionDialog.None);
+        Options.ConfirmCommand.Execute(null);
+        await Until(() => !Options.IsOpen);
         keeper.Verify(x => x.Hold(made.Id, "app / second"), Times.Once);
         model.Selected = other;
 
@@ -446,12 +473,16 @@ public sealed class SideSessionViewModelTests : IDisposable
     [Fact]
     public async Task ASlowRequestsFailureIsNotShownInTheNextDialogNorDoesItHoldItBack()
     {
-        TaskCompletionSource<WorkspaceInfo> slow = new();
-        connection.Setup(x => x.CreateSideSession(main.Id, "x", It.IsAny<SideSessionStart>(), null, It.IsAny<CancellationToken>())).Returns(slow.Task);
+        TaskCompletionSource slow = new();
+        connection.Setup(x => x.RenameSideSession(side.Id, "x", It.IsAny<CancellationToken>())).Returns(async () =>
+        {
+            await slow.Task;
+            return side;
+        });
         string? failed = null;
         await Open();
         model.Sessions.Failed += message => failed = message;
-        model.Sessions.NewCommand.Execute(null);
+        model.Sessions.RenameCommand.Execute(Row("fix-login"));
         model.Sessions.Name = "x";
         model.Sessions.ConfirmCommand.Execute(null);
         Assert.False(model.Sessions.CanConfirm);
@@ -503,6 +534,82 @@ public sealed class SideSessionViewModelTests : IDisposable
         await Until(() => model.Entries.Any(entry => entry.IsTask));
         int at = model.Entries.IndexOf(model.Entries.Single(entry => entry.IsTask));
         Assert.Equal(main.Id, model.Entries[at - 1].Workspace!.Id);
+    }
+
+    private SwarmTaskInfo Delegated(Guid owner, SwarmTaskState state, string title, int minutes = 0) => new() { Id = Guid.NewGuid(), JobId = Guid.NewGuid(), WorkspaceId = owner, Title = title, State = state, PeerName = "box", CreatedAt = DateTimeOffset.UnixEpoch.AddMinutes(minutes), UpdatedAt = DateTimeOffset.UnixEpoch };
+
+    private void Swarm(params SwarmTaskInfo[] tasks) => connection.Setup(x => x.GetSwarm(It.IsAny<CancellationToken>())).ReturnsAsync(new SwarmStatus { Server = new SwarmServer { Name = "s" }, Tasks = tasks });
+
+    [Fact]
+    public async Task TheListHasTheTasksDelegatedFromMainAndItsSessions()
+    {
+        Swarm(Delegated(side.Id, SwarmTaskState.Queued, "later", 2), Delegated(main.Id, SwarmTaskState.Running, "first", 1), Delegated(other.Id, SwarmTaskState.Running, "elsewhere"), Delegated(main.Id, SwarmTaskState.Running, "incoming") with { IsIncoming = true });
+
+        await Open();
+        await Until(() => model.Sessions.HasTasks);
+
+        Assert.Equal(["first \u00B7 box \u00B7 Running", "later \u00B7 box \u00B7 Waiting on box"], model.Sessions.Tasks.Select(task => task.Row));
+
+        model.Selected = other;
+
+        Assert.Equal(["elsewhere \u00B7 box \u00B7 Running"], model.Sessions.Tasks.Select(task => task.Row));
+    }
+
+    private async Task<RemoteTaskViewModel> Opened(SwarmTaskInfo task)
+    {
+        Swarm(task);
+        connection.Setup(x => x.GetSwarmTask(task.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new SwarmTaskDetail { Task = task, Instructions = "do it", Report = "done it" });
+        await Open();
+        await Until(() => model.Sessions.HasTasks);
+        model.Sessions.IsOpen = true;
+        model.Sessions.OpenTaskCommand.Execute(model.Sessions.Tasks[0]);
+        await Until(() => model.Sessions.OpenedTask?.Detail is not null);
+        Assert.False(model.Sessions.IsOpen);
+        return model.Sessions.OpenedTask!;
+    }
+
+    [Fact]
+    public async Task AFinishedDelegatedTaskCanBeBroughtInContinuedOrDiscarded()
+    {
+        SwarmTaskInfo task = Delegated(main.Id, SwarmTaskState.Done, "port it") with { Branch = "swarm/x", BringIn = true };
+        RemoteTaskViewModel view = await Opened(task);
+
+        Assert.Equal((true, true, true, false, false, true), (view.CanBringIn, view.CanContinue, view.ShowWhenDone, view.CanCancel, view.CanRetry, view.CanDiscard));
+        Assert.Equal(("Bring Into Main", "When Done: Bring Into Main", "done it"), (view.BringInText, view.WhenDoneText, view.Detail!.Report));
+
+        view.BringInCommand.Execute(null);
+        view.ToggleWhenDoneCommand.Execute(null);
+
+        connection.Verify(x => x.BringInSwarmTask(task.Id, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetSwarmTaskBringIn(task.Id, false, It.IsAny<CancellationToken>()), Times.Once);
+
+        WorkspaceInfo made = Side("port-it", SideSessionState.Creating);
+        connection.Setup(x => x.ContinueSwarmTask(task.Id, null, It.IsAny<CancellationToken>())).ReturnsAsync(made);
+        catalog = Catalog(side, made);
+
+        view.ContinueCommand.Execute(null);
+
+        Assert.False(model.Sessions.HasTask);
+        Change(Catalog(side, With(made, current => current with { State = SideSessionState.Ready })));
+        Assert.Equal(made.Id, model.Active!.Workspace.Id);
+    }
+
+    [Fact]
+    public async Task ADelegatedTaskOfASideSessionIsBroughtIntoItAndOneThatIsRemovedCloses()
+    {
+        SwarmTaskInfo task = Delegated(side.Id, SwarmTaskState.Running, "port it");
+        RemoteTaskViewModel view = await Opened(task);
+
+        Assert.Equal(("Bring Into fix-login", "When Done: Keep Separate", true, false), (view.BringInText, view.WhenDoneText, view.CanCancel, view.CanBringIn));
+        view.ToggleWhenDoneCommand.Execute(null);
+        view.CancelTaskCommand.Execute(null);
+        connection.Verify(x => x.SetSwarmTaskBringIn(task.Id, true, It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.CancelSwarmTask(task.Id, It.IsAny<CancellationToken>()), Times.Once);
+
+        connection.Setup(x => x.GetSwarmTask(task.Id, It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("That task is gone."));
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SwarmTaskChanged, WorkspaceId = Guid.Empty, TaskId = task.Id });
+
+        Assert.False(model.Sessions.HasTask);
     }
 
     [Fact]

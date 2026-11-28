@@ -101,7 +101,7 @@ public sealed class ConversationScenarios
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("steer", service);
-        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsShellAllowed = true }, CancellationToken.None);
+        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsSandboxed = false }, CancellationToken.None);
         int mark = server.Mark();
 
         await server.Connection.Prompt(workspace.Id, "Run the shell command `sleep 8`, and only after it finished create a file named note.txt containing exactly the word RED. Then reply with the word DONE.", CancellationToken.None);
@@ -142,7 +142,7 @@ public sealed class ConversationScenarios
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("replay", service);
-        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsShellAllowed = true }, CancellationToken.None);
+        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsSandboxed = false }, CancellationToken.None);
         int mark = server.Mark();
 
         await server.Connection.Prompt(workspace.Id, "Run the shell command `sleep 20` and wait for it to finish. Then reply with the word DONE.", CancellationToken.None);

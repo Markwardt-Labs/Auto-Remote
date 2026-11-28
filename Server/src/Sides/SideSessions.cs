@@ -20,10 +20,22 @@ internal interface ISideSessions
     /// <param name="name">The name of the session.</param>
     /// <param name="start">What its files start from.</param>
     /// <param name="firstTask">The first prompt of the session, or <see langword="null" />.</param>
+    /// <param name="bringIn">Whether it is brought into the main workspace by itself once its work is done.</param>
     /// <param name="cancellation">Cancels the creation.</param>
     /// <returns>The session, which is being set up.</returns>
     /// <exception cref="RequestException">The workspace cannot have side sessions, the name is taken or something could not be made.</exception>
-    Task<WorkspaceInfo> Create(Guid mainId, string name, SideSessionStart start, string? firstTask, CancellationToken cancellation);
+    Task<WorkspaceInfo> Create(Guid mainId, string name, SideSessionStart start, string? firstTask, bool bringIn, CancellationToken cancellation);
+
+    /// <summary>
+    /// Makes a side session that goes on with the result of a delegated task: its files are as the task left them, what it changed is measured against what the task started from, its AI knows what the AI of the workspace the task came from knew, and its chat starts with the task's report. It is kept separate until the user brings it in.
+    /// </summary>
+    /// <param name="originId">The workspace or side session the task was delegated from; a side session of the latter belongs to the same main workspace.</param>
+    /// <param name="name">The name of the session.</param>
+    /// <param name="from">What it starts from.</param>
+    /// <param name="cancellation">Cancels the creation.</param>
+    /// <returns>The session, which is being set up.</returns>
+    /// <exception cref="RequestException">The workspace cannot have side sessions, the name is taken or something could not be made.</exception>
+    Task<WorkspaceInfo> Continue(Guid originId, string name, SideSessionContinuation from, CancellationToken cancellation);
 
     /// <summary>
     /// Renames a side session. Its folder and branch keep their names.
@@ -105,7 +117,7 @@ internal interface ISideSessions
 }
 
 /// <inheritdoc />
-internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRepository repository, IWorkspaceStore store, IPromptService prompts, IWorkQueue queue, IWorkspaceLoops loops, IScriptRunner scripts, IWindowGuard guard, IWorkspaceSnapshots snapshots, IWorkspaceWatcher watcher, IEventHub events, ILog log) : ISideSessions
+internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRepository repository, IWorkspaceStore store, IPromptService prompts, IWorkQueue queue, IWorkspaceLoops loops, IScriptRunner scripts, IWindowGuard guard, IWorkspaceSnapshots snapshots, IWorkspaceWatcher watcher, IEventHub events, ILog log, Func<IFollowUps?>? following = null) : ISideSessions
 {
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> locks = new();
 
@@ -114,6 +126,8 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
     private readonly ConcurrentDictionary<Guid, Making> making = new();
 
     private readonly int nameLimit = 60;
+
+    private readonly string attachedPrefix = "Attached file: ";
 
     private readonly TimeSpan scriptPoll = TimeSpan.FromMilliseconds(200);
 
@@ -147,7 +161,16 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
     }
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> Create(Guid mainId, string name, SideSessionStart start, string? firstTask, CancellationToken cancellation)
+    public Task<WorkspaceInfo> Create(Guid mainId, string name, SideSessionStart start, string? firstTask, bool bringIn, CancellationToken cancellation) => Create(mainId, name, start, firstTask, bringIn, null, null, cancellation);
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> Continue(Guid originId, string name, SideSessionContinuation from, CancellationToken cancellation)
+    {
+        WorkspaceInfo origin = await workspaces.Get(originId, cancellation);
+        return await Create(origin.Side?.ParentId ?? originId, name, SideSessionStart.Files, null, false, from, originId, cancellation);
+    }
+
+    private async Task<WorkspaceInfo> Create(Guid mainId, string name, SideSessionStart start, string? firstTask, bool bringIn, SideSessionContinuation? continuation, Guid? knowledge, CancellationToken cancellation)
     {
         WorkspaceInfo main = await workspaces.Get(mainId, cancellation);
 
@@ -168,8 +191,8 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
             throw new RequestException($"Side sessions are stored in '{root}', which is inside a workspace. Set sessionsFolder in the server's config file to a folder outside every workspace.");
         }
 
-        string? task = string.IsNullOrWhiteSpace(firstTask) ? null : firstTask.Trim();
         Guid id = Guid.NewGuid();
+        string? task = string.IsNullOrWhiteSpace(firstTask) ? null : await CopyAttachments(main.Id, id, firstTask.Trim(), cancellation);
         // Known before the session is, so that a removal that comes while it is being made finds what to wait for.
         Making work = new(CancellationTokenSource.CreateLinkedTokenSource(stopping, cancellation));
         making[id] = work;
@@ -182,7 +205,7 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
             try
             {
                 string folder = repository.Folder(root, mainId, id);
-                await workspaces.AddSide(id, new StoredSideSession { ParentId = mainId, Name = ValidName(mainId, name, id), Service = main.Service, State = SideSessionState.Creating, StartedFrom = start, Root = root, Folder = folder, UnsentTask = task }, cancellation);
+                await workspaces.AddSide(id, new StoredSideSession { ParentId = mainId, Name = ValidName(mainId, name, id), Service = main.Service, State = SideSessionState.Creating, StartedFrom = start, Root = root, Folder = folder, UnsentTask = task, IntegrateWhenFinished = bringIn }, cancellation);
             }
             finally
             {
@@ -191,7 +214,7 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
 
             try
             {
-                await Make(main, id, start, work.Cancel.Token);
+                await Make(main, id, start, continuation, knowledge ?? main.Id, work.Cancel.Token);
             }
             catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException or OperationCanceledException)
             {
@@ -263,7 +286,7 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
 
             if (side.State == SideSessionState.Integrating)
             {
-                throw new RequestException("The side session is being integrated. Cancel the integration first.");
+                throw new RequestException("The side session is being brought into main. Cancel that first.");
             }
 
             await Remove(id);
@@ -313,7 +336,7 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
         // A folder that does not exist is refused by the move itself.
         if (made.Count > 0 && Directory.Exists(folder) && !await repository.Holds(folder, made, cancellation))
         {
-            throw new RequestException("The side sessions of this workspace belong to the repository it is in now. Integrate or delete them before moving it to a different one.");
+            throw new RequestException("The side sessions of this workspace belong to the repository it is in now. Bring them into main or delete them before moving it to a different one.");
         }
     }
 
@@ -408,16 +431,48 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
 
     private bool Inside(string child, string parent) => child == parent || child.StartsWith(Path.TrimEndingDirectorySeparator(parent) + Path.DirectorySeparatorChar, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal);
 
-    private async Task Make(WorkspaceInfo main, Guid id, SideSessionStart start, CancellationToken cancellation)
+    // A first task may name files attached to another chat of the same workspace, which a sandboxed AI of the new session could not read there, so it gets copies of its own.
+    private async Task<string> CopyAttachments(Guid mainId, Guid id, string task, CancellationToken cancellation)
+    {
+        string[] lines = task.Split('\n');
+        string attachments = Path.GetDirectoryName(store.AttachmentsFolder(mainId)) is { Length: > 0 } root ? root + Path.DirectorySeparatorChar : string.Empty;
+
+        for (int index = lines.Length - 1; index >= 0 && lines[index].StartsWith(attachedPrefix, StringComparison.Ordinal); index--)
+        {
+            string path = lines[index][attachedPrefix.Length..].Trim();
+
+            // Only what was attached to a chat is copied, nothing else the text happens to name.
+            if (attachments.Length > 0 && Path.GetFullPath(path).StartsWith(attachments, StringComparison.Ordinal) && File.Exists(path))
+            {
+                try
+                {
+                    string name = Path.GetFileName(path);
+                    int separator = name.IndexOf('-', StringComparison.Ordinal);
+                    string copy = await store.SaveAttachment(id, separator >= 0 ? name[(separator + 1)..] : name, await File.ReadAllBytesAsync(path, cancellation), cancellation);
+                    lines[index] = attachedPrefix + copy;
+                }
+                catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+                {
+                    log.Write($"An attached file could not be copied for a new side session: {exception.Message}");
+                }
+            }
+        }
+
+        return string.Join('\n', lines);
+    }
+
+    private async Task Make(WorkspaceInfo main, Guid id, SideSessionStart start, SideSessionContinuation? continuation, Guid knowledge, CancellationToken cancellation)
     {
         StoredSideSession side = workspaces.GetSide(id) ?? throw new RequestException("The side session no longer exists.");
         // Git is not cut off by a removal: what it makes is removed whole once it is done.
-        (string commit, string tree) = await repository.Create(main.Folder, id, side.Folder, start, stopping);
+        (string commit, string tree) = continuation is null
+            ? await repository.Create(main.Folder, id, side.Folder, start, stopping)
+            : await repository.CreateFrom(main.Folder, id, side.Folder, continuation.BaseCommit, continuation.ResultCommit, stopping);
         cancellation.ThrowIfCancellationRequested();
         await workspaces.UpdateSide(id, current => current with { StartCommit = commit, BaseTree = tree });
         // An empty chat of its own, so that what its AI learned before it was made is never shown or read back as its chat.
-        await store.SaveMessages(id, [], CancellationToken.None);
-        string fork = await prompts.Fork(main.Id, side.Folder, cancellation);
+        await store.SaveMessages(id, continuation is null ? [] : [new ChatMessage { Role = MessageRole.Assistant, Text = continuation.Report, Time = DateTimeOffset.UtcNow }], CancellationToken.None);
+        string fork = await prompts.Fork(knowledge, side.Folder, cancellation);
 
         try
         {
@@ -501,13 +556,20 @@ internal sealed class SideSessions(IWorkspaceManager workspaces, ISideSessionRep
                 return;
             }
 
+            // The task a session is started with is done by itself, so its AI is told nobody may be there.
+            WorkStep step = new() { Source = ActivitySource.Send, Text = task, Preface = "This is the task this side session was started with." };
+            IFollowUps? followed = following?.Invoke();
+            followed?.Expect(id, step);
+
             try
             {
                 await queue.Submit(id, task, WorkSource.Direct, cancellation);
+                followed?.Sent(id, step.Id);
                 await workspaces.UpdateSide(id, current => current with { UnsentTask = null });
             }
-            catch (RequestException exception)
+            catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException)
             {
+                followed?.NotSent(id, step.Id);
                 await workspaces.UpdateSide(id, current => current with { Error = $"The first task could not be sent: {exception.Message}" });
             }
         }

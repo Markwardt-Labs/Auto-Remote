@@ -51,6 +51,12 @@ internal sealed record StoredWorkspace
     public bool AllowDelegation { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the AI of the workspace is sandboxed. Off unless set, also for workspaces an older server stored.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsSandboxed { get; init; }
+
+    /// <summary>
     /// Gets the files copied into new side sessions of the workspace.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

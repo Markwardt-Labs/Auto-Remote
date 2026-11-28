@@ -127,13 +127,47 @@ internal interface ISwarmService
     Task Retry(Guid taskId, CancellationToken cancellation);
 
     /// <summary>
-    /// Applies the changes of a finished task to its workspace, which must be ready.
+    /// Has the AI of its workspace bring the result of a finished task in.
     /// </summary>
     /// <param name="taskId">The task.</param>
-    /// <param name="cancellation">Cancels the work.</param>
-    /// <returns>What happened.</returns>
-    /// <exception cref="RequestException">It cannot be applied now.</exception>
-    Task<string> Apply(Guid taskId, CancellationToken cancellation);
+    /// <returns>What happens.</returns>
+    /// <exception cref="RequestException">There is nothing to bring in, or it is under way already.</exception>
+    Task<string> BringIn(Guid taskId);
+
+    /// <summary>
+    /// Sets whether the result of a task is brought in once it is done; turning it off also cancels bringing it in that has not started.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="enabled">Whether it is.</param>
+    /// <returns>A task that completes once set.</returns>
+    /// <exception cref="RequestException">There is no such task.</exception>
+    Task SetBringIn(Guid taskId, bool enabled);
+
+    /// <summary>
+    /// Sets whether the changes are committed after something that waits was brought in.
+    /// </summary>
+    /// <param name="workspaceId">The workspace.</param>
+    /// <param name="id">What waits, as the agenda names it.</param>
+    /// <param name="commit">Whether they are.</param>
+    /// <returns>A task that completes once set.</returns>
+    /// <exception cref="RequestException">Nothing of that name waits.</exception>
+    Task SetBringInCommit(Guid workspaceId, Guid id, bool commit);
+
+    /// <summary>
+    /// Makes a side session that goes on with the result of a finished task.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="name">The name of the session, or <see langword="null" /> to name it after the task.</param>
+    /// <param name="cancellation">Cancels the creation.</param>
+    /// <returns>The session, which is being set up.</returns>
+    /// <exception cref="RequestException">The task cannot be continued or the session cannot be made.</exception>
+    Task<WorkspaceInfo> Continue(Guid taskId, string? name, CancellationToken cancellation);
+
+    /// <summary>
+    /// Takes up the results that were being brought in, once the scheduler restored its work, and starts bringing them in.
+    /// </summary>
+    /// <returns>A task that completes once started.</returns>
+    Task Automate();
 
     /// <summary>
     /// Removes an ended task.
@@ -159,7 +193,7 @@ internal interface ISwarmService
     Task CancelByOwner(Guid workspaceId);
 
     /// <summary>
-    /// Checks whether the AI of a workspace delegated tasks whose outcome it has not been told yet.
+    /// Checks whether the AI of a workspace delegated tasks that are still under way.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
     /// <returns><see langword="true" /> if it has.</returns>
@@ -169,7 +203,7 @@ internal interface ISwarmService
     /// Tells whether tasks a workspace delegated are still under way.
     /// </summary>
     /// <param name="workspaceId">The workspace.</param>
-    /// <returns>Whether any is waiting, on its way or running, or its AI has yet to be told how they ended.</returns>
+    /// <returns>Whether any is waiting, on its way or running, its AI has yet to be told how they ended, or a result is still to be brought in.</returns>
     Task<bool> IsDelegating(Guid workspaceId);
 
     /// <summary>
@@ -181,7 +215,7 @@ internal interface ISwarmService
 }
 
 /// <inheritdoc />
-internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwarmWorker worker, ISwarmCoordinator coordinator, ISwarmDrive drive, ISwarmLink link, ISwarmDialer dialer, IWorkspaceManager workspaces, IWorkspaceActivity activity, IWorkspaceStore store, ILog log) : ISwarmService
+internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwarmWorker worker, ISwarmCoordinator coordinator, ISwarmBringIns bringIns, ISwarmDrive drive, ISwarmLink link, ISwarmDialer dialer, IWorkspaceManager workspaces, IWorkspaceStore store, ILog log) : ISwarmService
 {
     private readonly TimeSpan check = TimeSpan.FromSeconds(15);
 
@@ -201,6 +235,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         open = true;
         await worker.Open(cancellation);
         await coordinator.Open(cancellation);
+        await bringIns.Open(cancellation);
         _ = link.Run(cancellation);
         _ = Check(cancellation);
     }
@@ -212,7 +247,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         (SwarmServer server, List<SwarmPeer> peers, List<SwarmTaskInfo> tasks, string folder) = await book.Read(document => (
             document.Server with { Fingerprint = book.Identity.Public.Fingerprint },
             document.Peers.OrderBy(peer => peer.Name, StringComparer.OrdinalIgnoreCase).Select(Describe).ToList(),
-            document.Outgoing.Select(task => Describe(task, names)).Concat(document.Incoming.Where(task => task.Instructions.Length > 0 || !task.IsCleaned).Select(task => Describe(task, names))).OrderByDescending(task => task.CreatedAt).ToList(),
+            document.Outgoing.Select(task => Describe(document, task, names)).Concat(document.Incoming.Where(task => task.Instructions.Length > 0 || !task.IsCleaned).Select(task => Describe(task, names))).OrderByDescending(task => task.CreatedAt).ToList(),
             document.Server.DriveFolder));
         return new SwarmStatus { Server = server, Peers = [.. peers.Select(peer => peer with { IsConnected = link.IsConnected(peer.Id) })], DrivePairings = await drive.Pairings(folder), PairingCode = link.Code, Tasks = tasks, Report = report };
     }
@@ -364,7 +399,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         {
             if (document.Outgoing.FirstOrDefault(task => task.Id == taskId) is { } outgoing)
             {
-                return (new SwarmTaskDetail { Task = Describe(outgoing, names), Instructions = outgoing.Instructions, ExpectedResult = outgoing.ExpectedResult, Report = outgoing.Report }, null);
+                return (new SwarmTaskDetail { Task = Describe(document, outgoing, names), Instructions = outgoing.Instructions, ExpectedResult = outgoing.ExpectedResult, Report = outgoing.Report }, null);
             }
 
             return document.Incoming.FirstOrDefault(task => task.Id == taskId) is { } incoming
@@ -397,20 +432,19 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
     public Task Retry(Guid taskId, CancellationToken cancellation) => coordinator.Retry(taskId, cancellation);
 
     /// <inheritdoc />
-    public async Task<string> Apply(Guid taskId, CancellationToken cancellation)
-    {
-        Guid? workspace = await book.Read(document => document.Outgoing.FirstOrDefault(task => task.Id == taskId)?.WorkspaceId);
+    public Task<string> BringIn(Guid taskId) => bringIns.Ask(taskId);
 
-        if (workspace is { } id && activity.Get(id) != WorkspaceState.Ready)
-        {
-            throw new RequestException(activity.Describe(id));
-        }
+    /// <inheritdoc />
+    public Task SetBringIn(Guid taskId, bool enabled) => bringIns.Set(taskId, enabled);
 
-        SwarmApplyResult applied = await coordinator.Apply(taskId, cancellation);
-        return applied.Conflicts.Count > 0
-            ? $"Applied the changes with conflicts to resolve in {string.Join(", ", applied.Conflicts)}."
-            : $"Applied the changes to {applied.Files} file{(applied.Files == 1 ? string.Empty : "s")}. They are not committed.";
-    }
+    /// <inheritdoc />
+    public Task SetBringInCommit(Guid workspaceId, Guid id, bool commit) => bringIns.SetCommit(workspaceId, id, commit);
+
+    /// <inheritdoc />
+    public Task<WorkspaceInfo> Continue(Guid taskId, string? name, CancellationToken cancellation) => bringIns.Continue(taskId, name, cancellation);
+
+    /// <inheritdoc />
+    public Task Automate() => bringIns.Start();
 
     /// <inheritdoc />
     public async Task Discard(Guid taskId, CancellationToken cancellation)
@@ -434,6 +468,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
             return;
         }
 
+        await bringIns.Withdraw(taskId);
         await coordinator.Discard(taskId, cancellation);
     }
 
@@ -463,6 +498,7 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         }
         else
         {
+            await bringIns.Forget(workspaceId);
             await coordinator.Forget(workspaceId);
         }
     }
@@ -531,8 +567,10 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         Problem = peer.Problem
     };
 
-    private SwarmTaskInfo Describe(SwarmOutgoing task, Dictionary<Guid, string> names) => new()
+    private SwarmTaskInfo Describe(SwarmDocument document, SwarmOutgoing task, Dictionary<Guid, string> names) => new()
     {
+        BringIn = task.BringIn,
+        IsBringingIn = task.TurnId is not null || document.IsToBringIn(task),
         Id = task.Id,
         JobId = task.JobId,
         Title = task.Title,
@@ -544,7 +582,6 @@ internal sealed class SwarmService(ISwarmBook book, ISwarmCourier courier, ISwar
         Error = task.Error,
         Summary = Summary(task.Report),
         Branch = task.Branch,
-        IsApplied = task.IsApplied,
         IsManual = task.IsManual,
         CreatedAt = task.CreatedAt,
         UpdatedAt = task.UpdatedAt

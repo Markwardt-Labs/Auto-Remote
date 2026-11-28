@@ -46,7 +46,7 @@ public sealed class WorkspaceControlTests : IDisposable
         prompts = new PromptService(workspaces.Object, store.Object, host.Object, hub, activity, snapshots);
         prompts.Configure(CancellationToken.None);
         loops = new WorkspaceLoops(workspaces.Object, prompts, activity, Mock.Of<IUsageService>(), hub, TimeSpan.FromMilliseconds(20));
-        control = new WorkspaceControl(activity, prompts, loops, Mock.Of<IWorkspaceVersioning>(), snapshots);
+        control = new WorkspaceControl(activity, prompts, Mock.Of<IWorkspaceVersioning>(), snapshots);
     }
 
     public void Dispose() => temp.Dispose();
@@ -144,29 +144,26 @@ public sealed class WorkspaceControlTests : IDisposable
     }
 
     [Fact]
-    public async Task Stop_DuringALoopStopsTheRunAndCancelsTheLoopSoNoRunFollows()
+    public async Task Stop_DuringALoopStopsTheRunAndLeavesTheLoopWhichTheStoppedChatHolds()
     {
         await StartLoopedWork();
 
         await control.Stop(workspace.Id);
-        await Task.Delay(500);
 
-        Assert.Null(loops.Get(workspace.Id));
-        Assert.False(prompts.IsBusy(workspace.Id));
-        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
+        // Holding the loop back is for what follows the work, which a stopped chat does; stopping the work ends only the run.
+        Assert.NotNull(loops.Get(workspace.Id));
+        await loops.Cancel(workspace.Id);
     }
 
     [Fact]
-    public async Task Cancel_DuringALoopRevertsTheRunAndCancelsTheLoop()
+    public async Task Cancel_DuringALoopRevertsTheRunAndLeavesTheLoop()
     {
         await StartLoopedWork();
         File.WriteAllText(Path.Combine(work, "a.txt"), "changed\n");
 
+        await loops.Cancel(workspace.Id);
         await control.Cancel(workspace.Id);
-        await Task.Delay(500);
 
-        Assert.Null(loops.Get(workspace.Id));
-        Assert.Equal(WorkspaceState.Ready, activity.Get(workspace.Id));
         Assert.Equal("orig", Read("a.txt"));
     }
 }

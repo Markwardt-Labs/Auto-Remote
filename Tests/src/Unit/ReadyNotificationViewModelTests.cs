@@ -53,6 +53,10 @@ public sealed class ReadyNotificationViewModelTests
 
     private void Looping(bool looping) => Raise(new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = looping ? new LoopInfo { Settings = new LoopSettings { Prompt = "x" }, StartedAt = DateTimeOffset.UnixEpoch } : null });
 
+    private Agenda UpNext() => new() { Items = [new AgendaItem { Kind = AgendaKind.Queued, Title = "next" }] };
+
+    private void Told(Agenda agenda) => Raise(new RemoteEvent { Kind = RemoteEventKind.AgendaChanged, WorkspaceId = workspace.Id, Agenda = agenda });
+
     private SavedInput Input(string text, bool queued = false) => new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow, IsQueued = queued };
 
     private void NeverNotified() => notifier.Verify(x => x.Notify(It.IsAny<Guid>(), It.IsAny<string>()), Times.Never);
@@ -72,10 +76,10 @@ public sealed class ReadyNotificationViewModelTests
         WorkspaceViewModel view = await Started();
         Working(true);
         model.ToggleNotifyCommand.Execute(null);
-        Saved(Input("next", true));
+        Told(UpNext());
         Working(false);
         Queued(new QueueStatus { Position = 1, Text = "next" });
-        Saved();
+        Told(new Agenda());
         return view;
     }
 
@@ -120,7 +124,7 @@ public sealed class ReadyNotificationViewModelTests
         }
         else
         {
-            Saved(Input("later", true));
+            Told(UpNext());
         }
 
         // It was off before the prompt was sent, which does not matter once the prompt was taken to wait.
@@ -185,7 +189,7 @@ public sealed class ReadyNotificationViewModelTests
         WorkspaceViewModel view = await Started();
         Working(true);
         model.ToggleNotifyCommand.Execute(null);
-        Stored(new ChatHistory { Messages = [] }, Input("next", true));
+        connection.Setup(x => x.GetAgenda(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(UpNext());
 
         await Reconnect();
 
@@ -198,8 +202,9 @@ public sealed class ReadyNotificationViewModelTests
     public async Task Reload_ThatFindsTheLastQueuedInputAtWorkDoesNotAnnounceReady()
     {
         WorkspaceViewModel view = await Started();
-        Saved(Input("next", true));
+        Told(UpNext());
         model.ToggleNotifyCommand.Execute(null);
+        connection.Setup(x => x.GetAgenda(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(new Agenda());
         Stored(new ChatHistory { Messages = [], Working = true });
 
         await Reconnect();

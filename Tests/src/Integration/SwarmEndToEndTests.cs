@@ -93,18 +93,21 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ATaskDelegatedDirectlyRunsRestrictedOnTheWorkerAndComesBackAsABranchThatApplies()
+    public async Task ATaskDelegatedDirectlyRunsOnTheWorkerComesBackAsABranchAndTheAiBringsItInWhenAsked()
     {
         await PairByNetwork();
         await Permit();
         await KnowsTheWorker();
         (WorkspaceInfo workspace, string folder) = await Project();
+        List<string> told = [];
+        coordinator.Ai = Bringer(told);
 
-        await coordinator.Connection.DelegateTask(workspace.Id, Request("write the file"), CancellationToken.None);
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("write the file") with { BringIn = false }, CancellationToken.None);
 
         SwarmTaskInfo done = await coordinator.Found(task => task.State == SwarmTaskState.Done);
         Assert.Equal("1", Environment.GetEnvironmentVariable("OPENCODE_DISABLE_PROJECT_CONFIG"));
-        Assert.Equal(("write the file", "worker", true, false), (done.Title, done.PeerName, done.IsManual, done.IsApplied));
+        Assert.Equal(("write the file", "worker", true, false, false), (done.Title, done.PeerName, done.IsManual, done.BringIn, done.IsBringingIn));
+        Assert.True(done.CanBringIn);
         Assert.StartsWith("swarm/", done.Branch);
         Assert.Contains("wrote done.txt", done.Summary);
         (string workerFolder, string asked) = Assert.Single(worker.Asked);
@@ -117,16 +120,18 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         SwarmTaskDetail detail = await coordinator.Connection.GetSwarmTask(done.Id, CancellationToken.None);
         Assert.Contains(detail.Messages, message => message.Role == MessageRole.Assistant && message.Text.Contains("wrote done.txt"));
 
-        SwarmStatus applied = await coordinator.Connection.ApplySwarmTask(done.Id, CancellationToken.None);
+        SwarmStatus asking = await coordinator.Connection.BringInSwarmTask(done.Id, CancellationToken.None);
 
-        Assert.Contains("1 file", applied.Report);
+        Assert.Contains("turn of its own", asking.Report);
+        await SwarmTestServer.Until(async () => told.Count == 1 && (await coordinator.Status()).Tasks.Count == 0, () => Task.FromResult(string.Join(" | ", told)));
         Assert.StartsWith("done by the worker", await File.ReadAllTextAsync(Path.Combine(folder, "done.txt")));
-        await Assert.ThrowsAsync<RemoteException>(() => coordinator.Connection.ApplySwarmTask(done.Id, CancellationToken.None));
-
+        Assert.Contains("was removed", Assert.Single(told));
+        Assert.StartsWith("[Auto Remote] Bring in the result", Assert.Single(Prompts(coordinator, "integration ")));
+        await SwarmTestServer.Until(async () => await Git(folder, "branch", "--format=%(refname:short)", "--list", "swarm/*") == string.Empty);
+        Assert.Equal(string.Empty, await Git(folder, "for-each-ref", "refs/auto-remote/tasks", "refs/auto-remote/results"));
+        await SwarmTestServer.Until(async () => await Activity(workspace.Id, entry => entry is { Source: ActivitySource.BringIn, Outcome: ActivityOutcome.Done }) is { } entry && entry.Files.Any(file => file.Contains("done.txt")) && entry.Handoff?.Contains("wrote done.txt") == true);
         await SwarmTestServer.Until(async () => !Directory.Exists(workerFolder) && (await worker.Connection.ListWorkspaces(CancellationToken.None)).Workspaces.Count == 0);
-        await coordinator.Connection.DiscardSwarmTask(done.Id, CancellationToken.None);
-        Assert.Empty((await coordinator.Status()).Tasks);
-        Assert.Equal("main", await Git(folder, "branch", "--format=%(refname:short)"));
+        Assert.Empty(Directory.Exists(Path.Combine(coordinator.Data, "swarm", "results")) ? Directory.GetDirectories(Path.Combine(coordinator.Data, "swarm", "results")) : []);
     }
 
     [Fact]
@@ -136,7 +141,7 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         await Permit();
         await KnowsTheWorker();
         (WorkspaceInfo workspace, string folder) = await Project();
-        WorkspaceInfo side = await coordinator.Connection.CreateSideSession(workspace.Id, "delegating", SideSessionStart.Files, null, CancellationToken.None);
+        WorkspaceInfo side = await coordinator.Connection.CreateSideSession(workspace.Id, "delegating", SideSessionStart.Files, null, false, CancellationToken.None);
         await SwarmTestServer.Until(async () => (await coordinator.Connection.ListWorkspaces(CancellationToken.None)).Sessions.Single().Side!.State == SideSessionState.Ready);
         worker.Hangs = true;
         await coordinator.Connection.DelegateTask(side.Id, Request("take long"), CancellationToken.None);
@@ -173,26 +178,41 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task TheAiDelegatesDependentTasksEndsItsTurnAndIsToldWhenTheyEndedToReviewAndApplyThem()
+    public async Task TheAiDelegatesDependentTasksEndsItsTurnAndGetsTheirResultsInATurnOfItsOwnToBringIn()
     {
         await PairByNetwork();
         await Permit();
         await KnowsTheWorker();
         (WorkspaceInfo workspace, string folder) = await Project();
         List<string> toolResults = [];
-        List<bool> sawEarlierWork = [];
+        List<string> brought = [];
+        List<bool> startedWithEarlierWork = [];
+        List<string> given = [];
         worker.Ai = (session, prompt) =>
         {
             string title = prompt.Text.Split('\n')[0].TrimStart('#', ' ');
+            string own = session.WorkspacePath!;
 
-            lock (sawEarlierWork)
+            lock (startedWithEarlierWork)
             {
-                sawEarlierWork.Add(File.Exists(Path.Combine(session.WorkspacePath!, "first.txt")));
+                startedWithEarlierWork.Add(File.Exists(Path.Combine(own, "first.txt")));
             }
 
-            File.WriteAllText(Path.Combine(session.WorkspacePath!, $"{title}.txt"), title);
+            // Combining what it builds on is the work of the AI.
+            foreach (System.Text.RegularExpressions.Match match in Regex.Matches(prompt.Text, "Folder: (.+)"))
+            {
+                string results = match.Groups[1].Value.Trim();
+                given.AddRange(session.SharedFolders.Where(shared => results.StartsWith(shared, StringComparison.Ordinal)));
+                Assert.False(results.StartsWith(own, StringComparison.Ordinal));
+                Assert.Contains("first.txt", File.ReadAllText(Path.Combine(results, "changes.diff")));
+                Assert.Contains("Report for first.", File.ReadAllText(Path.Combine(results, "report.md")));
+                Copy(results, own);
+            }
+
+            File.WriteAllText(Path.Combine(own, $"{title}.txt"), title);
             return [new PromptMessageEvent { Text = $"Report for {title}." }];
         };
+        Func<FakePromptSession, FakePrompt, IEnumerable<PromptEvent>> bring = Bringer(brought);
         coordinator.Ai = (session, prompt) =>
         {
             if (prompt.Text.Contains("split this up"))
@@ -202,24 +222,19 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
                 return [new PromptMessageEvent { Text = "Delegated; ending my turn." }];
             }
 
-            if (prompt.Text.StartsWith("[Auto Remote]", StringComparison.Ordinal))
+            if (prompt.Text.StartsWith("[Auto Remote] Your delegated tasks have ended", StringComparison.Ordinal))
             {
-                foreach (System.Text.RegularExpressions.Match match in Regex.Matches(prompt.Text, "Task ([0-9a-f]{32})"))
-                {
-                    toolResults.Add(Use(session, "review_task", new { taskId = match.Groups[1].Value }));
-                    toolResults.Add(Use(session, "apply_task", new { taskId = match.Groups[1].Value }));
-                }
-
-                toolResults.Add(Use(session, "task_status", new { }));
-                return [new PromptMessageEvent { Text = "All applied." }];
+                Assert.DoesNotContain(session.Transient.Tools, tool => tool.Name == "apply_task");
+                toolResults.Add(Use(session, "review_task", new { taskId = Regex.Match(prompt.Text, "Task ([0-9a-f]{32})").Groups[1].Value }));
+                return bring(session, prompt);
             }
 
             return [new PromptMessageEvent { Text = $"tools: {string.Join(",", session.Transient.Tools.Select(tool => tool.Name))}" }];
         };
         await coordinator.Connection.Prompt(workspace.Id, "which tools", CancellationToken.None);
         await SwarmTestServer.Until(async () => (await Chat(workspace.Id)).Any(message => message.Role == MessageRole.Assistant));
-        // No delegation tools; every main workspace has the one that finishes the integration of a side session.
-        Assert.Equal("tools: finish_integration", (await Chat(workspace.Id)).Last().Text);
+        // No delegation tools; every workspace has the ones that confirm what it brought in and say what it could not finish.
+        Assert.Equal("tools: finish_integration,report_unfinished", (await Chat(workspace.Id)).Last().Text);
         WorkspaceSettings settings = await coordinator.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
         Assert.False(settings.IsDelegationAllowed);
         Assert.True((await coordinator.Connection.SetWorkspaceSettings(workspace.Id, settings with { IsDelegationAllowed = true }, CancellationToken.None)).IsDelegationAllowed);
@@ -227,18 +242,24 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
 
         await coordinator.Connection.Prompt(workspace.Id, "split this up", CancellationToken.None);
 
-        await SwarmTestServer.Until(async () => (await Chat(workspace.Id)).Any(message => message.Text == "All applied."), async () => string.Join(" | ", toolResults) + string.Join(" | ", (await coordinator.Status()).Tasks.Select(task => $"{task.Title} {task.State} {task.Error}")));
+        await SwarmTestServer.Until(async () => brought.Count == 2 && (await coordinator.Status()).Tasks.Count == 0, async () => string.Join(" | ", toolResults) + string.Join(" | ", brought) + string.Join(" | ", (await coordinator.Status()).Tasks.Select(task => $"{task.Title} {task.State} {task.Error}")));
         Assert.Contains("worker (id ", toolResults[0]);
         Assert.Contains("Strong (large)", toolResults[0]);
-        Assert.Contains("only read and edit files", toolResults[0]);
+        Assert.Contains("run shell commands", toolResults[0]);
         Assert.Contains("end your turn", toolResults[1]);
-        Assert.Equal([false, true], sawEarlierWork);
-        Assert.Contains(toolResults, result => result.Contains("Report for first.") && result.Contains("first.txt"));
-        Assert.Contains("applied", toolResults[^1]);
+        Assert.Contains("first.txt", toolResults[2]);
+        Assert.Equal([false, false], startedWithEarlierWork);
+        Assert.NotEmpty(given);
+        string report = Assert.Single(Prompts(coordinator, "Your delegated tasks have ended"));
+        Assert.Equal(2, Regex.Matches(report, @"\(integration [0-9a-f]{12}\)").Count);
+        Assert.Contains("should already include theirs: \"first\" (integration ", report);
         Assert.Equal("first", await File.ReadAllTextAsync(Path.Combine(folder, "first.txt")));
         Assert.Equal("second", await File.ReadAllTextAsync(Path.Combine(folder, "second.txt")));
-        Assert.All((await coordinator.Status()).Tasks, task => Assert.Equal((SwarmTaskState.Done, true, false), (task.State, task.IsApplied, task.IsManual)));
+        await SwarmTestServer.Until(async () => await Activity(workspace.Id, entry => entry is { Source: ActivitySource.DelegatedResults, Outcome: ActivityOutcome.Done }) is not null);
         Assert.All(worker.Asked, asked => Assert.DoesNotContain("split this up", asked.Text));
+        // Nothing is told or asked again.
+        await Task.Delay(500);
+        Assert.Single(Prompts(coordinator, "Your delegated tasks have ended"));
     }
 
     private async Task<IReadOnlyList<ChatMessage>> Chat(Guid workspace) => (await coordinator.Connection.GetHistory(workspace, null, 200, 100_000, CancellationToken.None)).Messages;
@@ -261,9 +282,9 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         Assert.Equal(("coordinator", "hang on"), (delegation.From, delegation.Title));
         Guid delegated = delegation.WorkspaceId;
         WorkspaceSettings settings = await worker.Connection.GetWorkspaceSettings(delegated, CancellationToken.None);
-        Assert.Equal((AiCapability.Strong, false, false, false, false, false), (settings.Capability, settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.IsImageGenerationAllowed, settings.IsDelegationAllowed));
+        Assert.Equal((AiCapability.Strong, false, false, false, false), (settings.Capability, settings.IsSandboxed, settings.IsWebAllowed, settings.IsImageGenerationAllowed, settings.IsDelegationAllowed));
         await Assert.ThrowsAsync<RemoteException>(() => worker.Connection.Prompt(delegated, "do something else", CancellationToken.None));
-        await Assert.ThrowsAsync<RemoteException>(() => worker.Connection.SetWorkspaceSettings(delegated, settings with { IsShellAllowed = true }, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => worker.Connection.SetWorkspaceSettings(delegated, settings with { IsSandboxed = true }, CancellationToken.None));
         await Assert.ThrowsAsync<RemoteException>(() => worker.Connection.GitCommit(delegated, "x", CancellationToken.None));
         Assert.False((await worker.Connection.GetGitStatus(delegated, CancellationToken.None)).IsRepo);
 
@@ -311,6 +332,227 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         await coordinator.Found(task => task.State == SwarmTaskState.Done);
     }
 
+    private void Copy(string results, string into)
+    {
+        foreach (string line in File.ReadAllLines(Path.Combine(results, "changes.txt")))
+        {
+            string path = line[(line.LastIndexOf('\t') + 1)..];
+            File.Copy(Path.Combine(results, "files", path), Path.Combine(into, path), true);
+        }
+    }
+
+    // An AI that brings in every result a request names, by copying the changed files, and confirms each.
+    private Func<FakePromptSession, FakePrompt, IEnumerable<PromptEvent>> Bringer(List<string> confirmed) => (session, prompt) =>
+    {
+        foreach (System.Text.RegularExpressions.Match match in Regex.Matches(prompt.Text, @"\(integration ([0-9a-f]{12})\)\n\nTask [0-9a-f]{32}[^\n]*?Its folder is (.+?): files holds"))
+        {
+            string results = match.Groups[2].Value;
+            Assert.Contains(session.SharedFolders, shared => results.StartsWith(shared, StringComparison.Ordinal));
+            Copy(results, session.WorkspacePath!);
+            string answer = Use(session, "finish_integration", new { integration_id = match.Groups[1].Value });
+
+            lock (confirmed)
+            {
+                confirmed.Add(answer);
+            }
+        }
+
+        return [new PromptMessageEvent { Text = "Brought in." }];
+    };
+
+    private IReadOnlyList<string> Prompts(SwarmTestServer server, string containing)
+    {
+        lock (server.Asked)
+        {
+            return [.. server.Asked.Select(asked => asked.Text).Where(text => text.Contains(containing, StringComparison.Ordinal) && !text.StartsWith("Write a", StringComparison.Ordinal))];
+        }
+    }
+
+    private async Task<ActivityEntry?> Activity(Guid workspace, Func<ActivityEntry, bool> which) => (await coordinator.Connection.GetActivity(workspace, null, 50, CancellationToken.None)).Entries.FirstOrDefault(which);
+
+    private async Task<(WorkspaceInfo Workspace, string Folder)> Ready()
+    {
+        await PairByNetwork();
+        await Permit();
+        await KnowsTheWorker();
+        return await Project();
+    }
+
+    [Fact]
+    public async Task AResultThatIsNotConfirmedTwiceStaysWithItsTaskNeedsAttentionAndTheNextTurnIsTold()
+    {
+        (WorkspaceInfo workspace, string folder) = await Ready();
+
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("never confirmed"), CancellationToken.None);
+
+        SwarmTaskInfo left = await coordinator.Found(task => task.Error?.Contains("Needs attention") == true);
+        Assert.Equal((SwarmTaskState.Done, false, false), (left.State, left.BringIn, left.IsBringingIn));
+        Assert.True(left.CanBringIn);
+        await Task.Delay(500);
+        Assert.Equal(2, Prompts(coordinator, "(integration ").Count);
+        Assert.NotNull(await Activity(workspace.Id, entry => entry is { Source: ActivitySource.BringIn, Outcome: ActivityOutcome.Unfinished, NeedsAttention: true }));
+        Assert.Contains("done.txt", await Git(folder, "diff", "--name-only", $"{left.Branch}^", left.Branch!));
+        Assert.Empty((await coordinator.Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items);
+
+        await coordinator.Connection.Prompt(workspace.Id, "what happened", CancellationToken.None);
+
+        await SwarmTestServer.Until(() => Task.FromResult(Prompts(coordinator, "what happened").Any(text => text.Contains("was not confirmed"))));
+    }
+
+    [Fact]
+    public async Task AResultWaitsForABusyWorkspaceShowsInItsAgendaAndCanBeKeptApartBeforeItsTurn()
+    {
+        (WorkspaceInfo workspace, _) = await Ready();
+        coordinator.Hangs = true;
+        string other = temp.Combine("busy-too");
+        Directory.CreateDirectory(other);
+        WorkspaceInfo blocker = await coordinator.Connection.CreateWorkspace(other, AiService.Local, null, null, CancellationToken.None);
+        await coordinator.Connection.Prompt(blocker.Id, "hold the local AI", CancellationToken.None);
+        coordinator.Hangs = false;
+
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("wait for it"), CancellationToken.None);
+        SwarmTaskInfo done = await coordinator.Found(task => task.State == SwarmTaskState.Done);
+
+        Assert.True(done.IsBringingIn);
+        // The turn waits for the local AI, which another workspace holds.
+        await SwarmTestServer.Until(async () => (await coordinator.Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items.Any(item => item.Kind == AgendaKind.LocalAi));
+
+        await coordinator.Connection.SetSwarmTaskBringIn(done.Id, false, CancellationToken.None);
+
+        SwarmTaskInfo kept = await coordinator.Found(task => task is { BringIn: false, IsBringingIn: false });
+        Assert.Null(kept.Error);
+        await SwarmTestServer.Until(async () => (await coordinator.Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items.Count == 0);
+        await coordinator.Connection.StopWorkspace(blocker.Id, CancellationToken.None);
+        await Task.Delay(500);
+        Assert.Empty(Prompts(coordinator, "(integration "));
+    }
+
+    [Fact]
+    public async Task AResultOfAStoppedWorkspaceIsUpNextWithACommitSettingAndComesInOnceItIsResumed()
+    {
+        (WorkspaceInfo workspace, string folder) = await Ready();
+        coordinator.Ai = Bringer([]);
+        coordinator.FollowUps.Pause(workspace.Id);
+
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("held back"), CancellationToken.None);
+
+        SwarmTaskInfo done = await coordinator.Found(task => task.State == SwarmTaskState.Done);
+        AgendaItem item = Assert.Single((await coordinator.Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items);
+        Assert.Equal((AgendaKind.BringIn, (Guid?)done.Id, "Bring in held back", (bool?)true), (item.Kind, item.Id, item.Title, item.AutoCommit));
+
+        await coordinator.Connection.SetBringInCommit(workspace.Id, done.Id, false, CancellationToken.None);
+
+        Assert.False(Assert.Single((await coordinator.Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items).AutoCommit);
+        await Task.Delay(300);
+        Assert.Empty(Prompts(coordinator, "(integration "));
+
+        await coordinator.Connection.ResumeAutomation(workspace.Id, CancellationToken.None);
+
+        await SwarmTestServer.Until(async () => (await coordinator.Status()).Tasks.Count == 0);
+        Assert.True(File.Exists(Path.Combine(folder, "done.txt")));
+    }
+
+    [Fact]
+    public async Task AFinishedTaskGoesOnInASideSessionFromItsFilesWithItsReportAndMainStaysAsItWas()
+    {
+        (WorkspaceInfo workspace, string folder) = await Ready();
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("go on here") with { BringIn = false }, CancellationToken.None);
+        SwarmTaskInfo done = await coordinator.Found(task => task.State == SwarmTaskState.Done);
+        string head = await Git(folder, "rev-parse", "HEAD");
+
+        WorkspaceInfo made = await coordinator.Connection.ContinueSwarmTask(done.Id, null, CancellationToken.None);
+
+        await SwarmTestServer.Until(async () => (await coordinator.Connection.ListWorkspaces(CancellationToken.None)).Sessions.Single().Side!.State == SideSessionState.Ready);
+        WorkspaceInfo session = (await coordinator.Connection.ListWorkspaces(CancellationToken.None)).Sessions.Single();
+        Assert.Equal((made.Id, "go on here", false, workspace.Id), (session.Id, session.Side!.Name, session.Side.IntegrateWhenFinished, session.Side.ParentId));
+        Assert.StartsWith("done by the worker", await File.ReadAllTextAsync(Path.Combine(session.Folder, "done.txt")));
+        Assert.True(File.Exists(Path.Combine(session.Folder, "uncommitted.txt")));
+        Assert.Equal(head, await Git(session.Folder, "rev-parse", "HEAD"));
+        Assert.Equal("done.txt", Assert.Single(await coordinator.Connection.GetSessionChanges(session.Id, CancellationToken.None)).Path);
+        Assert.Contains("wrote done.txt", Assert.Single(await Chat(session.Id)).Text);
+        Assert.False(File.Exists(Path.Combine(folder, "done.txt")));
+        Assert.Empty((await coordinator.Status()).Tasks);
+    }
+
+    [Fact]
+    public async Task WorkTheWorkersAiCannotFinishFailsWithItsReasonAndStillSendsWhatItChanged()
+    {
+        (WorkspaceInfo workspace, string folder) = await Ready();
+        worker.Ai = (session, prompt) =>
+        {
+            File.WriteAllText(Path.Combine(session.WorkspacePath!, "half.txt"), "half\n");
+            Use(session, "report_unfinished", new { reason = "there is no key" });
+            return [new PromptMessageEvent { Text = "I wrote half of it." }];
+        };
+
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("half done"), CancellationToken.None);
+
+        SwarmTaskInfo failed = await coordinator.Found(task => task.State is SwarmTaskState.Failed or SwarmTaskState.Done);
+        Assert.Equal((SwarmTaskState.Failed, "The AI could not finish it: there is no key"), (failed.State, failed.Error));
+        Assert.Equal("half.txt", await Git(folder, "diff", "--name-only", $"{failed.Branch}^", failed.Branch!));
+        Assert.Contains("wrote half", failed.Summary);
+        Assert.False(failed.CanBringIn);
+        await Task.Delay(500);
+        Assert.Single(worker.Asked);
+        Assert.Empty(Prompts(coordinator, "(integration "));
+    }
+
+    [Fact]
+    public async Task ATurnWithDelegatedResultsThatARestartInterruptsGoesOnAndCanStillConfirmThem()
+    {
+        await PairByNetwork();
+        await Permit();
+        await KnowsTheWorker();
+        coordinator.Hangs = true;
+        (WorkspaceInfo workspace, string folder) = await Project();
+        coordinator.Hangs = false;
+        await coordinator.Coordinator.Delegate(workspace.Id, [new SwarmPlannedTask(Request("survive"), [])], false, CancellationToken.None);
+        // A session that hangs never asks for a reply, so what it was sent is looked up on it.
+        await SwarmTestServer.Until(() => Task.FromResult(coordinator.Prompter.Sessions.SelectMany(session => session.Prompts.ToList()).Count(prompt => prompt.Text.Contains("(integration ")) == 1), async () => string.Join(" | ", (await coordinator.Status()).Tasks.Select(task => $"{task.Title} {task.State} {task.Error}")));
+        List<string> confirmed = [];
+        coordinator.Ai = Bringer(confirmed);
+
+        await coordinator.Restart("coordinator");
+
+        await SwarmTestServer.Until(async () => confirmed.Count == 1 && (await coordinator.Status()).Tasks.Count == 0, async () => string.Join(" | ", Prompts(coordinator, "")) + string.Join(" | ", (await coordinator.Status()).Tasks.Select(task => $"{task.Title} {task.State} {task.Error} {task.IsBringingIn}")));
+        Assert.True(File.Exists(Path.Combine(folder, "done.txt")));
+        Assert.Single(confirmed);
+        Assert.Contains("The server restarted", Assert.Single(Prompts(coordinator, "(integration ")));
+    }
+
+    [Fact]
+    public async Task ATurnTheAiCouldNotHaveIsGivenAgainAndDoesNotCountAgainstTheResult()
+    {
+        (WorkspaceInfo workspace, string folder) = await Ready();
+        List<string> confirmed = [];
+        Func<FakePromptSession, FakePrompt, IEnumerable<PromptEvent>> bring = Bringer(confirmed);
+        int asked = 0;
+        coordinator.Ai = (session, prompt) => !prompt.Text.Contains("(integration ") ? [new PromptMessageEvent { Text = "ok" }] : ++asked <= 3 ? [new PromptFailureEvent { Message = "network is unreachable" }] : bring(session, prompt);
+        await coordinator.Coordinator.Delegate(workspace.Id, [new SwarmPlannedTask(Request("patiently"), [])], false, CancellationToken.None);
+
+        await SwarmTestServer.Until(async () => confirmed.Count == 1 && (await coordinator.Status()).Tasks.Count == 0, async () => $"{asked}: " + string.Join(" | ", (await coordinator.Status()).Tasks.Select(task => $"{task.Title} {task.State} {task.Error} {task.BringIn}")));
+
+        Assert.Equal(4, asked);
+        Assert.True(File.Exists(Path.Combine(folder, "done.txt")));
+        // The news that the job ended is given until the AI had it.
+        Assert.All(Prompts(coordinator, "(integration "), text => Assert.StartsWith("[Auto Remote] Your delegated tasks have ended", text));
+    }
+
+    [Fact]
+    public async Task ATaskDiscardedWhileItsResultWaitsLeavesNoCopyBehind()
+    {
+        (WorkspaceInfo workspace, _) = await Ready();
+        coordinator.FollowUps.Pause(workspace.Id);
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("thrown away"), CancellationToken.None);
+        SwarmTaskInfo done = await coordinator.Found(task => task.State == SwarmTaskState.Done);
+
+        await coordinator.Connection.DiscardSwarmTask(done.Id, CancellationToken.None);
+
+        Assert.Empty((await coordinator.Status()).Tasks);
+        Assert.Empty((await coordinator.Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items);
+        Assert.False(Directory.Exists(Path.Combine(coordinator.Data, "swarm", "results", done.Id.ToString("N"))));
+    }
+
     private async Task Eventually(Func<Task<bool>> condition)
     {
         for (int attempt = 0; attempt < 400 && !await condition(); attempt++)
@@ -336,15 +578,26 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         await Git(folder, "remote", "add", "origin", origin);
         await KnowsTheWorker();
 
-        await coordinator.Connection.DelegateTask(workspace.Id, Request("use the remote"), CancellationToken.None);
+        coordinator.Ai = Bringer([]);
+
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("use the remote") with { BringIn = false }, CancellationToken.None);
 
         SwarmTaskInfo done = await coordinator.Found(task => task.State is SwarmTaskState.Done or SwarmTaskState.Failed);
         Assert.Equal((SwarmTaskState.Done, null), (done.State, done.Error));
         Assert.Contains("swarm/results/", await Git(origin, "for-each-ref", "--format=%(refname)"));
 
-        await coordinator.Connection.ApplySwarmTask(done.Id, CancellationToken.None);
+        coordinator.FollowUps.Pause(workspace.Id);
+        await coordinator.Connection.DelegateTask(workspace.Id, Request("build on it") with { BringIn = false, DependsOn = [done.Id] }, CancellationToken.None);
+        SwarmTaskInfo second = await coordinator.Found(task => task.Title == "build on it" && task.State is SwarmTaskState.Done or SwarmTaskState.Failed);
+        Assert.Equal((SwarmTaskState.Done, null), (second.State, second.Error));
+        Assert.Contains($"swarm/dependencies/{second.Id:N}/{done.Id:N}", await Git(origin, "for-each-ref", "--format=%(refname)"));
+        Assert.Contains("Results this task builds on", worker.Asked[^1].Text);
+        await coordinator.Connection.DiscardSwarmTask(second.Id, CancellationToken.None);
+        coordinator.FollowUps.Resume(workspace.Id);
 
-        Assert.Equal(string.Empty, await Git(origin, "for-each-ref", "refs/heads/swarm"));
+        await coordinator.Connection.BringInSwarmTask(done.Id, CancellationToken.None);
+
+        await Eventually(async () => await Git(origin, "for-each-ref", "refs/heads/swarm") == string.Empty);
         Assert.True(File.Exists(Path.Combine(folder, "done.txt")));
 
         // No bundle ever reached this worker, so it never made the folder for one.
@@ -445,6 +698,8 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
         (WorkspaceInfo workspace, string folder) = await Project();
         await Assert.ThrowsAsync<RemoteException>(() => coordinator.Connection.DelegateTask(workspace.Id, Request("anyone"), CancellationToken.None));
 
+        coordinator.Ai = Bringer([]);
+
         await coordinator.Connection.DelegateTask(workspace.Id, Request("by drive", (await coordinator.Peer()).Id), CancellationToken.None);
 
         Assert.Equal(SwarmTaskState.InTransit, (await coordinator.Status()).Tasks.Single().State);
@@ -461,7 +716,7 @@ public sealed class SwarmEndToEndTests : IAsyncLifetime
 
         SwarmTaskInfo done = await coordinator.Found(task => task.State == SwarmTaskState.Done);
         Assert.Single(worker.Asked);
-        await coordinator.Connection.ApplySwarmTask(done.Id, CancellationToken.None);
+        await SwarmTestServer.Until(async () => (await coordinator.Status()).Tasks.All(task => task.Id != done.Id));
         Assert.True(File.Exists(Path.Combine(folder, "done.txt")));
         await coordinator.Connection.SyncDrive(CancellationToken.None);
         await worker.Connection.SyncDrive(CancellationToken.None);

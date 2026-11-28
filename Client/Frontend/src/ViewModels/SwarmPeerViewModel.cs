@@ -122,21 +122,12 @@ internal sealed class SwarmPeerViewModel : ViewModelBase
     public bool HasAddressEdit => address.Trim() != stored.Address;
 
     /// <summary>
-    /// Gets or sets a value indicating whether tasks of the server may run shell commands here.
+    /// Gets or sets a value indicating whether tasks of the server run sandboxed here: without a shell and without files outside their workspace but what the server shares with them.
     /// </summary>
-    public bool IsShellAllowed
+    public bool IsSandboxed
     {
-        get => stored.Permissions.IsShellAllowed;
-        set => Change(stored with { Permissions = stored.Permissions with { IsShellAllowed = value } }, value != stored.Permissions.IsShellAllowed);
-    }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether tasks of the server may reach files outside their workspace.
-    /// </summary>
-    public bool IsSystemAccessAllowed
-    {
-        get => stored.Permissions.IsSystemAccessAllowed;
-        set => Change(stored with { Permissions = stored.Permissions with { IsSystemAccessAllowed = value } }, value != stored.Permissions.IsSystemAccessAllowed);
+        get => stored.Permissions.IsSandboxed;
+        set => Change(stored with { Permissions = stored.Permissions with { IsSandboxed = value } }, value != stored.Permissions.IsSandboxed);
     }
 
     /// <summary>

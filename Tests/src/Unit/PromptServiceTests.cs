@@ -80,6 +80,7 @@ public sealed class PromptServiceTests : IDisposable
         workspace = info;
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => workspace);
         workspaces.Setup(x => x.SetOverrides(workspace.Id, It.IsAny<string?>(), It.IsAny<string?>(), It.IsAny<int?>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string? review, string? expand, int? minutes, CancellationToken _) => workspace = workspace with { ReviewPrompt = string.IsNullOrWhiteSpace(review) ? null : review.Trim(), ExpandPrompt = string.IsNullOrWhiteSpace(expand) ? null : expand.Trim(), StatusMinutes = minutes });
+        workspaces.Setup(x => x.SetSandbox(workspace.Id, It.IsAny<bool>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, bool sandboxed, CancellationToken _) => workspace = workspace with { IsSandboxed = sandboxed });
         workspaces.Setup(x => x.AttachSession(workspace.Id, It.IsAny<string>(), It.IsAny<CancellationToken>())).Callback<Guid, string, CancellationToken>((_, session, _) => workspace = workspace with { SessionId = session }).Returns(Task.CompletedTask);
     }
 
@@ -613,7 +614,7 @@ public sealed class PromptServiceTests : IDisposable
     {
         Mock<IWorkCompletion> completion = new();
         WorkspaceState during = WorkspaceState.Ready;
-        completion.Setup(x => x.Complete(workspace.Id, It.IsAny<bool>())).Returns(() =>
+        completion.Setup(x => x.Complete(workspace.Id, It.IsAny<WorkResult>())).Returns(() =>
         {
             during = activity.Get(workspace.Id);
             return false;
@@ -624,7 +625,7 @@ public sealed class PromptServiceTests : IDisposable
         await service.Prompt(workspace.Id, text, CancellationToken.None);
         await Until(() => !service.IsBusy(workspace.Id) && activity.Get(workspace.Id) == WorkspaceState.Ready);
 
-        completion.Verify(x => x.Complete(workspace.Id, succeeded), Times.Once);
+        completion.Verify(x => x.Complete(workspace.Id, It.Is<WorkResult>(result => (result.Answered && !result.Failed && !result.Stopped) == succeeded)), Times.Once);
         Assert.Equal(WorkspaceState.Working, during);
     }
 
@@ -632,7 +633,7 @@ public sealed class PromptServiceTests : IDisposable
     public async Task Prompt_LeavesTheWorkspaceTakenForWhatCommitsItsChanges()
     {
         Mock<IWorkCompletion> completion = new();
-        completion.Setup(x => x.Complete(workspace.Id, true)).Returns(() => activity.Pass(workspace.Id, WorkspaceState.Working, WorkspaceState.Managing));
+        completion.Setup(x => x.Complete(workspace.Id, It.IsAny<WorkResult>())).Returns(() => activity.Pass(workspace.Id, WorkspaceState.Working, WorkspaceState.Managing));
         service = Completing(completion.Object);
         prompter.OnCreate = session => session.ReplyWith(_ => [new PromptMessageEvent { Text = "fine" }]);
 
@@ -867,6 +868,38 @@ public sealed class PromptServiceTests : IDisposable
         completion.Verify(x => x.Abort(workspace.Id), Times.Once);
     }
 
+    [Fact]
+    public async Task Prompt_AddsWhatTheAiHasToKnowToWhatItIsSentButNotToTheChat()
+    {
+        Mock<IWorkCompletion> completion = new();
+        completion.Setup(x => x.Brief(workspace.Id, "go")).Returns("[Auto Remote]\nThis work runs unattended.");
+        service = Completing(completion.Object);
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptMessageEvent { Text = "fine" }]);
+
+        await service.Prompt(workspace.Id, "go", CancellationToken.None);
+        await Until(() => !service.IsBusy(workspace.Id) && Messages(MessageRole.Assistant).Count == 1);
+
+        Assert.Equal("go\n\n[Auto Remote]\nThis work runs unattended.", Assert.Single(Session.Prompts).Text);
+        Assert.Equal(["go"], Messages(MessageRole.User));
+        completion.Verify(x => x.Began(workspace.Id, "go"), Times.Once);
+        completion.Verify(x => x.Complete(workspace.Id, It.Is<WorkResult>(result => result.Reply == "fine")), Times.Once);
+    }
+
+    [Fact]
+    public async Task SetSettings_PutsTheSandboxOnTheSessionAndKeepsItWithTheWorkspace()
+    {
+        WorkspaceSettings current = await service.GetSettings(workspace.Id, CancellationToken.None);
+        Assert.False(current.IsSandboxed);
+        Assert.True(Session.Configuration.IsShellAllowed);
+        Assert.True(Session.Configuration.IsSystemAccessAllowed);
+
+        WorkspaceSettings saved = await service.SetSettings(workspace.Id, current with { IsSandboxed = true }, CancellationToken.None);
+
+        Assert.True(saved.IsSandboxed);
+        Assert.False(Session.Configuration.IsShellAllowed);
+        Assert.False(Session.Configuration.IsSystemAccessAllowed);
+    }
+
     private void Broken(string message) => host.Mock.Setup(x => x.CreateSession(It.IsAny<string>(), It.IsAny<AiService>(), It.IsAny<string?>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException(message));
 
     [Fact]
@@ -909,7 +942,7 @@ public sealed class PromptServiceTests : IDisposable
     [Fact]
     public async Task SetSettings_GivesTheSessionEveryValueAndAnswersHowItNowRuns()
     {
-        WorkspaceSettings wanted = new() { Service = AiService.Codex, Capability = AiCapability.Max, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = false, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "  be brief  " };
+        WorkspaceSettings wanted = new() { Service = AiService.Codex, Capability = AiCapability.Max, Effort = AiEffort.Low, IsSandboxed = true, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "  be brief  " };
 
         WorkspaceSettings saved = await service.SetSettings(workspace.Id, wanted, CancellationToken.None);
 

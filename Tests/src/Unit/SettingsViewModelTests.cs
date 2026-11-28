@@ -13,8 +13,7 @@ public sealed class SettingsViewModelTests
         Service = AiService.Codex,
         Capability = AiCapability.Balanced,
         Effort = AiEffort.High,
-        IsShellAllowed = true,
-        IsSystemAccessAllowed = true,
+        IsSandboxed = true,
         IsWebAllowed = true,
         Instructions = "work in the foreground",
         Descriptors = new Dictionary<string, string> { ["Provider"] = "Codex", ["Model"] = "GPT 5.6" }
@@ -51,7 +50,7 @@ public sealed class SettingsViewModelTests
         Assert.Equal("OpenAI Codex", settings.ProviderName);
         Assert.Equal(AiCapability.Balanced, settings.SelectedCapability.Value);
         Assert.Equal(AiEffort.High, settings.SelectedEffort.Value);
-        Assert.Equal((true, true, true, false), (settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.IsImageGenerationAllowed));
+        Assert.Equal((true, true, false), (settings.IsSandboxed, settings.IsWebAllowed, settings.IsImageGenerationAllowed));
         Assert.Equal("work in the foreground", settings.Instructions);
         Assert.False(settings.HasPending);
         Assert.Equal(["Provider", "Model"], settings.Details.Select(line => line.Name));
@@ -93,15 +92,14 @@ public sealed class SettingsViewModelTests
 
         settings.SelectedCapability = settings.Capabilities.Single(choice => choice.Value == AiCapability.Strong);
         settings.SelectedEffort = settings.Efforts.Single(choice => choice.Value == AiEffort.Max);
-        settings.IsShellAllowed = false;
-        settings.IsSystemAccessAllowed = false;
+        settings.IsSandboxed = false;
         settings.IsWebAllowed = false;
         settings.IsImageGenerationAllowed = true;
         settings.Instructions = "be brief";
 
         Assert.True(settings.HasPending);
         Assert.Empty(saved);
-        Assert.Equal((AiCapability.Strong, AiEffort.Max, false, false, false, true, "be brief"), (settings.SelectedCapability.Value, settings.SelectedEffort.Value, settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.IsImageGenerationAllowed, settings.Instructions));
+        Assert.Equal((AiCapability.Strong, AiEffort.Max, false, false, true, "be brief"), (settings.SelectedCapability.Value, settings.SelectedEffort.Value, settings.IsSandboxed, settings.IsWebAllowed, settings.IsImageGenerationAllowed, settings.Instructions));
     }
 
     [Fact]
@@ -112,14 +110,14 @@ public sealed class SettingsViewModelTests
         SettingsViewModel settings = Settings();
         await Until(() => settings.HasDetails);
         settings.SelectedCapability = settings.Capabilities.Single(choice => choice.Value == AiCapability.Strong);
-        settings.IsShellAllowed = false;
+        settings.IsSandboxed = false;
         settings.Instructions = "  be brief  ";
 
         bool applied = await settings.Apply();
 
         Assert.True(applied);
         WorkspaceSettings sent = Assert.Single(saved);
-        Assert.Equal((AiCapability.Strong, AiEffort.High, false, true, true, "be brief"), (sent.Capability, sent.Effort, sent.IsShellAllowed, sent.IsSystemAccessAllowed, sent.IsWebAllowed, sent.Instructions));
+        Assert.Equal((AiCapability.Strong, AiEffort.High, false, true, "be brief"), (sent.Capability, sent.Effort, sent.IsSandboxed, sent.IsWebAllowed, sent.Instructions));
         Assert.False(settings.HasPending);
         Assert.Equal("be brief", settings.Instructions);
     }
@@ -210,8 +208,8 @@ public sealed class SettingsViewModelTests
         await Until(() => settings.HasDetails);
         Assert.True(await settings.Apply());
 
-        settings.IsShellAllowed = false;
-        settings.IsShellAllowed = true;
+        settings.IsSandboxed = false;
+        settings.IsSandboxed = true;
         settings.Instructions = "work in the foreground  ";
 
         Assert.False(settings.HasPending);
@@ -223,17 +221,17 @@ public sealed class SettingsViewModelTests
     public async Task Apply_WhenTheServerRefuses_ShowsTheReasonAndKeepsTheEditsPending()
     {
         Session(Current);
-        connection.Setup(x => x.SetWorkspaceSettings(workspace.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("System access cannot be turned off with this provider."));
+        connection.Setup(x => x.SetWorkspaceSettings(workspace.Id, It.IsAny<WorkspaceSettings>(), It.IsAny<CancellationToken>())).ThrowsAsync(new RemoteException("The sandbox cannot be turned off with this provider."));
         SettingsViewModel settings = Settings();
         await Until(() => settings.HasDetails);
-        settings.IsSystemAccessAllowed = false;
+        settings.IsSandboxed = false;
 
         bool applied = await settings.Apply();
 
         Assert.False(applied);
-        Assert.Equal("System access cannot be turned off with this provider.", settings.Error);
+        Assert.Equal("The sandbox cannot be turned off with this provider.", settings.Error);
         Assert.True(settings.HasPending);
-        Assert.False(settings.IsSystemAccessAllowed);
+        Assert.False(settings.IsSandboxed);
     }
 
     [Fact]
@@ -243,11 +241,11 @@ public sealed class SettingsViewModelTests
         connection.Setup(x => x.GetWorkspaceSettings(workspace.Id, It.IsAny<CancellationToken>())).Returns(loading.Task);
         SettingsViewModel settings = Settings();
 
-        settings.IsShellAllowed = false;
+        settings.IsSandboxed = false;
         loading.SetResult(Current);
         await Until(() => settings.HasDetails);
 
-        Assert.False(settings.IsShellAllowed);
+        Assert.False(settings.IsSandboxed);
         Assert.True(settings.HasPending);
         Assert.Equal(["Provider", "Model"], settings.Details.Select(line => line.Name));
     }
@@ -263,11 +261,11 @@ public sealed class SettingsViewModelTests
         await settings.Reload();
         Assert.Equal(AiEffort.Low, settings.SelectedEffort.Value);
 
-        settings.IsShellAllowed = false;
+        settings.IsSandboxed = false;
         Session(Current with { Effort = AiEffort.Max });
         await settings.Reload();
 
-        Assert.Equal((AiEffort.Low, false), (settings.SelectedEffort.Value, settings.IsShellAllowed));
+        Assert.Equal((AiEffort.Low, false), (settings.SelectedEffort.Value, settings.IsSandboxed));
     }
 
     [Fact]
@@ -307,13 +305,13 @@ public sealed class SettingsViewModelTests
 
         settings.SelectedEffort = settings.Efforts.Single(choice => choice.Value == AiEffort.Low);
         read.SetResult(Current);
-        await Until(() => settings.IsShellAllowed);
+        await Until(() => settings.IsSandboxed);
 
         Assert.True(settings.HasPending);
-        Assert.Equal((AiEffort.Low, true, true, true, "work in the foreground"), (settings.SelectedEffort.Value, settings.IsShellAllowed, settings.IsSystemAccessAllowed, settings.IsWebAllowed, settings.Instructions));
+        Assert.Equal((AiEffort.Low, true, true, "work in the foreground"), (settings.SelectedEffort.Value, settings.IsSandboxed, settings.IsWebAllowed, settings.Instructions));
         Assert.True(await settings.Apply());
         WorkspaceSettings sent = Assert.Single(saved);
-        Assert.Equal((AiEffort.Low, true, true, true, "work in the foreground"), (sent.Effort, sent.IsShellAllowed, sent.IsSystemAccessAllowed, sent.IsWebAllowed, sent.Instructions));
+        Assert.Equal((AiEffort.Low, true, true, "work in the foreground"), (sent.Effort, sent.IsSandboxed, sent.IsWebAllowed, sent.Instructions));
     }
 
     [Fact]
@@ -322,12 +320,12 @@ public sealed class SettingsViewModelTests
         Session(Current);
         Accept();
         SettingsViewModel settings = new(connection.Object, workspace);
-        await Until(() => settings.IsShellAllowed);
+        await Until(() => settings.IsSandboxed);
 
         settings.IsImageGenerationAllowed = true;
 
         Assert.True(await settings.Apply());
         WorkspaceSettings sent = Assert.Single(saved);
-        Assert.Equal((AiEffort.High, true, true, true, true), (sent.Effort, sent.IsShellAllowed, sent.IsSystemAccessAllowed, sent.IsWebAllowed, sent.IsImageGenerationAllowed));
+        Assert.Equal((AiEffort.High, true, true, true), (sent.Effort, sent.IsSandboxed, sent.IsWebAllowed, sent.IsImageGenerationAllowed));
     }
 }

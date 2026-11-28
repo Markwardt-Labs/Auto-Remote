@@ -18,6 +18,13 @@ internal interface ISavedInputs
     bool HasQueued(Guid id);
 
     /// <summary>
+    /// Checks whether any queued input of a workspace is to be committed, as far as its inputs have been read.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> if one is.</returns>
+    bool WantsCommit(Guid id);
+
+    /// <summary>
     /// Lists the saved inputs of a workspace.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -25,6 +32,13 @@ internal interface ISavedInputs
     /// <returns>The queued inputs in the order they are sent, followed by the others, the last saved first.</returns>
     /// <exception cref="RequestException">No such workspace exists.</exception>
     Task<IReadOnlyList<SavedInput>> List(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Says once whether the inputs read of a workspace held queued ones that an older release had paused.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <returns><see langword="true" /> the first time after they were read.</returns>
+    bool TakeLegacyPause(Guid id);
 
     /// <summary>
     /// Stops counting the queued inputs of a workspace that is gone.
@@ -44,13 +58,12 @@ internal interface ISavedInputs
     Task<IReadOnlyList<SavedInput>> Queue(Guid id, string text, bool autoCommit, CancellationToken cancellation);
 
     /// <summary>
-    /// Pauses or resumes every queued input of a workspace and tells every client when that changes any of them.
+    /// Takes a queued input out of the queue and leaves it among the drafts, as one that could not be sent.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
-    /// <param name="paused">Whether they are paused.</param>
-    /// <param name="cancellation">Cancels the change.</param>
-    /// <exception cref="RequestException">No such workspace exists.</exception>
-    Task SetPaused(Guid id, bool paused, CancellationToken cancellation);
+    /// <param name="inputId">The input.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    Task Unqueue(Guid id, Guid inputId, CancellationToken cancellation);
 
     /// <summary>
     /// Sends the next queued input that is not paused and removes it once it was sent; nothing else can take or delete it meanwhile.
@@ -132,20 +145,28 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
 
     private readonly ConcurrentDictionary<Guid, Dictionary<Guid, Conversion>> conversions = new();
 
-    // Whether each workspace that has queued inputs has any that is to be sent.
+    // Whether each workspace that has queued inputs has any that is to be committed.
     private readonly ConcurrentDictionary<Guid, bool> queued = new();
 
     private readonly ConcurrentDictionary<Guid, byte> sent = new();
+
+    private readonly ConcurrentDictionary<Guid, byte> paused = new();
 
     private readonly int maxEntries = 200;
 
     private readonly int maxLength = 100000;
 
     /// <inheritdoc />
-    public IReadOnlyList<Guid> Waiting => [.. queued.Where(entry => entry.Value).Select(entry => entry.Key)];
+    public IReadOnlyList<Guid> Waiting => [.. queued.Keys];
 
     /// <inheritdoc />
     public bool HasQueued(Guid id) => queued.ContainsKey(id);
+
+    /// <inheritdoc />
+    public bool WantsCommit(Guid id) => queued.TryGetValue(id, out bool commits) && commits;
+
+    /// <inheritdoc />
+    public bool TakeLegacyPause(Guid id) => paused.TryRemove(id, out _);
 
     /// <inheritdoc />
     public void Forget(Guid id) => queued.TryRemove(id, out _);
@@ -194,7 +215,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
             }
 
             SavedInput added = new() { Id = Guid.NewGuid(), Text = text, Time = DateTimeOffset.UtcNow, IsQueued = true, AutoCommit = autoCommit };
-            IReadOnlyList<SavedInput> saved = Trim(Newest([.. stored.Select(input => input with { IsPaused = false }), added]), added.Id);
+            IReadOnlyList<SavedInput> saved = Trim(Newest([.. stored, added]), added.Id);
             await store.SaveInputs(id, saved, cancellation);
             return Publish(id, Current(id, Track(id, saved)));
         }
@@ -205,7 +226,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
     }
 
     /// <inheritdoc />
-    public async Task SetPaused(Guid id, bool paused, CancellationToken cancellation)
+    public async Task Unqueue(Guid id, Guid inputId, CancellationToken cancellation)
     {
         await workspaces.Get(id, cancellation);
         SemaphoreSlim gate = Gate(id);
@@ -215,9 +236,9 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
         {
             IReadOnlyList<SavedInput> stored = Track(id, await Load(id, cancellation));
 
-            if (stored.Any(input => input.IsQueued && input.IsPaused != paused))
+            if (stored.Any(input => input.Id == inputId && input.IsQueued))
             {
-                IReadOnlyList<SavedInput> saved = [.. stored.Select(input => input.IsQueued ? input with { IsPaused = paused } : input)];
+                IReadOnlyList<SavedInput> saved = [.. stored.Select(input => input.Id == inputId ? input with { IsQueued = false } : input)];
                 await store.SaveInputs(id, saved, cancellation);
                 Publish(id, Current(id, Track(id, saved)));
             }
@@ -239,7 +260,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
         {
             IReadOnlyList<SavedInput> stored = Track(id, await Load(id, cancellation));
 
-            if (Newest(stored).FirstOrDefault(input => input.IsQueued && !input.IsPaused) is not { } next)
+            if (Newest(stored).FirstOrDefault(input => input.IsQueued) is not { } next)
             {
                 return false;
             }
@@ -351,7 +372,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
             await store.SaveInputs(id, left, cancellation);
             Publish(id, Current(id, Track(id, left)));
             // One that is taken back is the user's to edit and send like any other.
-            return taken with { IsQueued = false, IsPaused = false };
+            return taken with { IsQueued = false };
         }
         finally
         {
@@ -422,7 +443,17 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
     }
 
     // A queued input that was sent but could not be taken off the disk is gone all the same, so it is never sent twice.
-    private async Task<IReadOnlyList<SavedInput>> Load(Guid id, CancellationToken cancellation) => [.. (await store.LoadInputs(id, cancellation)).Where(input => !sent.ContainsKey(input.Id))];
+    private async Task<IReadOnlyList<SavedInput>> Load(Guid id, CancellationToken cancellation)
+    {
+        IReadOnlyList<SavedInput> stored = await store.LoadInputs(id, cancellation);
+
+        if (stored.Any(input => input is { IsQueued: true, WasPaused: true }))
+        {
+            paused[id] = 0;
+        }
+
+        return [.. stored.Where(input => !sent.ContainsKey(input.Id)).Select(input => input.WasPaused is null ? input : input with { WasPaused = null })];
+    }
 
     // The oldest of the saved ones go first. Queued inputs and the one just added are never dropped, since they would be lost without a word.
     private IReadOnlyList<SavedInput> Trim(IEnumerable<SavedInput> inputs, Guid added)
@@ -441,7 +472,7 @@ internal sealed class SavedInputs(IWorkspaceStore store, IWorkspaceManager works
     {
         if (stored.Any(input => input.IsQueued))
         {
-            queued[id] = stored.Any(input => input.IsQueued && !input.IsPaused);
+            queued[id] = stored.Any(input => input.IsQueued && input.AutoCommit);
         }
         else
         {

@@ -54,4 +54,9 @@ internal sealed record SwarmTaskBody
     /// Gets the remote the code is fetched from in the git remote mode.
     /// </summary>
     public string? RemoteUrl { get; init; }
+
+    /// <summary>
+    /// Gets the results the task builds on, whose commits travel with the code. The base does not include their changes.
+    /// </summary>
+    public IReadOnlyList<SwarmDependency> Dependencies { get; init; } = [];
 }

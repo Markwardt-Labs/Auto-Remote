@@ -61,7 +61,11 @@ public sealed class ControlScenarios
 
         await server.Until(() => RealServer.Processes($"sleep {marker}") == 0, 30, "the long command to end with the server");
         await server.Launch();
+        // The interrupted work is taken up again, which the stop ends for good.
+        await server.Until(() => RealServer.Processes($"sleep {marker}") > 0, 180, "the AI to take the interrupted work up again");
+        await server.Connection.StopWorkspace(workspace.Id, CancellationToken.None);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
+        await server.Until(() => RealServer.Processes($"sleep {marker}") == 0, 30, "the long command to end");
         Assert.Contains("PAPAYA", await server.Ask(workspace, "What was the code word? Reply with just the word."), StringComparison.OrdinalIgnoreCase);
     }
 }

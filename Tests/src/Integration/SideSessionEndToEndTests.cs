@@ -9,6 +9,8 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
 
     private SwarmTestServer server = null!;
 
+    private readonly List<ManualResetEventSlim> held = [];
+
     private Func<FakePromptSession, FakePrompt, IEnumerable<PromptEvent>> integrate = (_, _) => [new PromptMessageEvent { Text = "not yet" }];
 
     private IServerConnection Connection => server.Connection;
@@ -34,11 +36,15 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
 
     public async Task DisposeAsync()
     {
+        held.ForEach(release => release.Set());
         await server.DisposeAsync();
         temp.Dispose();
     }
 
-    // "write NAME TEXT" writes a file where the session works, "complete" marks the task complete and a request to integrate is left to the test.
+    // What was asked, without what the server adds for the AI.
+    private string Asked(string text) => text.Split("\n\n[Auto Remote]\n")[0];
+
+    // "write NAME TEXT" writes a file where the session works, and a request to bring a session in is left to the test.
     private IEnumerable<PromptEvent> Work(FakePromptSession session, FakePrompt prompt)
     {
         if (prompt.Text.StartsWith("Integrate the side session", StringComparison.Ordinal))
@@ -46,15 +52,11 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
             return integrate(session, prompt);
         }
 
-        string[] words = prompt.Text.Split(' ', 3);
+        string[] words = Asked(prompt.Text).Split(' ', 3);
 
         if (words[0] == "write")
         {
             File.WriteAllText(Path.Combine(session.WorkspacePath!, words[1]), words[2] + "\n");
-        }
-        else if (words[0] == "complete")
-        {
-            return [new PromptMessageEvent { Text = Use(session, "mark_task_complete", new { }) }];
         }
 
         return [new PromptMessageEvent { Text = $"did: {words[0]}" }];
@@ -110,9 +112,9 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
 
     private async Task<WorkspaceInfo?> Session(Guid id) => (await Sessions()).FirstOrDefault(session => session.Id == id);
 
-    private async Task<WorkspaceInfo> Side(Guid main, string name = "fix-login", SideSessionStart start = SideSessionStart.Files, string? task = null)
+    private async Task<WorkspaceInfo> Side(Guid main, string name = "fix-login", SideSessionStart start = SideSessionStart.Files, string? task = null, bool bringIn = false)
     {
-        WorkspaceInfo made = await Connection.CreateSideSession(main, name, start, task, CancellationToken.None);
+        WorkspaceInfo made = await Connection.CreateSideSession(main, name, start, task, bringIn, CancellationToken.None);
         await SwarmTestServer.Until(async () => await Session(made.Id) is { Side.State: SideSessionState.Ready }, async () => string.Join("; ", (await Sessions()).Select(session => $"{session.Side!.State} {session.Side.Error}")));
         return (await Session(made.Id))!;
     }
@@ -132,6 +134,33 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         => (await Connection.GetHistory(main, null, null, null, CancellationToken.None)).Messages.Count(message => message.Role == MessageRole.User && message.Text.StartsWith("Integrate the side session", StringComparison.Ordinal));
 
     private async Task Requested(Guid main, int times) => await SwarmTestServer.Until(async () => await Requests(main) == times, async () => $"{await Requests(main)} requests");
+
+    // Main's AI is held on the request it was given until the test lets it end, and then says what it did without confirming it.
+    private (Task<string> Requested, ManualResetEventSlim Release) HoldTheRequest(Func<FakePromptSession, FakePrompt, IEnumerable<PromptEvent>>? then = null)
+    {
+        TaskCompletionSource<string> requested = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        ManualResetEventSlim release = new();
+        held.Add(release);
+        integrate = (session, prompt) =>
+        {
+            requested.TrySetResult(IntegrationId(prompt.Text));
+            release.Wait(TimeSpan.FromSeconds(20));
+            return then?.Invoke(session, prompt) ?? [new PromptMessageEvent { Text = "half done" }];
+        };
+        return (requested.Task.WaitAsync(TimeSpan.FromSeconds(15)), release);
+    }
+
+    private async Task Gone(WorkspaceInfo side) => await SwarmTestServer.Until(async () => await Session(side.Id) is null, async () => $"{(await Session(side.Id))?.Side?.State} {(await Session(side.Id))?.Side?.Error}");
+
+    private async Task<IReadOnlyList<ActivityEntry>> Activity(Guid id) => (await Connection.GetActivity(id, null, 100, CancellationToken.None)).Entries;
+
+    private string[] AiGot(string start)
+    {
+        lock (server.Asked)
+        {
+            return [.. server.Asked.Select(asked => asked.Text).Where(text => text.StartsWith(start, StringComparison.Ordinal))];
+        }
+    }
 
     private FakePromptSession Main(string folder) => server.Prompter.Sessions.Last(session => session.WorkspacePath == folder);
 
@@ -176,8 +205,8 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         Assert.DoesNotContain("write side.txt", await Chat(workspace.Id));
         FakePromptSession working = server.Prompter.Sessions.Last(session => session.WorkspacePath == side.Folder);
         Assert.Contains(side.Folder, working.Configuration.Instructions);
-        Assert.Contains(working.Transient.Tools, tool => tool.Name == "mark_task_complete");
-        Assert.DoesNotContain(working.Transient.Tools, tool => tool.Name == "finish_integration");
+        // Whether its work is done is told by how it ends, so it takes no tool to say so; every AI can say that it cannot finish.
+        Assert.Equal(["finish_integration", "report_unfinished"], working.Transient.Tools.Select(tool => tool.Name).Where(name => name is "finish_integration" or "report_unfinished" or "mark_task_complete").Order(StringComparer.Ordinal));
     }
 
     [Fact]
@@ -200,20 +229,20 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         Directory.CreateDirectory(plain);
         WorkspaceInfo bare = await Connection.CreateWorkspace(plain, AiService.Local, null, null, CancellationToken.None);
 
-        RemoteException none = await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(bare.Id, "x", SideSessionStart.Commit, null, CancellationToken.None));
+        RemoteException none = await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(bare.Id, "x", SideSessionStart.Commit, null, false, CancellationToken.None));
         Assert.Contains("git repository", none.Message);
 
         await Git(plain, "init", "--quiet");
-        RemoteException empty = await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(bare.Id, "x", SideSessionStart.Commit, null, CancellationToken.None));
+        RemoteException empty = await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(bare.Id, "x", SideSessionStart.Commit, null, false, CancellationToken.None));
         Assert.Contains("commit", empty.Message);
         Assert.Empty(await Sessions());
 
         (WorkspaceInfo workspace, _) = await Project();
         WorkspaceInfo first = await Side(workspace.Id, "one");
-        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(workspace.Id, "ONE", SideSessionStart.Commit, null, CancellationToken.None));
-        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(workspace.Id, "Main", SideSessionStart.Commit, null, CancellationToken.None));
-        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(workspace.Id, "  ", SideSessionStart.Commit, null, CancellationToken.None));
-        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(first.Id, "nested", SideSessionStart.Commit, null, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(workspace.Id, "ONE", SideSessionStart.Commit, null, false, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(workspace.Id, "Main", SideSessionStart.Commit, null, false, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(workspace.Id, "  ", SideSessionStart.Commit, null, false, CancellationToken.None));
+        await Assert.ThrowsAsync<RemoteException>(() => Connection.CreateSideSession(first.Id, "nested", SideSessionStart.Commit, null, false, CancellationToken.None));
 
         WorkspaceInfo renamed = await Connection.RenameSideSession(first.Id, "uno", CancellationToken.None);
 
@@ -352,7 +381,8 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         Assert.DoesNotContain("uncommitted.txt", files);
         Assert.NotEmpty(handoff.Trim());
         Assert.Equal("made on the side\n", await File.ReadAllTextAsync(Path.Combine(folder, "side.txt")));
-        Assert.Equal("first", await Git(folder, "log", "--format=%s", "--all"));
+        // Bringing it in is committed in main, and nothing of the session's branch is left.
+        Assert.Equal(["did: Write", "first"], (await Git(folder, "log", "--format=%s", "--all")).Split('\n'));
         await NothingIsLeft(folder, side);
         Assert.Empty(server.Prompter.Sessions.Last(session => session.WorkspacePath == folder).SharedFolders);
         Assert.DoesNotContain(server.Prompter.Sessions, session => session.Id == side.SessionId);
@@ -375,23 +405,89 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ARequestThatIsNotFinishedIsGivenOnceMoreAndThenOnlyGoesWithMainsOtherWork()
+    public async Task ARequestThatIsNotConfirmedIsGivenOnceMoreAndThenTheSessionIsGivenBackAndNothingElseWaits()
     {
         (WorkspaceInfo workspace, string folder) = await Project();
         WorkspaceInfo side = await Side(workspace.Id);
+        await Say(side.Id, "write side.txt made on the side");
+        await Connection.SetIntegrateWhenFinished(side.Id, false, CancellationToken.None);
 
         await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
 
-        await Requested(workspace.Id, 2);
+        await SwarmTestServer.Until(async () => (await Session(side.Id))?.Side is { State: SideSessionState.Ready, Error: not null }, async () => $"{await Requests(workspace.Id)} requests");
+        await Idle(workspace.Id);
         await Task.Delay(600);
         Assert.Equal(2, await Requests(workspace.Id));
-        Assert.Equal(SideSessionState.Integrating, (await Session(side.Id))!.Side!.State);
+        SideSession given = (await Session(side.Id))!.Side!;
+        Assert.Equal((false, "Needs attention: it was not brought in. Bringing it in was not confirmed."), (given.IntegrateWhenFinished, given.Error));
+        Assert.True(File.Exists(Path.Combine(side.Folder, "side.txt")));
+        Assert.False(Directory.Exists(side.Folder + ".integration"));
+        await SwarmTestServer.Until(() => Task.FromResult(Main(folder).SharedFolders.Count == 0));
+        Assert.Contains(await Activity(workspace.Id), entry => entry is { Source: ActivitySource.BringIn, NeedsAttention: true, Commit: null });
+        Assert.False((await Connection.GetAgenda(workspace.Id, CancellationToken.None)).IsStopped);
 
-        // Main works again, on something that takes a while: the request joins it.
+        await Say(workspace.Id, "next step");
+
+        Assert.Contains("Bringing the side session \"fix-login\" in was not confirmed, so it stays as it was.", Assert.Single(AiGot("next step")));
+        await Say(side.Id, "write more.txt still usable");
+        Assert.Equal(2, await Requests(workspace.Id));
+    }
+
+    [Fact]
+    public async Task ABringInThatMainsAiSaysItCannotFinishGivesTheSessionBackAtOnce()
+    {
+        (WorkspaceInfo workspace, _) = await Project();
+        WorkspaceInfo side = await Side(workspace.Id);
+        integrate = (session, _) => [new PromptMessageEvent { Text = Use(session, "report_unfinished", new { reason = "The two designs cannot be combined." }) }];
+
+        await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
+
+        await SwarmTestServer.Until(async () => (await Session(side.Id))?.Side is { State: SideSessionState.Ready, Error: not null });
+        await Idle(workspace.Id);
+        await Task.Delay(400);
+        Assert.Equal(1, await Requests(workspace.Id));
+        Assert.Contains("The two designs cannot be combined.", (await Session(side.Id))!.Side!.Error);
+        await SwarmTestServer.Until(async () => (await Activity(workspace.Id)).Any(entry => entry is { Source: ActivitySource.BringIn, Outcome: ActivityOutcome.Unfinished, NeedsAttention: true, Reason: "The two designs cannot be combined." }));
+    }
+
+    [Fact]
+    public async Task ASideSessionStartedWithATaskIsBroughtInByItselfOnceItsWorkEndsWellAndMainCommitsIt()
+    {
+        (WorkspaceInfo workspace, string folder) = await Project();
+        await Git(folder, "config", "user.name", "t");
+        await Git(folder, "config", "user.email", "t@t");
+        List<string> pushed = [];
+        integrate = CopyAndFinish;
+
+        WorkspaceInfo made = await Connection.CreateSideSession(workspace.Id, "task", SideSessionStart.Files, "write task.txt made by the task", true, CancellationToken.None);
+
+        await Gone(made);
+        await Idle(workspace.Id);
+        await SwarmTestServer.Until(async () => (await Activity(workspace.Id)).Any(entry => entry is { Source: ActivitySource.BringIn, Outcome: ActivityOutcome.Done, Commit: not null }), async () => string.Join("; ", (await Activity(workspace.Id)).Select(entry => $"{entry.Title} {entry.Outcome} {entry.Commit} {entry.CommitError}")));
+        Assert.Equal("made by the task\n", await File.ReadAllTextAsync(Path.Combine(folder, "task.txt")));
+        Assert.Equal(1, await Requests(workspace.Id));
+        Assert.Equal("2", await Git(folder, "rev-list", "--count", "HEAD"));
+        Assert.Contains("task.txt", await Git(folder, "show", "--name-only", "--format=", "HEAD"));
+        ActivityEntry brought = Assert.Single(await Activity(workspace.Id), entry => entry.Source == ActivitySource.BringIn);
+        Assert.Contains(brought.Files, file => file.StartsWith("task: ", StringComparison.Ordinal) && file.EndsWith("task.txt", StringComparison.Ordinal));
+        Assert.StartsWith("task: ", brought.Handoff);
+        Assert.Contains(brought.Notes, note => note.Contains("Brought in the side session \"task\"."));
+        Assert.Contains("This work runs unattended", Assert.Single(AiGot("write task.txt")));
+        Assert.Contains("This work runs unattended", Assert.Single(AiGot("Integrate the side session")));
+        await NothingIsLeft(folder, made);
+    }
+
+    [Fact]
+    public async Task TheCommitOfABringInCanBeTurnedOffWhileItWaitsForItsTurn()
+    {
+        (WorkspaceInfo workspace, string folder) = await Project();
+        WorkspaceInfo side = await Side(workspace.Id);
+        await Say(side.Id, "write side.txt made on the side");
+        integrate = CopyAndFinish;
         using ManualResetEventSlim release = new();
         server.Ai = (session, prompt) =>
         {
-            if (prompt.Text.StartsWith("long", StringComparison.Ordinal))
+            if (Asked(prompt.Text) == "long work")
             {
                 release.Wait(TimeSpan.FromSeconds(15));
             }
@@ -399,13 +495,23 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
             return Work(session, prompt);
         };
         await Connection.Prompt(workspace.Id, "long work", CancellationToken.None);
-        await Task.Delay(500);
+        await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
+        AgendaItem? waiting = null;
+        await SwarmTestServer.Until(async () => (waiting = (await Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items.SingleOrDefault(item => item.Kind == AgendaKind.BringIn)) is not null);
+        Assert.Equal((side.Id, "Bring in fix-login", true), (waiting!.Id, waiting.Title, waiting.AutoCommit));
+        // It has a turn of its own, so it does not join the work under way.
+        await Task.Delay(400);
+        Assert.Equal(0, await Requests(workspace.Id));
+
+        await Connection.SetBringInCommit(workspace.Id, side.Id, false, CancellationToken.None);
+
+        Assert.False(Assert.Single((await Connection.GetAgenda(workspace.Id, CancellationToken.None)).Items, item => item.Kind == AgendaKind.BringIn).AutoCommit);
+        Assert.False((await Session(side.Id))!.Side!.CommitBringIn);
         release.Set();
-        await Requested(workspace.Id, 3);
+        await Gone(side);
         await Idle(workspace.Id);
-        await Task.Delay(600);
-        Assert.Equal(3, await Requests(workspace.Id));
-        Assert.Equal(SideSessionState.Integrating, (await Session(side.Id))!.Side!.State);
+        Assert.True(File.Exists(Path.Combine(folder, "side.txt")));
+        Assert.Equal("1", await Git(folder, "rev-list", "--count", "HEAD"));
     }
 
     [Fact]
@@ -414,17 +520,9 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         (WorkspaceInfo workspace, string folder) = await Project();
         WorkspaceInfo side = await Side(workspace.Id);
         await Say(side.Id, "write side.txt made on the side");
-        FakePromptSession? main = null;
-        string id = string.Empty;
-        integrate = (session, prompt) =>
-        {
-            main = session;
-            id = IntegrationId(prompt.Text);
-            return [new PromptMessageEvent { Text = "half done" }];
-        };
+        (Task<string> requested, ManualResetEventSlim release) = HoldTheRequest();
         await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
-        await Requested(workspace.Id, 2);
-        await Idle(workspace.Id);
+        string id = await requested;
 
         await Connection.CancelIntegration(side.Id, CancellationToken.None);
 
@@ -435,12 +533,17 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         Assert.Contains("Nothing was removed", late);
         Assert.True(File.Exists(Path.Combine(side.Folder, "side.txt")));
         await Assert.ThrowsAsync<RemoteException>(() => Connection.CancelIntegration(side.Id, CancellationToken.None));
+        release.Set();
+        await Idle(workspace.Id);
+        await Task.Delay(400);
+        // The turn that was cancelled under way asks for nothing again.
+        Assert.Equal(1, await Requests(workspace.Id));
 
         await Say(side.Id, "write more.txt after cancelling");
         integrate = CopyAndFinish;
         await Idle(workspace.Id);
         await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
-        await SwarmTestServer.Until(async () => await Session(side.Id) is null);
+        await Gone(side);
         await NothingIsLeft(folder, side);
         Assert.True(File.Exists(Path.Combine(folder, "more.txt")));
     }
@@ -453,15 +556,9 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         for (int round = 0; round < 6; round++)
         {
             WorkspaceInfo side = await Side(workspace.Id, $"race-{round}");
-            string id = string.Empty;
-            integrate = (_, prompt) =>
-            {
-                id = IntegrationId(prompt.Text);
-                return [new PromptMessageEvent { Text = "waiting" }];
-            };
+            (Task<string> requested, ManualResetEventSlim release) = HoldTheRequest();
             await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
-            await SwarmTestServer.Until(() => Task.FromResult(id.Length > 0));
-            await Idle(workspace.Id);
+            string id = await requested;
             FakePromptSession main = server.Prompter.Sessions.Last(session => session.WorkspacePath == folder);
             int delay = round * 3;
             Task<string> finish = Task.Run(async () =>
@@ -471,6 +568,7 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
             });
             Exception? cancel = await Record.ExceptionAsync(() => Connection.CancelIntegration(side.Id, CancellationToken.None));
             string said = await finish;
+            release.Set();
             await Idle(workspace.Id);
 
             if (said.Contains("Nothing was removed"))
@@ -491,71 +589,72 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task ASessionSetToIntegrateWhenFinishedIsIntegratedOnceItsAiMarksTheTaskComplete()
+    public async Task ASessionKeptSeparateIsNotBroughtInAndSettingItToBringInOnceItsWorkEndedWellBringsItIn()
     {
         (WorkspaceInfo workspace, string folder) = await Project();
         integrate = CopyAndFinish;
         WorkspaceInfo side = await Side(workspace.Id);
 
         await Say(side.Id, "write side.txt made on the side");
-        await Connection.SetIntegrateWhenFinished(side.Id, true, CancellationToken.None);
-        await Task.Delay(300);
+        await Task.Delay(400);
+
         Assert.Equal(SideSessionState.Ready, (await Session(side.Id))!.Side!.State);
+        Assert.Equal(0, await Requests(workspace.Id));
 
-        await Connection.Prompt(side.Id, "complete", CancellationToken.None);
+        await Connection.SetIntegrateWhenFinished(side.Id, true, CancellationToken.None);
 
-        await SwarmTestServer.Until(async () => await Session(side.Id) is null, async () => $"{(await Session(side.Id))?.Side?.State} {(await Session(side.Id))?.Side?.Error}");
+        await Gone(side);
         await Idle(workspace.Id);
         Assert.True(File.Exists(Path.Combine(folder, "side.txt")));
         await NothingIsLeft(folder, side);
     }
 
     [Fact]
-    public async Task MarkingTheTaskCompleteIntegratesNothingUnlessTheUserAskedForIt()
+    public async Task ASessionSetToBringInThatHasDoneNoWorkIsNotBroughtIn()
     {
         (WorkspaceInfo workspace, _) = await Project();
         WorkspaceInfo side = await Side(workspace.Id);
 
-        await Connection.Prompt(side.Id, "complete", CancellationToken.None);
-        await SwarmTestServer.Until(async () => (await Chat(side.Id)).Contains("did not set"), () => Chat(side.Id));
-        await Task.Delay(300);
-
-        Assert.Equal(SideSessionState.Ready, (await Session(side.Id))!.Side!.State);
-
-        await Say(side.Id, "write more.txt which reopens the task");
         await Connection.SetIntegrateWhenFinished(side.Id, true, CancellationToken.None);
-        await Task.Delay(300);
+        await Task.Delay(500);
+
         Assert.Equal(SideSessionState.Ready, (await Session(side.Id))!.Side!.State);
+        Assert.Equal(0, await Requests(workspace.Id));
     }
 
     [Theory]
-    [InlineData(true)]
-    [InlineData(false)]
-    public async Task WorkThatWasStoppedOrFailedAfterTheAiMarkedItsTaskCompleteIsNotIntegrated(bool stopped)
+    [InlineData("stopped")]
+    [InlineData("failed")]
+    [InlineData("unfinished")]
+    public async Task WorkThatWasStoppedOrFailedOrThatTheAiCouldNotFinishIsNotBroughtInUntilWorkEndsWell(string how)
     {
         (WorkspaceInfo workspace, _) = await Project();
         integrate = CopyAndFinish;
         WorkspaceInfo side = await Side(workspace.Id);
         await Connection.SetIntegrateWhenFinished(side.Id, true, CancellationToken.None);
-        using ManualResetEventSlim marked = new();
+        using ManualResetEventSlim started = new();
         using ManualResetEventSlim release = new();
         server.Ai = (session, prompt) =>
         {
-            if (prompt.Text != "mark then go on")
+            if (Asked(prompt.Text) != "go on")
             {
                 return Work(session, prompt);
             }
 
-            Use(session, "mark_task_complete", new { });
-            marked.Set();
+            if (how == "unfinished")
+            {
+                Use(session, "report_unfinished", new { reason = "Something is missing." });
+            }
+
+            started.Set();
             release.Wait(TimeSpan.FromSeconds(10));
-            return stopped ? [new PromptMessageEvent { Text = "stopped" }] : throw new PromptSessionException("The model broke down.");
+            return how == "failed" ? throw new PromptSessionException("The model broke down.") : [new PromptMessageEvent { Text = how }];
         };
 
-        await Connection.Prompt(side.Id, "mark then go on", CancellationToken.None);
-        Assert.True(marked.Wait(TimeSpan.FromSeconds(10)));
+        await Connection.Prompt(side.Id, "go on", CancellationToken.None);
+        Assert.True(started.Wait(TimeSpan.FromSeconds(10)));
 
-        if (stopped)
+        if (how == "stopped")
         {
             Task stop = Connection.StopWorkspace(side.Id, CancellationToken.None);
             await Task.Delay(200);
@@ -570,10 +669,11 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         await Idle(side.Id);
         await Task.Delay(500);
         Assert.Equal(SideSessionState.Ready, (await Session(side.Id))!.Side!.State);
+        Assert.Equal(0, await Requests(workspace.Id));
 
-        // Asked again, and ended well, it is integrated.
-        await Connection.Prompt(side.Id, "complete", CancellationToken.None);
-        await SwarmTestServer.Until(async () => await Session(side.Id) is null, async () => $"{(await Session(side.Id))?.Side?.State}");
+        // Given more work that ends well, it is brought in.
+        await Connection.Prompt(side.Id, "carry on", CancellationToken.None);
+        await Gone(side);
     }
 
     [Fact]
@@ -597,7 +697,7 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
 
         Assert.True(before);
         Assert.False(after.Revertible);
-        Assert.Contains("integrated a side session", after.Refusal);
+        Assert.Contains("brought a side session in", after.Refusal);
         Assert.Null(server.Snapshots.Refusal(workspace.Id));
     }
 
@@ -607,7 +707,7 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         (WorkspaceInfo workspace, string folder) = await Project();
         // Git runs this as it makes the files of the session, which holds the making open.
         await Executable(Path.Combine(folder, ".git", "hooks", "post-checkout"), "#!/bin/sh\nsleep 2\n");
-        Task<WorkspaceInfo> creating = Connection.CreateSideSession(workspace.Id, "slow", SideSessionStart.Files, "write never.txt never", CancellationToken.None);
+        Task<WorkspaceInfo> creating = Connection.CreateSideSession(workspace.Id, "slow", SideSessionStart.Files, "write never.txt never", false, CancellationToken.None);
         await SwarmTestServer.Until(async () => (await Sessions()).Count == 1);
         WorkspaceInfo made = (await Sessions())[0];
 
@@ -669,10 +769,12 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         RemoteException other = await Assert.ThrowsAsync<RemoteException>(() => Connection.MoveWorkspaceToFolder(workspace.Id, spare, CancellationToken.None));
 
         Assert.Contains("repository", other.Message);
+        (Task<string> requested, ManualResetEventSlim release) = HoldTheRequest();
         await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
-        await Idle(workspace.Id);
+        await requested;
         RemoteException renaming = await Assert.ThrowsAsync<RemoteException>(() => Connection.RenameWorkspace(workspace.Id, "renamed", CancellationToken.None));
-        Assert.Contains("being integrated", renaming.Message);
+        Assert.Contains("being brought in", renaming.Message);
+        release.Set();
         Assert.True(Directory.Exists(unrelated));
     }
 
@@ -682,40 +784,36 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         (WorkspaceInfo workspace, string folder) = await Project();
         WorkspaceInfo side = await Side(workspace.Id);
         await Say(side.Id, "write side.txt made on the side");
+        (Task<string> requested, ManualResetEventSlim release) = HoldTheRequest();
         await Connection.IntegrateSideSession(side.Id, CancellationToken.None);
-        await Requested(workspace.Id, 2);
-        await Idle(workspace.Id);
+        string id = await requested;
 
-        await server.Restart("server");
-
-        await Task.Delay(500);
-        Assert.Equal(2, await Requests(workspace.Id));
-        Assert.Equal(SideSessionState.Integrating, (await Session(side.Id))!.Side!.State);
         List<string> shared = [];
+        List<string> ids = [];
+        // What main's AI does once it is asked again; the one already held stays as it is.
         integrate = (session, prompt) =>
         {
             shared.AddRange(session.SharedFolders);
+            ids.Add(IntegrationId(prompt.Text));
             return CopyAndFinish(session, prompt);
         };
-        server.Ai = (session, prompt) =>
-        {
-            if (!prompt.Text.StartsWith("long", StringComparison.Ordinal))
-            {
-                return Work(session, prompt);
-            }
 
-            // The request joins this work: as a message into it, or as part of its prompt when it arrives just as it starts.
-            int joined = prompt.Text.IndexOf("Integrate the side session", StringComparison.Ordinal);
-            Assert.True(joined >= 0 || SpinWait.SpinUntil(() => prompt.Steered.Count > 0, TimeSpan.FromSeconds(10)));
-            return integrate(session, new FakePrompt { Time = prompt.Time, Text = joined >= 0 ? prompt.Text[joined..] : prompt.Steered[0] });
-        };
+        await server.Restart("server");
 
-        await Connection.Prompt(workspace.Id, "long work", CancellationToken.None);
+        // What the AI of the server that is gone still does reaches nobody.
+        release.Set();
 
-        await SwarmTestServer.Until(async () => await Session(side.Id) is null, () => Chat(workspace.Id));
+        await Gone(side);
         await Idle(workspace.Id);
+        Assert.Equal([id], ids);
         Assert.Equal([side.Folder, side.Folder + ".integration"], shared);
         Assert.True(File.Exists(Path.Combine(folder, "side.txt")));
+        Assert.Equal(2, await Requests(workspace.Id));
+        // It stays the same piece of work, whose AI is told to look at what is there already.
+        await SwarmTestServer.Until(async () => (await Activity(workspace.Id)).Where(entry => entry.Source == ActivitySource.BringIn).Select(entry => entry.Outcome).SequenceEqual([ActivityOutcome.Done]), async () => string.Join("; ", (await Activity(workspace.Id)).Select(entry => $"{entry.Title} {entry.Outcome} {entry.Reason}")));
+        string[] asked = AiGot("Integrate the side session");
+        Assert.DoesNotContain("The server restarted", asked[0]);
+        Assert.Contains("The server restarted while you were bringing this in. Check what is already here", asked[^1]);
         await NothingIsLeft(folder, side);
     }
 
@@ -764,7 +862,7 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         await File.WriteAllTextAsync(Path.Combine(folder, "setup.cs"), "sleep 30\n");
         WorkspaceSettings settings = await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
         await Connection.SetWorkspaceSettings(workspace.Id, settings with { SessionSetupScript = "setup.cs" }, CancellationToken.None);
-        WorkspaceInfo side = await Connection.CreateSideSession(workspace.Id, "slow", SideSessionStart.Files, null, CancellationToken.None);
+        WorkspaceInfo side = await Connection.CreateSideSession(workspace.Id, "slow", SideSessionStart.Files, null, false, CancellationToken.None);
         await Assert.ThrowsAsync<RemoteException>(() => Connection.Prompt(side.Id, "write x.txt y", CancellationToken.None));
         Assert.Equal(SideSessionState.Creating, (await Session(side.Id))!.Side!.State);
 
@@ -781,7 +879,7 @@ public sealed class SideSessionEndToEndTests : IAsyncLifetime
         await File.WriteAllTextAsync(Path.Combine(folder, "setup.cs"), "sleep 30\n");
         WorkspaceSettings settings = await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
         await Connection.SetWorkspaceSettings(workspace.Id, settings with { SessionSetupScript = "setup.cs" }, CancellationToken.None);
-        WorkspaceInfo side = await Connection.CreateSideSession(workspace.Id, "slow", SideSessionStart.Files, "write never.txt never", CancellationToken.None);
+        WorkspaceInfo side = await Connection.CreateSideSession(workspace.Id, "slow", SideSessionStart.Files, "write never.txt never", false, CancellationToken.None);
 
         await Connection.DeleteSideSession(side.Id, CancellationToken.None);
 

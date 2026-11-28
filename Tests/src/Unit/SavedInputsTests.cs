@@ -55,11 +55,10 @@ public sealed class SavedInputsTests
     }
 
     [Fact]
-    public async Task Queue_PutsQueuedInputsFirstInTheOrderTheyAreSentAndResumesThemAll()
+    public async Task Queue_PutsQueuedInputsFirstInTheOrderTheyAreSent()
     {
         await inputs.Save(id, "saved", true, CancellationToken.None);
-        await inputs.Queue(id, "first", true, CancellationToken.None);
-        await inputs.SetPaused(id, true, CancellationToken.None);
+        await inputs.Queue(id, "first", false, CancellationToken.None);
         await Task.Delay(5);
         await inputs.Save(id, "saved later", true, CancellationToken.None);
 
@@ -67,24 +66,33 @@ public sealed class SavedInputsTests
 
         Assert.Equal(["first", "second", "saved later", "saved"], queued.Select(input => input.Text).ToList());
         Assert.Equal([true, true, false, false], queued.Select(input => input.IsQueued).ToList());
-        Assert.All(queued, input => Assert.False(input.IsPaused));
         Assert.True(inputs.HasQueued(id));
+        Assert.True(inputs.WantsCommit(id));
         Assert.Equal([id], inputs.Waiting);
     }
 
     [Fact]
-    public async Task SetPaused_TellsOnlyOfAChangeAndAPausedQueueIsNotWaitingToBeSent()
+    public async Task WantsCommit_IsOnlyForQueuedInputsThatAreToBeCommitted()
     {
-        await inputs.Queue(id, "first", true, CancellationToken.None);
-        published.Clear();
+        await inputs.Save(id, "saved", true, CancellationToken.None);
+        SavedInput queued = (await inputs.Queue(id, "first", false, CancellationToken.None))[0];
+        Assert.False(inputs.WantsCommit(id));
 
-        await inputs.SetPaused(id, true, CancellationToken.None);
-        await inputs.SetPaused(id, true, CancellationToken.None);
+        await inputs.SetAutoCommit(id, queued.Id, true, CancellationToken.None);
 
-        Assert.True(Assert.Single(Assert.Single(published).SavedInputs!).IsPaused);
-        Assert.True(inputs.HasQueued(id));
+        Assert.True(inputs.WantsCommit(id));
+    }
+
+    [Fact]
+    public async Task Unqueue_LeavesAnInputAmongTheDrafts()
+    {
+        SavedInput queued = Assert.Single(await inputs.Queue(id, "first", true, CancellationToken.None));
+
+        await inputs.Unqueue(id, queued.Id, CancellationToken.None);
+
+        Assert.False(Assert.Single(stored).IsQueued);
+        Assert.False(inputs.HasQueued(id));
         Assert.Empty(inputs.Waiting);
-        Assert.False(await inputs.SendNext(id, _ => throw new InvalidOperationException("Sent a paused input."), CancellationToken.None));
     }
 
     [Fact]
@@ -146,7 +154,7 @@ public sealed class SavedInputsTests
 
         SavedInput taken = await inputs.Take(id, queued.Id, CancellationToken.None);
 
-        Assert.Equal(("first", false, false), (taken.Text, taken.IsQueued, taken.IsPaused));
+        Assert.Equal(("first", false), (taken.Text, taken.IsQueued));
         Assert.False(inputs.HasQueued(id));
         Assert.Empty(stored);
     }

@@ -20,7 +20,7 @@ public sealed class EnvironmentViewModelTests
         ImageGeneration = ImageGenerationKind.Local,
         LocalImageServer = "http://localhost:7860",
         LocalImageModels = new CapabilityNames { Fast = "a", Balanced = "b", Strong = "c", Max = "d" },
-        NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = true, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "be brief" },
+        NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Low, IsSandboxed = true, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "be brief" },
         ReviewPrompt = "check everything",
         ExpandPrompt = "write more"
     };
@@ -95,7 +95,7 @@ public sealed class EnvironmentViewModelTests
         await model.Load();
 
         Assert.Equal((AiCapability.Strong, AiEffort.Low), (model.NewCapability.Value, model.NewEffort.Value));
-        Assert.Equal((false, true, false, true, "be brief"), (model.NewIsShellAllowed, model.NewIsSystemAccessAllowed, model.NewIsWebAllowed, model.NewIsImageGenerationAllowed, model.NewInstructions));
+        Assert.Equal((true, false, true, "be brief"), (model.NewIsSandboxed, model.NewIsWebAllowed, model.NewIsImageGenerationAllowed, model.NewInstructions));
         Assert.Equal(["Fast", "Balanced", "Strong", "Max"], model.Capabilities.Select(choice => choice.Name));
         Assert.Equal(["Low", "Medium", "High", "Max"], model.Efforts.Select(choice => choice.Name));
     }
@@ -107,8 +107,7 @@ public sealed class EnvironmentViewModelTests
         await model.Load();
         model.NewCapability = model.Capabilities.Single(choice => choice.Value == AiCapability.Max);
         model.NewEffort = model.Efforts.Single(choice => choice.Value == AiEffort.High);
-        model.NewIsShellAllowed = true;
-        model.NewIsSystemAccessAllowed = false;
+        model.NewIsSandboxed = false;
         model.NewIsWebAllowed = true;
         model.NewIsImageGenerationAllowed = false;
         model.NewInstructions = "   ";
@@ -116,7 +115,7 @@ public sealed class EnvironmentViewModelTests
         model.CloseCommand.Execute(null);
         await Until(() => saved.Count == 1);
 
-        Assert.Equal(new WorkspaceDefaults { Capability = AiCapability.Max, Effort = AiEffort.High, IsShellAllowed = true, IsSystemAccessAllowed = false, IsWebAllowed = true, IsImageGenerationAllowed = false, Instructions = string.Empty }, saved[0].NewWorkspaces);
+        Assert.Equal(new WorkspaceDefaults { Capability = AiCapability.Max, Effort = AiEffort.High, IsSandboxed = false, IsWebAllowed = true, IsImageGenerationAllowed = false, Instructions = string.Empty }, saved[0].NewWorkspaces);
     }
 
     [Fact]

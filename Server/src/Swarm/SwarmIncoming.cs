@@ -66,6 +66,16 @@ internal sealed class SwarmIncoming
     public string? RemoteUrl { get; set; }
 
     /// <summary>
+    /// Gets or sets the results it builds on.
+    /// </summary>
+    public List<SwarmDependency> Dependencies { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets why the AI said it could not finish it, or <see langword="null" />.
+    /// </summary>
+    public string? Unfinished { get; set; }
+
+    /// <summary>
     /// Gets or sets where it stands.
     /// </summary>
     public SwarmTaskState State { get; set; }

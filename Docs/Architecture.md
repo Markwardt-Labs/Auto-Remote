@@ -40,7 +40,7 @@ Replies, the working state and file system changes reach the client as events on
 
 ## Side sessions are worktrees that an AI integrates
 
-Several AI sessions working one folder at once would overwrite each other, so a side session works in a git worktree of its own. Bringing it back is a task for main's AI rather than a merge: main has usually moved on and may hold uncommitted work, which an AI can adapt to and a merge cannot, and the result is wanted as ordinary pending changes with no commit or branch left behind. It is meant to run unattended, so nothing asks for approval or checks the outcome, and nothing is kept to undo it with.
+Several AI sessions working one folder at once would overwrite each other, so a side session works in a git worktree of its own. Bringing it back is a task for main's AI rather than a merge: main has usually moved on and may hold uncommitted work, which an AI can adapt to and a merge cannot. The same goes for the results of delegated tasks and of tasks they depend on. The AI uses git or edits files as it sees fit. This is meant to run unattended, so nothing asks for approval or checks the outcome, and nothing is kept to undo it with.
 
 ## Git runs on the server only
 
@@ -57,6 +57,10 @@ What the user manages is a workspace: a folder on the server. The AI conversatio
 ## All clients stay identical
 
 The mobile, desktop and web clients are one product in three shells: a change to a screen, behavior or style lands in all of them together. Sharing `Client/Frontend/` makes that automatic for the two Avalonia clients (the git screens included); the web client is mirrored by hand. Files whose name ends in `.md` or `.markdown` are previewed rendered as markdown (headings, emphasis, lists and task lists, quotes, code, tables, rules) rather than as raw text. The Avalonia clients render it as native controls from a markdown parser, and the web client with a small built-in renderer since it has no dependencies; links are shown styled but are not followed, and images appear as their alt text. A `<br>` tag (also `<br/>` and `<br />`, in any case) breaks the line, in table cells too; other HTML tags are shown as text. A `mermaid` block in a file preview is drawn on request, by the server which makes the SVG. Other text files get syntax highlighting from a small built-in tokenizer rather than a grammar engine, so the clients stay dependency free and identical.
+
+## The AI is trusted with unattended work
+
+The server schedules what users give the AI (messages, queued inputs, loops, new sessions and delegations) and records what comes of it, but never judges or approves the work. It only holds work back when the user stops it or while the AI cannot run. The AI says itself when it cannot finish something, and whatever is not finished is told to its next turn.
 
 ## Local AI work is queued between whole pieces of work
 

@@ -66,6 +66,12 @@ public sealed record WorkspaceInfo
     public bool ShowWork { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the AI of the workspace is sandboxed.
+    /// </summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
+    public bool IsSandboxed { get; init; }
+
+    /// <summary>
     /// Gets a value indicating whether the AI of the workspace may delegate tasks to paired servers.
     /// </summary>
     public bool AllowDelegation { get; init; }

@@ -66,9 +66,14 @@ public sealed record SwarmTaskInfo
     public string? Branch { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the changes were applied to the workspace.
+    /// Gets a value indicating whether the result is brought into the workspace by itself once the task is done.
     /// </summary>
-    public bool IsApplied { get; init; }
+    public bool BringIn { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether bringing the result in is under way or waiting for its turn.
+    /// </summary>
+    public bool IsBringingIn { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the user delegated it by hand, which is not reported back to the AI.
@@ -104,10 +109,10 @@ public sealed record SwarmTaskInfo
     public bool CanRetry => !IsIncoming && State is SwarmTaskState.Failed or SwarmTaskState.Cancelled or SwarmTaskState.Lost;
 
     /// <summary>
-    /// Gets a value indicating whether its changes can be applied to the workspace.
+    /// Gets a value indicating whether the user can have its result brought into the workspace.
     /// </summary>
     [JsonIgnore]
-    public bool CanApply => !IsIncoming && State == SwarmTaskState.Done && Branch is not null && !IsApplied;
+    public bool CanBringIn => !IsIncoming && State == SwarmTaskState.Done && Branch is not null && !IsBringingIn;
 
     /// <summary>
     /// Gets a value indicating whether it can be removed from the list, which deletes its result branch.

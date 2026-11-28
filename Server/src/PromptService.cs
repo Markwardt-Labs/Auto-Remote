@@ -437,6 +437,8 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             }
 
             Say(id, live, new ChatMessage { Role = MessageRole.User, Text = text, Time = DateTimeOffset.UtcNow });
+            // New work is told what it has to know, which the chat does not show; a message that joins work is told nothing.
+            string sent = started && completion?.Invoke()?.Brief(id, text) is { } brief ? $"{text}\n\n{brief}" : text;
 
             bool queued = false;
             bool steering = false;
@@ -457,7 +459,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 }
                 else if (busy)
                 {
-                    live.Pending.Enqueue((text, options));
+                    live.Pending.Enqueue((sent, options));
                     queued = true;
                 }
                 else
@@ -470,7 +472,17 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                     live.Sending++;
                 }
 
+                if (!live.Working)
+                {
+                    live.Asked = text;
+                }
+
                 SetWorking(id, live, true);
+            }
+
+            if (!started)
+            {
+                completion?.Invoke()?.Joined(id, text);
             }
 
             if (queued)
@@ -480,7 +492,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
             try
             {
-                await session.Send(text, options, cancellation);
+                await session.Send(steering ? text : sent, options, cancellation);
             }
             catch (Exception exception) when (exception is PromptSessionException or ObjectDisposedException or InvalidOperationException or NotSupportedException or ArgumentException or IOException)
             {
@@ -502,6 +514,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                         live.Expecting = false;
                     }
 
+                    live.Error ??= exception.Message;
                     Reconcile(id, live, session);
                 }
 
@@ -656,6 +669,11 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             if (workspace.Side is null && (settings.SessionFiles != overridden.SessionFiles || settings.SessionSetupScript != overridden.SessionSetupScript))
             {
                 overridden = await workspaces.SetSessionSetup(id, settings.SessionFiles, settings.SessionSetupScript, cancellation);
+            }
+
+            if (overridden.IsSandboxed != settings.IsSandboxed)
+            {
+                overridden = await workspaces.SetSandbox(id, settings.IsSandboxed, cancellation);
             }
 
             if (overridden.AllowDelegation != settings.IsDelegationAllowed)
@@ -1018,11 +1036,24 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     {
         configuration.Capability = Enum.Parse<PromptCapability>(settings.Capability.ToString());
         configuration.Effort = Enum.Parse<PromptEffort>(settings.Effort.ToString());
-        configuration.IsShellAllowed = settings.IsShellAllowed;
-        configuration.IsSystemAccessAllowed = settings.IsSystemAccessAllowed;
+        Confine(configuration, settings.IsSandboxed);
         configuration.IsWebAllowed = settings.IsWebAllowed;
         configuration.IsImageGenerationAllowed = settings.IsImageGenerationAllowed;
         configuration.Instructions = host.ComposeInstructions(settings.Instructions, settings.StatusMinutes, note);
+    }
+
+    // The sandbox is the one switch for what reaches beyond the workspace: the shell, which can reach anything, and files outside it.
+    private void Confine(IPromptSessionConfiguration configuration, bool sandboxed)
+    {
+        if (configuration.IsShellAllowed == sandboxed)
+        {
+            configuration.IsShellAllowed = !sandboxed;
+        }
+
+        if (configuration.IsSystemAccessAllowed == sandboxed)
+        {
+            configuration.IsSystemAccessAllowed = !sandboxed;
+        }
     }
 
     private WorkspaceSettings Describe(WorkspaceInfo workspace, IPromptSession session)
@@ -1033,8 +1064,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             Service = workspace.Service,
             Capability = Enum.Parse<AiCapability>(session.Configuration.Capability.ToString()),
             Effort = Enum.Parse<AiEffort>(session.Configuration.Effort.ToString()),
-            IsShellAllowed = session.Configuration.IsShellAllowed,
-            IsSystemAccessAllowed = session.Configuration.IsSystemAccessAllowed,
+            IsSandboxed = workspace.IsSandboxed,
             IsWebAllowed = session.Configuration.IsWebAllowed,
             IsImageGenerationAllowed = session.Configuration.IsImageGenerationAllowed,
             IsDelegationAllowed = workspace.AllowDelegation,
@@ -1134,7 +1164,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
 
         string main = (await workspaces.Get(side.ParentId, cancellation)).Folder;
         string start = side.StartedFrom == SideSessionStart.Files ? "main's files as they were then, changes that were not committed included" : "the commit main had checked out then, without its changes that were not committed";
-        return $"This is a side session named \"{side.Name}\". You work in your own copy of the project at {workspace.Folder}, on a branch of its own. It started from {start}. Everything earlier in this conversation is background from the main session, from before this session was made: paths in it point to the main workspace at {main}, and work in it that was not finished belongs to main, so do not continue it. Only do the work asked for in this session, in your own copy, and change nothing in {main}. Committing and discarding changes in your copy is fine; do not switch branches, merge, rebase, squash, push, pull, or change remotes or tags. When the task asked for in this session is completely done, call mark_task_complete before you write your final reply. Only that call tells that the task is done; saying so in a reply does not.";
+        return $"This is a side session named \"{side.Name}\". You work in your own copy of the project at {workspace.Folder}, on a branch of its own. It started from {start}. Everything earlier in this conversation is background from the main session, from before this session was made: paths in it point to the main workspace at {main}, and work in it that was not finished belongs to main, so do not continue it. Only do the work asked for in this session, in your own copy, and change nothing in {main}. Committing and discarding changes in your copy is fine; do not switch branches, merge, rebase, squash, push, pull, or change remotes or tags. When your work here ends with nothing left to do, this session may be brought into the main session by itself, so only reply once the task is done; if you cannot finish it, call report_unfinished.";
     }
 
     /// <inheritdoc />
@@ -1159,6 +1189,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             string? note = await SideNote(workspace, cancellation);
             session = await Obtain(workspace, cancellation);
+            Confine(session.Configuration, workspace.IsSandboxed);
             string wanted = host.ComposeInstructions(host.UserInstructions(session.Configuration.Instructions), workspace.StatusMinutes, note);
 
             if (session.Configuration.Instructions != wanted)
@@ -1397,6 +1428,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         {
             case PromptMessageEvent { Text: { Length: > 0 } reply }:
                 live.Produced = true;
+                live.Reply = reply;
                 Say(id, live, new ChatMessage { Role = MessageRole.Assistant, Text = reply, Time = DateTimeOffset.UtcNow });
                 break;
             case PromptDeltaEvent { Text: { Length: > 0 } piece } when live.ShowWork:
@@ -1447,15 +1479,18 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 usage?.Note(service, windows.Windows);
                 break;
             case PromptFailureEvent failure:
+                string error = failure.Exception is PromptToolStartException ? $"{service.Label()} could not be started: {failure.Message}" : failure.Message;
+
                 lock (live.Sync)
                 {
                     live.Failed = true;
+                    live.Error = error;
                     live.Pending.Clear();
                     live.Steered.Clear();
                     live.Epoch++;
                 }
 
-                events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Time = DateTimeOffset.UtcNow, Error = failure.Exception is PromptToolStartException ? $"{service.Label()} could not be started: {failure.Message}" : failure.Message });
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Time = DateTimeOffset.UtcNow, Error = error });
                 break;
             case PromptStateEvent changed:
                 lock (live.Sync)
@@ -1550,6 +1585,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
             lock (live.Sync)
             {
                 live.Failed = true;
+                live.Error = exception.Message;
                 live.Pending.Clear();
                 live.Steered.Clear();
                 live.Expecting = false;
@@ -1675,6 +1711,10 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 live.Produced = false;
                 live.Stopped = false;
                 live.Failed = false;
+                live.Error = null;
+                live.Reply = null;
+                completion?.Invoke()?.Began(id, live.Asked);
+                live.Asked = null;
             }
             else
             {
@@ -1686,7 +1726,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
                 }
 
                 // Told while the workspace is still taken, so what commits the changes goes straight on from the work.
-                if (completion?.Invoke()?.Complete(id, !live.Failed && !live.Stopped && live.Produced) != true)
+                if (completion?.Invoke()?.Complete(id, new WorkResult(live.Produced, live.Failed || !live.Stopped && !live.Produced, live.Stopped, live.Error, live.Reply)) != true)
                 {
                     activity.Leave(id, WorkspaceState.Working);
                 }
@@ -1700,6 +1740,7 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
     {
         if (live.Working && !live.Produced && !live.Stopped && !live.Failed)
         {
+            live.Error = silentEnd;
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = id, Time = DateTimeOffset.UtcNow, Error = silentEnd });
         }
 
@@ -1798,6 +1839,12 @@ internal sealed class PromptService(IWorkspaceManager workspaces, IWorkspaceStor
         public bool Stopped { get; set; }
 
         public bool Failed { get; set; }
+
+        public string? Error { get; set; }
+
+        public string? Reply { get; set; }
+
+        public string? Asked { get; set; }
 
         public StringBuilder Thought { get; } = new();
 

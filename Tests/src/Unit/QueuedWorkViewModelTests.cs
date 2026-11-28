@@ -26,20 +26,18 @@ public sealed class QueuedWorkViewModelTests
 
         await chat.Start();
 
-        Assert.True(chat.IsQueued);
-        Assert.Equal("Queued (position 2), waiting for app, web.", chat.QueueText);
-        Assert.Equal("fix it\nlog.txt", chat.QueuedPrompt);
-        Assert.True(chat.HasQueuedPrompt);
+        Assert.Equal((true, true, true), (chat.IsQueued, chat.HasStatusLine, chat.HasStatusButtons));
+        Assert.Equal("Waiting for Local AI, position 2", chat.StatusText);
 
-        Queue(new QueueStatus { Position = 1 });
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.AgendaChanged, WorkspaceId = workspaceId, Agenda = new Agenda { Status = "Waiting for Local AI, position 1 · 2 up next" } });
 
-        Assert.Equal("Queued (position 1).", chat.QueueText);
-        Assert.False(chat.HasQueuedPrompt);
+        Assert.Equal("Waiting for Local AI, position 1 · 2 up next", chat.StatusText);
 
         Queue(null);
+        connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.AgendaChanged, WorkspaceId = workspaceId, Agenda = new Agenda() });
 
-        Assert.False(chat.IsQueued);
-        Assert.Equal(string.Empty, chat.QueueText);
+        Assert.Equal((false, false, false), (chat.IsQueued, chat.HasStatusLine, chat.HasStatusButtons));
+        Assert.Equal(string.Empty, chat.StatusText);
     }
 
     [Fact]
@@ -71,7 +69,7 @@ public sealed class QueuedWorkViewModelTests
     }
 
     [Fact]
-    public async Task CancellingAPromptSentElsewhereHasTheServerKeepItAsASavedInputAndLeavesTheBoxAlone()
+    public async Task CancellingAPromptSentElsewhereHasTheServerKeepItAsADraftAndLeavesTheBoxAlone()
     {
         await chat.Start();
         Queue(Waiting("from the phone"));
@@ -81,7 +79,7 @@ public sealed class QueuedWorkViewModelTests
         chat.CancelQueuedCommand.Execute(null);
 
         Assert.Equal("mine", chat.Input);
-        Assert.Contains("saved input", chat.Notice);
+        Assert.Contains("kept as a draft", chat.Notice);
         connection.Verify(x => x.CancelQueuedWork(workspaceId, true, It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -151,12 +149,12 @@ public sealed class QueuedWorkViewModelTests
         HomeViewModel home = new(connection.Object);
         await home.Start();
 
-        Assert.Equal(["/work/a", "Queued - /work/b"], home.Entries.Select(entry => entry.Detail).Order());
+        Assert.Equal(["/work/a", "Waiting for Local AI - /work/b"], home.Entries.Select(entry => entry.Detail).Order());
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = first.Id, Queue = new QueueStatus { Position = 1 } });
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = second.Id });
 
-        Assert.Equal(["/work/b", "Queued - /work/a"], home.Entries.Select(entry => entry.Detail).Order());
+        Assert.Equal(["/work/b", "Waiting for Local AI - /work/a"], home.Entries.Select(entry => entry.Detail).Order());
     }
 
     [Fact]

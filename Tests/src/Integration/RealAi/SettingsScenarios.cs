@@ -7,14 +7,14 @@ public sealed class SettingsScenarios
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("persist", AiService.ClaudeCode, configure: false);
-        WorkspaceSettings changed = (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Effort = AiEffort.Low, IsShellAllowed = true, IsSystemAccessAllowed = true, IsWebAllowed = false, IsImageGenerationAllowed = true };
+        WorkspaceSettings changed = (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Effort = AiEffort.Low, IsSandboxed = true, IsWebAllowed = false, IsImageGenerationAllowed = true };
 
         await server.Connection.SetWorkspaceSettings(workspace.Id, changed, CancellationToken.None);
         await server.Stop();
         await server.Launch();
 
         WorkspaceSettings after = await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
-        Assert.Equal((AiEffort.Low, true, true, false, true), (after.Effort, after.IsShellAllowed, after.IsSystemAccessAllowed, after.IsWebAllowed, after.IsImageGenerationAllowed));
+        Assert.Equal((AiEffort.Low, true, false, true), (after.Effort, after.IsSandboxed, after.IsWebAllowed, after.IsImageGenerationAllowed));
     }
 
     [RealAiFact]
@@ -22,7 +22,7 @@ public sealed class SettingsScenarios
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("killed", AiService.ClaudeCode, configure: false);
-        WorkspaceSettings changed = (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Effort = AiEffort.Low, IsShellAllowed = true, IsSystemAccessAllowed = true, IsWebAllowed = false, IsImageGenerationAllowed = true };
+        WorkspaceSettings changed = (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Effort = AiEffort.Low, IsSandboxed = true, IsWebAllowed = false, IsImageGenerationAllowed = true };
 
         await server.Connection.SetWorkspaceSettings(workspace.Id, changed, CancellationToken.None);
         await Task.Delay(500);
@@ -30,6 +30,6 @@ public sealed class SettingsScenarios
         await server.Launch();
 
         WorkspaceSettings after = await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None);
-        Assert.Equal((AiEffort.Low, true, true, false, true), (after.Effort, after.IsShellAllowed, after.IsSystemAccessAllowed, after.IsWebAllowed, after.IsImageGenerationAllowed));
+        Assert.Equal((AiEffort.Low, true, false, true), (after.Effort, after.IsSandboxed, after.IsWebAllowed, after.IsImageGenerationAllowed));
     }
 }

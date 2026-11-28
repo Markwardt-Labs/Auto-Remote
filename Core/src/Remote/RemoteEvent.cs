@@ -104,6 +104,16 @@ public sealed record RemoteEvent
     /// Gets when the event happened, for <see cref="RemoteEventKind.Failed" />, so that every client shows the same time for the failure.
     /// </summary>
     public DateTimeOffset? Time { get; init; }
+
+    /// <summary>
+    /// Gets what is up next now, for <see cref="RemoteEventKind.AgendaChanged" />.
+    /// </summary>
+    public Agenda? Agenda { get; init; }
+
+    /// <summary>
+    /// Gets the entry that is new or changed, for <see cref="RemoteEventKind.ActivityChanged" />.
+    /// </summary>
+    public ActivityEntry? ActivityEntry { get; init; }
 }
 
 /// <summary>
@@ -210,5 +220,15 @@ public enum RemoteEventKind
     /// <summary>
     /// Whether the changes of a workspace are committed once its work is over changed; <see cref="RemoteEvent.AutoCommit" /> carries the new state. <see cref="AutoCommitState.Committing" /> is told before the AI is told to have stopped working.
     /// </summary>
-    AutoCommitChanged
+    AutoCommitChanged,
+
+    /// <summary>
+    /// What is up next in a workspace changed, <see cref="RemoteEvent.Agenda" />.
+    /// </summary>
+    AgendaChanged,
+
+    /// <summary>
+    /// An entry of the activity of a workspace is new or changed, <see cref="RemoteEvent.ActivityEntry" />.
+    /// </summary>
+    ActivityChanged
 }

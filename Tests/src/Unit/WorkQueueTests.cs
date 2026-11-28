@@ -697,10 +697,13 @@ public sealed class WorkQueueTests : IDisposable
         Assert.Equal(committed ? [second] : [], restarted.RestoredCommits);
     }
 
-    [Fact]
-    public async Task WaitingWorkThatCannotStartGivesUpOnWhatWasToFollowIt()
+    [Theory]
+    [InlineData(true, 0)]
+    [InlineData(false, 1)]
+    public async Task WaitingWorkThatCannotStartKeepsItsTextOnlyWhenNobodyTriesItAgain(bool takenBack, int kept)
     {
         Mock<IWorkCompletion> completion = new();
+        completion.Setup(x => x.TakeBack(It.IsAny<Guid>(), It.IsAny<string>(), "No model.")).Returns(takenBack);
         // This one hears of the work like the queue of every other test, which has nothing of its own to start here.
         WorkQueue followed = new(workspaces.Object, prompts.Object, host.Object, activity, savedInputs.Object, events, () => completion.Object);
         Guid one = Workspace("one");
@@ -713,6 +716,7 @@ public sealed class WorkQueueTests : IDisposable
 
         await Assert.ThrowsAsync<RequestException>(() => waiting.Started.WaitAsync(TimeSpan.FromSeconds(5)));
 
-        completion.Verify(x => x.Abandon(two), Times.Once);
+        completion.Verify(x => x.TakeBack(two, "b", "No model."), Times.Once);
+        savedInputs.Verify(x => x.Keep(two, "b", It.IsAny<CancellationToken>()), Times.Exactly(kept));
     }
 }

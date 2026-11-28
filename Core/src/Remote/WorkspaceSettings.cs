@@ -21,14 +21,9 @@ public sealed record WorkspaceSettings
     public AiEffort Effort { get; init; } = AiEffort.Medium;
 
     /// <summary>
-    /// Gets a value indicating whether the AI has a shell that runs any command on the server's machine as the server's user.
+    /// Gets a value indicating whether the AI is sandboxed: it has no shell and its file tools reach nothing outside the workspace but what the server shares with it. Off unless turned on.
     /// </summary>
-    public bool IsShellAllowed { get; init; }
-
-    /// <summary>
-    /// Gets a value indicating whether the file tools of the AI may use any path on the server's machine and not only the ones inside the workspace folder.
-    /// </summary>
-    public bool IsSystemAccessAllowed { get; init; }
+    public bool IsSandboxed { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the AI may read the web and search it.

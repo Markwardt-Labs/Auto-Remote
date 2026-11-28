@@ -23,7 +23,7 @@ public sealed class SwarmViewModelTests
         connection.Setup(x => x.GetSwarm(It.IsAny<CancellationToken>())).ReturnsAsync(() => status);
         connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [app, delegated], Delegations = [new WorkspaceDelegation { WorkspaceId = delegated.Id, From = "there", Title = "t" }] });
         connection.Setup(x => x.SetSwarm(It.IsAny<SwarmServer>(), It.IsAny<CancellationToken>())).ReturnsAsync((SwarmServer server, CancellationToken _) => Record($"server {server.Name} {server.AcceptDelegatedWork} {server.DriveFolder} {server.MaxTasksPerJob}", status = status with { Server = server }));
-        connection.Setup(x => x.SetSwarmPeer(It.IsAny<SwarmPeer>(), It.IsAny<CancellationToken>())).ReturnsAsync((SwarmPeer peer, CancellationToken _) => Record($"peer {peer.SendWork} {peer.AcceptWork} {peer.Mode} {peer.Address} {peer.Permissions.IsShellAllowed}", status = status with { Peers = [peer] }));
+        connection.Setup(x => x.SetSwarmPeer(It.IsAny<SwarmPeer>(), It.IsAny<CancellationToken>())).ReturnsAsync((SwarmPeer peer, CancellationToken _) => Record($"peer {peer.SendWork} {peer.AcceptWork} {peer.Mode} {peer.Address} {peer.Permissions.IsSandboxed}", status = status with { Peers = [peer] }));
         connection.Setup(x => x.SyncDrive(It.IsAny<CancellationToken>())).ReturnsAsync(() => Record("sync", status with { Report = "Read 1 package." }));
         connection.Setup(x => x.RevokeSwarmPeer(It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((string id, CancellationToken _) => Record($"revoke {id}", status = status with { Peers = [] }));
         connection.Setup(x => x.GetSwarmTask(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid id, CancellationToken _) => new SwarmTaskDetail { Task = status.Tasks.First(task => task.Id == id), Instructions = "do it" });
@@ -39,7 +39,7 @@ public sealed class SwarmViewModelTests
 
     private async Task<SwarmViewModel> Loaded()
     {
-        SwarmViewModel model = new(connection.Object, null, app.Id);
+        SwarmViewModel model = new(connection.Object);
         await model.Load();
         return model;
     }
@@ -86,31 +86,27 @@ public sealed class SwarmViewModelTests
     }
 
     [Fact]
-    public async Task Load_ShowsTheServerThePeersAndTasksAndOffersOnlyWorkspacesThatAreNotDelegated()
+    public async Task Load_ShowsTheServerThePeersAndTasks()
     {
         SwarmViewModel model = await Loaded();
 
         Assert.Equal(("here", "Fingerprint AAAA-BBBB", false), (model.ServerName, model.Fingerprint, model.HasNoPeers));
         Assert.Equal("there", Assert.Single(model.Peers).Name);
         Assert.Equal("→ fix", Assert.Single(model.Tasks).Title);
-        Assert.Equal([app], model.Workspaces);
-        Assert.Same(app, model.SelectedWorkspace);
-        Assert.Equal(["Any networked worker"], model.Workers.Select(worker => worker.Name));
         Assert.Empty(calls);
     }
 
     [Fact]
-    public async Task Switches_AreSentAtOnceAndSendingWorkOffersThePeerAsAWorker()
+    public async Task Switches_AreSentAtOnce()
     {
         SwarmViewModel model = await Loaded();
 
         model.AcceptDelegatedWork = true;
         model.Peers[0].SendWork = true;
-        model.Peers[0].IsShellAllowed = true;
+        model.Peers[0].IsSandboxed = true;
         model.Peers[0].SelectedMode = model.Peers[0].Modes[2];
 
         Assert.Equal(["server here True  10", "peer True False Direct  False", "peer True False Direct  True", "peer True False AirGapped  True"], calls);
-        Assert.Equal(["Any networked worker", "there"], model.Workers.Select(worker => worker.Name));
         Assert.False(model.Peers[0].IsNetworked);
     }
 
@@ -152,30 +148,29 @@ public sealed class SwarmViewModelTests
     }
 
     [Fact]
-    public async Task Delegating_NeedsAWorkspaceTitleAndInstructionsAndReportsTheNewTasks()
+    public async Task AnOpenedTaskIsBroughtIntoMainOrIntoTheSideSessionItWasDelegatedFrom()
     {
+        WorkspaceInfo side = new() { Id = Guid.NewGuid(), Folder = "/data/sessions/fix", Side = new SideSession { ParentId = app.Id, ParentName = "app", Name = "fix-login" } };
+        connection.Setup(x => x.ListWorkspaces(It.IsAny<CancellationToken>())).ReturnsAsync(new WorkspaceCatalog { Groups = [], Workspaces = [app], Sessions = [side] });
+        status = status with { Tasks = [status.Tasks[0] with { WorkspaceId = app.Id }, Task(SwarmTaskState.Done) with { WorkspaceId = side.Id, Branch = "swarm/y" }] };
+        connection.Setup(x => x.BringInSwarmTask(It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid id, CancellationToken _) => Record($"bring {id}", status));
         SwarmViewModel model = await Loaded();
-        IReadOnlyList<Guid>? followed = null;
-        model.Delegated += ids => followed = ids;
-        SwarmTaskInfo made = Task(SwarmTaskState.Pending, "new");
-        SwarmTaskRequest? sent = null;
-        connection.Setup(x => x.DelegateTask(app.Id, It.IsAny<SwarmTaskRequest>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, SwarmTaskRequest request, CancellationToken _) =>
-        {
-            sent = request;
-            return status = status with { Tasks = [made, .. status.Tasks] };
-        });
-        Assert.False(model.DelegateCommand.CanExecute(null));
-        model.TaskTitle = " new ";
-        model.TaskInstructions = "write it";
-        Assert.True(model.DelegateCommand.CanExecute(null));
-        model.SelectedCapability = model.Capabilities[2];
 
-        model.DelegateCommand.Execute(null);
+        model.OpenTaskCommand.Execute(model.Tasks[0]);
+        Assert.Equal("Bring Into Main", model.BringInText);
+        model.BringInTaskCommand.Execute(null);
 
-        Assert.Equal(("new", "write it", AiCapability.Strong, (string?)null), (sent!.Title, sent.Instructions, sent.Capability, sent.PeerId));
-        Assert.Equal([made.Id], followed);
-        Assert.Equal((string.Empty, "The task was delegated."), (model.TaskTitle, model.Outcome));
+        model.OpenTaskCommand.Execute(model.Tasks[1]);
+        Assert.Equal("Bring Into fix-login", model.BringInText);
+        Assert.Equal([$"bring {status.Tasks[0].Id}"], calls);
     }
+
+    [Theory]
+    [InlineData(SwarmTaskState.Queued, false, "Waiting on there - on there")]
+    [InlineData(SwarmTaskState.Done, true, "Done, bringing in - on there")]
+    [InlineData(SwarmTaskState.Done, false, "Done - on there")]
+    [InlineData(SwarmTaskState.Pending, false, "Waiting for a worker - on there")]
+    public void ATaskSaysWhereItStands(SwarmTaskState state, bool bringingIn, string expected) => Assert.Equal(expected, new SwarmTaskViewModel(Task(state) with { IsBringingIn = bringingIn }).Detail);
 
     [Fact]
     public async Task Revoking_AsksFirst()
@@ -203,13 +198,13 @@ public sealed class SwarmViewModelTests
         model.OpenTaskCommand.Execute(model.Tasks[0]);
 
         Assert.True(model.HasDetail);
-        Assert.Equal((true, false, false, true), (model.CanApplyTask, model.CanRetryTask, model.CanCancelTask, model.CanDiscardTask));
+        Assert.Equal((true, false, false, true), (model.CanBringInTask, model.CanRetryTask, model.CanCancelTask, model.CanDiscardTask));
         Guid id = status.Tasks[0].Id;
         status = status with { Tasks = [status.Tasks[0] with { State = SwarmTaskState.Lost, Branch = null }] };
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SwarmTaskChanged, WorkspaceId = Guid.Empty, TaskId = id });
 
-        Assert.Equal((false, true, true, true), (model.CanApplyTask, model.CanRetryTask, model.CanCancelTask, model.CanDiscardTask));
+        Assert.Equal((false, true, true, true), (model.CanBringInTask, model.CanRetryTask, model.CanCancelTask, model.CanDiscardTask));
         connection.Setup(x => x.DiscardSwarmTask(id, It.IsAny<CancellationToken>())).ReturnsAsync(() => status = status with { Tasks = [] });
 
         model.DiscardTaskCommand.Execute(null);

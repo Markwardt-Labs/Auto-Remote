@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The panel in which the user sets up a loop of the AI in a workspace: the prompt (the review prompt, the expand prompt or their own), how often it is sent, and when the loop ends by itself.
+/// The settings of a loop of the AI in a workspace, as Send Options takes them for Repeat: the prompt (the review prompt, the expand prompt or what is typed in the message box), how often it is sent, when the loop ends by itself and whether every run is committed.
 /// </summary>
 internal sealed class LoopViewModel : ViewModelBase
 {
@@ -15,27 +15,17 @@ internal sealed class LoopViewModel : ViewModelBase
         this.connection = connection;
         this.workspace = workspace;
         selectedCondition = All.First(choice => choice.Condition == LoopCondition.Forever);
-        StartCommand = new AsyncCommand(_ => Start());
-        CancelCommand = new AsyncCommand(_ =>
-        {
-            IsOpen = false;
-            return Task.CompletedTask;
-        });
     }
 
     private readonly IServerConnection connection;
 
     private readonly WorkspaceInfo workspace;
 
-    private bool isOpen;
-
     private string reviewPrompt = string.Empty;
 
     private string expandPrompt = string.Empty;
 
     private LoopPromptKind kind = LoopPromptKind.Review;
-
-    private string customPrompt = string.Empty;
 
     private decimal? intervalMinutes = 15;
 
@@ -55,15 +45,10 @@ internal sealed class LoopViewModel : ViewModelBase
 
     private decimal? percent = 90;
 
-    private bool waitForLimit = true;
+    private bool commitEachRun;
 
     /// <summary>
-    /// Raised once the server accepted the loop and the panel closed.
-    /// </summary>
-    public event Action? Started;
-
-    /// <summary>
-    /// Gets the prompt of the review choice, which is the review prompt of the workspace or the global one, as read when the panel opened.
+    /// Gets the prompt of the review choice, which is the review prompt of the workspace or the global one, as read by <see cref="Prepare" />.
     /// </summary>
     public string ReviewPrompt
     {
@@ -72,7 +57,7 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets the prompt of the expand choice, which is the expand prompt of the workspace or the global one, as read when the panel opened.
+    /// Gets the prompt of the expand choice, which is the expand prompt of the workspace or the global one, as read by <see cref="Prepare" />.
     /// </summary>
     public string ExpandPrompt
     {
@@ -89,25 +74,6 @@ internal sealed class LoopViewModel : ViewModelBase
     /// Gets the usage windows the AI service reports, which a loop can watch.
     /// </summary>
     public IReadOnlyList<string> Windows => windows;
-
-    /// <summary>
-    /// Gets the command that starts the loop with what the panel holds.
-    /// </summary>
-    public AsyncCommand StartCommand { get; }
-
-    /// <summary>
-    /// Gets the command that closes the panel without starting a loop.
-    /// </summary>
-    public AsyncCommand CancelCommand { get; }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether the panel is showing.
-    /// </summary>
-    public bool IsOpen
-    {
-        get => isOpen;
-        set => Set(ref isOpen, value);
-    }
 
     /// <summary>
     /// Gets or sets a value indicating whether every run sends the review prompt. Setting it to <see langword="false" /> changes nothing: another choice is made by setting that one.
@@ -128,21 +94,12 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether every run sends the user's own prompt. Setting it to <see langword="false" /> changes nothing.
+    /// Gets or sets a value indicating whether every run sends what is typed in the message box. Setting it to <see langword="false" /> changes nothing.
     /// </summary>
     public bool UseCustom
     {
         get => kind == LoopPromptKind.Custom;
         set => Choose(LoopPromptKind.Custom, value);
-    }
-
-    /// <summary>
-    /// Gets or sets the user's own prompt.
-    /// </summary>
-    public string CustomPrompt
-    {
-        get => customPrompt;
-        set => Set(ref customPrompt, value);
     }
 
     /// <summary>
@@ -238,12 +195,12 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets a value indicating whether the loop waits when the usage limit of the service stops its prompts and goes on by itself, instead of ending; on whenever the panel opens.
+    /// Gets or sets a value indicating whether the changes are committed after each run that ends well.
     /// </summary>
-    public bool WaitForLimit
+    public bool CommitEachRun
     {
-        get => waitForLimit;
-        set => Set(ref waitForLimit, value);
+        get => commitEachRun;
+        set => Set(ref commitEachRun, value);
     }
 
     /// <summary>
@@ -265,22 +222,21 @@ internal sealed class LoopViewModel : ViewModelBase
     ];
 
     /// <summary>
-    /// Opens the panel, reading the review and expand prompts and which usage windows the AI service reports so the loop can watch one.
+    /// Puts the settings back to what they start from, and reads the review and expand prompts and which usage windows the AI service reports so the loop can watch one.
     /// </summary>
-    /// <returns>A task that completes once the panel shows.</returns>
-    public async Task Open()
+    /// <param name="typed">Whether something is typed in the message box, which every run then sends unless another prompt is chosen.</param>
+    /// <param name="chosen">The prompt every run sends from the start, or <see langword="null" /> for the one <paramref name="typed" /> gives.</param>
+    /// <returns>A task that completes once everything is read.</returns>
+    public async Task Prepare(bool typed, LoopPromptKind? chosen = null)
     {
-        Error = null;
-        UseReview = true;
-        CustomPrompt = string.Empty;
+        Choose(chosen ?? (typed ? LoopPromptKind.Custom : LoopPromptKind.Review), true);
         IntervalMinutes = 15;
         EndTime = new TimeSpan(TimeSpan.FromHours(23).Ticks);
         Hours = 2;
         Minutes = 0;
         Runs = 5;
         Percent = 90;
-        WaitForLimit = true;
-        IsOpen = true;
+        CommitEachRun = false;
         IReadOnlyList<string> names = [];
 
         try
@@ -312,18 +268,19 @@ internal sealed class LoopViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Builds the settings of the loop from what the panel holds.
+    /// Builds the settings of the loop.
     /// </summary>
     /// <param name="now">The current time, which a time of day is counted from.</param>
+    /// <param name="typed">What is typed in the message box.</param>
     /// <returns>The settings.</returns>
-    /// <exception cref="InvalidOperationException">What the panel holds is not enough for a loop; the message says what is missing.</exception>
-    public LoopSettings Build(DateTimeOffset now)
+    /// <exception cref="InvalidOperationException">What is chosen is not enough for a loop; the message says what is missing.</exception>
+    public LoopSettings Build(DateTimeOffset now, string typed)
     {
         string prompt = kind switch
         {
             LoopPromptKind.Review => ReviewPrompt,
             LoopPromptKind.Expand => ExpandPrompt,
-            _ => customPrompt.Trim(),
+            _ => typed.Trim(),
         };
 
         if (prompt.Length == 0)
@@ -343,7 +300,7 @@ internal sealed class LoopViewModel : ViewModelBase
             throw new InvalidOperationException("The minutes between runs must be between 0 and 1440.");
         }
 
-        LoopSettings settings = new() { Prompt = prompt, IntervalSeconds = (int)Math.Round(interval * 60), Condition = selectedCondition.Condition, WaitForLimit = waitForLimit };
+        LoopSettings settings = new() { Prompt = prompt, IntervalSeconds = (int)Math.Round(interval * 60), Condition = selectedCondition.Condition, AutoCommit = commitEachRun };
 
         switch (selectedCondition.Condition)
         {
@@ -359,27 +316,6 @@ internal sealed class LoopViewModel : ViewModelBase
                 return selectedWindow is { } window && percent is >= 1 and <= 100 ? settings with { Window = window, Percent = (double)percent.Value } : throw new InvalidOperationException("Choose a usage window and a share between 1 and 100.");
             default:
                 return settings;
-        }
-    }
-
-    private async Task Start()
-    {
-        LoopSettings settings;
-
-        try
-        {
-            settings = Build(DateTimeOffset.Now);
-        }
-        catch (InvalidOperationException exception)
-        {
-            Error = exception.Message;
-            return;
-        }
-
-        if (await Attempt(() => connection.StartLoop(workspace.Id, settings, CancellationToken.None)))
-        {
-            IsOpen = false;
-            Started?.Invoke();
         }
     }
 

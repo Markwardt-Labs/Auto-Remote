@@ -43,8 +43,8 @@
                 </DataTemplate>
               </ComboBox.ItemTemplate>
             </ComboBox>
-            <ToggleSwitch IsChecked="{Binding NewIsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" />
-            <ToggleSwitch IsChecked="{Binding NewIsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
+            <ToggleSwitch IsChecked="{Binding NewIsSandboxed}" Content="Sandbox" OnContent="" OffContent="" />
+            <TextBlock Text="On: no shell, and no files outside the workspace except what Auto Remote shares." Classes="muted" FontSize="12" TextWrapping="Wrap" />
             <ToggleSwitch IsChecked="{Binding NewIsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
             <ToggleSwitch IsChecked="{Binding NewIsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
             <ToggleSwitch IsChecked="{Binding NewIsDelegationAllowed}" Content="Let the AI delegate work" OnContent="" OffContent="" ToolTip.Tip="The AI may send tasks, with the code of the workspace, to the paired servers that receive work." />

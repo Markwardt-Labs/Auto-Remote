@@ -23,7 +23,7 @@ internal interface IWorkspaceControl
 }
 
 /// <inheritdoc />
-internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptService prompts, IWorkspaceLoops loops, IWorkspaceVersioning versioning, IWorkspaceSnapshots snapshots) : IWorkspaceControl
+internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptService prompts, IWorkspaceVersioning versioning, IWorkspaceSnapshots snapshots) : IWorkspaceControl
 {
     /// <inheritdoc />
     public Task Stop(Guid id) => Halt(id, WorkspaceState.Stopping);
@@ -52,8 +52,6 @@ internal sealed class WorkspaceControl(IWorkspaceActivity activity, IPromptServi
 
         try
         {
-            await loops.Cancel(id);
-
             switch (previous)
             {
                 case WorkspaceState.Working:

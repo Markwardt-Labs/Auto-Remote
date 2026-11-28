@@ -133,21 +133,12 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets whether the AI may run shell commands.
+    /// Gets or sets whether the AI is sandboxed: it has no shell and reaches no files outside the workspace but what the server shares with it.
     /// </summary>
-    public bool IsShellAllowed
+    public bool IsSandboxed
     {
-        get => pending.IsShellAllowed;
-        set => Edit(settings => settings with { IsShellAllowed = value });
-    }
-
-    /// <summary>
-    /// Gets or sets whether the AI's file tools may use any path on the server's machine and not only the ones inside the workspace.
-    /// </summary>
-    public bool IsSystemAccessAllowed
-    {
-        get => pending.IsSystemAccessAllowed;
-        set => Edit(settings => settings with { IsSystemAccessAllowed = value });
+        get => pending.IsSandboxed;
+        set => Edit(settings => settings with { IsSandboxed = value });
     }
 
     /// <summary>
@@ -308,7 +299,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     }
 
     private bool Differs(WorkspaceSettings first, WorkspaceSettings second)
-        => (first.Capability, first.Effort, first.IsShellAllowed, first.IsSystemAccessAllowed, first.IsWebAllowed, first.IsImageGenerationAllowed, first.IsDelegationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes, Blank(first.SessionFiles), Blank(first.SessionSetupScript)) != (second.Capability, second.Effort, second.IsShellAllowed, second.IsSystemAccessAllowed, second.IsWebAllowed, second.IsImageGenerationAllowed, second.IsDelegationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes, Blank(second.SessionFiles), Blank(second.SessionSetupScript));
+        => (first.Capability, first.Effort, first.IsSandboxed, first.IsWebAllowed, first.IsImageGenerationAllowed, first.IsDelegationAllowed, (first.Instructions ?? string.Empty).Trim(), Blank(first.ReviewPrompt), Blank(first.ExpandPrompt), first.StatusMinutes, Blank(first.SessionFiles), Blank(first.SessionSetupScript)) != (second.Capability, second.Effort, second.IsSandboxed, second.IsWebAllowed, second.IsImageGenerationAllowed, second.IsDelegationAllowed, (second.Instructions ?? string.Empty).Trim(), Blank(second.ReviewPrompt), Blank(second.ExpandPrompt), second.StatusMinutes, Blank(second.SessionFiles), Blank(second.SessionSetupScript));
 
     private string? Blank(string? text) => string.IsNullOrWhiteSpace(text) ? null : text.Trim();
 
@@ -361,8 +352,7 @@ internal sealed class SettingsViewModel : ViewModelBase
     {
         Raise(nameof(SelectedCapability));
         Raise(nameof(SelectedEffort));
-        Raise(nameof(IsShellAllowed));
-        Raise(nameof(IsSystemAccessAllowed));
+        Raise(nameof(IsSandboxed));
         Raise(nameof(IsWebAllowed));
         Raise(nameof(IsImageGenerationAllowed));
         Raise(nameof(IsDelegationAllowed));

@@ -58,6 +58,10 @@ public sealed class RequestHandlerTests
 
     private readonly Mock<IFollowUps> followUps = new();
 
+    private readonly Mock<IActivityLog> journal = new();
+
+    private readonly Mock<IAgendaService> agenda = new();
+
     private readonly object owner = new();
 
     private readonly RequestHandler handler;
@@ -78,7 +82,7 @@ public sealed class RequestHandlerTests
         workspaces.Setup(x => x.Sides(It.IsAny<Guid?>())).Returns([]);
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         versioning.Setup(x => x.Perform(It.IsAny<WorkspaceInfo>(), It.IsAny<bool>(), It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>(), It.IsAny<bool>())).Returns((WorkspaceInfo _, bool _, Func<CancellationToken, Task> action, CancellationToken cancellation, bool _) => action(cancellation));
-        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object, sideSessions.Object, integrations.Object, sideRepository.Object, resources.Object, followUps.Object);
+        handler = new RequestHandler(workspaces.Object, folders.Object, files.Object, git.Object, versioning.Object, savedInputs.Object, errors.Object, guard.Object, prompts.Object, diagrams.Object, scripts.Object, usage.Object, activity, control.Object, speech.Object, host.Object, loops.Object, watcher.Object, updater.Object, log.Object, queue.Object, swarm.Object, sideSessions.Object, integrations.Object, sideRepository.Object, resources.Object, followUps.Object, journal.Object, agenda.Object);
     }
 
     [Fact]
@@ -418,13 +422,13 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_CancelLimitPause_EndsThePauseWithoutAResumeAndTheLoopOfTheWorkspace()
+    public async Task Handle_CancelLimitPause_EndsThePauseWithoutAResumeAndKeepsTheLoop()
     {
         RemoteResponse response = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.CancelLimitPause, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
 
         Assert.Null(response.Error);
         guard.Verify(x => x.Cancel(workspace.Id), Times.Once);
-        loops.Verify(x => x.Cancel(workspace.Id), Times.Once);
+        loops.Verify(x => x.Cancel(workspace.Id), Times.Never);
     }
 
     [Fact]
@@ -606,7 +610,7 @@ public sealed class RequestHandlerTests
     [Fact]
     public async Task Handle_GetAndSetWorkspaceSettings_ReadAndChangeHowTheAiSessionRuns()
     {
-        WorkspaceSettings settings = new() { Capability = AiCapability.Strong, Effort = AiEffort.Max, IsShellAllowed = true };
+        WorkspaceSettings settings = new() { Capability = AiCapability.Strong, Effort = AiEffort.Max, IsSandboxed = true };
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         prompts.Setup(x => x.GetSettings(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(settings);
         prompts.Setup(x => x.SetSettings(workspace.Id, settings, It.IsAny<CancellationToken>())).ReturnsAsync(settings with { Instructions = "kept" });
@@ -898,23 +902,57 @@ public sealed class RequestHandlerTests
         Assert.Equal(AutoCommitState.On, history.History!.AutoCommit);
     }
 
-    [Theory]
-    [InlineData(true, true, 1, 0)]
-    [InlineData(true, false, 1, 1)]
-    [InlineData(false, true, 0, 0)]
-    public async Task Handle_Prompt_TurnsAutoCommitOnBeforeTheWorkWhenAskedAndOffAgainWhenTheWorkIsRefused(bool asked, bool taken, int armed, int disarmed)
+    [Fact]
+    public async Task Handle_Prompt_NeverTurnsAutoCommitOn()
     {
-        followUps.Setup(x => x.Arm(workspace.Id)).Returns(true);
+        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go", AutoCommit = true }, owner, CancellationToken.None);
 
-        if (!taken)
-        {
-            queue.Setup(x => x.Submit(workspace.Id, "go", WorkSource.Direct, It.IsAny<CancellationToken>())).ThrowsAsync(new RequestException("refused"));
-        }
+        followUps.Verify(x => x.Arm(It.IsAny<Guid>()), Times.Never);
+        followUps.Verify(x => x.SetAutoCommit(It.IsAny<Guid>(), It.IsAny<bool>()), Times.Never);
+    }
 
-        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.Prompt, WorkspaceId = workspace.Id, Text = "go", AutoCommit = asked ? true : null }, owner, CancellationToken.None);
+    [Theory]
+    [InlineData(RemoteCommand.TakeSavedInput)]
+    [InlineData(RemoteCommand.DiscardSavedInput)]
+    [InlineData(RemoteCommand.SetSavedInputAutoCommit)]
+    public async Task Handle_ChangesToTheSavedInputs_AreLookedAtAgainByWhatFollowsTheWork(RemoteCommand command)
+    {
+        savedInputs.Setup(x => x.Take(workspace.Id, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync(new SavedInput { Id = Guid.NewGuid(), Text = "x", Time = DateTimeOffset.UtcNow });
+        savedInputs.Setup(x => x.Discard(workspace.Id, It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync([]);
+        savedInputs.Setup(x => x.SetAutoCommit(workspace.Id, It.IsAny<Guid>(), false, It.IsAny<CancellationToken>())).ReturnsAsync([]);
 
-        followUps.Verify(x => x.Arm(workspace.Id), Times.Exactly(armed));
-        followUps.Verify(x => x.Disarm(workspace.Id), Times.Exactly(disarmed));
+        await handler.Handle(new RemoteRequest { Id = 1, Command = command, WorkspaceId = workspace.Id, InputId = Guid.NewGuid(), Enabled = false }, owner, CancellationToken.None);
+
+        followUps.Verify(x => x.Reconsider(workspace.Id), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true, true, 1)]
+    [InlineData(true, false, 0)]
+    [InlineData(false, true, 0)]
+    public async Task Handle_TurningTheCommitOnForAQueuedInput_CommitsTheWorkUnderWayBeforeIt(bool queuedInput, bool enabled, int times)
+    {
+        Guid input = Guid.NewGuid();
+        savedInputs.Setup(x => x.SetAutoCommit(workspace.Id, input, enabled, It.IsAny<CancellationToken>())).ReturnsAsync([new SavedInput { Id = input, Text = "x", Time = DateTimeOffset.UtcNow, IsQueued = queuedInput, AutoCommit = enabled }]);
+
+        await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.SetSavedInputAutoCommit, WorkspaceId = workspace.Id, InputId = input, Enabled = enabled }, owner, CancellationToken.None);
+
+        followUps.Verify(x => x.CommitBefore(workspace.Id), Times.Exactly(times));
+    }
+
+    [Fact]
+    public async Task Handle_ActivityAndAgenda_AreReadFromWhatKeepsThem()
+    {
+        ActivityPage page = new() { Entries = [] };
+        Agenda next = new() { Status = "1 up next" };
+        journal.Setup(x => x.Read(workspace.Id, "5", 20, It.IsAny<CancellationToken>())).ReturnsAsync(page);
+        agenda.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(next);
+
+        RemoteResponse read = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.GetActivity, WorkspaceId = workspace.Id, Before = "5", Limit = 20 }, owner, CancellationToken.None);
+        RemoteResponse upNext = await handler.Handle(new RemoteRequest { Id = 2, Command = RemoteCommand.GetAgenda, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+
+        Assert.Same(page, read.Activity);
+        Assert.Same(next, upNext.Agenda);
     }
 
     [Fact]
@@ -931,12 +969,12 @@ public sealed class RequestHandlerTests
     }
 
     [Fact]
-    public async Task Handle_ResumeQueue_GoesToWhatFollowsTheWork()
+    public async Task Handle_ResumeAutomation_GoesToWhatFollowsTheWork()
     {
-        RemoteResponse resumed = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ResumeQueue, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
+        RemoteResponse resumed = await handler.Handle(new RemoteRequest { Id = 1, Command = RemoteCommand.ResumeAutomation, WorkspaceId = workspace.Id }, owner, CancellationToken.None);
 
         Assert.Null(resumed.Error);
-        followUps.Verify(x => x.ResumeQueue(workspace.Id, It.IsAny<CancellationToken>()), Times.Once);
+        followUps.Verify(x => x.Resume(workspace.Id), Times.Once);
     }
 
     [Fact]
@@ -1196,7 +1234,7 @@ public sealed class RequestHandlerTests
     public async Task Handle_SetWorkspaceSettings_LogsWhatChangedAndWhoChangedItButNothingWhenNothingChanged()
     {
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
-        WorkspaceSettings before = new() { Effort = AiEffort.High, IsShellAllowed = true, IsWebAllowed = true, IsImageGenerationAllowed = true, ExpandPrompt = "mine" };
+        WorkspaceSettings before = new() { Effort = AiEffort.High, IsSandboxed = true, IsWebAllowed = true, IsImageGenerationAllowed = true, ExpandPrompt = "mine" };
         WorkspaceSettings defaults = new();
         List<string> written = [];
         log.Setup(x => x.Write(It.IsAny<string>())).Callback<string>(written.Add);
@@ -1213,7 +1251,7 @@ public sealed class RequestHandlerTests
         string line = Assert.Single(written);
         Assert.StartsWith("Settings of app changed by a client: ", line);
         Assert.Contains("effort High -> Medium", line);
-        Assert.Contains("shell True -> False", line);
+        Assert.Contains("sandbox True -> False", line);
         Assert.Contains("web True -> False", line);
         Assert.Contains("images True -> False", line);
         Assert.Contains("expand prompt mine -> ", line);

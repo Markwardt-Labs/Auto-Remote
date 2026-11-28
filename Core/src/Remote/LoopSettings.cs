@@ -46,7 +46,7 @@ public sealed record LoopSettings
     public double? Percent { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the loop waits when a run fails because of the usage limit of the service and goes on by itself once the AI can be prompted again, which is the default; when it is <see langword="false" />, such a failure ends the loop like any other.
+    /// Gets a value indicating whether the changes are committed after each run that ends well.
     /// </summary>
-    public bool WaitForLimit { get; init; } = true;
+    public bool AutoCommit { get; init; }
 }

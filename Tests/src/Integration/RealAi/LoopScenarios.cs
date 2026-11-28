@@ -28,7 +28,7 @@ public sealed class LoopScenarios
     [RealAiTheory]
     [InlineData(AiService.ClaudeCode)]
     [InlineData(AiService.Codex)]
-    public async Task StoppingTheWorkDuringALoopStopsTheRunAndCancelsTheLoopSoNothingFollows(AiService service)
+    public async Task StoppingTheWorkDuringALoopStopsTheRunAndHoldsTheLoopSoNothingFollows(AiService service)
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo workspace = await server.Workspace("loop-stop", service);
@@ -39,7 +39,8 @@ public sealed class LoopScenarios
         await server.Connection.StopWorkspace(workspace.Id, CancellationToken.None);
         await Task.Delay(TimeSpan.FromSeconds(8));
 
-        Assert.Null(await server.Connection.GetLoop(workspace.Id, CancellationToken.None));
+        Assert.NotNull(await server.Connection.GetLoop(workspace.Id, CancellationToken.None));
+        Assert.True((await server.Connection.GetAgenda(workspace.Id, CancellationToken.None)).IsStopped);
         Assert.Equal(WorkspaceState.Ready, await server.Connection.GetWorkspaceState(workspace.Id, CancellationToken.None));
         Assert.Equal(1, server.Events().Skip(mark).Count(item => item.Kind == RemoteEventKind.MessageAdded && item.Message!.Role == MessageRole.User));
         await server.Until(() => RealServer.Processes("sleep 271") == 0, 20, "the long command to end");

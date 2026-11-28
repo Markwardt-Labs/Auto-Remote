@@ -6,14 +6,9 @@ namespace Markwardt.AutoRemote;
 public sealed record SwarmPermissions
 {
     /// <summary>
-    /// Gets a value indicating whether the AI may run shell commands, which can reach anything the server's account can, whatever else is off.
+    /// Gets a value indicating whether the AI is sandboxed: it has no shell and its file tools reach nothing outside the workspace but what the server shares with it. Off unless turned on.
     /// </summary>
-    public bool IsShellAllowed { get; init; }
-
-    /// <summary>
-    /// Gets a value indicating whether the file tools may reach files outside the workspace of the task.
-    /// </summary>
-    public bool IsSystemAccessAllowed { get; init; }
+    public bool IsSandboxed { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the AI may use the web.

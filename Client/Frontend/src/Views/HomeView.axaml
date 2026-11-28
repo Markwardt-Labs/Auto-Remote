@@ -220,6 +220,7 @@
            <UniformGrid Grid.Row="0" Rows="1" IsVisible="{Binding ShowSideTabs}">
              <local:TouchButton Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChatView}" />
              <local:TouchButton Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScriptView}" />
+             <local:TouchButton Content="Activity" Command="{Binding ShowActivityCommand}" Classes="tab" Classes.on="{Binding ShowActivityView}" />
              <local:TouchButton Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistoryView}" IsVisible="{Binding ShowHistoryTab}" />
            </UniformGrid>
            <Panel Grid.Row="1">
@@ -232,36 +233,19 @@
                 <TextBlock Text="{Binding $parent[local:HomeView].DataContext.Active.SideError, FallbackValue=''}" Classes="error" FontSize="12" />
               </Border>
             </StackPanel>
-            <Border Name="LimitPauseBanner" DockPanel.Dock="Top" IsVisible="{Binding HasLimitPause}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Warning}" BorderThickness="0,0,0,1" Padding="14,8">
-              <Grid ColumnDefinitions="Auto,*,Auto">
-                <Path Classes="lineIcon" Data="{StaticResource PauseIconGeometry}" Stroke="{DynamicResource Warning}" MaxWidth="14" MaxHeight="14" VerticalAlignment="Top" Margin="0,2,10,0" />
-                <TextBlock Grid.Column="1" Text="{Binding LimitPauseText}" TextWrapping="Wrap" FontSize="12" />
-                <local:TouchButton Grid.Column="2" Content="Cancel Auto Resume" Command="{Binding CancelLimitPauseCommand}" Classes="flat" FontSize="12" Margin="10,0,0,0" VerticalAlignment="Top" ToolTip.Tip="End the automatic pause without resuming the work and the loop" />
-              </Grid>
-            </Border>
-            <Border Name="QueueBanner" DockPanel.Dock="Top" IsVisible="{Binding IsQueued}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,1" Padding="14,8">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding QueueText}" TextWrapping="Wrap" FontSize="12" />
-                  <TextBlock Text="{Binding QueuedPrompt}" Classes="muted" TextWrapping="Wrap" FontSize="12" MaxLines="3" TextTrimming="CharacterEllipsis" IsVisible="{Binding HasQueuedPrompt}" />
-                </StackPanel>
-                <local:TouchButton Grid.Column="1" Content="Cancel Queued Work" Command="{Binding CancelQueuedCommand}" Classes="flat" FontSize="12" VerticalAlignment="Top" />
-              </Grid>
-            </Border>
-            <Border Name="QueuePausedBanner" DockPanel.Dock="Top" IsVisible="{Binding HasPausedQueued}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Warning}" BorderThickness="0,0,0,1" Padding="14,8">
-              <Grid ColumnDefinitions="*,Auto" ColumnSpacing="8">
-                <StackPanel Grid.Column="0" Spacing="2" VerticalAlignment="Center">
-                  <TextBlock Text="{Binding QueuePausedText}" FontWeight="SemiBold" FontSize="12" />
-                  <TextBlock Text="Work was stopped, cancelled or failed, or the server restarted." Classes="muted" TextWrapping="Wrap" FontSize="12" />
-                </StackPanel>
-                <local:TouchButton Grid.Column="1" Content="Resume Queue" Command="{Binding ResumeQueueCommand}" Classes="primary" FontSize="12" Padding="10,5" VerticalAlignment="Center" />
-              </Grid>
-            </Border>
-            <Border Name="LoopWaitingBanner" DockPanel.Dock="Top" IsVisible="{Binding $parent[local:HomeView].DataContext.Active.IsLoopWaiting, FallbackValue=False}" Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Accent}" BorderThickness="0,0,0,1" Padding="14,8">
-              <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="14" MaxHeight="14" VerticalAlignment="Center" />
-                <TextBlock Grid.Column="1" Text="{Binding $parent[local:HomeView].DataContext.Active.LoopWaiting, FallbackValue=''}" TextWrapping="Wrap" FontSize="12" VerticalAlignment="Center" />
-              </Grid>
+            <Border Name="StatusLine" DockPanel.Dock="Top" Classes="statusLine" Classes.attention="{Binding IsStopped}" IsVisible="{Binding HasStatusLine}" Padding="8,4">
+              <local:AdaptiveRow MinFillWidth="150">
+                <Panel />
+                <local:TouchButton Name="StatusButton" Classes="flat" Command="{Binding ToggleUpNextCommand}" ToolTip.Tip="Up Next" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" VerticalAlignment="Center" Padding="6,4">
+                  <TextBlock Name="StatusText" Text="{Binding StatusText}" TextWrapping="Wrap" FontSize="12" />
+                </local:TouchButton>
+                <WrapPanel Name="StatusButtons" HorizontalAlignment="Right" VerticalAlignment="Center" IsVisible="{Binding HasStatusButtons}">
+                  <local:TouchButton Name="ResumeAutomationButton" Content="Resume" Command="{Binding ResumeAutomationCommand}" IsVisible="{Binding IsStopped}" Classes="primary" FontSize="12" Padding="10,5" Margin="3,2" />
+                  <local:TouchButton Name="StopRetryingButton" Content="Stop Retrying" Command="{Binding StopRetryingCommand}" IsVisible="{Binding IsRetrying}" FontSize="12" Padding="8,4" Margin="3,2" ToolTip.Tip="Give up on the work that waits to be tried again" />
+                  <local:TouchButton Name="CancelAutoResumeButton" Content="Cancel Auto Resume" Command="{Binding CancelLimitPauseCommand}" IsVisible="{Binding HasLimitPause}" FontSize="12" Padding="8,4" Margin="3,2" ToolTip.Tip="End the automatic pause without resuming the work" />
+                  <local:TouchButton Name="CancelWaitingButton" Content="Cancel Waiting Work" Command="{Binding CancelQueuedCommand}" IsVisible="{Binding IsQueued}" FontSize="12" Padding="8,4" Margin="3,2" />
+                </WrapPanel>
+              </local:AdaptiveRow>
             </Border>
             <StackPanel DockPanel.Dock="Bottom" Margin="20,4" Spacing="4" IsVisible="{Binding HasError}">
               <TextBlock Classes="muted" FontSize="11" Text="{Binding ErrorTime, Converter={x:Static local:MessageConverters.Time}}"
@@ -347,14 +331,16 @@
                     IsVisible="{Binding $parent[local:HomeView].DataContext.IsDesktop, FallbackValue=False}" />
             <Grid Grid.Row="2" Margin="20,4,12,12" RowDefinitions="Auto,Auto,*">
             <StackPanel Grid.Row="0" Spacing="6" Margin="0,0,0,6">
-              <local:TouchButton Name="LoadedAutoCommitButton" Classes="action" Classes.toggled="{Binding ShowsLoadedAutoCommitOn}" Command="{Binding ToggleLoadedAutoCommitCommand}" HorizontalAlignment="Left" Padding="8,4"
-                      IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowLoadedAutoCommit, FallbackValue=False}">
-                <StackPanel Orientation="Horizontal" Spacing="6">
-                  <Path Classes="lineIcon" Data="{StaticResource AutoCommitIconGeometry}" MaxWidth="12" MaxHeight="12" />
-                  <TextBlock Text="{Binding LoadedAutoCommitText}" FontSize="12" VerticalAlignment="Center" />
-                </StackPanel>
-              </local:TouchButton>
-              <TextBlock Name="LoadedAutoCommitNote" Text="{Binding $parent[local:HomeView].DataContext.Active.LoadedAutoCommitNote, FallbackValue=''}" IsVisible="{Binding $parent[local:HomeView].DataContext.Active.HasLoadedAutoCommitNote, FallbackValue=False}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+              <WrapPanel>
+                <local:TouchButton Name="AutoCommitButton" Classes="action" Classes.toggled="{Binding IsAutoCommitOn}" Command="{Binding ToggleAutoCommitCommand}" ToolTip.Tip="{Binding AutoCommitTip}" ToolTip.Placement="Top" Padding="8,4" Margin="0,0,10,0"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowAutoCommitButton, FallbackValue=False}">
+                  <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Path Classes="lineIcon" Data="{StaticResource AutoCommitIconGeometry}" MaxWidth="12" MaxHeight="12" />
+                    <TextBlock Name="AutoCommitLabel" Text="{Binding AutoCommitText}" FontSize="12" VerticalAlignment="Center" />
+                  </StackPanel>
+                </local:TouchButton>
+                <TextBlock Name="JoinNote" Text="Send joins the running work." IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowJoinNote, FallbackValue=False}" Classes="muted" FontSize="12" TextWrapping="Wrap" VerticalAlignment="Center" />
+              </WrapPanel>
               <TextBlock Text="{Binding Notice}" IsVisible="{Binding HasNotice}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
               <Border Background="{DynamicResource Elevated}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0"
                     IsVisible="{Binding $parent[local:HomeView].DataContext.Active.Git.IsWorking, FallbackValue=False}">
@@ -384,8 +370,8 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
-            <Grid Name="ChatInputRow" Grid.Row="2" ColumnDefinitions="Auto,*,Auto">
-              <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
+            <local:AdaptiveRow Name="ChatInputRow" Grid.Row="2" MinFillWidth="70">
+              <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,6,0">
                 <local:TouchButton Classes="icon" ToolTip.Tip="Attach files" Click="OnAttachClick" IsEnabled="{Binding TakesTyping}" VerticalAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource AttachIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
@@ -393,47 +379,38 @@
                   <Path Classes="lineIcon" Data="{StaticResource MicIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
               </StackPanel>
-              <TextBox Name="ChatInput" Grid.Column="1" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" IsEnabled="{Binding TakesTyping}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
-              <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="4" Margin="6,0,0,0" VerticalAlignment="Center">
-                <local:TouchButton Classes="action" Classes.saved="{Binding HasSavedInputs}" Command="{Binding ToggleSavedInputsCommand}" ToolTip.Tip="Load a saved input" ToolTip.Placement="Top"
+              <TextBox Name="ChatInput" Classes="bare" Text="{Binding Input}" PlaceholderText="{Binding Placeholder}" IsEnabled="{Binding TakesTyping}" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="140" />
+              <WrapPanel Name="ChatButtons" Classes="messageButtons" Margin="4,0,-2,0" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <local:TouchButton Name="DraftsButton" Classes="action" Classes.saved="{Binding HasDrafts}" Command="{Binding ToggleSavedInputsCommand}" ToolTip.Tip="Drafts" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding !HasText}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
+                  <Path Classes="lineIcon" Data="{StaticResource LoadInputIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                </local:TouchButton>
+                <local:TouchButton Name="UpNextButton" Classes="action" Command="{Binding ToggleUpNextCommand}" ToolTip.Tip="Up Next" ToolTip.Placement="Top"
+                        Width="34" Height="34" CornerRadius="4" Padding="0"
+                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowUpNextButton, FallbackValue=False}"
+                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Grid Width="32" Height="32">
-                    <Path Classes="lineIcon" Data="{StaticResource LoadInputIconGeometry}" MaxWidth="14" MaxHeight="14" />
-                    <Border Name="QueuedBadge" Classes="badge" Classes.paused="{Binding HasPausedQueued}" IsVisible="{Binding HasQueuedInputs}" HorizontalAlignment="Right" VerticalAlignment="Top" MinWidth="13" Height="13" CornerRadius="7" Padding="3,0">
+                    <Path Classes="lineIcon" Data="{StaticResource OutlineIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                    <Border Name="QueuedBadge" Classes="badge" Classes.paused="{Binding IsStopped}" HorizontalAlignment="Right" VerticalAlignment="Top" MinWidth="13" Height="13" CornerRadius="7" Padding="3,0">
                       <TextBlock Text="{Binding QueuedCount}" FontSize="9" LineHeight="13" HorizontalAlignment="Center" />
                     </Border>
                   </Grid>
                 </local:TouchButton>
-                <local:TouchButton Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.OpenLoopCommand}" ToolTip.Tip="Loop: send a prompt over and over" ToolTip.Placement="Top"
-                        Width="34" Height="34" CornerRadius="4" Padding="0"
-                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowLoopButton, FallbackValue=False}"
-                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <Path Classes="lineIcon" Data="{StaticResource LoopIconGeometry}" MaxWidth="14" MaxHeight="14" />
-                </local:TouchButton>
-                <local:TouchButton Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.CancelLoopCommand}" ToolTip.Tip="Cancel the loop (the work in progress keeps going)" ToolTip.Placement="Top"
+                <local:TouchButton Name="CancelLoopButton" Classes="action" Command="{Binding $parent[local:HomeView].DataContext.Active.CancelLoopCommand}" ToolTip.Tip="Cancel the loop (the work in progress keeps going)" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowCancelLoopButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource LoopCancelIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
-                <local:TouchButton Name="AutoCommitButton" Classes="action" Classes.toggled="{Binding IsAutoCommitOn}" Command="{Binding ToggleAutoCommitCommand}" ToolTip.Tip="{Binding AutoCommitTip}" ToolTip.Placement="Top"
-                        MinWidth="34" Height="34" CornerRadius="4" Padding="0"
-                        IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowAutoCommitButton, FallbackValue=False}"
-                        VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
-                  <StackPanel Orientation="Horizontal">
-                    <Path Classes="lineIcon" Data="{StaticResource AutoCommitIconGeometry}" Width="14" Height="14" VerticalAlignment="Center" />
-                    <TextBlock Name="AutoCommitLabel" Text="Current&#x0a;Work" FontSize="10" LineHeight="12" Margin="5,0,9,0" VerticalAlignment="Center" IsVisible="{Binding $parent[local:HomeView].DataContext.Active.LabelsAutoCommitButton, FallbackValue=False}" />
-                  </StackPanel>
-                </local:TouchButton>
-                <local:TouchButton Classes="primary" Command="{Binding ReviewCommand}" ToolTip.Tip="Review the workspace and its changes and fix any problems" ToolTip.Placement="Top"
+                <local:TouchButton Name="ReviewButton" Classes="primary" Command="{Binding ReviewCommand}" OptionsCommand="{Binding $parent[local:HomeView].DataContext.Active.OpenSendOptionsCommand}" OptionsParameter="{x:Static local:LoopPromptKind.Review}" ToolTip.Tip="Review the workspace and its changes and fix any problems. Right-click or hold for Send Options" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowReviewButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource ReviewIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
-                <local:TouchButton Classes="primary" Command="{Binding ExpandCommand}" ToolTip.Tip="Expand upon the content of the workspace" ToolTip.Placement="Top"
+                <local:TouchButton Name="ExpandButton" Classes="primary" Command="{Binding ExpandCommand}" OptionsCommand="{Binding $parent[local:HomeView].DataContext.Active.OpenSendOptionsCommand}" OptionsParameter="{x:Static local:LoopPromptKind.Expand}" ToolTip.Tip="Expand upon the content of the workspace. Right-click or hold for Send Options" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowExpandButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
@@ -451,19 +428,19 @@
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource ResumeIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
-                <local:TouchButton Classes="action" Command="{Binding SaveInputCommand}" ToolTip.Tip="Save the input for later and clear it" ToolTip.Placement="Top"
+                <local:TouchButton Name="SaveDraftButton" Classes="action" Command="{Binding SaveInputCommand}" ToolTip.Tip="Save Draft" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding HasText}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource SaveInputIconGeometry}" MaxWidth="14" MaxHeight="14" />
                 </local:TouchButton>
-                <local:TouchButton Name="QueueButton" Classes="primary" Command="{Binding QueueCommand}" ToolTip.Tip="{Binding $parent[local:HomeView].DataContext.Active.QueueTip}" ToolTip.Placement="Top"
+                <local:TouchButton Name="QueueButton" Classes="primary" Command="{Binding QueueCommand}" OptionsCommand="{Binding $parent[local:HomeView].DataContext.Active.OpenSendOptionsCommand}" ToolTip.Tip="{Binding $parent[local:HomeView].DataContext.Active.QueueTip}" ToolTip.Placement="Top"
                         Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowQueueButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Classes="lineIcon" Data="{StaticResource QueueIconGeometry}" MaxWidth="15" MaxHeight="15" />
                 </local:TouchButton>
-                <local:TouchButton Content="↑" Command="{Binding SendCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
+                <local:TouchButton Name="SendButton" Content="↑" Command="{Binding SendCommand}" OptionsCommand="{Binding $parent[local:HomeView].DataContext.Active.OpenSendOptionsCommand}" ToolTip.Tip="Send. Right-click or hold for Send Options" ToolTip.Placement="Top" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0"
                         IsVisible="{Binding $parent[local:HomeView].DataContext.Active.ShowSendButton, FallbackValue=False}"
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center" FontSize="18" />
                 <local:TouchButton Command="{Binding $parent[local:HomeView].DataContext.BeginStopCommand}" Classes="primary" Width="34" Height="34" CornerRadius="4" Padding="0" ToolTip.Tip="{Binding $parent[local:HomeView].DataContext.Active.StopTip, FallbackValue='Stop the work and keep what it did'}" ToolTip.Placement="Top"
@@ -471,39 +448,33 @@
                         VerticalAlignment="Center" HorizontalContentAlignment="Center" VerticalContentAlignment="Center">
                   <Path Data="M1,1 L11,1 L11,11 L1,11 Z" Fill="White" Width="12" Height="12" />
                 </local:TouchButton>
-              </StackPanel>
-            </Grid>
+              </WrapPanel>
+            </local:AdaptiveRow>
             </Grid>
            </Grid>
-           <Border DataContext="{Binding Chat}" IsVisible="{Binding IsSavedInputsOpen}" Background="{DynamicResource Background}">
-            <Panel>
-            <Grid RowDefinitions="Auto,Auto,*" Margin="20,8,20,12">
+           <Border Name="DraftsPanel" DataContext="{Binding Chat}" IsVisible="{Binding IsSavedInputsOpen}" Background="{DynamicResource Background}">
+            <Grid RowDefinitions="Auto,*" Margin="20,8,20,12">
               <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
-                <TextBlock Grid.Column="0" Text="Saved inputs" Classes="serif" FontSize="18" VerticalAlignment="Center" />
+                <TextBlock Grid.Column="0" Text="Drafts" Classes="serif" FontSize="18" VerticalAlignment="Center" />
                 <local:TouchButton Grid.Column="1" Content="Close" Command="{Binding ToggleSavedInputsCommand}" Classes="flat" />
               </Grid>
-              <StackPanel Grid.Row="1" Spacing="6" Margin="0,0,0,8" IsVisible="{Binding HasPausedQueued}">
-                <TextBlock Text="Queued inputs are paused because work was stopped, cancelled or failed, or the server restarted. They also go on after work ends well again or when you queue another input." Classes="muted" FontSize="12" TextWrapping="Wrap" />
-                <local:TouchButton Content="Resume Queue" Command="{Binding ResumeQueueCommand}" Classes="primary" FontSize="12" Padding="10,5" HorizontalAlignment="Left" />
-              </StackPanel>
-              <TextBlock Grid.Row="2" Text="No saved inputs." Classes="muted" IsVisible="{Binding HasNoSavedInputs}" />
-              <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" IsVisible="{Binding !HasNoSavedInputs}">
-                <ItemsControl Name="SavedInputList" ItemsSource="{Binding SavedInputs}">
+              <TextBlock Grid.Row="1" Text="No drafts." Classes="muted" IsVisible="{Binding HasNoDrafts}" />
+              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding !HasNoDrafts}">
+                <ItemsControl Name="SavedInputList" ItemsSource="{Binding Drafts}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Border Classes="savedRow" Classes.queued="{Binding IsQueued}">
-                        <Grid ColumnDefinitions="*,Auto,Auto" ColumnSpacing="4">
+                      <Border Classes="savedRow">
+                        <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="4">
                           <Panel Grid.Column="0">
                             <local:TouchButton IsVisible="{Binding IsReady}" Command="{Binding $parent[ItemsControl].DataContext.LoadSavedInputCommand}" CommandParameter="{Binding}" Background="Transparent" BorderThickness="0" CornerRadius="0" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="6,10">
                               <StackPanel Spacing="4">
-                                <TextBlock Text="{Binding QueueLabel}" IsVisible="{Binding IsQueued}" Foreground="{DynamicResource Accent}" FontSize="11" FontWeight="Bold" />
                                 <TextBlock Text="{Binding Text}" MaxLines="8" TextTrimming="CharacterEllipsis" TextWrapping="Wrap" />
                                 <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
                               </StackPanel>
                             </local:TouchButton>
                             <StackPanel IsVisible="{Binding !IsReady}" Spacing="4" Margin="6,10" VerticalAlignment="Center">
-                              <TextBlock Text="Turning speech into text..." IsVisible="{Binding IsConverting}" Classes="muted" />
-                              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsConverting}" Foreground="{DynamicResource Accent}" />
+                              <TextBlock Text="Turning speech into text..." IsVisible="{Binding IsConverting}" Classes="muted" TextWrapping="Wrap" />
+                              <ProgressBar IsIndeterminate="True" IsVisible="{Binding IsConverting}" Foreground="{DynamicResource Accent}" MinWidth="40" />
                               <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
                               <TextBlock Classes="muted" FontSize="11" Text="{Binding Time, Converter={x:Static local:MessageConverters.Time}}" />
                             </StackPanel>
@@ -517,7 +488,16 @@
                             </local:TouchButton.IsVisible>
                             <Path Classes="lineIcon" Data="{StaticResource AutoCommitIconGeometry}" MaxWidth="14" MaxHeight="14" />
                           </local:TouchButton>
-                          <local:TouchButton Grid.Column="2" Classes="icon deleteSaved" ToolTip.Tip="Delete" Command="{Binding $parent[ItemsControl].DataContext.AskDeleteSavedInputCommand}" CommandParameter="{Binding}" VerticalAlignment="Center" Padding="8">
+                          <local:TouchButton Grid.Column="2" Classes="icon runSaved" ToolTip.Tip="Run in New Session" Command="{Binding $parent[local:HomeView].DataContext.Active.RunInNewSessionCommand}" CommandParameter="{Binding}" VerticalAlignment="Center" Padding="8">
+                            <local:TouchButton.IsVisible>
+                              <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                <Binding Path="$parent[local:HomeView].DataContext.Active.Git.IsRepo" FallbackValue="False" />
+                                <Binding Path="IsReady" />
+                              </MultiBinding>
+                            </local:TouchButton.IsVisible>
+                            <Path Classes="lineIcon" Data="{StaticResource SessionIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                          </local:TouchButton>
+                          <local:TouchButton Grid.Column="3" Classes="icon deleteSaved" ToolTip.Tip="Delete" Command="{Binding $parent[ItemsControl].DataContext.AskDeleteSavedInputCommand}" CommandParameter="{Binding}" VerticalAlignment="Center" Padding="8">
                             <Path Classes="lineIcon" Data="{StaticResource DeleteIconGeometry}" MaxWidth="14" MaxHeight="14" />
                           </local:TouchButton>
                         </Grid>
@@ -527,7 +507,47 @@
                 </ItemsControl>
               </ScrollViewer>
             </Grid>
-            <Border Name="DeleteSavedInputDialog" IsVisible="{Binding IsAskingDelete}" Background="{DynamicResource Scrim}">
+           </Border>
+           <Border Name="UpNextPanel" DataContext="{Binding Chat}" IsVisible="{Binding IsUpNextOpen}" Background="{DynamicResource Background}">
+            <Grid RowDefinitions="Auto,*" Margin="20,8,20,12">
+              <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+                <TextBlock Grid.Column="0" Text="Up Next" Classes="serif" FontSize="18" VerticalAlignment="Center" />
+                <local:TouchButton Grid.Column="1" Content="Close" Command="{Binding ToggleUpNextCommand}" Classes="flat" />
+              </Grid>
+              <TextBlock Grid.Row="1" Text="Nothing is up next." Classes="muted" IsVisible="{Binding HasNoUpNext}" />
+              <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" IsVisible="{Binding !HasNoUpNext}">
+                <ItemsControl Name="UpNextList" ItemsSource="{Binding UpNext}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Classes="savedRow" Padding="6,8">
+                        <StackPanel Spacing="4">
+                          <TextBlock Text="{Binding Title}" TextWrapping="Wrap" MaxLines="4" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Text="{Binding Detail}" IsVisible="{Binding HasDetail}" Classes="muted" FontSize="11" TextWrapping="Wrap" />
+                          <WrapPanel IsVisible="{Binding HasCommitChoice}">
+                            <local:TouchButton Classes="icon agendaCommit" Classes.toggled="{Binding IsCommitOn}" ToolTip.Tip="{Binding CommitTip}" Command="{Binding $parent[ItemsControl].DataContext.ToggleAgendaCommitCommand}" CommandParameter="{Binding}" Padding="8" Margin="0,0,6,0" VerticalAlignment="Center"
+                                    IsVisible="{Binding $parent[local:HomeView].DataContext.Active.Git.IsRepo, FallbackValue=False}">
+                              <Path Classes="lineIcon" Data="{StaticResource AutoCommitIconGeometry}" MaxWidth="14" MaxHeight="14" />
+                            </local:TouchButton>
+                            <local:TouchButton Content="Edit" FontSize="12" Padding="8,4" Margin="0,2,6,2" VerticalAlignment="Center" IsVisible="{Binding IsQueued}" Command="{Binding $parent[ItemsControl].DataContext.EditQueuedCommand}" CommandParameter="{Binding}" />
+                            <local:TouchButton Content="Run in New Session" FontSize="12" Padding="8,4" Margin="0,2,6,2" VerticalAlignment="Center" Command="{Binding $parent[local:HomeView].DataContext.Active.RunInNewSessionCommand}" CommandParameter="{Binding}">
+                              <local:TouchButton.IsVisible>
+                                <MultiBinding Converter="{x:Static BoolConverters.And}">
+                                  <Binding Path="$parent[local:HomeView].DataContext.Active.Git.IsRepo" FallbackValue="False" />
+                                  <Binding Path="IsQueued" />
+                                </MultiBinding>
+                              </local:TouchButton.IsVisible>
+                            </local:TouchButton>
+                            <local:TouchButton Content="Delete" FontSize="12" Padding="8,4" Margin="0,2,6,2" VerticalAlignment="Center" IsVisible="{Binding IsQueued}" Command="{Binding $parent[ItemsControl].DataContext.AskDeleteQueuedCommand}" CommandParameter="{Binding}" />
+                          </WrapPanel>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </ScrollViewer>
+            </Grid>
+           </Border>
+           <Border Name="DeleteSavedInputDialog" DataContext="{Binding Chat}" IsVisible="{Binding IsAskingDelete}" Background="{DynamicResource Scrim}">
               <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
                 <StackPanel Spacing="12">
                   <TextBlock Text="{Binding DeleteQuestion}" Classes="serif" FontSize="18" TextWrapping="Wrap" />
@@ -537,8 +557,6 @@
                 </StackPanel>
               </Border>
             </Border>
-            </Panel>
-           </Border>
            </Panel>
            <Panel IsVisible="{Binding ShowScriptView}">
            <DockPanel DataContext="{Binding Scripts}">
@@ -620,6 +638,51 @@
               </ScrollViewer>
             </Grid>
            </DockPanel>
+           </Panel>
+           <Panel IsVisible="{Binding ShowActivityView}">
+            <ScrollViewer Name="ActivityView" DataContext="{Binding Activity}" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+              <StackPanel Margin="12,8,12,12">
+                <TextBlock Text="No activity yet." IsVisible="{Binding IsEmpty}" Classes="muted" />
+                <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" Margin="0,0,0,8" />
+                <ItemsControl Name="ActivityList" ItemsSource="{Binding Entries}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Classes="activityRow" Classes.attention="{Binding NeedsAttention}">
+                        <StackPanel>
+                          <local:TouchButton Classes="flat activity" Command="{Binding $parent[ItemsControl].DataContext.ToggleCommand}" CommandParameter="{Binding}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,8">
+                            <StackPanel Spacing="3">
+                              <WrapPanel>
+                                <TextBlock Text="{Binding Outcome}" Classes="outcome" Classes.bad="{Binding IsBad}" FontSize="11" FontWeight="Bold" Margin="0,0,8,0" />
+                                <TextBlock Text="Needs Attention" Classes="needsAttention" IsVisible="{Binding NeedsAttention}" FontSize="11" FontWeight="Bold" Margin="0,0,8,0" />
+                                <TextBlock Text="{Binding Time}" Classes="muted" FontSize="11" />
+                              </WrapPanel>
+                              <TextBlock Text="{Binding Title}" TextWrapping="Wrap" MaxLines="3" TextTrimming="CharacterEllipsis" />
+                            </StackPanel>
+                          </local:TouchButton>
+                          <StackPanel IsVisible="{Binding IsExpanded}" Spacing="3" Margin="8,0,8,10">
+                            <TextBlock Text="Input" Classes="muted" FontSize="11" IsVisible="{Binding HasText}" />
+                            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasText}" Margin="0,0,0,6" />
+                            <TextBlock Text="Reason" Classes="muted" FontSize="11" IsVisible="{Binding HasReason}" />
+                            <SelectableTextBlock Text="{Binding Reason}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasReason}" Margin="0,0,0,6" />
+                            <TextBlock Text="AI Report" Classes="muted" FontSize="11" IsVisible="{Binding HasReport}" />
+                            <SelectableTextBlock Text="{Binding Report}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasReport}" Margin="0,0,0,6" />
+                            <TextBlock Text="Commit" Classes="muted" FontSize="11" IsVisible="{Binding HasCommit}" />
+                            <SelectableTextBlock Text="{Binding CommitText}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasCommit}" Margin="0,0,0,6" />
+                            <TextBlock Text="Files" Classes="muted" FontSize="11" IsVisible="{Binding HasFiles}" />
+                            <SelectableTextBlock Text="{Binding Files}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasFiles}" Margin="0,0,0,6" />
+                            <TextBlock Text="Handoff" Classes="muted" FontSize="11" IsVisible="{Binding HasHandoff}" />
+                            <SelectableTextBlock Text="{Binding Handoff}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasHandoff}" Margin="0,0,0,6" />
+                            <TextBlock Text="Notes" Classes="muted" FontSize="11" IsVisible="{Binding HasNotes}" />
+                            <SelectableTextBlock Text="{Binding Notes}" TextWrapping="Wrap" FontSize="12" IsVisible="{Binding HasNotes}" />
+                          </StackPanel>
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <local:TouchButton Content="Load More" Command="{Binding LoadMoreCommand}" IsVisible="{Binding HasMore}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
+              </StackPanel>
+            </ScrollViewer>
            </Panel>
            <Panel IsVisible="{Binding ShowHistoryView}">
            <Grid DataContext="{Binding Git.History}" RowDefinitions="Auto,Auto,*">
@@ -903,8 +966,8 @@
               </Expander>
               <Expander Classes="section" Header="Access" IsExpanded="False">
                 <StackPanel Spacing="8" Margin="0,4,0,8" IsEnabled="{Binding CanEdit}">
-                  <ToggleSwitch IsChecked="{Binding IsShellAllowed}" Content="Run shell commands" OnContent="" OffContent="" />
-                  <ToggleSwitch IsChecked="{Binding IsSystemAccessAllowed}" Content="Allow files outside the workspace" OnContent="" OffContent="" />
+                  <ToggleSwitch IsChecked="{Binding IsSandboxed}" Content="Sandbox" OnContent="" OffContent="" />
+                  <TextBlock Text="On: no shell, and no files outside the workspace except what Auto Remote shares." Classes="muted" FontSize="12" TextWrapping="Wrap" />
                   <ToggleSwitch IsChecked="{Binding IsWebAllowed}" Content="Use the web" OnContent="" OffContent="" />
                   <ToggleSwitch IsChecked="{Binding IsImageGenerationAllowed}" Content="Generate images" OnContent="" OffContent="" />
                   <ToggleSwitch IsChecked="{Binding IsDelegationAllowed}" Content="Let the AI delegate work" OnContent="" OffContent="" ToolTip.Tip="The AI may send tasks, with the code of this workspace, to the paired servers that receive work, and decides what to delegate without asking about each task." />
@@ -998,60 +1061,129 @@
           <local:TouchButton Content="Chat" Command="{Binding ShowChatCommand}" Classes="tab" Classes.on="{Binding ShowChat}" Padding="0,12" />
           <local:TouchButton Content="Files" Command="{Binding ShowFilesCommand}" Classes="tab" Classes.on="{Binding ShowFiles}" Padding="0,12" />
           <local:TouchButton Content="Script" Command="{Binding ShowScriptCommand}" Classes="tab" Classes.on="{Binding ShowScript}" Padding="0,12" />
+          <local:TouchButton Content="Activity" Command="{Binding ShowActivityCommand}" Classes="tab" Classes.on="{Binding ShowActivity}" Padding="0,12" />
           <local:TouchButton Content="History" Command="{Binding ShowHistoryCommand}" Classes="tab" Classes.on="{Binding ShowHistory}" IsVisible="{Binding ShowHistoryTab}" Padding="0,12" />
         </UniformGrid>
       </Border>
     </Grid>
 
-    <Grid IsVisible="{Binding Active.Loop.IsOpen, FallbackValue=False}">
-      <Border Background="{DynamicResource Scrim}" PointerPressed="CloseLoop" />
-      <Border Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="6" Padding="16" Width="340" MaxHeight="640" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8">
-        <ScrollViewer VerticalScrollBarVisibility="Auto">
-          <StackPanel DataContext="{Binding Active.Loop}" Spacing="8">
-            <TextBlock Text="Loop" Classes="serif" FontSize="16" />
-            <TextBlock Text="Prompt" Classes="muted" Margin="0,6,0,0" />
-            <RadioButton GroupName="LoopPrompt" Content="Review" IsChecked="{Binding UseReview, Mode=TwoWay}" />
-            <RadioButton GroupName="LoopPrompt" Content="Expand" IsChecked="{Binding UseExpand, Mode=TwoWay}" />
-            <RadioButton GroupName="LoopPrompt" Content="Custom" IsChecked="{Binding UseCustom, Mode=TwoWay}" />
-            <TextBox Text="{Binding CustomPrompt}" IsVisible="{Binding UseCustom}" PlaceholderText="Enter the prompt..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70" MaxHeight="160" />
-            <TextBlock Text="Minutes between runs" Classes="muted" Margin="0,6,0,0" />
-            <NumericUpDown Value="{Binding IntervalMinutes}" Minimum="0" Maximum="1440" Increment="1" FormatString="0.##" HorizontalAlignment="Stretch" />
-            <TextBlock Text="Ends" Classes="muted" Margin="0,6,0,0" />
-            <ComboBox ItemsSource="{Binding Conditions}" SelectedItem="{Binding SelectedCondition}" HorizontalAlignment="Stretch">
-              <ComboBox.ItemTemplate>
-                <DataTemplate>
-                  <TextBlock Text="{Binding Name}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
-            <StackPanel IsVisible="{Binding IsUntilTime}" Spacing="4">
-              <TextBlock Text="Time of day (the next time it is)" Classes="muted" />
-              <TimePicker SelectedTime="{Binding EndTime}" ClockIdentifier="24HourClock" MinuteIncrement="5" HorizontalAlignment="Stretch" />
-            </StackPanel>
-            <StackPanel IsVisible="{Binding IsDuration}" Spacing="4">
-              <TextBlock Text="Hours and minutes" Classes="muted" />
-              <Grid ColumnDefinitions="*,8,*">
-                <NumericUpDown Grid.Column="0" Value="{Binding Hours}" Minimum="0" Maximum="576" Increment="1" FormatString="0" />
-                <NumericUpDown Grid.Column="2" Value="{Binding Minutes}" Minimum="0" Maximum="59" Increment="5" FormatString="0" />
-              </Grid>
-            </StackPanel>
-            <StackPanel IsVisible="{Binding IsRuns}" Spacing="4">
-              <TextBlock Text="Runs" Classes="muted" />
-              <NumericUpDown Value="{Binding Runs}" Minimum="1" Maximum="100000" Increment="1" FormatString="0" HorizontalAlignment="Stretch" />
-            </StackPanel>
-            <StackPanel IsVisible="{Binding IsWindow}" Spacing="4">
-              <TextBlock Text="Usage window and share of its limit (%)" Classes="muted" />
-              <ComboBox ItemsSource="{Binding Windows}" SelectedItem="{Binding SelectedWindow}" HorizontalAlignment="Stretch" />
-              <NumericUpDown Value="{Binding Percent}" Minimum="1" Maximum="100" Increment="5" FormatString="0" HorizontalAlignment="Stretch" />
-            </StackPanel>
-            <ToggleSwitch IsChecked="{Binding WaitForLimit}" Content="Wait for the usage limit instead of ending" OnContent="" OffContent="" Margin="0,6,0,0" />
-            <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
-            <Grid ColumnDefinitions="*,8,*" Margin="0,8,0,0">
+    <Grid Name="SendOptionsPanel" IsVisible="{Binding Active.SendOptions.IsOpen, FallbackValue=False}">
+      <Border Background="{DynamicResource Scrim}" PointerPressed="CloseSendOptions" />
+      <Border Name="SendOptionsCard" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="6" Padding="16" MaxWidth="380" MaxHeight="640" HorizontalAlignment="Stretch" VerticalAlignment="Center" Margin="8">
+        <DockPanel DataContext="{Binding Active.SendOptions}">
+          <StackPanel DockPanel.Dock="Bottom" Spacing="8" Margin="0,8,0,0">
+            <TextBlock Name="SendOptionsError" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" TextWrapping="Wrap" />
+            <Grid ColumnDefinitions="*,8,*">
               <local:TouchButton Grid.Column="0" Content="Cancel" Command="{Binding CancelCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
-              <local:TouchButton Grid.Column="2" Content="Start Loop" Command="{Binding StartCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
+              <local:TouchButton Name="SendOptionsConfirm" Grid.Column="2" Content="{Binding ConfirmText}" Command="{Binding ConfirmCommand}" Classes="primary" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             </Grid>
           </StackPanel>
-        </ScrollViewer>
+          <TextBlock DockPanel.Dock="Top" Text="Send Options" Classes="serif" FontSize="16" Margin="0,0,0,4" />
+          <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+          <StackPanel Spacing="8" Margin="0,0,14,0">
+            <TextBlock Text="When" Classes="muted" Margin="0,6,0,0" />
+            <WrapPanel>
+              <RadioButton GroupName="SendWhen" Content="Now" IsChecked="{Binding IsNow, Mode=TwoWay}" Margin="0,0,16,0" />
+              <RadioButton GroupName="SendWhen" Content="Next" IsChecked="{Binding IsNext, Mode=TwoWay}" Margin="0,0,16,0" />
+              <RadioButton GroupName="SendWhen" Content="Repeat" IsChecked="{Binding IsRepeat, Mode=TwoWay}" IsEnabled="{Binding CanRepeat}" />
+            </WrapPanel>
+            <TextBlock Text="Where" Classes="muted" Margin="0,6,0,0" />
+            <WrapPanel>
+              <RadioButton GroupName="SendWhere" Content="This Chat" IsChecked="{Binding IsThisChat, Mode=TwoWay}" Margin="0,0,16,0" />
+              <RadioButton GroupName="SendWhere" Content="New Session" IsChecked="{Binding IsNewSession, Mode=TwoWay}" IsEnabled="{Binding CanChooseNewSession}" />
+            </WrapPanel>
+            <StackPanel IsVisible="{Binding ShowSendNote}" Spacing="4">
+              <TextBlock Text="When Done" Classes="muted" Margin="0,6,0,0" />
+              <TextBlock Text="Send never turns on auto commit." Classes="muted" FontSize="12" TextWrapping="Wrap" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowQueueChoice}" Spacing="4">
+              <TextBlock Text="When Done" Classes="muted" Margin="0,6,0,0" />
+              <WrapPanel>
+                <RadioButton GroupName="SendDone" Content="Commit" IsChecked="{Binding CommitsAfter, Mode=TwoWay}" Margin="0,0,16,0" />
+                <RadioButton GroupName="SendDone" Content="Keep Changes" IsChecked="{Binding KeepsChanges, Mode=TwoWay}" />
+              </WrapPanel>
+            </StackPanel>
+            <StackPanel IsVisible="{Binding ShowLoop}" Spacing="8">
+              <StackPanel DataContext="{Binding Loop}" Spacing="8">
+                <TextBlock Text="Prompt" Classes="muted" Margin="0,6,0,0" />
+                <RadioButton GroupName="LoopPrompt" Content="Review" IsChecked="{Binding UseReview, Mode=TwoWay}" />
+                <RadioButton GroupName="LoopPrompt" Content="Expand" IsChecked="{Binding UseExpand, Mode=TwoWay}" />
+                <RadioButton GroupName="LoopPrompt" Content="Custom" IsChecked="{Binding UseCustom, Mode=TwoWay}" />
+                <TextBox Name="LoopPromptBox" Text="{Binding $parent[local:HomeView].DataContext.Active.Chat.Input, Mode=TwoWay, FallbackValue=''}" IsVisible="{Binding UseCustom}" PlaceholderText="Enter the prompt..." AcceptsReturn="True" TextWrapping="Wrap" MinHeight="70" MaxHeight="160" />
+              <TextBlock Text="Minutes between runs" Classes="muted" Margin="0,6,0,0" />
+              <NumericUpDown Value="{Binding IntervalMinutes}" Minimum="0" Maximum="1440" Increment="1" FormatString="0.##" HorizontalAlignment="Stretch" />
+              <TextBlock Text="Ends" Classes="muted" Margin="0,6,0,0" />
+              <ComboBox ItemsSource="{Binding Conditions}" SelectedItem="{Binding SelectedCondition}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Name}" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <StackPanel IsVisible="{Binding IsUntilTime}" Spacing="4">
+                <TextBlock Text="Time of day (the next time it is)" Classes="muted" />
+                <TimePicker SelectedTime="{Binding EndTime}" ClockIdentifier="24HourClock" MinuteIncrement="5" HorizontalAlignment="Stretch" />
+              </StackPanel>
+              <StackPanel IsVisible="{Binding IsDuration}" Spacing="4">
+                <TextBlock Text="Hours and minutes" Classes="muted" />
+                <Grid ColumnDefinitions="*,8,*">
+                  <NumericUpDown Grid.Column="0" Value="{Binding Hours}" Minimum="0" Maximum="576" Increment="1" FormatString="0" />
+                  <NumericUpDown Grid.Column="2" Value="{Binding Minutes}" Minimum="0" Maximum="59" Increment="5" FormatString="0" />
+                </Grid>
+              </StackPanel>
+              <StackPanel IsVisible="{Binding IsRuns}" Spacing="4">
+                <TextBlock Text="Runs" Classes="muted" />
+                <NumericUpDown Value="{Binding Runs}" Minimum="1" Maximum="100000" Increment="1" FormatString="0" HorizontalAlignment="Stretch" />
+              </StackPanel>
+              <StackPanel IsVisible="{Binding IsWindow}" Spacing="4">
+                <TextBlock Text="Usage window and share of its limit (%)" Classes="muted" />
+                <ComboBox ItemsSource="{Binding Windows}" SelectedItem="{Binding SelectedWindow}" HorizontalAlignment="Stretch" />
+                <NumericUpDown Value="{Binding Percent}" Minimum="1" Maximum="100" Increment="5" FormatString="0" HorizontalAlignment="Stretch" />
+              </StackPanel>
+              </StackPanel>
+              <ToggleSwitch Name="CommitEachRunSwitch" IsChecked="{Binding Loop.CommitEachRun}" Content="Commit Each Run" OnContent="" OffContent="" IsVisible="{Binding ShowCommitEachRun}" Margin="0,6,0,0" />
+            </StackPanel>
+            <StackPanel IsVisible="{Binding IsNewSession}" Spacing="8">
+              <TextBlock Name="SessionNameLabel" Text="{Binding NameLabel}" Classes="muted" Margin="0,6,0,0" />
+              <TextBox Name="NewSessionName" Text="{Binding Name}" />
+              <TextBlock Text="Run On" Classes="muted" Margin="0,6,0,0" />
+              <ComboBox Name="RunOn" ItemsSource="{Binding Targets}" SelectedItem="{Binding Target}" HorizontalAlignment="Stretch">
+                <ComboBox.ItemTemplate>
+                  <DataTemplate>
+                    <TextBlock Text="{Binding Name}" TextTrimming="CharacterEllipsis" />
+                  </DataTemplate>
+                </ComboBox.ItemTemplate>
+              </ComboBox>
+              <TextBlock Text="{Binding TaskLabel}" Classes="muted" Margin="0,6,0,0" />
+              <TextBox Name="NewSessionTask" Text="{Binding $parent[local:HomeView].DataContext.Active.Chat.Input, Mode=TwoWay, FallbackValue=''}" PlaceholderText="Work the session starts on once it is set up" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" MaxHeight="160" />
+              <StackPanel IsVisible="{Binding IsRemote}" Spacing="8">
+                <TextBlock Text="Instructions must be complete on their own: the other server does not see this conversation." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+                <TextBlock Text="Expected Result (optional)" Classes="muted" Margin="0,6,0,0" />
+                <TextBox Text="{Binding ExpectedResult}" PlaceholderText="Expected result and how to check it" AcceptsReturn="True" TextWrapping="Wrap" MaxHeight="120" />
+                <TextBlock Text="Capability" Classes="muted" Margin="0,6,0,0" />
+                <ComboBox ItemsSource="{Binding Capabilities}" SelectedItem="{Binding SelectedCapability}" HorizontalAlignment="Stretch">
+                  <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                      <TextBlock Text="{Binding Name}" />
+                    </DataTemplate>
+                  </ComboBox.ItemTemplate>
+                </ComboBox>
+              </StackPanel>
+              <StackPanel IsVisible="{Binding ShowStartingFiles}" Spacing="4">
+                <TextBlock Text="Starting files" Classes="muted" Margin="0,6,0,0" />
+                <RadioButton GroupName="SessionStart" Content="Current Commit" IsChecked="{Binding UseCurrentCommit, Mode=TwoWay}" />
+                <RadioButton GroupName="SessionStart" Content="Current Files" IsChecked="{Binding UseCurrentFiles, Mode=TwoWay}" />
+                <TextBlock Text="Current Files includes changes that are not committed, new files too." Classes="muted" FontSize="11" TextWrapping="Wrap" />
+              </StackPanel>
+              <TextBlock Text="When Done" Classes="muted" Margin="0,6,0,0" />
+              <WrapPanel>
+                <RadioButton GroupName="SessionDone" Content="{Binding BringInText}" IsChecked="{Binding BringsIn, Mode=TwoWay}" Margin="0,0,16,0" />
+                <RadioButton GroupName="SessionDone" Content="Keep Separate" IsChecked="{Binding KeepsSeparate, Mode=TwoWay}" />
+              </WrapPanel>
+            </StackPanel>
+          </StackPanel>
+          </ScrollViewer>
+        </DockPanel>
       </Border>
     </Grid>
 
@@ -1063,6 +1195,7 @@
           <local:TouchButton DockPanel.Dock="Bottom" Content="New Session" Command="{Binding NewCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" Margin="0,8,0,0" />
           <TextBlock DockPanel.Dock="Bottom" Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" Margin="6,6,6,0" />
           <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+           <StackPanel>
             <ItemsControl ItemsSource="{Binding Entries}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
@@ -1078,11 +1211,11 @@
                           <TextBlock Text="{Binding Detail}" Classes="muted" FontSize="11" />
                         </StackPanel>
                       </local:TouchButton>
-                      <local:TouchButton Grid.Column="1" Content="Cancel Integration" FontSize="12" Padding="8,4" VerticalAlignment="Center" IsVisible="{Binding IsIntegrating}" Command="{Binding $parent[ItemsControl].DataContext.CancelIntegrationCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Grid.Column="1" Content="Cancel Bring In" FontSize="12" Padding="8,4" VerticalAlignment="Center" IsVisible="{Binding IsIntegrating}" Command="{Binding $parent[ItemsControl].DataContext.CancelIntegrationCommand}" CommandParameter="{Binding}" />
                       <local:TouchButton Grid.Column="2" Content="⋯" Classes="flat" Padding="10,4" VerticalAlignment="Center" ToolTip.Tip="Session actions" IsVisible="{Binding HasActions}" Command="{Binding $parent[ItemsControl].DataContext.ExpandCommand}" CommandParameter="{Binding}" />
                     </Grid>
                     <WrapPanel IsVisible="{Binding IsExpanded}" Margin="8,2,0,6">
-                      <local:TouchButton Content="Integrate" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.IntegrateCommand}" CommandParameter="{Binding}" />
+                      <local:TouchButton Content="Bring Into Main" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.IntegrateCommand}" CommandParameter="{Binding}" />
                       <local:TouchButton Content="{Binding WhenFinishedText}" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.WhenFinishedCommand}" CommandParameter="{Binding}" />
                       <local:TouchButton Content="Changes Since Session Start" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.ChangesCommand}" CommandParameter="{Binding}" />
                       <local:TouchButton Content="Rename" FontSize="12" Padding="8,4" Margin="0,0,6,6" IsVisible="{Binding ShowManage}" Command="{Binding $parent[ItemsControl].DataContext.RenameCommand}" CommandParameter="{Binding}" />
@@ -1092,10 +1225,48 @@
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
+            <TextBlock Text="Delegated Tasks" Classes="muted" FontSize="11" IsVisible="{Binding HasTasks}" Margin="8,8,8,2" />
+            <ItemsControl Name="DelegatedTaskList" ItemsSource="{Binding Tasks}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <local:TouchButton Classes="flat session" HorizontalAlignment="Stretch" HorizontalContentAlignment="Left" Padding="8,5" Command="{Binding $parent[ItemsControl].DataContext.OpenTaskCommand}" CommandParameter="{Binding}">
+                    <TextBlock Text="{Binding Row}" TextWrapping="Wrap" FontSize="12" />
+                  </local:TouchButton>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+           </StackPanel>
           </ScrollViewer>
         </DockPanel>
       </Border>
     </Grid>
+
+    <Border Name="TaskDetailOverlay" Focusable="True" IsVisible="{Binding Sessions.HasTask}" Background="{DynamicResource Background}">
+      <Grid RowDefinitions="Auto,*,Auto" Margin="16" MaxWidth="720" DataContext="{Binding Sessions.OpenedTask}">
+        <Grid Grid.Row="0" ColumnDefinitions="*,Auto" Margin="0,0,0,8">
+          <StackPanel Grid.Column="0" Spacing="2">
+            <TextBlock Text="{Binding Title, FallbackValue=''}" Classes="serif" FontSize="20" TextWrapping="Wrap" />
+            <TextBlock Text="{Binding Status, FallbackValue=''}" Classes="muted" FontSize="12" TextWrapping="Wrap" />
+          </StackPanel>
+          <local:TouchButton Grid.Column="1" Content="Close" Command="{Binding CloseCommand}" Classes="flat" VerticalAlignment="Top" />
+        </Grid>
+        <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Disabled">
+          <local:SwarmTaskBodyView DataContext="{Binding Detail, FallbackValue={x:Null}}" Margin="0,4,0,8" />
+        </ScrollViewer>
+        <StackPanel Grid.Row="2" Spacing="4">
+          <TextBlock Text="{Binding Error, FallbackValue=''}" IsVisible="{Binding HasError, FallbackValue=False}" Classes="error" TextWrapping="Wrap" />
+          <TextBlock Text="{Binding Outcome, FallbackValue=''}" IsVisible="{Binding HasOutcome, FallbackValue=False}" Classes="muted" TextWrapping="Wrap" />
+          <WrapPanel Name="TaskActions">
+            <local:TouchButton Content="{Binding BringInText, FallbackValue=''}" Command="{Binding BringInCommand}" IsVisible="{Binding CanBringIn, FallbackValue=False}" Classes="primary" Margin="0,4,8,0" />
+            <local:TouchButton Content="Continue Here" Command="{Binding ContinueCommand}" IsVisible="{Binding CanContinue, FallbackValue=False}" Margin="0,4,8,0" />
+            <local:TouchButton Content="{Binding WhenDoneText, FallbackValue=''}" Classes="action" Classes.toggled="{Binding BringsIn, FallbackValue=False}" Command="{Binding ToggleWhenDoneCommand}" IsVisible="{Binding ShowWhenDone, FallbackValue=False}" ToolTip.Tip="Switch what happens once the task is done" Margin="0,4,8,0" />
+            <local:TouchButton Content="Retry Task" Command="{Binding RetryCommand}" IsVisible="{Binding CanRetry, FallbackValue=False}" Margin="0,4,8,0" />
+            <local:TouchButton Content="Cancel Task" Command="{Binding CancelTaskCommand}" IsVisible="{Binding CanCancel, FallbackValue=False}" Classes="danger" Margin="0,4,8,0" />
+            <local:TouchButton Content="Discard Task" Command="{Binding DiscardCommand}" IsVisible="{Binding CanDiscard, FallbackValue=False}" Margin="0,4,8,0" />
+          </WrapPanel>
+        </StackPanel>
+      </Grid>
+    </Border>
 
     <Border Name="SessionDialogOverlay" IsVisible="{Binding Sessions.IsPrompting}" Background="{DynamicResource Scrim}">
       <Border Name="SessionDialogCard" Focusable="True" Background="{DynamicResource Surface}" BorderBrush="{DynamicResource Border}" BorderThickness="1" CornerRadius="20" Padding="20" Margin="24" MaxWidth="420" VerticalAlignment="Center">
@@ -1104,14 +1275,6 @@
             <TextBlock Text="{Binding DialogTitle}" Classes="serif" FontSize="20" TextWrapping="Wrap" />
             <TextBlock Text="{Binding DialogText}" IsVisible="{Binding HasDialogText}" Classes="muted" TextWrapping="Wrap" />
             <TextBox Name="SessionName" Text="{Binding Name}" PlaceholderText="Name" IsVisible="{Binding NeedsName}" />
-            <StackPanel Spacing="4" IsVisible="{Binding IsNew}">
-              <TextBlock Text="Starting files" Classes="muted" />
-              <RadioButton GroupName="SessionStart" Content="Current Commit" IsChecked="{Binding UseCurrentCommit, Mode=TwoWay}" />
-              <RadioButton GroupName="SessionStart" Content="Current Files" IsChecked="{Binding UseCurrentFiles, Mode=TwoWay}" />
-              <TextBlock Text="Current Files includes changes that are not committed, new files too." Classes="muted" FontSize="11" TextWrapping="Wrap" />
-              <TextBlock Text="First Task (optional)" Classes="muted" Margin="0,8,0,0" />
-              <TextBox Text="{Binding FirstTask}" PlaceholderText="Work the session starts on once it is set up" AcceptsReturn="True" TextWrapping="Wrap" MinHeight="60" MaxHeight="160" />
-            </StackPanel>
             <TextBlock Text="{Binding Error}" IsVisible="{Binding HasError}" Classes="error" />
             <local:TouchButton Name="SessionConfirm" Content="{Binding ConfirmText}" Command="{Binding ConfirmCommand}" IsEnabled="{Binding CanConfirm}" Classes="primary" Classes.danger="{Binding IsDestructive}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />
             <local:TouchButton Name="SessionDismiss" Content="{Binding DismissText}" Command="{Binding DismissCommand}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center" />

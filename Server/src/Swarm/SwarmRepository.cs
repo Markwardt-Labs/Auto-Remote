@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// The git work of the swarm. On the delegating server it snapshots a workspace without touching its branches, files or index, packs the snapshot, and turns results into branches whose changes can be reviewed and applied. On a worker it keeps a bare cache repository per sender and project, and writes the files of a task into a folder that is deliberately not a repository: nothing the AI writes there can configure the git commands the server runs afterwards.
+/// The git work of the swarm. On the delegating server it snapshots a workspace without touching its branches, files or index, packs the snapshot, and turns results into branches. It never merges or applies a result: it writes it out for an AI to bring in. On a worker it keeps a bare cache repository per sender and project, and writes the files of a task into a folder that is deliberately not a repository: nothing the AI writes there can configure the git commands the server runs afterwards.
 /// </summary>
 internal interface ISwarmRepository
 {
@@ -26,7 +26,18 @@ internal interface ISwarmRepository
     Task Pin(string folder, Guid taskId, string commit, CancellationToken cancellation);
 
     /// <summary>
-    /// Packs the base of a task into a git bundle, leaving out the commits the worker already has.
+    /// Keeps the result of a task another one builds on, under a hidden reference of the dependent task.
+    /// </summary>
+    /// <param name="folder">The workspace folder.</param>
+    /// <param name="taskId">The dependent task.</param>
+    /// <param name="dependencyId">The task it builds on.</param>
+    /// <param name="commit">The result.</param>
+    /// <param name="cancellation">Cancels the work.</param>
+    /// <returns>A task that completes once the reference is set.</returns>
+    Task PinDependency(string folder, Guid taskId, Guid dependencyId, string commit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Packs the base of a task, with the results it builds on, into a git bundle, leaving out the commits the worker already has.
     /// </summary>
     /// <param name="folder">The workspace folder.</param>
     /// <param name="taskId">The task, whose base is pinned.</param>
@@ -34,18 +45,6 @@ internal interface ISwarmRepository
     /// <param name="cancellation">Cancels the work.</param>
     /// <returns>The bundle, empty when the worker already has everything.</returns>
     Task<ReadOnlyMemory<byte>> Bundle(string folder, Guid taskId, IReadOnlyList<string> known, CancellationToken cancellation);
-
-    /// <summary>
-    /// Merges the changes of a finished task into a base for a task that builds on it.
-    /// </summary>
-    /// <param name="folder">The workspace folder.</param>
-    /// <param name="current">The commit to merge into.</param>
-    /// <param name="dependencyBase">The commit the finished task started from.</param>
-    /// <param name="dependencyResult">The commit holding its changes.</param>
-    /// <param name="cancellation">Cancels the work.</param>
-    /// <returns>The merged commit.</returns>
-    /// <exception cref="RequestException">The changes conflict.</exception>
-    Task<string> Merge(string folder, string current, string dependencyBase, string dependencyResult, CancellationToken cancellation);
 
     /// <summary>
     /// Gets the address of the project's remote, <c>origin</c>, without any password in it.
@@ -116,18 +115,19 @@ internal interface ISwarmRepository
     Task<string> Changes(string folder, string baseCommit, string resultCommit, string? path, int limit, CancellationToken cancellation);
 
     /// <summary>
-    /// Applies the changes between two commits to the files of a workspace, merging them with what changed meanwhile, without committing them and without touching the index.
+    /// Writes a result out for an AI to read, into a folder that is made anew: all its files in <c>files</c>, which is no repository and holds no links, the list of what it changed in <c>changes.txt</c>, the diff in <c>changes.diff</c> and the report in <c>report.md</c>.
     /// </summary>
-    /// <param name="folder">The workspace folder.</param>
-    /// <param name="baseCommit">The commit before.</param>
-    /// <param name="resultCommit">The commit after.</param>
+    /// <param name="repository">The repository that holds both commits.</param>
+    /// <param name="folder">The folder to write.</param>
+    /// <param name="baseCommit">The commit the work started from.</param>
+    /// <param name="resultCommit">The commit holding its changes.</param>
+    /// <param name="report">The report of the work.</param>
     /// <param name="cancellation">Cancels the work.</param>
-    /// <returns>What was applied, with any files left with conflicts.</returns>
-    /// <exception cref="RequestException">Nothing could be applied.</exception>
-    Task<SwarmApplyResult> Apply(string folder, string baseCommit, string resultCommit, CancellationToken cancellation);
+    /// <returns>The changed files, one line each with how it changed.</returns>
+    Task<IReadOnlyList<string>> Materialize(string repository, string folder, string baseCommit, string resultCommit, string report, CancellationToken cancellation);
 
     /// <summary>
-    /// Deletes the hidden references of a task and its result branch, unless the branch is checked out.
+    /// Deletes the hidden references of a task, those of what it builds on included, and its result branch, unless the branch is checked out.
     /// </summary>
     /// <param name="folder">The workspace folder.</param>
     /// <param name="taskId">The task.</param>
@@ -137,16 +137,17 @@ internal interface ISwarmRepository
     Task Release(string folder, Guid taskId, string? branch, CancellationToken cancellation);
 
     /// <summary>
-    /// Takes the base of a task into a worker's cache repository, making the repository when needed.
+    /// Takes the base of a task, with the results it builds on, into a worker's cache repository, making the repository when needed.
     /// </summary>
     /// <param name="cache">The cache repository.</param>
     /// <param name="bundle">The bundle, which may be empty.</param>
     /// <param name="taskId">The task.</param>
     /// <param name="baseCommit">The base.</param>
+    /// <param name="dependencies">The results it builds on.</param>
     /// <param name="cancellation">Cancels the work.</param>
     /// <returns><see langword="false" /> when the cache lacks commits the bundle builds on.</returns>
-    /// <exception cref="RequestException">The bundle is damaged or does not hold the base.</exception>
-    Task<bool> Receive(string cache, ReadOnlyMemory<byte> bundle, Guid taskId, string baseCommit, CancellationToken cancellation);
+    /// <exception cref="RequestException">The bundle is damaged or does not hold what the task needs.</exception>
+    Task<bool> Receive(string cache, ReadOnlyMemory<byte> bundle, Guid taskId, string baseCommit, IReadOnlyList<SwarmDependency> dependencies, CancellationToken cancellation);
 
     /// <summary>
     /// Fetches the base of a task from the project's remote into a worker's cache repository.
@@ -160,6 +161,20 @@ internal interface ISwarmRepository
     /// <returns>A task that completes once the base is there.</returns>
     /// <exception cref="RequestException">The address is not allowed, the remote cannot be reached or does not hold the base.</exception>
     Task FetchBase(string cache, string url, string branch, Guid taskId, string baseCommit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Fetches a result a task builds on from the project's remote into a worker's cache repository.
+    /// </summary>
+    /// <param name="cache">The cache repository.</param>
+    /// <param name="url">The remote's address, which must be a network address.</param>
+    /// <param name="branch">The branch holding the result.</param>
+    /// <param name="taskId">The dependent task.</param>
+    /// <param name="dependencyId">The task it builds on.</param>
+    /// <param name="commit">The result.</param>
+    /// <param name="cancellation">Cancels the work.</param>
+    /// <returns>A task that completes once the result is there.</returns>
+    /// <exception cref="RequestException">The address is not allowed, the remote cannot be reached or does not hold the result.</exception>
+    Task FetchDependency(string cache, string url, string branch, Guid taskId, Guid dependencyId, string commit, CancellationToken cancellation);
 
     /// <summary>
     /// Writes the files of a commit into a new folder, which does not become a repository; symbolic links become plain files holding their target.
@@ -276,6 +291,9 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
     public Task Pin(string folder, Guid taskId, string commit, CancellationToken cancellation) => Text(folder, ["update-ref", BaseReference(taskId), Commit(commit)], null, cancellation);
 
     /// <inheritdoc />
+    public Task PinDependency(string folder, Guid taskId, Guid dependencyId, string commit, CancellationToken cancellation) => Text(folder, ["update-ref", DependencyReference(taskId, dependencyId), Commit(commit)], null, cancellation);
+
+    /// <inheritdoc />
     public async Task<ReadOnlyMemory<byte>> Bundle(string folder, Guid taskId, IReadOnlyList<string> known, CancellationToken cancellation)
     {
         List<string> excluded = [];
@@ -288,21 +306,8 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
             }
         }
 
-        return await Pack(folder, [BaseReference(taskId), .. excluded.Count > 0 ? (IEnumerable<string>)["--not", .. excluded] : []], cancellation);
-    }
-
-    /// <inheritdoc />
-    public async Task<string> Merge(string folder, string current, string dependencyBase, string dependencyResult, CancellationToken cancellation)
-    {
-        GitOutput merged = await git.Run(folder, ["merge-tree", "--write-tree", $"--merge-base={Commit(dependencyBase)}", Commit(current), Commit(dependencyResult)], cancellation);
-
-        if (merged.ExitCode != 0)
-        {
-            throw new RequestException(merged.ExitCode == 1 ? "The changes of the tasks it depends on conflict with each other." : Failure(merged));
-        }
-
-        string tree = merged.Output.Split('\n')[0].Trim();
-        return await Text(folder, ["commit-tree", tree, "-p", current, "-p", dependencyResult, "-m", "Changes of the tasks this one depends on (Auto Remote)"], identity, cancellation);
+        List<string> dependencies = await References(folder, DependencyReferences(taskId), cancellation);
+        return await Pack(folder, [BaseReference(taskId), .. dependencies, .. excluded.Count > 0 ? (IEnumerable<string>)["--not", .. excluded] : []], cancellation);
     }
 
     /// <inheritdoc />
@@ -363,30 +368,21 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
     }
 
     /// <inheritdoc />
-    public async Task<SwarmApplyResult> Apply(string folder, string baseCommit, string resultCommit, CancellationToken cancellation)
+    public async Task<IReadOnlyList<string>> Materialize(string repository, string folder, string baseCommit, string resultCommit, string report, CancellationToken cancellation)
     {
-        using TemporaryFile patch = new(".patch");
-        await Text(folder, ["diff", "--binary", "--full-index", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", $"--output={patch.Path}", Commit(baseCommit), Commit(resultCommit)], null, cancellation);
-        int files = (await Text(folder, ["diff", "--name-only", "-z", baseCommit, resultCommit], null, cancellation, null, true)).Split('\0', StringSplitOptions.RemoveEmptyEntries).Length;
-
-        if (files == 0)
+        if (Directory.Exists(folder))
         {
-            return new SwarmApplyResult([], 0);
+            Directory.Delete(folder, true);
         }
 
-        using TemporaryFile index = new(".index");
-        CopyIndex(await IndexPath(folder, cancellation), index.Path);
-        Dictionary<string, string> environment = new() { ["GIT_INDEX_FILE"] = index.Path };
-        await Text(folder, ["add", "-A"], environment, cancellation);
-        GitOutput applied = await git.Run(folder, ["apply", "--3way", "--whitespace=nowarn", patch.Path], environment, cancellation);
-
-        if (applied.ExitCode == 0)
-        {
-            return new SwarmApplyResult([], files);
-        }
-
-        string[] conflicts = (await Text(folder, ["diff", "--name-only", "-z", "--diff-filter=U"], environment, cancellation, null, true)).Split('\0', StringSplitOptions.RemoveEmptyEntries);
-        return conflicts.Length > 0 ? new SwarmApplyResult(conflicts, files) : throw new RequestException($"The changes could not be applied: {Failure(applied)}");
+        Directory.CreateDirectory(folder);
+        await Export(await Text(repository, ["rev-parse", "--absolute-git-dir"], null, cancellation), Path.Combine(folder, "files"), resultCommit, cancellation);
+        string list = await Text(repository, ["-c", "core.quotePath=false", "diff", "--name-status", "-M", "--no-ext-diff", Commit(baseCommit), Commit(resultCommit)], null, cancellation, null, true);
+        await File.WriteAllTextAsync(Path.Combine(folder, "changes.txt"), list, cancellation);
+        // Written by git itself, which keeps the bytes of every file as they are.
+        await Text(repository, ["-c", "core.quotePath=false", "diff", "--binary", "-M", "--no-color", "--no-ext-diff", "--no-textconv", "--src-prefix=a/", "--dst-prefix=b/", $"--output={Path.Combine(folder, "changes.diff")}", baseCommit, resultCommit], null, cancellation, transferTimeout);
+        await File.WriteAllTextAsync(Path.Combine(folder, "report.md"), report.TrimEnd() + "\n", cancellation);
+        return list.Split('\n', StringSplitOptions.RemoveEmptyEntries);
     }
 
     /// <inheritdoc />
@@ -400,6 +396,11 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
         await git.Run(folder, ["update-ref", "-d", BaseReference(taskId)], cancellation);
         await git.Run(folder, ["update-ref", "-d", ResultReference(taskId)], cancellation);
 
+        foreach (string reference in await References(folder, DependencyReferences(taskId), cancellation))
+        {
+            await git.Run(folder, ["update-ref", "-d", reference], cancellation);
+        }
+
         if (branch is not null && branch.StartsWith("swarm/", StringComparison.Ordinal))
         {
             await git.Run(folder, ["branch", "-D", branch], cancellation);
@@ -407,9 +408,15 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
     }
 
     /// <inheritdoc />
-    public async Task<bool> Receive(string cache, ReadOnlyMemory<byte> bundle, Guid taskId, string baseCommit, CancellationToken cancellation)
+    public async Task<bool> Receive(string cache, ReadOnlyMemory<byte> bundle, Guid taskId, string baseCommit, IReadOnlyList<SwarmDependency> dependencies, CancellationToken cancellation)
     {
         await Prepare(cache, cancellation);
+        List<(string Source, string Target, string Commit)> wanted =
+        [
+            (BaseReference(taskId), WorkerReference(taskId), Commit(baseCommit)),
+            .. dependencies.Where(dependency => dependency.ResultCommit is not null).Select(dependency => (DependencyReference(taskId, dependency.TaskId), WorkerDependencyReference(taskId, dependency.TaskId), Commit(dependency.ResultCommit!)))
+        ];
+        HashSet<string> carried = [];
 
         if (!bundle.IsEmpty)
         {
@@ -422,18 +429,31 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
                 return verified.Error.Contains("prerequisite", StringComparison.OrdinalIgnoreCase) ? false : throw new RequestException($"The bundle is not usable: {Failure(verified)}");
             }
 
-            await Text(cache, ["fetch", "--no-tags", "--no-write-fetch-head", file.Path, $"+{BaseReference(taskId)}:{WorkerReference(taskId)}"], null, cancellation, transferTimeout);
-        }
-        else if (!await Has(cache, Commit(baseCommit), cancellation))
-        {
-            return false;
-        }
-        else
-        {
-            await Text(cache, ["update-ref", WorkerReference(taskId), baseCommit], null, cancellation);
+            // A bundle leaves out the references whose commits the worker was known to have.
+            HashSet<string> held = [.. (await Text(cache, ["bundle", "list-heads", file.Path], null, cancellation)).Split('\n', StringSplitOptions.RemoveEmptyEntries).Select(line => line[(line.IndexOf(' ') + 1)..].Trim())];
+            carried = [.. wanted.Where(entry => held.Contains(entry.Source)).Select(entry => entry.Source)];
+
+            if (carried.Count > 0)
+            {
+                await Text(cache, ["fetch", "--no-tags", "--no-write-fetch-head", file.Path, .. wanted.Where(entry => carried.Contains(entry.Source)).Select(entry => $"+{entry.Source}:{entry.Target}")], null, cancellation, transferTimeout);
+            }
         }
 
-        await Expect(cache, WorkerReference(taskId), baseCommit, cancellation);
+        foreach ((string source, string target, string commit) in wanted)
+        {
+            if (!carried.Contains(source))
+            {
+                if (!await Has(cache, commit, cancellation))
+                {
+                    return false;
+                }
+
+                await Text(cache, ["update-ref", target, commit], null, cancellation);
+            }
+
+            await Expect(cache, target, commit, cancellation);
+        }
+
         return true;
     }
 
@@ -447,6 +467,16 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
     }
 
     /// <inheritdoc />
+    public async Task FetchDependency(string cache, string url, string branch, Guid taskId, Guid dependencyId, string commit, CancellationToken cancellation)
+    {
+        RequireAllowed(url);
+        await Prepare(cache, cancellation);
+        string reference = WorkerDependencyReference(taskId, dependencyId);
+        await Text(cache, ["fetch", "--no-tags", "--no-write-fetch-head", "--no-recurse-submodules", url, $"+refs/heads/{branch}:{reference}"], null, cancellation, transferTimeout);
+        await Expect(cache, reference, commit, cancellation);
+    }
+
+    /// <inheritdoc />
     public async Task Export(string cache, string folder, string commit, CancellationToken cancellation)
     {
         if (Directory.Exists(folder) && Directory.EnumerateFileSystemEntries(folder).Any())
@@ -457,8 +487,10 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
         Directory.CreateDirectory(folder);
         using TemporaryFile index = new(".index");
         Dictionary<string, string> environment = Detached(cache, folder, index.Path);
-        await Text(folder, ["read-tree", Commit(commit)], environment, cancellation);
-        await Text(folder, ["checkout-index", "--all", "--force"], environment, cancellation, transferTimeout);
+        // A workspace's own repository makes links, which could lead the file tools of whoever reads the folder anywhere.
+        List<string> plain = ["-c", "core.symlinks=false", "-c", "core.fsmonitor=false", "-c", $"core.hooksPath={Path.Combine(Path.GetFullPath(cache), "no-hooks")}"];
+        await Text(folder, [.. plain, "read-tree", Commit(commit)], environment, cancellation);
+        await Text(folder, [.. plain, "checkout-index", "--all", "--force"], environment, cancellation, transferTimeout);
         RemoveNamed(folder, name => IsToolConfiguration(name));
     }
 
@@ -523,10 +555,21 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
 
         await git.Run(cache, ["update-ref", "-d", WorkerReference(taskId)], cancellation);
         await git.Run(cache, ["update-ref", "-d", $"refs/results/{taskId:N}"], cancellation);
+
+        foreach (string reference in await References(cache, $"refs/task-dependencies/{taskId:N}/", cancellation))
+        {
+            await git.Run(cache, ["update-ref", "-d", reference], cancellation);
+        }
     }
 
     /// <inheritdoc />
     public async Task<bool> Has(string folder, string commit, CancellationToken cancellation) => hash.IsMatch(commit) && (await git.Run(folder, ["cat-file", "-e", $"{commit}^{{commit}}"], cancellation)).ExitCode == 0;
+
+    private async Task<List<string>> References(string folder, string prefix, CancellationToken cancellation)
+    {
+        GitOutput listed = await git.Run(folder, ["for-each-ref", "--format=%(refname)", prefix], cancellation);
+        return listed.ExitCode == 0 ? [.. listed.Output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)] : [];
+    }
 
     private async Task Prepare(string cache, CancellationToken cancellation)
     {
@@ -677,6 +720,12 @@ internal sealed class SwarmRepository(IGitService git) : ISwarmRepository
     private string ResultReference(Guid taskId) => $"refs/auto-remote/results/{taskId:N}";
 
     private string WorkerReference(Guid taskId) => $"refs/tasks/{taskId:N}";
+
+    private string DependencyReferences(Guid taskId) => $"refs/auto-remote/dependencies/{taskId:N}/";
+
+    private string DependencyReference(Guid taskId, Guid dependencyId) => $"{DependencyReferences(taskId)}{dependencyId:N}";
+
+    private string WorkerDependencyReference(Guid taskId, Guid dependencyId) => $"refs/task-dependencies/{taskId:N}/{dependencyId:N}";
 
     private sealed class TemporaryFile(string extension) : IDisposable
     {

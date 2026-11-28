@@ -48,6 +48,19 @@ internal interface ISideSessionRepository
     Task<(string Commit, string Tree)> Create(string main, Guid id, string folder, SideSessionStart start, CancellationToken cancellation);
 
     /// <summary>
+    /// Makes the worktree of a side session that goes on with the result of a delegated task: on the commit that was checked out when the task was delegated, with the files as the task left them, and what the task started from recorded as the snapshot.
+    /// </summary>
+    /// <param name="main">The main workspace folder.</param>
+    /// <param name="id">The side session.</param>
+    /// <param name="folder">The folder to make, which must not exist.</param>
+    /// <param name="baseCommit">The commit the task started from.</param>
+    /// <param name="resultCommit">The commit holding the files as the task left them.</param>
+    /// <param name="cancellation">Cancels the work.</param>
+    /// <returns>The commit the session is on and the tree its changes are measured against.</returns>
+    /// <exception cref="RequestException">Git could not make it.</exception>
+    Task<(string Commit, string Tree)> CreateFrom(string main, Guid id, string folder, string baseCommit, string resultCommit, CancellationToken cancellation);
+
+    /// <summary>
     /// Lists what changed between the snapshot a session started from and its files as they are.
     /// </summary>
     /// <param name="folder">The session folder.</param>
@@ -180,9 +193,32 @@ internal sealed class SideSessionRepository(IGitService git) : ISideSessionRepos
             Check(await git.Run(folder, ["restore", $"--source={tree}", "--worktree", "--no-overlay", "--", "."], cancellation, checkoutTimeout), "Main's files could not be brought into the session");
         }
 
-        GitOutput kept = await git.Run(main, ["commit-tree", tree, "-p", commit, "-m", "Auto Remote: the files a side session started with"], identity, cancellation);
-        Check(kept, "The starting snapshot could not be recorded");
-        Check(await git.Run(main, ["update-ref", Snapshot(id), kept.Output.Trim()], cancellation), "The starting snapshot could not be recorded");
+        await Record(main, id, tree, commit, cancellation);
+        return (commit, tree);
+    }
+
+    /// <inheritdoc />
+    public async Task<(string Commit, string Tree)> CreateFrom(string main, Guid id, string folder, string baseCommit, string resultCommit, CancellationToken cancellation)
+    {
+        string commit = await Output(main, ["rev-parse", "--verify", $"{baseCommit}^{{commit}}"], cancellation);
+
+        // The commits the swarm made to hold uncommitted files, for any of its versions, are no history of the project.
+        while ((await Output(main, ["log", "-1", "--format=%an%n%s", commit], cancellation)).Split('\n') is ["Auto Remote", var subject] && subject.EndsWith("(Auto Remote)", StringComparison.Ordinal))
+        {
+            commit = await Output(main, ["rev-parse", "--verify", $"{commit}^1"], cancellation);
+        }
+
+        string tree = await Output(main, ["rev-parse", $"{baseCommit}^{{tree}}"], cancellation);
+        string result = await Output(main, ["rev-parse", $"{resultCommit}^{{tree}}"], cancellation);
+        Directory.CreateDirectory(Path.GetDirectoryName(folder)!);
+        Check(await git.Run(main, ["worktree", "add", "-b", Branch(id), folder, commit], cancellation, checkoutTimeout), "The files of the session could not be made");
+
+        if (result != await Output(main, ["rev-parse", $"{commit}^{{tree}}"], cancellation))
+        {
+            Check(await git.Run(folder, ["restore", $"--source={result}", "--worktree", "--no-overlay", "--", "."], cancellation, checkoutTimeout), "The files of the task could not be brought into the session");
+        }
+
+        await Record(main, id, tree, commit, cancellation);
         return (commit, tree);
     }
 
@@ -287,6 +323,13 @@ internal sealed class SideSessionRepository(IGitService git) : ISideSessionRepos
         {
             Directory.Delete(files, true);
         }
+    }
+
+    private async Task Record(string main, Guid id, string tree, string commit, CancellationToken cancellation)
+    {
+        GitOutput kept = await git.Run(main, ["commit-tree", tree, "-p", commit, "-m", "Auto Remote: the files a side session started with"], identity, cancellation);
+        Check(kept, "The starting snapshot could not be recorded");
+        Check(await git.Run(main, ["update-ref", Snapshot(id), kept.Output.Trim()], cancellation), "The starting snapshot could not be recorded");
     }
 
     private string Snapshot(Guid id) => $"refs/auto-remote/session/{id:N}/base";

@@ -58,9 +58,10 @@ internal interface IServerConnection : IAsyncDisposable
     /// <param name="name">The name of the session.</param>
     /// <param name="start">What its files start from.</param>
     /// <param name="firstTask">Its first prompt, or <see langword="null" />.</param>
+    /// <param name="bringIn">Whether it is brought into the main workspace by itself once its work is done.</param>
     /// <param name="cancellation">Cancels the request.</param>
     /// <returns>The session, which is still being set up.</returns>
-    Task<WorkspaceInfo> CreateSideSession(Guid id, string name, SideSessionStart start, string? firstTask, CancellationToken cancellation);
+    Task<WorkspaceInfo> CreateSideSession(Guid id, string name, SideSessionStart start, string? firstTask, bool bringIn, CancellationToken cancellation);
 
     /// <summary>
     /// Renames a side session.
@@ -80,7 +81,7 @@ internal interface IServerConnection : IAsyncDisposable
     Task DeleteSideSession(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Starts integrating a side session into its main workspace.
+    /// Has the main workspace's AI bring a side session into it.
     /// </summary>
     /// <param name="id">The side session.</param>
     /// <param name="cancellation">Cancels the request.</param>
@@ -88,7 +89,7 @@ internal interface IServerConnection : IAsyncDisposable
     Task IntegrateSideSession(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Cancels the integration of a side session.
+    /// Cancels bringing a side session into its main workspace.
     /// </summary>
     /// <param name="id">The side session.</param>
     /// <param name="cancellation">Cancels the request.</param>
@@ -96,7 +97,7 @@ internal interface IServerConnection : IAsyncDisposable
     Task CancelIntegration(Guid id, CancellationToken cancellation);
 
     /// <summary>
-    /// Sets whether a side session is integrated by itself once its AI marks its task complete.
+    /// Sets whether a side session is brought into its main workspace by itself once its work is done.
     /// </summary>
     /// <param name="id">The side session.</param>
     /// <param name="enabled">Whether it is.</param>
@@ -257,16 +258,6 @@ internal interface IServerConnection : IAsyncDisposable
     Task PromptOverLimit(Guid id, string text, CancellationToken cancellation);
 
     /// <summary>
-    /// Sends a prompt like <see cref="Prompt" />, turning auto commit on for the work it starts or joins.
-    /// </summary>
-    /// <param name="id">The workspace identifier.</param>
-    /// <param name="text">The prompt.</param>
-    /// <param name="overLimit">Whether the prompt goes ahead although a usage window is at or past the maximum, as with <see cref="PromptOverLimit" />.</param>
-    /// <param name="cancellation">Cancels the wait.</param>
-    /// <exception cref="RemoteException">The server refused, as with <see cref="Prompt" />.</exception>
-    Task PromptToCommit(Guid id, string text, bool overLimit, CancellationToken cancellation);
-
-    /// <summary>
     /// Has the server draw a Mermaid diagram.
     /// </summary>
     /// <param name="source">The Mermaid text.</param>
@@ -409,13 +400,33 @@ internal interface IServerConnection : IAsyncDisposable
     Task<SwarmStatus> RetrySwarmTask(Guid taskId, CancellationToken cancellation);
 
     /// <summary>
-    /// Applies the changes of a finished task to its workspace.
+    /// Has the AI of the task's workspace bring the result of a finished task into it.
     /// </summary>
     /// <param name="taskId">The task.</param>
     /// <param name="cancellation">Cancels the request.</param>
     /// <returns>The swarm as it now is.</returns>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task<SwarmStatus> ApplySwarmTask(Guid taskId, CancellationToken cancellation);
+    Task<SwarmStatus> BringInSwarmTask(Guid taskId, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sets whether the result of a delegated task is brought into its workspace by itself once it is done; turning it off also cancels bringing it in that has not started.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="enabled">Whether it is.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The swarm as it now is.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<SwarmStatus> SetSwarmTaskBringIn(Guid taskId, bool enabled, CancellationToken cancellation);
+
+    /// <summary>
+    /// Makes a side session that starts from the result of a finished delegated task, to go on with it by hand.
+    /// </summary>
+    /// <param name="taskId">The task.</param>
+    /// <param name="name">The name of the session, or <see langword="null" /> to name it after the task.</param>
+    /// <param name="cancellation">Cancels the request.</param>
+    /// <returns>The session.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<WorkspaceInfo> ContinueSwarmTask(Guid taskId, string? name, CancellationToken cancellation);
 
     /// <summary>
     /// Removes an ended task.
@@ -835,12 +846,42 @@ internal interface IServerConnection : IAsyncDisposable
     Task<IReadOnlyList<SavedInput>> QueueInput(Guid id, string text, bool autoCommit, CancellationToken cancellation);
 
     /// <summary>
-    /// Resumes the paused queued inputs of a workspace.
+    /// Lets the work of a workspace that runs by itself go on after it was stopped.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
     /// <param name="cancellation">Cancels the wait.</param>
     /// <exception cref="RemoteException">The server refused.</exception>
-    Task ResumeQueue(Guid id, CancellationToken cancellation);
+    Task ResumeAutomation(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads what is up next in a workspace.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The agenda.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<Agenda> GetAgenda(Guid id, CancellationToken cancellation);
+
+    /// <summary>
+    /// Reads a page of the activity of a workspace, the newest first.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="before">The cursor to read older entries with, or <see langword="null" /> for the newest.</param>
+    /// <param name="limit">The most entries to read.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <returns>The page.</returns>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task<ActivityPage> GetActivity(Guid id, string? before, int limit, CancellationToken cancellation);
+
+    /// <summary>
+    /// Sets whether the changes are committed after the AI brought something in.
+    /// </summary>
+    /// <param name="id">The workspace it is brought into.</param>
+    /// <param name="inputId">The bring-in, as the agenda names it.</param>
+    /// <param name="enabled">Whether they are.</param>
+    /// <param name="cancellation">Cancels the wait.</param>
+    /// <exception cref="RemoteException">The server refused.</exception>
+    Task SetBringInCommit(Guid id, Guid inputId, bool enabled, CancellationToken cancellation);
 
     /// <summary>
     /// Sets whether the changes of a workspace are committed once the AI's work is over.
@@ -1209,7 +1250,7 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<WorkspaceInfo> MoveWorkspaceToFolder(Guid id, string folder, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.MoveWorkspaceToFolder, WorkspaceId = id, Path = folder }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task<WorkspaceInfo> CreateSideSession(Guid id, string name, SideSessionStart start, string? firstTask, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateSideSession, WorkspaceId = id, Name = name, Start = start, Text = firstTask }, cancellation)).Workspace ?? throw Malformed();
+    public async Task<WorkspaceInfo> CreateSideSession(Guid id, string name, SideSessionStart start, string? firstTask, bool bringIn, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.CreateSideSession, WorkspaceId = id, Name = name, Start = start, Text = firstTask, BringIn = bringIn }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<WorkspaceInfo> RenameSideSession(Guid id, string name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenameSideSession, WorkspaceId = id, Name = name }, cancellation)).Workspace ?? throw Malformed();
@@ -1272,9 +1313,6 @@ internal sealed class ServerConnection : IServerConnection
     public async Task PromptOverLimit(Guid id, string text, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = true }, cancellation);
 
     /// <inheritdoc />
-    public async Task PromptToCommit(Guid id, string text, bool overLimit, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.Prompt, WorkspaceId = id, Text = text, IgnoreLimit = overLimit ? true : null, AutoCommit = true }, cancellation);
-
-    /// <inheritdoc />
     public async Task<string> RenderDiagram(string source, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.RenderDiagram, Text = source }, cancellation)).Diagram ?? throw new IOException("The server sent no diagram.");
 
     /// <inheritdoc />
@@ -1317,7 +1355,13 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<SwarmStatus> RetrySwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.RetrySwarmTask, TaskId = taskId }, cancellation);
 
     /// <inheritdoc />
-    public async Task<SwarmStatus> ApplySwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.ApplySwarmTask, TaskId = taskId }, cancellation);
+    public async Task<SwarmStatus> BringInSwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.BringInSwarmTask, TaskId = taskId }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<SwarmStatus> SetSwarmTaskBringIn(Guid taskId, bool enabled, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.SetSwarmTaskBringIn, TaskId = taskId, Enabled = enabled }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<WorkspaceInfo> ContinueSwarmTask(Guid taskId, string? name, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.ContinueSwarmTask, TaskId = taskId, Name = name }, cancellation)).Workspace ?? throw Malformed();
 
     /// <inheritdoc />
     public async Task<SwarmStatus> DiscardSwarmTask(Guid taskId, CancellationToken cancellation) => await Swarm(new() { Id = 0, Command = RemoteCommand.DiscardSwarmTask, TaskId = taskId }, cancellation);
@@ -1460,7 +1504,16 @@ internal sealed class ServerConnection : IServerConnection
     public async Task<IReadOnlyList<SavedInput>> QueueInput(Guid id, string text, bool autoCommit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.QueueInput, WorkspaceId = id, Text = text, AutoCommit = autoCommit }, cancellation)).SavedInputs ?? throw Malformed();
 
     /// <inheritdoc />
-    public async Task ResumeQueue(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ResumeQueue, WorkspaceId = id }, cancellation);
+    public async Task ResumeAutomation(Guid id, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.ResumeAutomation, WorkspaceId = id }, cancellation);
+
+    /// <inheritdoc />
+    public async Task<Agenda> GetAgenda(Guid id, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetAgenda, WorkspaceId = id }, cancellation)).Agenda ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task<ActivityPage> GetActivity(Guid id, string? before, int limit, CancellationToken cancellation) => (await Send(new() { Id = 0, Command = RemoteCommand.GetActivity, WorkspaceId = id, Before = before, Limit = limit }, cancellation)).Activity ?? throw Malformed();
+
+    /// <inheritdoc />
+    public async Task SetBringInCommit(Guid id, Guid inputId, bool enabled, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SetBringInCommit, WorkspaceId = id, InputId = inputId, Enabled = enabled }, cancellation);
 
     /// <inheritdoc />
     public async Task SetAutoCommit(Guid id, bool enabled, CancellationToken cancellation) => await Send(new() { Id = 0, Command = RemoteCommand.SetAutoCommit, WorkspaceId = id, Enabled = enabled }, cancellation);

@@ -60,6 +60,18 @@ internal interface IWorkQueue
     Task<WorkTicket> SubmitWhenFree(Guid id, string text, Action taken, CancellationToken cancellation);
 
     /// <summary>
+    /// Gives a workspace a prompt of a given kind like <see cref="SubmitWhenFree(Guid, string, Action, CancellationToken)" />. A request to bring work in is not restored after a restart, nor kept as a draft when it cannot start, since whoever asks for it asks again.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="text">The prompt.</param>
+    /// <param name="source">Where it comes from.</param>
+    /// <param name="taken">Called once the prompt is the workspace's work.</param>
+    /// <param name="cancellation">Cancels the wait for a start that happens at once.</param>
+    /// <returns>Whether the prompt waits, and a task that tells when it starts.</returns>
+    /// <exception cref="RequestException">The workspace has other work, or the prompt could not be sent.</exception>
+    Task<WorkTicket> SubmitWhenFree(Guid id, string text, WorkSource source, Action taken, CancellationToken cancellation);
+
+    /// <summary>
     /// Checks whether work of a workspace is on its way to the AI, so it neither waits any more nor works yet.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -124,7 +136,7 @@ internal sealed class WorkQueue : IWorkQueue
     /// <param name="activity">Tells whether a workspace is busy with something else.</param>
     /// <param name="savedInputs">Keeps the text of a waiting prompt that could not start.</param>
     /// <param name="events">Tells clients about the queue and the queue about work ending.</param>
-    /// <param name="completion">Gives up on what was to follow waiting work that could not start.</param>
+    /// <param name="completion">Takes back waiting work that could not start, to try it again.</param>
     public WorkQueue(IWorkspaceManager workspaces, IPromptService prompts, IPrompterHost host, IWorkspaceActivity activity, ISavedInputs savedInputs, IEventHub events, Func<IWorkCompletion?>? completion = null)
     {
         this.completion = completion;
@@ -272,6 +284,9 @@ internal sealed class WorkQueue : IWorkQueue
 
     /// <inheritdoc />
     public Task<WorkTicket> SubmitWhenFree(Guid id, string text, Action taken, CancellationToken cancellation) => Place(id, text, WorkSource.Direct, taken, cancellation);
+
+    /// <inheritdoc />
+    public Task<WorkTicket> SubmitWhenFree(Guid id, string text, WorkSource source, Action taken, CancellationToken cancellation) => Place(id, text, source, taken, cancellation);
 
     /// <inheritdoc />
     public bool IsStarting(Guid id)
@@ -696,12 +711,15 @@ internal sealed class WorkQueue : IWorkQueue
             }
 
             events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = entry.Workspace, Time = DateTimeOffset.UtcNow, Error = $"The queued work could not start: {exception.Message}" });
-            await Keep(entry);
 
-            // Said while the work still counts as starting, so no queued input is sent after work that failed.
-            if (entry.Source == WorkSource.Direct && completion?.Invoke() is { } followed)
+            // Work that is tried again keeps its text with whoever tries it; any other keeps it as a saved input.
+            if (entry.Source == WorkSource.Direct && completion?.Invoke()?.TakeBack(entry.Workspace, entry.Text, exception.Message) == true)
             {
-                await followed.Abandon(entry.Workspace);
+                Changed([entry.Workspace]);
+            }
+            else
+            {
+                await Keep(entry);
             }
 
             Settle(entry.Workspace, true);

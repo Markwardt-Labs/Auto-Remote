@@ -1,0 +1,26 @@
+<UserControl xmlns="https://github.com/avaloniaui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Class="Markwardt.AutoRemote.Client.SwarmTaskBodyView"
+             x:CompileBindings="False">
+  <StackPanel Spacing="10">
+    <TextBlock Text="{Binding Task.Error, FallbackValue=''}" IsVisible="{Binding Task.Error, Converter={x:Static StringConverters.IsNotNullOrEmpty}, FallbackValue=False}" Classes="error" TextWrapping="Wrap" />
+    <TextBlock Text="Instructions" Classes="serif" FontSize="15" />
+    <SelectableTextBlock Text="{Binding Instructions, FallbackValue=''}" TextWrapping="Wrap" />
+    <TextBlock Text="Expected result" Classes="serif" FontSize="15" IsVisible="{Binding ExpectedResult, Converter={x:Static StringConverters.IsNotNullOrEmpty}, FallbackValue=False}" />
+    <SelectableTextBlock Text="{Binding ExpectedResult, FallbackValue=''}" TextWrapping="Wrap" IsVisible="{Binding ExpectedResult, Converter={x:Static StringConverters.IsNotNullOrEmpty}, FallbackValue=False}" />
+    <TextBlock Text="Report" Classes="serif" FontSize="15" IsVisible="{Binding Report, Converter={x:Static StringConverters.IsNotNullOrEmpty}, FallbackValue=False}" />
+    <SelectableTextBlock Text="{Binding Report, FallbackValue=''}" TextWrapping="Wrap" IsVisible="{Binding Report, Converter={x:Static StringConverters.IsNotNullOrEmpty}, FallbackValue=False}" />
+    <TextBlock Text="Conversation" Classes="serif" FontSize="15" IsVisible="{Binding !!Messages.Count, FallbackValue=False}" />
+    <ItemsControl ItemsSource="{Binding Messages, FallbackValue={x:Null}}">
+      <ItemsControl.ItemTemplate>
+        <DataTemplate>
+          <StackPanel Margin="0,3" Spacing="2">
+            <TextBlock Text="{Binding Role}" Classes="muted" FontSize="11" IsVisible="{Binding !IsWork}" />
+            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" Opacity="0.6" FontSize="12" IsVisible="{Binding IsWork}" />
+            <SelectableTextBlock Text="{Binding Text}" TextWrapping="Wrap" IsVisible="{Binding !IsWork}" />
+          </StackPanel>
+        </DataTemplate>
+      </ItemsControl.ItemTemplate>
+    </ItemsControl>
+  </StackPanel>
+</UserControl>

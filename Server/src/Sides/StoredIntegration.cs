@@ -31,7 +31,27 @@ internal sealed record StoredIntegration
     public bool InWork { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether the request waits to go along with the next work of main rather than being sent by itself.
+    /// Gets the identifier of the work that brings it in, which every attempt shares, so they make one entry of activity.
     /// </summary>
-    public bool WaitsForWork { get; init; }
+    public Guid StepId { get; init; }
+
+    /// <summary>
+    /// Gets how often in a row it was put off because the AI could not run, which makes it wait longer each time.
+    /// </summary>
+    public int Delays { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether a restart of the server ended a turn it had.
+    /// </summary>
+    public bool Interrupted { get; init; }
+
+    /// <summary>
+    /// Gets what the session said about its work.
+    /// </summary>
+    public string Handoff { get; init; } = string.Empty;
+
+    /// <summary>
+    /// Gets the files the session changed.
+    /// </summary>
+    public IReadOnlyList<string> Files { get; init; } = [];
 }

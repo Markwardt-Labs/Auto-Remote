@@ -503,30 +503,31 @@ public sealed class WorkspaceLoopsTests : IDisposable
     }
 
     [Fact]
-    public async Task Start_EndsWithTheFailureWhenARunFails()
+    public async Task ARunThatFails_NeverEndsTheLoop()
     {
-        prompter.OnCreate = session => session.Fail("boom");
+        prompter.OnCreate = session => session.ReplyWith(_ => [new PromptFailureEvent { Message = "boom" }]);
         WorkspaceLoops loops = Create();
 
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", IntervalSeconds = 1 }, CancellationToken.None);
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 3 }, CancellationToken.None);
         await Until(() => loops.Get(workspace.Id) is null);
 
-        Assert.Equal("The loop stopped: boom", Ended());
-        Assert.Single(Session.Prompts);
+        Assert.Equal("The loop made all its runs.", Ended());
+        Assert.Equal(3, Session.Prompts.Count);
     }
 
     [Fact]
-    public async Task Start_EndsWithTheReasonWhenARunIsRefusedAndNothingIsWorking()
+    public async Task ARunThatIsRefused_IsTriedAgainLaterWithoutEndingTheLoop()
     {
         int reads = 0;
-        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => Interlocked.Increment(ref reads) == 1 ? workspace : throw new RequestException("gone"));
-        WorkspaceLoops loops = Create();
+        workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(() => Interlocked.Increment(ref reads) == 2 ? throw new RequestException("busy elsewhere") : workspace);
+        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(50));
 
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go" }, CancellationToken.None);
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
         await Until(() => loops.Get(workspace.Id) is null);
 
-        Assert.Equal("The loop stopped: gone", Ended());
-        Assert.Empty(prompter.Sessions);
+        Assert.Equal("The loop made all its runs.", Ended());
+        Assert.True(Waiting());
+        Assert.Single(Session.Prompts);
     }
 
     [Fact]
@@ -560,149 +561,141 @@ public sealed class WorkspaceLoopsTests : IDisposable
         return [new PromptMessageEvent { Text = text }];
     }
 
-    private int failures;
-
-    private void FailFirst(string message, int times = 1) => prompter.OnCreate = session => session.ReplyWith(prompt => Interlocked.Increment(ref failures) <= times ? [new PromptFailureEvent { Message = message }] : [new PromptMessageEvent { Text = "reply to " + prompt.Text }]);
-
     private bool Waiting() => Changes().Any(change => change.Loop?.LimitCheckAt is not null);
 
-    [Fact]
-    public async Task Start_WaitsForTheUsageLimitInsteadOfEndingChecksAgainAndGoesOnOnceItIsFree()
+    // What follows the work, which tells the loop how each of its runs ended.
+    private Mock<IFollowUps> Following(ConcurrentQueue<WorkEnd> ends, List<WorkStep>? asked = null)
     {
-        FailFirst("5-hour limit reached, resets at 9pm");
-        int reads = 0;
-        double used = 100;
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(() =>
+        Mock<IFollowUps> followed = new();
+        followed.Setup(x => x.TryExpect(workspace.Id, It.IsAny<WorkStep>(), It.IsAny<Action<WorkEnd>?>(), It.IsAny<Func<string?>?>())).Returns((Guid _, WorkStep step, Action<WorkEnd>? ended, Func<string?>? _) =>
         {
-            Interlocked.Increment(ref reads);
-            return Status(used);
+            asked?.Add(step);
+            ended!(ends.TryDequeue(out WorkEnd? end) ? end : new WorkEnd(ActivityOutcome.Done));
+            return true;
         });
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(100));
-
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 2 }, CancellationToken.None);
-        await Until(Waiting);
-        await Task.Delay(450);
-
-        Assert.NotNull(loops.Get(workspace.Id));
-        Assert.NotNull(loops.Get(workspace.Id)!.LimitCheckAt);
-        Assert.Single(Session.Prompts);
-        Assert.True(reads >= 4);
-        Assert.Equal(0, loops.Get(workspace.Id)!.Runs);
-        Assert.DoesNotContain(Changes(), change => change.Loop is null);
-
-        used = 40;
-        await Until(() => loops.Get(workspace.Id) is null);
-
-        Assert.Equal(3, Session.Prompts.Count);
-        Assert.Equal("The loop made all its runs.", Ended());
-        Assert.Null(Changes().Where(change => change.Loop is not null).Last().Loop!.LimitCheckAt);
-        Assert.Equal(["reply to go", "reply to go"], Messages());
+        return followed;
     }
 
+    private WorkspaceLoops Followed(Mock<IFollowUps> followed, TimeSpan? limitInterval = null) => new(workspaces.Object, prompts, activity, usage.Object, hub, TimeSpan.FromMilliseconds(10), TimeSpan.FromMilliseconds(30), limitInterval, following: () => followed.Object);
+
     [Fact]
-    public async Task Start_GoesOnToPromptAgainWhenTheUsageCannotBeReadWhileItWaits()
+    public async Task ARunTheAiCouldNotMake_IsNotCountedAndIsTriedAgainLater()
     {
-        FailFirst("You've hit your usage limit. Try again later.");
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync((UsageStatus?)null);
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(100));
+        ConcurrentQueue<WorkEnd> ends = new([new WorkEnd(ActivityOutcome.Waiting, true, "usage limit"), new WorkEnd(ActivityOutcome.Waiting, true, "usage limit")]);
+        WorkspaceLoops loops = Followed(Following(ends), TimeSpan.FromMilliseconds(60));
 
         await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
         await Until(() => loops.Get(workspace.Id) is null);
 
+        Assert.Equal("The loop made all its runs.", Ended());
+        Assert.Equal(3, Session.Prompts.Count);
         Assert.True(Waiting());
-        Assert.Equal(2, Session.Prompts.Count);
-        Assert.Equal("The loop made all its runs.", Ended());
-    }
-
-    [Fact]
-    public async Task Start_TriesAgainAndWaitsAgainWhenTheLimitIsStillThere()
-    {
-        FailFirst("Rate limit exceeded", 2);
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync((UsageStatus?)null);
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(80));
-
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
-        await Until(() => loops.Get(workspace.Id) is null);
-
-        Assert.Equal(3, Session.Prompts.Count);
-        Assert.Equal("The loop made all its runs.", Ended());
-        Assert.True(Changes().Count(change => change.Loop?.LimitCheckAt is not null) >= 2);
-    }
-
-    [Fact]
-    public async Task Start_WaitsWhenAWindowIsFullEvenIfTheFailureDoesNotSayLimit()
-    {
-        FailFirst("The request failed");
-        double used = 100;
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => Status(used));
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(100));
-
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
-        await Until(Waiting);
-
-        Assert.NotNull(loops.Get(workspace.Id));
-
-        used = 70;
-        await Until(() => loops.Get(workspace.Id) is null);
-
-        Assert.Equal("The loop made all its runs.", Ended());
-    }
-
-    [Fact]
-    public async Task Start_StillEndsWithTheFailureWhenItHasNothingToDoWithTheLimit()
-    {
-        FailFirst("The tool crashed");
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(50));
-
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go" }, CancellationToken.None);
-        await Until(() => loops.Get(workspace.Id) is null);
-
-        Assert.Equal("The loop stopped: The tool crashed", Ended());
-        Assert.False(Waiting());
-        Assert.Single(Session.Prompts);
     }
 
     [Theory]
-    [InlineData("5-hour limit reached, resets at 9pm", 100)]
-    [InlineData("The request failed", 100)]
-    public async Task Start_EndsLikeOnAnyOtherFailureWhenItWasStartedWithoutWaitingForTheLimit(string failure, double used)
+    [InlineData(true, true)]
+    [InlineData(false, null)]
+    public async Task EachRun_IsFollowedWithTheCommitTheLoopAsksFor(bool commits, bool? expected)
     {
-        FailFirst(failure);
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(used));
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(50));
+        List<WorkStep> asked = [];
+        WorkspaceLoops loops = Followed(Following(new ConcurrentQueue<WorkEnd>(), asked));
 
-        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", WaitForLimit = false }, CancellationToken.None);
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1, AutoCommit = commits }, CancellationToken.None);
         await Until(() => loops.Get(workspace.Id) is null);
 
-        Assert.Equal($"The loop stopped: {failure}", Ended());
-        Assert.False(Waiting());
-        Assert.Single(Session.Prompts);
-        usage.Verify(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>()), Times.Never);
+        WorkStep step = Assert.Single(asked);
+        Assert.Equal((ActivitySource.Loop, "go", expected), (step.Source, step.Text, step.Commit));
     }
 
     [Fact]
-    public async Task Cancel_EndsALoopThatWaitsForTheLimitAtOnce()
+    public async Task ARunWaitsWhileOtherWorkIsStillOnItsWayToTheAi()
     {
-        FailFirst("usage limit reached");
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(100));
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMilliseconds(60));
+        bool onItsWay = true;
+        int asked = 0;
+        Mock<IFollowUps> followed = new();
+        followed.Setup(x => x.TryExpect(workspace.Id, It.IsAny<WorkStep>(), It.IsAny<Action<WorkEnd>?>(), It.IsAny<Func<string?>?>())).Returns((Guid _, WorkStep _, Action<WorkEnd>? ended, Func<string?>? _) =>
+        {
+            Interlocked.Increment(ref asked);
+
+            if (Volatile.Read(ref onItsWay))
+            {
+                return false;
+            }
+
+            ended!(new WorkEnd(ActivityOutcome.Done));
+            return true;
+        });
+        WorkspaceLoops loops = Followed(followed);
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+        await Until(() => Volatile.Read(ref asked) > 2);
+        Assert.Empty(prompter.Sessions);
+
+        Volatile.Write(ref onItsWay, false);
+
+        await Until(() => loops.Get(workspace.Id) is null);
+        Assert.Single(Session.Prompts);
+        followed.Verify(x => x.NotSent(It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ALoopWaitsWhileWhatFollowsTheWorkSaysSo()
+    {
+        bool waiting = true;
+        Mock<IFollowUps> followed = Following(new ConcurrentQueue<WorkEnd>());
+        followed.Setup(x => x.IsWaiting(workspace.Id)).Returns(() => waiting);
+        WorkspaceLoops loops = Followed(followed);
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 1 }, CancellationToken.None);
+        await Task.Delay(150);
+        Assert.Empty(prompter.Sessions);
+
+        waiting = false;
+
+        await Until(() => loops.Get(workspace.Id) is null);
+        Assert.Single(Session.Prompts);
+    }
+
+    [Fact]
+    public async Task ALoopSurvivesARestartAndGoesOnWhereItWas()
+    {
+        using TempFolder data = new();
+        using CancellationTokenSource server = new();
+        WorkspaceLoops loops = Create();
+        await loops.Open(data.Path, server.Token);
+        await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.Runs, Runs = 2, IntervalSeconds = 1 }, CancellationToken.None);
+        await Until(() => loops.Get(workspace.Id) is { Runs: 1, IsRunning: false });
+        await server.CancelAsync();
+        await Task.Delay(100);
+        using CancellationTokenSource again = new();
+        WorkspaceLoops restarted = Create();
+
+        await restarted.Open(data.Path, again.Token);
+
+        Assert.Equal(1, restarted.Get(workspace.Id)?.Runs);
+        await Until(() => restarted.Get(workspace.Id) is null);
+        Assert.Equal(2, Session.Prompts.Count);
+        await again.CancelAsync();
+    }
+
+    [Fact]
+    public async Task Cancel_EndsALoopThatWaitsToTryAgainAtOnce()
+    {
+        ConcurrentQueue<WorkEnd> ends = new([new WorkEnd(ActivityOutcome.Waiting, true, "offline")]);
+        WorkspaceLoops loops = Followed(Following(ends), TimeSpan.FromMinutes(10));
         await loops.Start(workspace.Id, new LoopSettings { Prompt = "go" }, CancellationToken.None);
         await Until(Waiting);
 
         await loops.Cancel(workspace.Id);
-        await Task.Delay(250);
+        await Task.Delay(100);
 
         Assert.Null(loops.Get(workspace.Id));
         Assert.Single(Session.Prompts);
-        Assert.False(prompts.IsBusy(workspace.Id));
     }
 
     [Fact]
-    public async Task Start_EndsAWaitingLoopWhenItsTimeIsUp()
+    public async Task ALoopThatWaitsToTryAgain_StillEndsWhenItsTimeIsUp()
     {
-        FailFirst("usage limit reached");
-        usage.Setup(x => x.Refresh(It.IsAny<AiService>(), It.IsAny<CancellationToken>())).ReturnsAsync(Status(100));
-        WorkspaceLoops loops = Create(limitInterval: TimeSpan.FromMinutes(10));
+        ConcurrentQueue<WorkEnd> ends = new([new WorkEnd(ActivityOutcome.Waiting, true, "offline")]);
+        WorkspaceLoops loops = Followed(Following(ends), TimeSpan.FromMinutes(10));
 
         await loops.Start(workspace.Id, new LoopSettings { Prompt = "go", Condition = LoopCondition.ForDuration, DurationSeconds = 1 }, CancellationToken.None);
         await Until(Waiting);

@@ -24,7 +24,7 @@ Auto Commit is two calls from the client: `GenerateCommitMessage`, then the ordi
 
 Every action that changes the repository is refused unless the workspace is ready, so it cannot race the AI's edits.
 
-The server also makes this commit by itself after the AI's work when auto commit is on, taking the workspace straight on from the work.
+The server also makes this commit by itself after the AI's work when its commit is on, taking the workspace straight on from the work, and then checks whether it was pushed, since a push that fails does not fail the commit.
 
 Auto Commit has no dialog of its own to show an error in, so when any step fails (a refusal, nothing to commit, the AI failing or answering with twelve words or more) every client shows the reason in an "Auto Commit" notice; the notice is allowed even while git or AI work locks the other prompts.
 

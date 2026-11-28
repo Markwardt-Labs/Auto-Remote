@@ -38,17 +38,24 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             IsSavedInputsOpen = !IsSavedInputsOpen;
             return Task.CompletedTask;
         }, () => !isDelegated);
+        ToggleUpNextCommand = new AsyncCommand(_ =>
+        {
+            IsUpNextOpen = !IsUpNextOpen;
+            return Task.CompletedTask;
+        });
+        EditQueuedCommand = new AsyncCommand(parameter => LoadSavedInput(QueuedInputOf(parameter)), () => !isDelegated, false);
+        ToggleAgendaCommitCommand = new AsyncCommand(ToggleAgendaCommit, () => !isDelegated, false);
+        AskDeleteQueuedCommand = new AsyncCommand(parameter =>
+        {
+            DeletingInput = QueuedInputOf(parameter);
+            return Task.CompletedTask;
+        }, () => !isDelegated, false);
         LoadSavedInputCommand = new AsyncCommand(parameter => LoadSavedInput(parameter), null, false);
         // What is typed can be queued whatever the workspace is doing, a commit included.
-        QueueCommand = new AsyncCommand(_ => QueueInput(), () => !isDelegated && HasContent);
+        QueueCommand = new AsyncCommand(_ => QueueTyped(loadedAutoCommit ?? true), () => !isDelegated && HasContent);
         ToggleAutoCommitCommand = new AsyncCommand(_ => ToggleAutoCommit());
-        // While the current work is to be committed whatever the input says, there is nothing to choose for sending it.
-        ToggleLoadedAutoCommitCommand = new AsyncCommand(_ =>
-        {
-            LoadedAutoCommit = !loadedAutoCommit;
-            return Task.CompletedTask;
-        }, () => !IsAutoCommitOn);
-        ResumeQueueCommand = new AsyncCommand(_ => ResumeQueue(), () => !isDelegated);
+        ResumeAutomationCommand = new AsyncCommand(_ => ResumeAutomation(), () => !isDelegated);
+        StopRetryingCommand = new AsyncCommand(_ => Attempt(() => connection.StopWorkspace(workspaceId, CancellationToken.None)), () => !isDelegated);
         ToggleSavedInputAutoCommitCommand = new AsyncCommand(parameter => ToggleSavedInputAutoCommit(parameter), null, false);
         AskDeleteSavedInputCommand = new AsyncCommand(parameter =>
         {
@@ -149,6 +156,10 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
     private bool isSavedInputsOpen;
 
+    private bool isUpNextOpen;
+
+    private Agenda agenda = new();
+
     private SavedInput? deletingInput;
 
     private AutoCommitState autoCommit;
@@ -229,7 +240,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 Raise(nameof(TakesTyping));
                 ToggleSavedInputsCommand.Refresh();
                 QueueCommand.Refresh();
-                ResumeQueueCommand.Refresh();
+                ResumeAutomationCommand.Refresh();
+                StopRetryingCommand.Refresh();
+                EditQueuedCommand.Refresh();
+                ToggleAgendaCommitCommand.Refresh();
+                AskDeleteQueuedCommand.Refresh();
             }
         }
     }
@@ -283,7 +298,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public AsyncCommand DictateCommand { get; }
 
     /// <summary>
-    /// Gets the command that ends the recording and hands it to the server, which adds a saved input that shows it being turned into text and fills it with the text when it is ready. The saved inputs open to show it.
+    /// Gets the command that ends the recording and hands it to the server, which adds a draft that shows it being turned into text and fills it with the text when it is ready. The drafts open to show it.
     /// </summary>
     public AsyncCommand CompleteDictationCommand { get; }
 
@@ -336,7 +351,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets a value indicating whether anything but white space is typed in the message box, which offers saving it; without text the message box offers loading a saved input instead.
+    /// Gets a value indicating whether anything but white space is typed in the message box, which offers saving it as a draft; without text the message box offers loading a draft instead.
     /// </summary>
     public bool HasText => !string.IsNullOrWhiteSpace(input);
 
@@ -346,22 +361,96 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public ObservableCollection<SavedInput> SavedInputs { get; } = [];
 
     /// <summary>
-    /// Gets a value indicating whether the list of saved inputs is shown.
+    /// Gets the saved inputs that are not queued, which the list of drafts shows.
+    /// </summary>
+    public ObservableCollection<SavedInput> Drafts { get; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether the list of drafts is shown.
     /// </summary>
     public bool IsSavedInputsOpen
     {
         get => isSavedInputsOpen;
         private set
         {
-            if (Set(ref isSavedInputsOpen, value) && !value)
+            if (Set(ref isSavedInputsOpen, value))
             {
-                DeletingInput = null;
+                if (value)
+                {
+                    IsUpNextOpen = false;
+                }
+                else
+                {
+                    DeletingInput = null;
+                }
             }
         }
     }
 
     /// <summary>
-    /// Gets the saved input the user is asked whether to delete, or <see langword="null" /> when no such question shows.
+    /// Gets or sets a value indicating whether the list of what is up next is shown.
+    /// </summary>
+    public bool IsUpNextOpen
+    {
+        get => isUpNextOpen;
+        set
+        {
+            if (Set(ref isUpNextOpen, value))
+            {
+                if (value)
+                {
+                    IsSavedInputsOpen = false;
+                }
+                else
+                {
+                    DeletingInput = null;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets what the workspace is going to run by itself, as the server last told.
+    /// </summary>
+    public Agenda Agenda => agenda;
+
+    /// <summary>
+    /// Gets the items of the agenda as the Up Next list shows them, in the order they run.
+    /// </summary>
+    public ObservableCollection<AgendaRowViewModel> UpNext { get; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether nothing is up next.
+    /// </summary>
+    public bool HasNoUpNext => UpNext.Count == 0;
+
+    /// <summary>
+    /// Gets a value indicating whether the user stopped the work that runs by itself, which the status line offers to resume.
+    /// </summary>
+    public bool IsStopped => agenda.IsStopped;
+
+    /// <summary>
+    /// Gets a value indicating whether the status line shows above the conversation.
+    /// </summary>
+    public bool HasStatusLine => agenda.Status is not null || IsStopped || HasLimitPause || IsQueued;
+
+    /// <summary>
+    /// Gets what the status line says: what the server says, or a short word for what its buttons are about while the server says nothing.
+    /// </summary>
+    public string StatusText => agenda.Status ?? (IsStopped ? "Stopped" : HasLimitPause ? "Paused at the usage limit" : queue is { } waiting ? $"Waiting for Local AI, position {waiting.Position}" : string.Empty);
+
+    /// <summary>
+    /// Gets a value indicating whether the status line has any button.
+    /// </summary>
+    public bool HasStatusButtons => IsStopped || IsRetrying || HasLimitPause || IsQueued;
+
+    /// <summary>
+    /// Gets a value indicating whether work waits to be tried again, which the status line offers to stop.
+    /// </summary>
+    public bool IsRetrying => !IsStopped && agenda.Items.Any(item => item.Kind == AgendaKind.Retry);
+
+    /// <summary>
+    /// Gets the draft or queued input the user is asked whether to delete, or <see langword="null" /> when no such question shows.
     /// </summary>
     public SavedInput? DeletingInput
     {
@@ -378,7 +467,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets a value indicating whether the question whether to delete a saved input shows.
+    /// Gets a value indicating whether the question whether to delete a draft or queued input shows.
     /// </summary>
     public bool IsAskingDelete => deletingInput is not null;
 
@@ -390,23 +479,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         null => string.Empty,
         { IsQueued: true } => "Delete this queued input? It will not be sent.",
         { IsReady: false } => "Delete this recording? Its text is not kept.",
-        _ => "Delete this saved input? This cannot be undone."
+        _ => "Delete this draft? This cannot be undone."
     };
 
     /// <summary>
     /// Gets the text of <see cref="DeletingInput" />.
     /// </summary>
     public string DeletePreview => deletingInput?.Text ?? string.Empty;
-
-    /// <summary>
-    /// Gets a value indicating whether queued inputs are to be sent, so the work of the workspace is not over yet.
-    /// </summary>
-    public bool HasActiveQueued => SavedInputs.Any(saved => saved is { IsQueued: true, IsPaused: false });
-
-    /// <summary>
-    /// Gets a value indicating whether queued inputs are paused, which the list explains.
-    /// </summary>
-    public bool HasPausedQueued => SavedInputs.Any(saved => saved is { IsQueued: true, IsPaused: true });
 
     /// <summary>
     /// Gets whether the changes of the workspace are committed once the work of the AI is over.
@@ -435,12 +514,17 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool IsCommitting => autoCommit == AutoCommitState.Committing;
 
     /// <summary>
+    /// Gets what the button about committing the current work says.
+    /// </summary>
+    public string AutoCommitText => IsAutoCommitOn ? "When Done: Commit" : "When Done: Keep Changes";
+
+    /// <summary>
     /// Gets what the auto commit button says it does.
     /// </summary>
     public string AutoCommitTip => IsAutoCommitOn ? "The changes are committed when the current work is done. Press to turn auto commit off." : "Auto commit the changes when the current work is done";
 
     /// <summary>
-    /// Gets whether the changes are to be committed after the work of the saved input that was loaded into the message box, which it took with it, or <see langword="null" /> when the box holds nothing that was loaded.
+    /// Gets whether the changes are to be committed after the work of the draft or queued input that was loaded into the message box, which it took with it, or <see langword="null" /> when the box holds nothing that was loaded.
     /// </summary>
     public bool? LoadedAutoCommit
     {
@@ -452,14 +536,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 _ = PersistAutoCommit(value);
                 Raise(nameof(HasLoadedInput));
                 Raise(nameof(IsLoadedAutoCommitOn));
-                Raise(nameof(ShowsLoadedAutoCommitOn));
-                Raise(nameof(LoadedAutoCommitText));
             }
         }
     }
 
     /// <summary>
-    /// Gets a value indicating whether the message box holds a saved input that was loaded into it.
+    /// Gets a value indicating whether the message box holds a draft or queued input that was loaded into it.
     /// </summary>
     public bool HasLoadedInput => loadedAutoCommit is not null;
 
@@ -469,17 +551,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool IsLoadedAutoCommitOn => loadedAutoCommit == true;
 
     /// <summary>
-    /// Gets a value indicating whether the button above the message box shows as on: the loaded input is to be committed after, or the current work is already, which it would be committed with.
-    /// </summary>
-    public bool ShowsLoadedAutoCommitOn => IsLoadedAutoCommitOn || IsAutoCommitOn;
-
-    /// <summary>
-    /// Gets what the button that turns auto commit of the loaded input on and off says, which cannot be pressed while the current work is to be committed.
-    /// </summary>
-    public string LoadedAutoCommitText => IsAutoCommitOn ? "Auto Commit Already On for Current Work" : IsLoadedAutoCommitOn ? "Auto Commit This Input: On" : "Auto Commit This Input: Off";
-
-    /// <summary>
-    /// Gets how many queued inputs there are, paused or not, which the button of the saved inputs shows.
+    /// Gets how many queued inputs there are, which the Up Next button shows.
     /// </summary>
     public int QueuedCount => SavedInputs.Count(saved => saved.IsQueued);
 
@@ -489,24 +561,34 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool HasQueuedInputs => QueuedCount > 0;
 
     /// <summary>
-    /// Gets how many queued inputs are to be sent.
+    /// Gets the command that lets the work that runs by itself go on after it was stopped.
     /// </summary>
-    public int ActiveQueuedCount => SavedInputs.Count(saved => saved is { IsQueued: true, IsPaused: false });
+    public AsyncCommand ResumeAutomationCommand { get; }
 
     /// <summary>
-    /// Gets what the banner of a paused queue says.
+    /// Gets the command that stops the work that waits to be tried again, so it is not tried again.
     /// </summary>
-    public string QueuePausedText => $"Queue paused ({SavedInputs.Count(saved => saved is { IsQueued: true, IsPaused: true })})";
+    public AsyncCommand StopRetryingCommand { get; }
 
     /// <summary>
-    /// Gets the command that resumes the paused queued inputs.
+    /// Gets the command that shows or hides the list of what is up next.
     /// </summary>
-    public AsyncCommand ResumeQueueCommand { get; }
+    public AsyncCommand ToggleUpNextCommand { get; }
 
     /// <summary>
-    /// Gets the command that turns auto commit of the loaded input on or off.
+    /// Gets the command that takes the queued input of the <see cref="AgendaRowViewModel" /> given as its parameter into the message box.
     /// </summary>
-    public AsyncCommand ToggleLoadedAutoCommitCommand { get; }
+    public AsyncCommand EditQueuedCommand { get; }
+
+    /// <summary>
+    /// Gets the command that turns committing after the <see cref="AgendaRowViewModel" /> given as its parameter on or off.
+    /// </summary>
+    public AsyncCommand ToggleAgendaCommitCommand { get; }
+
+    /// <summary>
+    /// Gets the command that asks whether to delete the queued input of the <see cref="AgendaRowViewModel" /> given as its parameter.
+    /// </summary>
+    public AsyncCommand AskDeleteQueuedCommand { get; }
 
     /// <summary>
     /// Gets the command that turns auto commit of the <see cref="SavedInput" /> given as its parameter on or off.
@@ -539,9 +621,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public AsyncCommand CancelDeleteSavedInputCommand { get; }
 
     /// <summary>
-    /// Gets a value indicating whether no input is saved, which the list says in place of its entries.
+    /// Gets a value indicating whether there is no draft, which the list says in place of its entries.
     /// </summary>
-    public bool HasNoSavedInputs => SavedInputs.Count == 0;
+    public bool HasNoDrafts => Drafts.Count == 0;
 
     /// <summary>
     /// Gets the automatic pause the AI of the workspace is in because a usage window of its provider reached the maximum of the global settings, or <see langword="null" /> when it is in none.
@@ -555,6 +637,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 Raise(nameof(HasLimitPause));
                 Raise(nameof(LimitPauseText));
+                RaiseStatus();
             }
         }
     }
@@ -604,7 +687,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
             if (value is { Text.Length: > 0 })
             {
-                // The banner shows a prompt that has to wait; it is a message once its work starts.
+                // A prompt that has to wait is shown by what is up next; it is a message once its work starts.
                 MessageParts waiting = MessageParts.Parse(value.Text);
 
                 foreach (ChatMessage echo in Messages.Where(message => message.IsPending && Holds(waiting, MessageParts.Parse(message.Text))).ToList())
@@ -616,9 +699,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             if (Set(ref queue, value))
             {
                 Raise(nameof(IsQueued));
-                Raise(nameof(QueueText));
-                Raise(nameof(QueuedPrompt));
-                Raise(nameof(HasQueuedPrompt));
+                RaiseStatus();
             }
         }
     }
@@ -629,34 +710,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public bool IsQueued => queue is not null;
 
     /// <summary>
-    /// Gets what the banner of the waiting work says: its place in the queue and what it waits for.
-    /// </summary>
-    public string QueueText => queue is null ? string.Empty : $"Queued (position {queue.Position}){(queue.Running.Count > 0 ? $", waiting for {string.Join(", ", queue.Running)}" : string.Empty)}.";
-
-    /// <summary>
-    /// Gets the text of the waiting prompt, with the names of its attachments, or an empty text when what waits is not a prompt.
-    /// </summary>
-    public string QueuedPrompt
-    {
-        get
-        {
-            if (queue is not { Text.Length: > 0 })
-            {
-                return string.Empty;
-            }
-
-            MessageParts parts = MessageParts.Parse(queue.Text);
-            return string.Join('\n', new[] { parts.Body, string.Join(", ", parts.Files.Select(file => file.Name)) }.Where(part => part.Length > 0));
-        }
-    }
-
-    /// <summary>
-    /// Gets a value indicating whether what waits is a prompt, whose text is shown.
-    /// </summary>
-    public bool HasQueuedPrompt => queue is { Text.Length: > 0 };
-
-    /// <summary>
-    /// Gets the command that removes the waiting work. A prompt this client sent comes back to the message box without replacing what is typed there; one sent from elsewhere is kept as a saved input.
+    /// Gets the command that removes the waiting work. A prompt this client sent comes back to the message box without replacing what is typed there; one sent from elsewhere is kept as a draft.
     /// </summary>
     public AsyncCommand CancelQueuedCommand { get; }
 
@@ -666,17 +720,17 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     public string LimitPauseText => limitPause is { } pause ? $"Paused automatically: the {pause.Window} usage window is at {pause.PercentUsed:0.#}%, at or past the maximum of {pause.MaxPercent:0.#}%. The AI resumes once it is below the maximum; the server checks again at {pause.NextCheckAt.ToLocalTime():t}." : string.Empty;
 
     /// <summary>
-    /// Gets a value indicating whether the server holds at least one saved input of the workspace, which the load button shows with a blue border.
+    /// Gets a value indicating whether the workspace has at least one draft, which the button of the drafts shows with a blue border.
     /// </summary>
-    public bool HasSavedInputs => SavedInputs.Count > 0;
+    public bool HasDrafts => Drafts.Count > 0;
 
     /// <summary>
-    /// Gets the command that saves <see cref="Input" /> as a saved input on the server and clears it; it is available while text is typed.
+    /// Gets the command that saves <see cref="Input" /> as a draft on the server and clears it; it is available while text is typed.
     /// </summary>
     public AsyncCommand SaveInputCommand { get; }
 
     /// <summary>
-    /// Gets the command that shows or hides the list of saved inputs.
+    /// Gets the command that shows or hides the list of drafts.
     /// </summary>
     public AsyncCommand ToggleSavedInputsCommand { get; }
 
@@ -830,6 +884,24 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="message">The failure.</param>
     public void Show(string message) => Error = message;
+
+    /// <summary>
+    /// Reads what is up next again, for a decision that cannot wait until the server tells of a change; what is known stays when it cannot be read.
+    /// </summary>
+    /// <returns>A task that completes once read.</returns>
+    public async Task ReadAgenda()
+    {
+        try
+        {
+            if (await connection.GetAgenda(workspaceId, CancellationToken.None) is { } read)
+            {
+                ShowAgenda(read);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
+        {
+        }
+    }
 
     /// <summary>
     /// Loads the newest chunk of the stored conversation and starts following it live.
@@ -1117,6 +1189,8 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         ChatHistory? history = null;
         IReadOnlyList<SavedInput>? saved = null;
         await Attempt(async () => saved = await connection.GetSavedInputs(workspaceId, CancellationToken.None));
+        Agenda? next = null;
+        await Attempt(async () => next = await connection.GetAgenda(workspaceId, CancellationToken.None));
 
         if (await Attempt(async () => history = await connection.GetHistory(workspaceId, null, ChunkMessages, ChunkCharacters, CancellationToken.None)))
         {
@@ -1158,13 +1232,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 Queue = waiting;
             }
 
-            // Queued inputs still to be sent are shown before the state and none left only after it, so neither step looks like the end of the work.
-            bool pending = saved?.Any(entry => entry is { IsQueued: true, IsPaused: false }) == true;
-
-            if (pending)
+            // Work still to come is shown before the state and that none is left only after it, so neither step looks like the end of the work.
+            if (next?.IsPending == true)
             {
-                ShowSavedInputs(saved!);
-                saved = null;
+                ShowAgenda(next);
+                next = null;
             }
 
             ShowWorkState(history.AutoCommit, history.Working);
@@ -1180,6 +1252,11 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         if (saved is not null)
         {
             ShowSavedInputs(saved);
+        }
+
+        if (next is not null)
+        {
+            ShowAgenda(next);
         }
     }
 
@@ -1309,6 +1386,9 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             case RemoteEventKind.SavedInputsChanged when remoteEvent.SavedInputs is { } saved:
                 ShowSavedInputs(saved);
                 break;
+            case RemoteEventKind.AgendaChanged when remoteEvent.Agenda is { } next:
+                ShowAgenda(next);
+                break;
         }
     }
 
@@ -1318,18 +1398,73 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         Raise(nameof(IsAutoCommitOn));
         Raise(nameof(IsCommitting));
         Raise(nameof(AutoCommitTip));
-        Raise(nameof(ShowsLoadedAutoCommitOn));
-        Raise(nameof(LoadedAutoCommitText));
-        ToggleLoadedAutoCommitCommand.Refresh();
+        Raise(nameof(AutoCommitText));
+    }
+
+    private void RaiseStatus()
+    {
+        Raise(nameof(HasStatusLine));
+        Raise(nameof(StatusText));
+        Raise(nameof(HasStatusButtons));
+        Raise(nameof(IsRetrying));
+    }
+
+    // Rows that stay as they are keep their buttons, which would otherwise be made again with every change of another.
+    private void ShowAgenda(Agenda next)
+    {
+        agenda = next;
+        List<AgendaRowViewModel> rows = [.. next.Items.Select(item => new AgendaRowViewModel(item))];
+
+        while (UpNext.Count > rows.Count)
+        {
+            UpNext.RemoveAt(UpNext.Count - 1);
+        }
+
+        for (int index = 0; index < rows.Count; index++)
+        {
+            if (index == UpNext.Count)
+            {
+                UpNext.Add(rows[index]);
+            }
+            else if (UpNext[index] != rows[index])
+            {
+                UpNext[index] = rows[index];
+            }
+        }
+
+        Raise(nameof(HasNoUpNext));
+        Raise(nameof(IsStopped));
+        RaiseStatus();
+        Raise(nameof(Agenda));
+    }
+
+    private SavedInput? QueuedInputOf(object? parameter) => parameter is AgendaRowViewModel { IsQueued: true } row ? SavedInputs.FirstOrDefault(saved => saved.Id == row.Item.Id) : null;
+
+    private async Task ToggleAgendaCommit(object? parameter)
+    {
+        // The list is left to what the server tells, since it may run the item meanwhile.
+        if (parameter is AgendaRowViewModel { HasCommitChoice: true } row)
+        {
+            Guid id = row.Item.Id!.Value;
+            await Attempt(() => row.IsQueued
+                ? connection.SetSavedInputAutoCommit(workspaceId, id, !row.IsCommitOn, CancellationToken.None)
+                : connection.SetBringInCommit(workspaceId, id, !row.IsCommitOn, CancellationToken.None));
+        }
     }
 
     private void ShowSavedInputs(IReadOnlyList<SavedInput> saved)
     {
         SavedInputs.Clear();
+        Drafts.Clear();
 
         foreach (SavedInput entry in saved)
         {
             SavedInputs.Add(entry);
+
+            if (!entry.IsQueued)
+            {
+                Drafts.Add(entry);
+            }
         }
 
         // The question is dropped with what it asks about, which another client or the queue may have taken.
@@ -1338,14 +1473,10 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             DeletingInput = null;
         }
 
-        Raise(nameof(HasNoSavedInputs));
-        Raise(nameof(HasSavedInputs));
-        Raise(nameof(HasActiveQueued));
-        Raise(nameof(HasPausedQueued));
+        Raise(nameof(HasNoDrafts));
+        Raise(nameof(HasDrafts));
         Raise(nameof(QueuedCount));
         Raise(nameof(HasQueuedInputs));
-        Raise(nameof(ActiveQueuedCount));
-        Raise(nameof(QueuePausedText));
     }
 
     private async Task SaveInput()
@@ -1388,6 +1519,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         }
 
         IsSavedInputsOpen = false;
+        IsUpNextOpen = false;
 
         if (worked)
         {
@@ -1634,12 +1766,12 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
     }
 
     // Resuming gives the workspace work like queuing does, so its end is waited for in the same way.
-    private async Task ResumeQueue()
+    private async Task ResumeAutomation()
     {
         Notice = null;
         PromptStarted?.Invoke();
 
-        if (!await Attempt(() => connection.ResumeQueue(workspaceId, CancellationToken.None)))
+        if (!await Attempt(() => connection.ResumeAutomation(workspaceId, CancellationToken.None)))
         {
             PromptFailed?.Invoke();
         }
@@ -1651,8 +1783,13 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         return Attempt(() => connection.SetAutoCommit(workspaceId, wanted, CancellationToken.None));
     }
 
+    /// <summary>
+    /// Queues what is typed and attached.
+    /// </summary>
+    /// <param name="commit">Whether the changes are committed after its work.</param>
+    /// <returns>A task that completes once it is queued, or has come back to the message box with the failure shown.</returns>
     // Queuing gives the workspace work like sending does, only that the server sends it when the work before it is over.
-    private async Task QueueInput()
+    public async Task QueueTyped(bool commit)
     {
         string text = input.Trim();
         List<ChatAttachment> sending = [.. Attachments];
@@ -1672,7 +1809,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
                 paths.Add(attachment.ServerPath ?? await connection.UploadAttachment(workspaceId, attachment.Name, attachment.Data, CancellationToken.None));
             }
 
-            await connection.QueueInput(workspaceId, Written(text, paths), loaded ?? true, CancellationToken.None);
+            await connection.QueueInput(workspaceId, Written(text, paths), commit, CancellationToken.None);
         }))
         {
             PromptFailed?.Invoke();
@@ -1785,14 +1922,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
             {
                 submitted.Add(MessageParts.Parse(prompt));
 
-                if (loaded == true)
-                {
-                    await connection.PromptToCommit(workspaceId, prompt, false, CancellationToken.None);
-                }
-                else
-                {
-                    await connection.Prompt(workspaceId, prompt, CancellationToken.None);
-                }
+                await connection.Prompt(workspaceId, prompt, CancellationToken.None);
             }
             catch (RemoteException exception) when (exception.OverLimit is { } pause)
             {
@@ -1944,7 +2074,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
         PromptStarted?.Invoke();
         ChatMessage echo = Echo(ask.Prompt);
 
-        if (!await Attempt(() => ask.Loaded == true ? connection.PromptToCommit(workspaceId, ask.Prompt, true, CancellationToken.None) : connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
+        if (!await Attempt(() => connection.PromptOverLimit(workspaceId, ask.Prompt, CancellationToken.None)))
         {
             Withdraw(echo);
             PutBack(cleared ? ask.Typed! : string.Empty, taken);
@@ -1983,7 +2113,7 @@ internal sealed class ChatViewModel : ViewModelBase, IDisposable
 
         if (!own)
         {
-            Notice = "The queued prompt was kept as a saved input.";
+            Notice = "The waiting prompt was kept as a draft.";
             return;
         }
 

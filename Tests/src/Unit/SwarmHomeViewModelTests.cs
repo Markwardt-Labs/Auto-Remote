@@ -40,8 +40,8 @@ public sealed class SwarmHomeViewModelTests
     {
         tasks = [Task(SwarmTaskState.Running), Task(SwarmTaskState.Done)];
         HomeViewModel home = await Started();
-        (Guid? Task, Guid? Workspace)? requested = null;
-        home.SwarmRequested += (task, workspace) => requested = (task, workspace);
+        List<Guid?> requested = [];
+        home.SwarmRequested += requested.Add;
 
         DrawerEntry entry = Assert.Single(home.Entries, entry => entry.IsTask);
         Assert.Equal(("↳ fix tests", "Running - on box", 1), (entry.Text, entry.Detail, entry.Depth));
@@ -49,7 +49,7 @@ public sealed class SwarmHomeViewModelTests
 
         home.SelectedEntry = entry;
 
-        Assert.Equal((tasks[0].Id, app.Id), requested);
+        Assert.Equal([tasks[0].Id], requested);
         Assert.Equal(app.Id, home.Selected?.Id);
 
         tasks = [tasks[0] with { State = SwarmTaskState.Cancelled }];
@@ -57,7 +57,7 @@ public sealed class SwarmHomeViewModelTests
 
         Assert.DoesNotContain(home.Entries, row => row.IsTask);
         home.SwarmCommand.Execute(null);
-        Assert.Equal(((Guid?)null, (Guid?)app.Id), requested);
+        Assert.Equal([tasks[0].Id, null], requested);
     }
 
     [Fact]
@@ -152,20 +152,72 @@ public sealed class SwarmHomeViewModelTests
     }
 
     [Fact]
+    public async Task TasksThatAreBroughtInAndRemovedWhileThatWorkRunsLeaveTheWaitToIt()
+    {
+        HomeViewModel home = await Started();
+        home.Active!.Chat.Input = "split it up";
+        home.Active.Chat.SendCommand.Execute(null);
+        Working(true);
+        tasks = [Task(SwarmTaskState.Running)];
+        Changed();
+        Working(false);
+
+        // The results come back, and the task is gone as soon as the AI confirms it, in the middle of that turn.
+        tasks = [tasks[0] with { State = SwarmTaskState.Done }];
+        Changed();
+        Working(true);
+        tasks = [];
+        Changed();
+
+        Assert.True(home.Active.NotifyWhenReady);
+        keeper.Verify(x => x.Release(It.IsAny<Guid>()), Times.Never);
+        Working(false);
+
+        notifier.Verify(x => x.Notify(app.Id, "app"), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public async Task ATaskDelegatedByHandHoldsTheReadyNotificationOnlyWhenItIsToBeBroughtIn(bool bringIn, bool held)
+    {
+        tasks = [Task(SwarmTaskState.Running, true) with { BringIn = bringIn }];
+        HomeViewModel home = await Started();
+        home.ToggleNotifyCommand.Execute(null);
+        Working(true);
+
+        Working(false);
+
+        notifier.Verify(x => x.Notify(app.Id, "app"), held ? Times.Never() : Times.Once());
+
+        if (held)
+        {
+            // One that fails brings nothing in, which ends the wait.
+            tasks = [tasks[0] with { State = SwarmTaskState.Failed }];
+            Changed();
+
+            notifier.Verify(x => x.Notify(app.Id, "app"), Times.Once);
+        }
+    }
+
+    [Fact]
     public async Task ADelegatedWorkspaceClosesWhatTheServerWouldRefuseButCanStillBeDeletedAndSaysWhatStopDoes()
     {
         HomeViewModel home = await Started();
 
         Assert.True(home.Active!.Chat.TakesTyping);
-        Assert.True(home.Active.OpenLoopCommand.CanExecute(null));
+        Assert.True(home.Active.OpenSendOptionsCommand.CanExecute(null));
         Assert.Equal(("Stop the work and keep what it did", false), (home.Active.StopTip, home.HasStopNote));
 
         home.Selected = remote;
 
         Assert.False(home.Active.Chat.TakesTyping);
         Assert.False(home.Active.Chat.ToggleSavedInputsCommand.CanExecute(null));
-        Assert.False(home.Active.OpenLoopCommand.CanExecute(null));
+        Assert.False(home.Active.OpenSendOptionsCommand.CanExecute(null));
         Assert.False(home.Active.Settings.CanEdit);
+        home.Sessions.NewCommand.Execute(null);
+        Assert.False(home.Active.SendOptions.IsOpen);
+        Assert.Equal("This workspace runs a task delegated by laptop, so no session can be made of it.", home.Active.Chat.Error);
         Assert.False(home.BeginRenameCommand.CanExecute(null));
         Assert.False(home.MoveWorkspaceToFolderCommand.CanExecute(null));
         Assert.True(home.BeginDeleteCommand.CanExecute(null));

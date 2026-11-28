@@ -30,14 +30,14 @@ internal interface IRequestHandler
 }
 
 /// <inheritdoc />
-internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm, ISideSessions sideSessions, ISideIntegrations integrations, ISideSessionRepository sideRepository, IResourceMonitor resources, IFollowUps followUps) : IRequestHandler
+internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowser folders, IWorkspaceFileBrowser files, IGitService git, IWorkspaceVersioning versioning, ISavedInputs savedInputs, IErrorHistory errors, IWindowGuard guard, IPromptService prompts, IDiagramService diagrams, IScriptRunner scripts, IUsageService usage, IWorkspaceActivity activity, IWorkspaceControl control, ISpeechService speech, IPrompterHost host, IWorkspaceLoops loops, IWorkspaceWatcher watcher, IServerUpdater updater, ILog log, IWorkQueue queue, ISwarmService swarm, ISideSessions sideSessions, ISideIntegrations integrations, ISideSessionRepository sideRepository, IResourceMonitor resources, IFollowUps followUps, IActivityLog journal, IAgendaService agenda) : IRequestHandler
 {
     private readonly ConcurrentDictionary<object, IReadOnlyList<IDisposable>> watches = new();
 
     // A delegated task runs code another server sent, under permissions its sender was given, so its workspace takes nothing else: no further prompts or settings, and no git, which would run whatever configuration the AI wrote into a repository it made there.
     private readonly HashSet<RemoteCommand> refusedWhenDelegated =
     [
-        RemoteCommand.Prompt, RemoteCommand.QueueInput, RemoteCommand.SetAutoCommit, RemoteCommand.SetSavedInputAutoCommit, RemoteCommand.ResumeQueue, RemoteCommand.UploadAttachment, RemoteCommand.StartLoop, RemoteCommand.CreateSideSession, RemoteCommand.RenameWorkspace, RemoteCommand.MoveWorkspaceToFolder, RemoteCommand.SetWorkspaceSettings, RemoteCommand.GenerateCommitMessage, RemoteCommand.RunScript, RemoteCommand.DelegateTask,
+        RemoteCommand.Prompt, RemoteCommand.QueueInput, RemoteCommand.SetAutoCommit, RemoteCommand.SetSavedInputAutoCommit, RemoteCommand.ResumeAutomation, RemoteCommand.SetBringInCommit, RemoteCommand.UploadAttachment, RemoteCommand.StartLoop, RemoteCommand.CreateSideSession, RemoteCommand.RenameWorkspace, RemoteCommand.MoveWorkspaceToFolder, RemoteCommand.SetWorkspaceSettings, RemoteCommand.GenerateCommitMessage, RemoteCommand.RunScript, RemoteCommand.DelegateTask,
         RemoteCommand.GetGitChanges, RemoteCommand.GetGitHistory, RemoteCommand.GetGitCommitChanges, RemoteCommand.GetGitDiff, RemoteCommand.GetGitBranchState, RemoteCommand.GitCommit, RemoteCommand.GitReset, RemoteCommand.GitCreateBranch, RemoteCommand.GitCreateTag, RemoteCommand.GitSetRemote, RemoteCommand.GitCheckout, RemoteCommand.GitDeleteBranch, RemoteCommand.GitDeleteTag, RemoteCommand.GitSquash, RemoteCommand.GitRebase, RemoteCommand.GitMerge, RemoteCommand.GitFetch, RemoteCommand.GitSync, RemoteCommand.GitSetIdentity
     ];
 
@@ -72,10 +72,14 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         await swarm.Open(config, cancellation);
         await sideSessions.Open(config, cancellation);
         await integrations.Open(cancellation);
+        journal.Open(config.DataFolder);
         // Before any restored work starts, so work that is to be committed is.
-        await followUps.Open(cancellation);
+        await followUps.Open(config.DataFolder, cancellation);
+        await swarm.Automate();
+        await loops.Open(config.DataFolder, cancellation);
         // Only now, so a request to integrate that was restored with the queue is taken out before it can be sent.
         queue.Resume();
+        agenda.Open(cancellation);
         resources.Open(cancellation);
     }
 
@@ -123,7 +127,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             {
                 throw new RequestException(side.State switch
                 {
-                    SideSessionState.Integrating => "The side session is being integrated. Cancel the integration to use it again.",
+                    SideSessionState.Integrating => "The side session is being brought into main. Cancel Bring In to use it again.",
                     SideSessionState.Creating => "The side session is still being set up.",
                     _ => "The side session is being removed."
                 });
@@ -136,7 +140,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
 
             if (refusedInSideSessions.Contains(request.Command))
             {
-                throw new RequestException("Side sessions cannot switch or change branches, tags or remotes. Integrate the session and do this in the main workspace.");
+                throw new RequestException("Side sessions cannot switch or change branches, tags or remotes. Bring the session into main and do this there.");
             }
 
             // The clients sync on their own now and then; a side session's branch is never pulled or pushed.
@@ -160,7 +164,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         switch (request.Command)
         {
             case RemoteCommand.CreateSideSession:
-                return new RemoteResponse { Id = 0, Workspace = await sideSessions.Create(RequireWorkspace(request), Require(request.Name, "name"), request.Start ?? throw new RequestException("The request needs what the session starts from."), request.Text, cancellation) };
+                return new RemoteResponse { Id = 0, Workspace = await sideSessions.Create(RequireWorkspace(request), Require(request.Name, "name"), request.Start ?? throw new RequestException("The request needs what the session starts from."), request.Text, request.BringIn ?? !string.IsNullOrWhiteSpace(request.Text), cancellation) };
             case RemoteCommand.RenameSideSession:
                 return new RemoteResponse { Id = 0, Workspace = await sideSessions.Rename(RequireWorkspace(request), Require(request.Name, "name"), cancellation) };
             case RemoteCommand.DeleteSideSession:
@@ -265,7 +269,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 watcher.Forget(deleting.Id);
                 await swarm.Forget(deleting.Id);
                 await queue.Cancel(deleting.Id);
+                await loops.Cancel(deleting.Id);
                 await workspaces.Delete(deleting.Id, request.DeleteFolder, cancellation);
+                journal.Delete(deleting.Id);
                 await prompts.Forget(deleting, request.DeleteFolder);
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.ListFolders:
@@ -276,23 +282,32 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return new RemoteResponse { Id = 0, History = (await prompts.History(RequireWorkspace(request), request.Before, request.Limit, request.Characters, cancellation)) with { LimitPause = guard.Get(RequireWorkspace(request)), AutoCommit = followUps.Get(RequireWorkspace(request)) } };
             case RemoteCommand.QueueInput:
                 return new RemoteResponse { Id = 0, SavedInputs = await followUps.Queue(RequireWorkspace(request), Require(request.Text, "text"), request.AutoCommit ?? true, cancellation) };
-            case RemoteCommand.ResumeQueue:
-                await followUps.ResumeQueue(RequireWorkspace(request), cancellation);
+            case RemoteCommand.ResumeAutomation:
+                await workspaces.Get(RequireWorkspace(request), cancellation);
+                followUps.Resume(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0 };
+            case RemoteCommand.GetActivity:
+                await workspaces.Get(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, Activity = await journal.Read(RequireWorkspace(request), request.Before, request.Limit, cancellation) };
+            case RemoteCommand.GetAgenda:
+                await workspaces.Get(RequireWorkspace(request), cancellation);
+                return new RemoteResponse { Id = 0, Agenda = await agenda.Get(RequireWorkspace(request), cancellation) };
             case RemoteCommand.SetAutoCommit:
                 await workspaces.Get(RequireWorkspace(request), cancellation);
                 followUps.SetAutoCommit(RequireWorkspace(request), request.Enabled ?? throw new RequestException("The request needs enabled."));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.Prompt:
                 RequireAiInput(request);
-                return await Prompt(RequireWorkspace(request), Require(request.Text, "text"), request.IgnoreLimit == true, request.AutoCommit == true, cancellation);
+                return await Prompt(RequireWorkspace(request), Require(request.Text, "text"), request.IgnoreLimit == true, cancellation);
             case RemoteCommand.UploadAttachment:
                 // An upload only keeps a file aside, which an input that is queued may need while git works.
                 return new RemoteResponse { Id = 0, AttachmentPath = await prompts.Attach(RequireWorkspace(request), Require(request.Name, "name"), Require(request.Data, "data"), cancellation) };
             case RemoteCommand.TranscribeSavedInput:
                 return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.Transcribe(RequireWorkspace(request), Require(request.Data, "data"), cancellation) };
             case RemoteCommand.DiscardSavedInput:
-                return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.Discard(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), cancellation) };
+                IReadOnlyList<SavedInput> remaining = await savedInputs.Discard(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), cancellation);
+                followUps.Reconsider(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0, SavedInputs = remaining };
             case RemoteCommand.UpdateServer:
                 await updater.Update(cancellation);
                 return new RemoteResponse { Id = 0 };
@@ -328,10 +343,9 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.RenderDiagram:
                 return new RemoteResponse { Id = 0, Diagram = await diagrams.Render(Require(request.Text, "text"), cancellation) };
             case RemoteCommand.CancelLimitPause:
-                // Work that is not resumed does not end, so nothing follows it.
+                // Work that is not resumed does not end, so nothing follows it, and what runs by itself waits for the user.
                 await followUps.Abandon(RequireWorkspace(request));
                 guard.Cancel(RequireWorkspace(request));
-                await loops.Cancel(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.GetErrors:
                 return new RemoteResponse { Id = 0, Errors = await errors.List(RequireWorkspace(request), cancellation) };
@@ -365,8 +379,15 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 return await Swarm(() => swarm.Cancel(RequireTask(request)), cancellation);
             case RemoteCommand.RetrySwarmTask:
                 return await Swarm(() => swarm.Retry(RequireTask(request), cancellation), cancellation);
-            case RemoteCommand.ApplySwarmTask:
-                return await Swarm(async () => await swarm.Apply(RequireTask(request), cancellation), cancellation);
+            case RemoteCommand.BringInSwarmTask:
+                return await Swarm(async () => await swarm.BringIn(RequireTask(request)), cancellation);
+            case RemoteCommand.SetSwarmTaskBringIn:
+                return await Swarm(() => swarm.SetBringIn(RequireTask(request), request.Enabled ?? throw new RequestException("The request needs enabled.")), cancellation);
+            case RemoteCommand.ContinueSwarmTask:
+                return new RemoteResponse { Id = 0, Workspace = await swarm.Continue(RequireTask(request), request.Name, cancellation) };
+            case RemoteCommand.SetBringInCommit:
+                await SetBringInCommit(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs what is brought in."), request.Enabled ?? throw new RequestException("The request needs enabled."), cancellation);
+                return new RemoteResponse { Id = 0 };
             case RemoteCommand.DiscardSwarmTask:
                 return await Swarm(() => swarm.Discard(RequireTask(request), cancellation), cancellation);
             case RemoteCommand.GetQueuedWork:
@@ -379,9 +400,19 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
             case RemoteCommand.SaveInput:
                 return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.Save(RequireWorkspace(request), request.Text ?? string.Empty, request.AutoCommit ?? true, cancellation) };
             case RemoteCommand.SetSavedInputAutoCommit:
-                return new RemoteResponse { Id = 0, SavedInputs = await savedInputs.SetAutoCommit(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), request.Enabled ?? throw new RequestException("The request needs enabled."), cancellation) };
+                IReadOnlyList<SavedInput> toggled = await savedInputs.SetAutoCommit(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), request.Enabled ?? throw new RequestException("The request needs enabled."), cancellation);
+
+                if (request.Enabled == true && toggled.Any(input => input.Id == request.InputId && input.IsQueued))
+                {
+                    followUps.CommitBefore(RequireWorkspace(request));
+                }
+
+                followUps.Reconsider(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0, SavedInputs = toggled };
             case RemoteCommand.TakeSavedInput:
-                return new RemoteResponse { Id = 0, SavedInput = await savedInputs.Take(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), cancellation) };
+                SavedInput taken = await savedInputs.Take(RequireWorkspace(request), request.InputId ?? throw new RequestException("The request needs a saved input."), cancellation);
+                followUps.Reconsider(RequireWorkspace(request));
+                return new RemoteResponse { Id = 0, SavedInput = taken };
             case RemoteCommand.GenerateCommitMessage:
                 RequireReady(request);
                 return new RemoteResponse { Id = 0, CommitMessage = await versioning.CommitMessage(await WorkspaceOf(request, cancellation), cancellation) };
@@ -439,6 +470,12 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
                 await (activity.Get(RequireWorkspace(request)) == WorkspaceState.Managing ? control.Stop(RequireWorkspace(request)) : versioning.Cancel(RequireWorkspace(request)));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.StopWorkspace:
+                // With nothing under way, stopping is about work that waits to be tried again, which nothing else could end.
+                if (activity.Get(RequireWorkspace(request)) == WorkspaceState.Ready && followUps.StopRetries(RequireWorkspace(request)))
+                {
+                    return new RemoteResponse { Id = 0 };
+                }
+
                 await control.Stop(RequireWorkspace(request));
                 return new RemoteResponse { Id = 0 };
             case RemoteCommand.CancelWorkspace:
@@ -512,7 +549,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         if (request.Command is RemoteCommand.GitCheckout or RemoteCommand.GitDeleteBranch or RemoteCommand.GitSquash or RemoteCommand.GitRebase or RemoteCommand.GitMerge or RemoteCommand.GitCreateBranch or RemoteCommand.GetGitBranchState
             && new[] { request.Name, request.Base }.Any(name => name?.Trim().Replace("refs/heads/", string.Empty, StringComparison.Ordinal).StartsWith(sideRepository.BranchPrefix, StringComparison.Ordinal) == true))
         {
-            throw new RequestException("That branch belongs to a side session. Use the session itself, or integrate it.");
+            throw new RequestException("That branch belongs to a side session. Use the session itself, or bring it into main.");
         }
     }
 
@@ -521,7 +558,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
     {
         if (workspaces.Sides(id).Any(entry => entry.Side.State == SideSessionState.Integrating))
         {
-            throw new RequestException("A side session is being integrated. Wait for it to finish or cancel it first.");
+            throw new RequestException("A side session is being brought in. Wait for it to finish or cancel it first.");
         }
     }
 
@@ -566,7 +603,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         };
     }
 
-    private async Task<RemoteResponse> Prompt(Guid id, string text, bool ignoreLimit, bool autoCommit, CancellationToken cancellation)
+    private async Task<RemoteResponse> Prompt(Guid id, string text, bool ignoreLimit, CancellationToken cancellation)
     {
         if (ignoreLimit)
         {
@@ -578,29 +615,33 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
         }
 
         WorkTicket ticket;
-        // Turned on before the work starts, so work that ends at once is committed too.
-        bool armed = autoCommit && followUps.Arm(id);
 
         try
         {
             ticket = await queue.Submit(id, text, WorkSource.Direct, cancellation);
         }
-        catch (Exception exception)
+        catch (RequestException) when (ignoreLimit)
         {
-            if (armed)
-            {
-                followUps.Disarm(id);
-            }
-
-            if (ignoreLimit && exception is RequestException)
-            {
-                guard.Unexempt(id);
-            }
-
+            guard.Unexempt(id);
             throw;
         }
 
         return new RemoteResponse { Id = 0, Queue = ticket.Queued ? queue.Get(id) : null };
+    }
+
+    // What waits to be brought into a workspace is a side session of it or the result of a task it delegated.
+    private async Task SetBringInCommit(Guid workspaceId, Guid id, bool commit, CancellationToken cancellation)
+    {
+        await workspaces.Get(workspaceId, cancellation);
+
+        if (workspaces.Sides(workspaceId).Any(entry => entry.Id == id))
+        {
+            await integrations.SetCommit(id, commit);
+        }
+        else
+        {
+            await swarm.SetBringInCommit(workspaceId, id, commit);
+        }
     }
 
     private async Task<RemoteResponse> Swarm(Func<Task<string?>> action, CancellationToken cancellation)
@@ -717,8 +758,7 @@ internal sealed class RequestHandler(IWorkspaceManager workspaces, IFolderBrowse
 
         Note("capability", before.Capability, after.Capability);
         Note("effort", before.Effort, after.Effort);
-        Note("shell", before.IsShellAllowed, after.IsShellAllowed);
-        Note("files outside the workspace", before.IsSystemAccessAllowed, after.IsSystemAccessAllowed);
+        Note("sandbox", before.IsSandboxed, after.IsSandboxed);
         Note("web", before.IsWebAllowed, after.IsWebAllowed);
         Note("images", before.IsImageGenerationAllowed, after.IsImageGenerationAllowed);
         Note("delegation", before.IsDelegationAllowed, after.IsDelegationAllowed);

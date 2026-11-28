@@ -21,6 +21,11 @@ internal enum WorkspaceTab
     Script,
 
     /// <summary>
+    /// What the workspace did, and how it went.
+    /// </summary>
+    Activity,
+
+    /// <summary>
     /// The git history of the workspace.
     /// </summary>
     History,

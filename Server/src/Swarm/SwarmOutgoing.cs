@@ -81,7 +81,7 @@ internal sealed class SwarmOutgoing
     public string SnapshotCommit { get; set; } = string.Empty;
 
     /// <summary>
-    /// Gets or sets the commit the work starts from, which includes the changes of the tasks it builds on.
+    /// Gets or sets the commit the work starts from, which its changes are measured against.
     /// </summary>
     public string BaseCommit { get; set; } = string.Empty;
 
@@ -116,9 +116,39 @@ internal sealed class SwarmOutgoing
     public string? Error { get; set; }
 
     /// <summary>
-    /// Gets or sets whether its changes were applied.
+    /// Gets or sets the results of the tasks it builds on, as taken when they were all done.
     /// </summary>
-    public bool IsApplied { get; set; }
+    public List<SwarmDependency> Dependencies { get; set; } = [];
+
+    /// <summary>
+    /// Gets or sets whether its result is brought into the workspace once it is done. A task stored without it waits until the user asks.
+    /// </summary>
+    public bool BringIn { get; set; }
+
+    /// <summary>
+    /// Gets or sets whether the changes are committed after its result was brought in.
+    /// </summary>
+    public bool CommitBringIn { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets whether the user asked for its result now, without waiting for the rest of its job.
+    /// </summary>
+    public bool IsAsked { get; set; }
+
+    /// <summary>
+    /// Gets or sets the identifier the AI confirms bringing it in with, while that is under way or still to be tried again.
+    /// </summary>
+    public string? BringInId { get; set; }
+
+    /// <summary>
+    /// Gets or sets the turn that is to bring it in now.
+    /// </summary>
+    public Guid? TurnId { get; set; }
+
+    /// <summary>
+    /// Gets or sets how many times the AI was asked to bring it in.
+    /// </summary>
+    public int Deliveries { get; set; }
 
     /// <summary>
     /// Gets or sets whether the user delegated it.

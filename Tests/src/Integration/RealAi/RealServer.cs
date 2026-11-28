@@ -147,9 +147,9 @@ internal sealed class RealServer : IAsyncDisposable
         return workspace;
     }
 
-    // A new workspace has no shell, which the scenarios that have the AI run commands need.
+    // The scenarios that keep the AI to its file tools sandbox it.
     public async Task Economize(WorkspaceInfo workspace, AiEffort effort = AiEffort.Low, bool shell = true)
-        => await Connection.SetWorkspaceSettings(workspace.Id, (await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Capability = AiCapability.Fast, Effort = effort, IsShellAllowed = shell }, CancellationToken.None);
+        => await Connection.SetWorkspaceSettings(workspace.Id, (await Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { Capability = AiCapability.Fast, Effort = effort, IsSandboxed = !shell }, CancellationToken.None);
 
     public async Task Environment(Func<AiEnvironment, AiEnvironment> change)
         => await Connection.SetAiEnvironment(change(await Connection.GetAiEnvironment(CancellationToken.None)), CancellationToken.None);

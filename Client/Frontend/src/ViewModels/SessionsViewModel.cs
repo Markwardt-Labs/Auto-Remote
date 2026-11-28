@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The sessions of the workspace on screen: the list that opens from its title, and what the user is asked before one is made, renamed, integrated or deleted.
+/// The sessions of the workspace on screen: the list that opens from its title, with the tasks delegated from it, and what the user is asked before a session is renamed, brought in or deleted.
 /// </summary>
 internal sealed class SessionsViewModel : ViewModelBase
 {
@@ -9,13 +9,9 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// Initializes a new instance of the <see cref="SessionsViewModel" /> class.
     /// </summary>
     /// <param name="connection">The server.</param>
-    /// <param name="isAiWorking">Tells whether the AI of a workspace works right now.</param>
-    /// <param name="prepare">Sends what was edited of a workspace's settings before a session is made of it, or <see langword="null" /> when nothing is to be sent.</param>
-    public SessionsViewModel(IServerConnection connection, Func<Guid, bool> isAiWorking, Func<Guid, Task<bool>>? prepare = null)
+    public SessionsViewModel(IServerConnection connection)
     {
         this.connection = connection;
-        this.isAiWorking = isAiWorking;
-        this.prepare = prepare;
         ToggleCommand = new AsyncCommand(_ =>
         {
             IsOpen = !isOpen;
@@ -56,7 +52,17 @@ internal sealed class SessionsViewModel : ViewModelBase
 
             return Task.CompletedTask;
         });
-        NewCommand = new AsyncCommand(_ => BeginNew());
+        NewCommand = new AsyncCommand(_ =>
+        {
+            if (main is not null)
+            {
+                IsOpen = false;
+                NewRequested?.Invoke();
+            }
+
+            return Task.CompletedTask;
+        });
+        OpenTaskCommand = new AsyncCommand(parameter => parameter is SwarmTaskViewModel row ? OpenTask(row.Task) : Task.CompletedTask, null, false);
         RenameCommand = new AsyncCommand(entry => Begin(SessionDialog.Rename, entry as SessionEntry));
         DeleteCommand = new AsyncCommand(entry => Begin(SessionDialog.Delete, entry as SessionEntry));
         IntegrateCommand = new AsyncCommand(entry => Begin(SessionDialog.Integrate, entry as SessionEntry));
@@ -73,10 +79,6 @@ internal sealed class SessionsViewModel : ViewModelBase
     }
 
     private readonly IServerConnection connection;
-
-    private readonly Func<Guid, bool> isAiWorking;
-
-    private readonly Func<Guid, Task<bool>>? prepare;
 
     // Counts the dialogs, so what a slow request ends with is not taken for the one on screen by then.
     private int turn;
@@ -99,9 +101,7 @@ internal sealed class SessionsViewModel : ViewModelBase
 
     private string name = string.Empty;
 
-    private string firstTask = string.Empty;
-
-    private bool useCurrentFiles;
+    private RemoteTaskViewModel? remoteTask;
 
     /// <summary>
     /// Occurs when the user picked a session to switch to.
@@ -114,9 +114,14 @@ internal sealed class SessionsViewModel : ViewModelBase
     public event Action<Guid>? ChangesRequested;
 
     /// <summary>
-    /// Occurs when a side session was made, with whether it was given a first task.
+    /// Occurs when a side session was made to go on with a delegated task.
     /// </summary>
-    public event Action<WorkspaceInfo, bool>? Made;
+    public event Action<WorkspaceInfo>? Made;
+
+    /// <summary>
+    /// Occurs when the user asks for a new session, which Send Options describes.
+    /// </summary>
+    public event Action? NewRequested;
 
     /// <summary>
     /// Occurs when a request of a dialog that is no longer on screen failed.
@@ -132,6 +137,36 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// Gets the rows of the list, the main session first.
     /// </summary>
     public ObservableCollection<SessionEntry> Entries { get; } = [];
+
+    /// <summary>
+    /// Gets the tasks delegated from the workspace on screen, its sessions included, the oldest first.
+    /// </summary>
+    public ObservableCollection<SwarmTaskViewModel> Tasks { get; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether any task was delegated from the workspace.
+    /// </summary>
+    public bool HasTasks => Tasks.Count > 0;
+
+    /// <summary>
+    /// Gets the delegated task that is opened, or <see langword="null" />.
+    /// </summary>
+    public RemoteTaskViewModel? OpenedTask
+    {
+        get => remoteTask;
+        private set
+        {
+            if (Set(ref remoteTask, value))
+            {
+                Raise(nameof(HasTask));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gets a value indicating whether a delegated task is opened.
+    /// </summary>
+    public bool HasTask => remoteTask is not null;
 
     /// <summary>
     /// Gets or sets a value indicating whether the list is shown.
@@ -167,7 +202,6 @@ internal sealed class SessionsViewModel : ViewModelBase
                 turn++;
                 Raise(nameof(CanConfirm));
                 Raise(nameof(IsPrompting));
-                Raise(nameof(IsNew));
                 Raise(nameof(NeedsName));
                 Raise(nameof(IsDestructive));
                 Raise(nameof(DialogTitle));
@@ -190,14 +224,9 @@ internal sealed class SessionsViewModel : ViewModelBase
     public bool CanConfirm => waiting != turn;
 
     /// <summary>
-    /// Gets a value indicating whether a new session is being described.
-    /// </summary>
-    public bool IsNew => dialog == SessionDialog.New;
-
-    /// <summary>
     /// Gets a value indicating whether the dialog asks for a name.
     /// </summary>
-    public bool NeedsName => dialog is SessionDialog.New or SessionDialog.Rename;
+    public bool NeedsName => dialog == SessionDialog.Rename;
 
     /// <summary>
     /// Gets a value indicating whether confirming throws work away.
@@ -209,12 +238,11 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// </summary>
     public string DialogTitle => dialog switch
     {
-        SessionDialog.New => "New session",
         SessionDialog.Rename => "Rename session",
         SessionDialog.Delete => "Delete session?",
-        SessionDialog.Integrate => "Integrate session?",
-        SessionDialog.IntegrateWhenFinished => "Integrate When Finished?",
-        SessionDialog.CancelIntegration => "Cancel Integration?",
+        SessionDialog.Integrate => "Bring Into Main?",
+        SessionDialog.IntegrateWhenFinished => "When Done: Bring Into Main?",
+        SessionDialog.CancelIntegration => "Cancel Bring In?",
         _ => string.Empty
     };
 
@@ -225,7 +253,7 @@ internal sealed class SessionsViewModel : ViewModelBase
     {
         SessionDialog.Delete => $"\"{targetName}\" and all of its changes will be permanently discarded.",
         SessionDialog.Integrate => $"The main session's AI brings the changes of \"{targetName}\" into the main session, and the session is then permanently removed. This cannot be undone.",
-        SessionDialog.IntegrateWhenFinished => $"Once its AI marks its task complete and nothing of it runs any more, \"{targetName}\" is integrated into the main session by itself and permanently removed. This cannot be undone.",
+        SessionDialog.IntegrateWhenFinished => $"Once its work is done and nothing of it is left to run, the main session's AI brings the changes of \"{targetName}\" into the main session by itself, and the session is then permanently removed. This cannot be undone.",
         SessionDialog.CancelIntegration => "Main may already contain some of this session's changes. They will not be undone, and you may need to clean up main yourself. The AI may make a few more edits before it stops.",
         _ => string.Empty
     };
@@ -240,19 +268,18 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// </summary>
     public string ConfirmText => dialog switch
     {
-        SessionDialog.New => "Create Session",
         SessionDialog.Rename => "Rename",
         SessionDialog.Delete => "Delete",
-        SessionDialog.Integrate => "Integrate",
+        SessionDialog.Integrate => "Bring Into Main",
         SessionDialog.IntegrateWhenFinished => "Turn On",
-        SessionDialog.CancelIntegration => "Cancel Integration",
+        SessionDialog.CancelIntegration => "Cancel Bring In",
         _ => string.Empty
     };
 
     /// <summary>
     /// Gets the label of the button that closes the dialog.
     /// </summary>
-    public string DismissText => dialog == SessionDialog.CancelIntegration ? "Keep Integrating" : "Cancel";
+    public string DismissText => dialog == SessionDialog.CancelIntegration ? "Keep Bringing In" : "Cancel";
 
     /// <summary>
     /// Gets or sets the name typed for a session.
@@ -261,39 +288,6 @@ internal sealed class SessionsViewModel : ViewModelBase
     {
         get => name;
         set => Set(ref name, value);
-    }
-
-    /// <summary>
-    /// Gets or sets the work a new session starts on once it is set up.
-    /// </summary>
-    public string FirstTask
-    {
-        get => firstTask;
-        set => Set(ref firstTask, value);
-    }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether a new session starts from the files as they are, uncommitted changes included.
-    /// </summary>
-    public bool UseCurrentFiles
-    {
-        get => useCurrentFiles;
-        set
-        {
-            if (Set(ref useCurrentFiles, value))
-            {
-                Raise(nameof(UseCurrentCommit));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets a value indicating whether a new session starts from the current commit.
-    /// </summary>
-    public bool UseCurrentCommit
-    {
-        get => !useCurrentFiles;
-        set => UseCurrentFiles = !value;
     }
 
     /// <summary>
@@ -337,19 +331,24 @@ internal sealed class SessionsViewModel : ViewModelBase
     public AsyncCommand DeleteCommand { get; }
 
     /// <summary>
-    /// Gets the command that asks whether to integrate a row's session.
+    /// Gets the command that asks whether to bring a row's session into the main one.
     /// </summary>
     public AsyncCommand IntegrateCommand { get; }
 
     /// <summary>
-    /// Gets the command that asks whether to cancel the integration of a row's session.
+    /// Gets the command that asks whether to cancel bringing a row's session in.
     /// </summary>
     public AsyncCommand CancelIntegrationCommand { get; }
 
     /// <summary>
-    /// Gets the command that switches integrating a row's session once it is finished on, after asking, or off.
+    /// Gets the command that switches bringing a row's session in once its work is done on, after asking, or off.
     /// </summary>
     public AsyncCommand WhenFinishedCommand { get; }
+
+    /// <summary>
+    /// Gets the command that opens the delegated task given as its parameter, a <see cref="SwarmTaskViewModel" />.
+    /// </summary>
+    public AsyncCommand OpenTaskCommand { get; }
 
     /// <summary>
     /// Gets the command that goes ahead with the dialog.
@@ -366,14 +365,18 @@ internal sealed class SessionsViewModel : ViewModelBase
     /// </summary>
     /// <param name="workspace">The main workspace, or <see langword="null" /> when none is selected.</param>
     /// <param name="sessions">The rows, the main session first.</param>
-    public void Show(WorkspaceInfo? workspace, IReadOnlyList<SessionEntry> sessions)
+    /// <param name="delegated">The tasks delegated from the workspace and its sessions, the oldest first, or <see langword="null" /> for none.</param>
+    public void Show(WorkspaceInfo? workspace, IReadOnlyList<SessionEntry> sessions, IReadOnlyList<SwarmTaskInfo>? delegated = null)
     {
         if (workspace?.Id != main?.Id)
         {
             expanded = null;
             Dialog = SessionDialog.None;
             IsOpen = false;
+            CloseTask();
         }
+
+        ShowTasks(delegated ?? []);
 
         main = workspace;
         rows.Clear();
@@ -381,7 +384,7 @@ internal sealed class SessionsViewModel : ViewModelBase
         Build();
 
         // A question about a session that has gone, or that no longer is what it was asked about, has nothing to act on.
-        if (dialog is SessionDialog.None or SessionDialog.New)
+        if (dialog == SessionDialog.None)
         {
             return;
         }
@@ -392,6 +395,15 @@ internal sealed class SessionsViewModel : ViewModelBase
         {
             Dialog = SessionDialog.None;
         }
+    }
+
+    /// <summary>
+    /// Closes the delegated task that is opened, if any.
+    /// </summary>
+    public void CloseTask()
+    {
+        remoteTask?.Dispose();
+        OpenedTask = null;
     }
 
     private void Build()
@@ -416,21 +428,44 @@ internal sealed class SessionsViewModel : ViewModelBase
         }
     }
 
-    private Task BeginNew()
+    private void ShowTasks(IReadOnlyList<SwarmTaskInfo> delegated)
     {
-        if (main is null)
+        List<SwarmTaskViewModel> wanted = [.. delegated.Select(found => new SwarmTaskViewModel(found))];
+
+        if (!wanted.SequenceEqual(Tasks))
         {
-            return Task.CompletedTask;
+            Tasks.Clear();
+
+            foreach (SwarmTaskViewModel row in wanted)
+            {
+                Tasks.Add(row);
+            }
+
+            Raise(nameof(HasTasks));
         }
 
-        Error = null;
-        Name = string.Empty;
-        FirstTask = string.Empty;
-        // Decided as the dialog opens and left alone after that: unfinished work of a busy AI is best left behind.
-        UseCurrentFiles = !isAiWorking(main.Id);
-        Raise(nameof(UseCurrentCommit));
-        Dialog = SessionDialog.New;
-        return Task.CompletedTask;
+        if (remoteTask is not null && delegated.FirstOrDefault(found => found.Id == remoteTask.Id) is { } current)
+        {
+            remoteTask.Take(current);
+        }
+    }
+
+    private async Task OpenTask(SwarmTaskInfo chosen)
+    {
+        CloseTask();
+        IsOpen = false;
+        string? destination = rows.FirstOrDefault(row => row.Id == chosen.WorkspaceId && row.IsSide)?.Name;
+        RemoteTaskViewModel opening = new(connection, chosen, destination);
+        opening.Closed += () =>
+        {
+            if (OpenedTask == opening)
+            {
+                OpenedTask = null;
+            }
+        };
+        opening.Continued += made => Made?.Invoke(made);
+        OpenedTask = opening;
+        await opening.Load();
     }
 
     private Task Begin(SessionDialog kind, SessionEntry? entry)
@@ -480,11 +515,7 @@ internal sealed class SessionsViewModel : ViewModelBase
 
         SessionDialog asked = dialog;
         Guid id = target;
-        Guid parent = main.Id;
         string given = name.Trim();
-        string task = firstTask.Trim();
-        SideSessionStart start = useCurrentFiles ? SideSessionStart.Files : SideSessionStart.Commit;
-        WorkspaceInfo? made = null;
         int mine = turn;
         waiting = mine;
         Raise(nameof(CanConfirm));
@@ -494,14 +525,6 @@ internal sealed class SessionsViewModel : ViewModelBase
         {
             switch (asked)
             {
-                case SessionDialog.New:
-                    if (prepare is not null && !await prepare(parent))
-                    {
-                        throw new RemoteException("The workspace's settings could not be saved.");
-                    }
-
-                    made = await connection.CreateSideSession(parent, given, start, task.Length == 0 ? null : task, CancellationToken.None);
-                    break;
                 case SessionDialog.Rename:
                     await connection.RenameSideSession(id, given, CancellationToken.None);
                     break;
@@ -525,10 +548,6 @@ internal sealed class SessionsViewModel : ViewModelBase
                 Dialog = SessionDialog.None;
             }
 
-            if (made is not null)
-            {
-                Made?.Invoke(made, task.Length > 0);
-            }
         }
         catch (Exception exception) when (exception is IOException or SocketException or RemoteException or UnauthorizedAccessException or InvalidDataException or ObjectDisposedException)
         {

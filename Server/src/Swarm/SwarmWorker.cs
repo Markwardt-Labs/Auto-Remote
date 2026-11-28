@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// The tasks other servers delegate to this one: each runs in a workspace of its own, made from the code of the task with only the permissions the owner gave the sender, on the local AI, in turn with the other work. Its result is one commit on the code it started from, with the AI's report and conversation. The workspace is removed once the sender has the result.
+/// The tasks other servers delegate to this one: each runs in a workspace of its own, made from the code of the task with only the permissions the owner gave the sender, on the local AI, in turn with the other work. The results of the tasks it builds on are given to its AI as read only copies beside the code, to combine itself. Its result is one commit on the code it started from, with the AI's report and conversation, also when the AI says it could not finish. The workspace is removed once the sender has the result.
 /// </summary>
 internal interface ISwarmWorker
 {
@@ -42,6 +42,14 @@ internal interface ISwarmWorker
     /// <param name="workspaceId">The workspace.</param>
     /// <returns>A task that completes once the cancellation is underway.</returns>
     Task CancelByOwner(Guid workspaceId);
+
+    /// <summary>
+    /// Takes the word of the AI of a delegated task that it could not finish it, so the task ends as failed with that reason; does nothing for another workspace.
+    /// </summary>
+    /// <param name="workspaceId">The workspace.</param>
+    /// <param name="reason">Why.</param>
+    /// <returns>A task that completes once noted.</returns>
+    Task Unfinished(Guid workspaceId, string reason);
 
     /// <summary>
     /// Removes the workspace of a task once the sender acknowledged its result.
@@ -148,6 +156,8 @@ internal sealed class SwarmWorker : ISwarmWorker
 
     private readonly TimeSpan sendPatience = TimeSpan.FromMinutes(30);
 
+    private readonly string dependencyShare = "swarm-dependencies";
+
     private readonly ConcurrentDictionary<Guid, byte> starting = new();
 
     private readonly int messageLimit = 400;
@@ -156,7 +166,11 @@ internal sealed class SwarmWorker : ISwarmWorker
 
     private readonly TimeSpan kept = TimeSpan.FromDays(90);
 
-    private readonly string instructions = "You are working on a task another server of the user delegated to you. Work only in this workspace. You cannot ask anyone questions: decide yourself and say what you assumed. The workspace is not a git repository, so do not rely on git. When you are done, end with a report that says what you changed, how you checked it (with the commands you ran and their result, or why you could not run any) and anything left open.";
+    private readonly string instructions = "You are working on a task another server of the user delegated to you. Work only in this workspace. You cannot ask anyone questions: decide yourself and say what you assumed. The workspace is not a git repository, so do not rely on git. When you are done, end with a report that says what you changed, how you checked it (with the commands you ran and their result, or why you could not run any) and anything left open. If you cannot finish the task, call report_unfinished with the reason and still end with that report.";
+
+    private readonly int reasonLimit = 1000;
+
+    private readonly int buildingReportLimit = 3000;
 
     /// <inheritdoc />
     public IReadOnlyList<WorkspaceDelegation> Delegations => [.. delegated.Values.Select(entry => entry.Delegation)];
@@ -238,7 +252,7 @@ internal sealed class SwarmWorker : ISwarmWorker
                 string peerName = document.Peers.First(peer => peer.Identity.Id == peerId).Name;
 
                 // Nothing of a refused task is kept but what answering it needs.
-                document.Incoming.Add(new SwarmIncoming { Id = task.TaskId, JobId = task.JobId, PeerId = peerId, PeerName = peerName, Title = task.Title, Instructions = refusal is null ? task.Instructions : string.Empty, ExpectedResult = refusal is null ? task.ExpectedResult : string.Empty, Capability = task.Capability, Mode = task.Mode, RepoKey = SafeKey(task.RepoKey), BaseCommit = task.BaseCommit, RemoteUrl = task.RemoteUrl, State = SwarmTaskState.Queued, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
+                document.Incoming.Add(new SwarmIncoming { Id = task.TaskId, JobId = task.JobId, PeerId = peerId, PeerName = peerName, Title = task.Title, Instructions = refusal is null ? task.Instructions : string.Empty, ExpectedResult = refusal is null ? task.ExpectedResult : string.Empty, Capability = task.Capability, Mode = task.Mode, RepoKey = SafeKey(task.RepoKey), BaseCommit = task.BaseCommit, RemoteUrl = task.RemoteUrl, Dependencies = refusal is null ? [.. task.Dependencies] : [], State = SwarmTaskState.Queued, CreatedAt = DateTimeOffset.UtcNow, UpdatedAt = DateTimeOffset.UtcNow });
             });
 
             if (refusal is not null)
@@ -332,6 +346,26 @@ internal sealed class SwarmWorker : ISwarmWorker
     }
 
     /// <inheritdoc />
+    public async Task Unfinished(Guid workspaceId, string reason)
+    {
+        if (!delegated.TryGetValue(workspaceId, out (Guid TaskId, WorkspaceDelegation Delegation) entry))
+        {
+            return;
+        }
+
+        string why = string.IsNullOrWhiteSpace(reason) ? "No reason was given." : reason.Trim();
+
+        // Kept at once, since the work may end and the server may stop before the result is sent.
+        await book.Change(document =>
+        {
+            if (document.Incoming.FirstOrDefault(task => task.Id == entry.TaskId) is { } task && Active(task.State))
+            {
+                task.Unfinished = why.Length > reasonLimit ? $"{why[..reasonLimit]}..." : why;
+            }
+        }, false);
+    }
+
+    /// <inheritdoc />
     public async Task Delivered(Guid messageId)
     {
         Guid? done = await book.Read(document => document.Incoming.FirstOrDefault(task => task.ResultMessageId == messageId && !task.IsCleaned)?.Id);
@@ -382,7 +416,7 @@ internal sealed class SwarmWorker : ISwarmWorker
         List<SwarmCapability> capabilities = [.. Enum.GetValues<AiCapability>().Select(capability => (Capability: capability, Model: Model(environment, capability))).Where(item => item.Model is not null).Select(item => new SwarmCapability { Capability = item.Capability, Model = item.Model!, Context = Context(environment, item.Capability) })];
         IReadOnlyList<string> models = accepts ? await loaded(environment, CancellationToken.None) : [];
         List<AiCapability> warm = capabilities.Where(capability => models.Any(model => model == capability.Model || model.StartsWith($"{capability.Model}-liveai-ctx", StringComparison.Ordinal) || model == $"{capability.Model}:latest")).Select(capability => capability.Capability).ToList();
-        return new SwarmProfileBody { Name = name, AcceptsWork = accepts, FreeSlots = accepts ? Math.Max(0, queue.FreeDelegatedSlots - waiting) : 0, Capabilities = capabilities, LoadedCapabilities = warm, Permissions = permissions };
+        return new SwarmProfileBody { Name = name, Version = SwarmProfileBody.DependencyVersion, AcceptsWork = accepts, FreeSlots = accepts ? Math.Max(0, queue.FreeDelegatedSlots - waiting) : 0, Capabilities = capabilities, LoadedCapabilities = warm, Permissions = permissions };
     }
 
     /// <inheritdoc />
@@ -570,13 +604,19 @@ internal sealed class SwarmWorker : ISwarmWorker
 
         if (task.Mode == SwarmMode.GitRemote)
         {
-            await repository.FetchBase(cache, task.RemoteUrl ?? throw new RequestException("The task names no remote."), $"swarm/tasks/{id:N}", id, task.BaseCommit, CancellationToken.None);
+            string url = task.RemoteUrl ?? throw new RequestException("The task names no remote.");
+            await repository.FetchBase(cache, url, $"swarm/tasks/{id:N}", id, task.BaseCommit, CancellationToken.None);
+
+            foreach (SwarmDependency dependency in task.Dependencies.Where(dependency => dependency.ResultCommit is not null))
+            {
+                await repository.FetchDependency(cache, url, $"swarm/dependencies/{id:N}/{dependency.TaskId:N}", id, dependency.TaskId, dependency.ResultCommit!, CancellationToken.None);
+            }
         }
         else
         {
             ReadOnlyMemory<byte> bundle = File.Exists(BundlePath(id)) ? await File.ReadAllBytesAsync(BundlePath(id)) : ReadOnlyMemory<byte>.Empty;
 
-            if (!await repository.Receive(cache, bundle, id, task.BaseCommit, CancellationToken.None))
+            if (!await repository.Receive(cache, bundle, id, task.BaseCommit, task.Dependencies, CancellationToken.None))
             {
                 await Finish(id, SwarmOutcome.MissingHistory, null, MissingHistoryMessage());
                 return null;
@@ -588,6 +628,12 @@ internal sealed class SwarmWorker : ISwarmWorker
         // Recorded first, so whatever a restart leaves of the setup can be found again.
         await book.Change(document => document.Incoming.First(entry => entry.Id == id).Folder = folder, false);
         await repository.Export(cache, folder, task.BaseCommit, CancellationToken.None);
+
+        // Beside the folder of the task, so nothing of them is taken for its changes.
+        foreach (SwarmDependency dependency in task.Dependencies.Where(dependency => dependency.ResultCommit is not null))
+        {
+            await repository.Materialize(cache, DependencyFolder(id, dependency.TaskId), dependency.BaseCommit, dependency.ResultCommit!, $"# {dependency.Title}\n\n{dependency.Report ?? "The task made no report."}", CancellationToken.None);
+        }
         WorkspaceInfo created = await workspaces.Create(folder, AiService.Local, null, null, CancellationToken.None);
         delegated[created.Id] = (id, new WorkspaceDelegation { WorkspaceId = created.Id, From = task.PeerName, Title = task.Title });
         bool wanted = await book.Change(document =>
@@ -639,7 +685,8 @@ internal sealed class SwarmWorker : ISwarmWorker
 
     private void Check(SwarmTaskBody task)
     {
-        if (task.Title.Length is 0 or > 500 || task.Instructions.Length is 0 or > 200_000 || task.ExpectedResult.Length > 20_000 || task.BaseCommit.Length > 64 || task.RemoteUrl is { Length: > 2000 } || !Enum.IsDefined(task.Capability) || !Enum.IsDefined(task.Mode))
+        if (task.Title.Length is 0 or > 500 || task.Instructions.Length is 0 or > 200_000 || task.ExpectedResult.Length > 20_000 || task.BaseCommit.Length > 64 || task.RemoteUrl is { Length: > 2000 } || !Enum.IsDefined(task.Capability) || !Enum.IsDefined(task.Mode)
+            || task.Dependencies is not { Count: <= 100 } || task.Dependencies.Any(dependency => dependency is not { Title.Length: <= 500, BaseCommit.Length: <= 64, Report: null or { Length: <= 100_000 }, ResultCommit: null or { Length: <= 64 }, Includes.Count: <= 1000 } || dependency.Includes.Any(included => included is not { Title.Length: <= 500 })))
         {
             throw new InvalidDataException("The task is not valid.");
         }
@@ -661,8 +708,7 @@ internal sealed class SwarmWorker : ISwarmWorker
         {
             Capability = capability,
             Effort = environment.NewWorkspaces.Effort,
-            IsShellAllowed = permissions.IsShellAllowed,
-            IsSystemAccessAllowed = permissions.IsSystemAccessAllowed,
+            IsSandboxed = permissions.IsSandboxed,
             IsWebAllowed = permissions.IsWebAllowed,
             IsImageGenerationAllowed = permissions.IsImageGenerationAllowed && environment.ImageGeneration == ImageGenerationKind.Local,
             IsDelegationAllowed = false,
@@ -685,7 +731,12 @@ internal sealed class SwarmWorker : ISwarmWorker
             return;
         }
 
-        string text = $"# {task.Title}\n\n{task.Instructions}{(task.ExpectedResult.Length > 0 ? $"\n\n## Expected result\n\n{task.ExpectedResult}" : string.Empty)}";
+        if (Directory.Exists(DependencyRoot(id)))
+        {
+            prompts.Share(workspaceId, dependencyShare, [DependencyRoot(id)]);
+        }
+
+        string text = $"# {task.Title}\n\n{task.Instructions}{(task.ExpectedResult.Length > 0 ? $"\n\n## Expected result\n\n{task.ExpectedResult}" : string.Empty)}{BuildOn(task)}";
 
         try
         {
@@ -725,6 +776,41 @@ internal sealed class SwarmWorker : ISwarmWorker
         {
             await Complete(id);
         }
+    }
+
+    private string BuildOn(SwarmIncoming task)
+    {
+        if (task.Dependencies.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder text = new("\n\n## Results this task builds on\n\n");
+        text.Append(task.Dependencies.HasChanges
+            ? "Earlier tasks made the results below. Their changes are not in your files yet: first combine all of them into your folder, then do this task on top. Each folder is outside your workspace and read only: files holds all files as that task left them, changes.txt lists what it changed against the code it started from, changes.diff is that change as a diff and report.md is its report. Your files may differ from what a task started from, so apply its changes rather than copying whole files over, and decide conflicts yourself. Your report has to say anything of them you could not take over."
+            : "Earlier tasks made the reports below; they changed no files.");
+
+        foreach (SwarmDependency dependency in task.Dependencies)
+        {
+            text.Append(CultureInfo.InvariantCulture, $"\n\n### \"{dependency.Title}\"");
+
+            if (dependency.ResultCommit is not null)
+            {
+                text.Append(CultureInfo.InvariantCulture, $"\n\nFolder: {DependencyFolder(task.Id, dependency.TaskId)}");
+
+                if (dependency.Includes.Count > 0)
+                {
+                    text.Append(CultureInfo.InvariantCulture, $"\nIts changes should already include those of: {string.Join(", ", dependency.Includes.Select(included => $"\"{included.Title}\""))}, so do not apply those twice.");
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(dependency.Report))
+            {
+                text.Append(CultureInfo.InvariantCulture, $"\n\nReport:\n{(dependency.Report.Length > buildingReportLimit ? $"{dependency.Report[..buildingReportLimit]}..." : dependency.Report)}");
+            }
+        }
+
+        return text.ToString();
     }
 
     private Task MarkRunning(Guid id) => book.Change(document =>
@@ -804,8 +890,11 @@ internal sealed class SwarmWorker : ISwarmWorker
         }
 
         string? report = (await Conversation(workspace)).LastOrDefault(message => message is { Role: MessageRole.Assistant, IsWork: false })?.Text;
+        task = await book.Read(document => document.Incoming.FirstOrDefault(entry => entry.Id == id));
+        string? unfinished = task?.Unfinished is { } why ? $"The AI could not finish it: {why}" : null;
+        string? failure = failures.GetValueOrDefault(id) ?? unfinished;
 
-        await Finish(id, failures.TryGetValue(id, out string? failure) ? SwarmOutcome.Failed : SwarmOutcome.Done, report, failure);
+        await Finish(id, failure is null ? SwarmOutcome.Done : SwarmOutcome.Failed, report, failure, unfinished is not null);
     }
 
     private async Task<IReadOnlyList<ChatMessage>> Conversation(Guid workspace)
@@ -829,7 +918,10 @@ internal sealed class SwarmWorker : ISwarmWorker
         return messages;
     }
 
-    private async Task Finish(Guid id, SwarmOutcome outcome, string? report, string? error)
+    private Task Finish(Guid id, SwarmOutcome outcome, string? report, string? error) => Finish(id, outcome, report, error, false);
+
+    // Work the AI could not finish sends back what it changed too.
+    private async Task Finish(Guid id, SwarmOutcome outcome, string? report, string? error, bool keepsChanges)
     {
         SemaphoreSlim gate = finishing.GetOrAdd(id, _ => new SemaphoreSlim(1, 1));
         await gate.WaitAsync();
@@ -847,7 +939,7 @@ internal sealed class SwarmWorker : ISwarmWorker
             ReadOnlyMemory<byte> bundle = ReadOnlyMemory<byte>.Empty;
             IReadOnlyList<ChatMessage> messages = task.WorkspaceId is { } at ? await store.LoadMessages(at, CancellationToken.None) ?? [] : [];
 
-            if (outcome == SwarmOutcome.Done && task.Folder is { } folder)
+            if ((outcome == SwarmOutcome.Done || keepsChanges) && task.Folder is { } folder)
             {
                 await book.Change(document => document.Incoming.First(entry => entry.Id == id).IsWorkDone = true, false);
 
@@ -875,7 +967,7 @@ internal sealed class SwarmWorker : ISwarmWorker
                     }
 
                     outcome = SwarmOutcome.Failed;
-                    error = $"The changes could not be sent back: {exception.Message}";
+                    error = keepsChanges && error is not null ? $"{error} The changes could not be sent back: {exception.Message}" : $"The changes could not be sent back: {exception.Message}";
                     commit = null;
                     bundle = ReadOnlyMemory<byte>.Empty;
                 }
@@ -966,6 +1058,12 @@ internal sealed class SwarmWorker : ISwarmWorker
             await repository.Forget(Cache(task), id, CancellationToken.None);
         }
 
+        if (task.WorkspaceId is { } shared)
+        {
+            prompts.Unshare(shared, dependencyShare);
+        }
+
+        DeleteDependencies(id);
         DeleteBundle(id);
         await book.Change(document =>
         {
@@ -1007,6 +1105,22 @@ internal sealed class SwarmWorker : ISwarmWorker
         {
             Directory.Delete(folder, true);
         }
+
+        DeleteDependencies(id);
+    }
+
+    private void DeleteDependencies(Guid id)
+    {
+        try
+        {
+            if (Directory.Exists(DependencyRoot(id)))
+            {
+                Directory.Delete(DependencyRoot(id), true);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+        }
     }
 
     // A task that travelled through a git remote never had a bundle, nor the folder for one.
@@ -1029,6 +1143,10 @@ internal sealed class SwarmWorker : ISwarmWorker
     private string Cache(SwarmIncoming task) => Path.Combine(book.Folder, "repos", $"{task.PeerId}-{task.RepoKey}.git");
 
     private string BundlePath(Guid id) => Path.Combine(book.Folder, "incoming", $"{id:N}.bundle");
+
+    private string DependencyRoot(Guid id) => Path.Combine(book.Folder, "dependencies", $"{id:N}");
+
+    private string DependencyFolder(Guid id, Guid dependencyId) => Path.Combine(DependencyRoot(id), $"{dependencyId:N}");
 
     private string SafeKey(string key) => key.Length is > 0 and <= 64 && key.All(char.IsAsciiHexDigit) ? key : "repository";
 

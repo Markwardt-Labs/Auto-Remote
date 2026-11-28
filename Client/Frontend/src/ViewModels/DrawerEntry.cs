@@ -78,7 +78,7 @@ internal sealed record DrawerEntry
     /// <summary>
     /// Gets the secondary line of a row: for a workspace its folder on the server, after notes that its work waits for the local AI or that another server delegated it, and for a delegated task where it stands.
     /// </summary>
-    public string Detail => DelegatedTask is { } task ? new SwarmTaskViewModel(task).Detail : Workspace is null ? string.Empty : string.Join(" - ", new[] { IsQueued ? "Queued" : null, DelegatedBy is { } from ? $"Delegated by {from}" : null, Workspace.Folder }.Where(part => part is not null));
+    public string Detail => DelegatedTask is { } task ? new SwarmTaskViewModel(task).Detail : Workspace is null ? string.Empty : string.Join(" - ", new[] { IsQueued ? "Waiting for Local AI" : null, DelegatedBy is { } from ? $"Delegated by {from}" : null, Workspace.Folder }.Where(part => part is not null));
 
     /// <summary>
     /// Gets the row's left margin.

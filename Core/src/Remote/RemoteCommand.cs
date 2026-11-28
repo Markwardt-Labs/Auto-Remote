@@ -442,9 +442,9 @@ public enum RemoteCommand
     RetrySwarmTask,
 
     /// <summary>
-    /// Applies the changes of the finished task <see cref="RemoteRequest.TaskId" /> to the files of its workspace without committing them; answered in <see cref="RemoteResponse.Swarm" /> with what happened in <see cref="SwarmStatus.Report" />.
+    /// Has the AI of the task's workspace bring the result of the finished task <see cref="RemoteRequest.TaskId" /> into it, in a turn of its own; the task is removed once the AI confirms it. Answered in <see cref="RemoteResponse.Swarm" />.
     /// </summary>
-    ApplySwarmTask,
+    BringInSwarmTask,
 
     /// <summary>
     /// Removes the ended task <see cref="RemoteRequest.TaskId" /> from the list, with its result branch; answered in <see cref="RemoteResponse.Swarm" />.
@@ -477,7 +477,7 @@ public enum RemoteCommand
     CancelIntegration,
 
     /// <summary>
-    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the side session is integrated by itself once its AI marks its task complete.
+    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the side session is brought into its main workspace by itself once its work is done.
     /// </summary>
     SetIntegrateWhenFinished,
 
@@ -497,7 +497,7 @@ public enum RemoteCommand
     GetResources,
 
     /// <summary>
-    /// Queues <see cref="RemoteRequest.Text" /> for <see cref="RemoteRequest.WorkspaceId" />: it is sent once the work of the workspace is over, at once when there is none, and its changes are committed after it. Resumes the paused queued inputs. Answered in <see cref="RemoteResponse.SavedInputs" />.
+    /// Queues <see cref="RemoteRequest.Text" /> for <see cref="RemoteRequest.WorkspaceId" />: it is sent once the work of the workspace is over, at once when there is none, and committed after it unless <see cref="RemoteRequest.AutoCommit" /> is <see langword="false" />. Work under way is then committed before it too. A stopped workspace keeps it until it is resumed. Answered in <see cref="RemoteResponse.SavedInputs" />.
     /// </summary>
     QueueInput,
 
@@ -512,7 +512,32 @@ public enum RemoteCommand
     SetSavedInputAutoCommit,
 
     /// <summary>
-    /// Resumes the paused queued inputs of <see cref="RemoteRequest.WorkspaceId" />, which are then sent once nothing is in their way. Changes nothing when none are paused.
+    /// Lets the work of <see cref="RemoteRequest.WorkspaceId" /> that runs by itself go on after it was stopped: queued inputs, the loop and what is to be brought in. Changes nothing when it was not stopped.
     /// </summary>
-    ResumeQueue
+    ResumeAutomation,
+
+    /// <summary>
+    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the delegated task <see cref="RemoteRequest.TaskId" /> is brought into its workspace by itself once it is done; turning it off also cancels bringing it in that has not started. Answered in <see cref="RemoteResponse.Swarm" />.
+    /// </summary>
+    SetSwarmTaskBringIn,
+
+    /// <summary>
+    /// Makes a side session that starts from the result of the finished delegated task <see cref="RemoteRequest.TaskId" />, named <see cref="RemoteRequest.Name" /> or after the task, to go on with it by hand; answered in <see cref="RemoteResponse.Workspace" />.
+    /// </summary>
+    ContinueSwarmTask,
+
+    /// <summary>
+    /// Sets with <see cref="RemoteRequest.Enabled" /> whether the changes are committed after the AI brought in what <see cref="RemoteRequest.InputId" /> names, a bring-in of the agenda of <see cref="RemoteRequest.WorkspaceId" />.
+    /// </summary>
+    SetBringInCommit,
+
+    /// <summary>
+    /// Reads the activity of <see cref="RemoteRequest.WorkspaceId" />, newest first, from before the cursor <see cref="RemoteRequest.Before" /> and at most <see cref="RemoteRequest.Limit" /> entries; answered in <see cref="RemoteResponse.Activity" />.
+    /// </summary>
+    GetActivity,
+
+    /// <summary>
+    /// Reads what is up next in <see cref="RemoteRequest.WorkspaceId" />; answered in <see cref="RemoteResponse.Agenda" />.
+    /// </summary>
+    GetAgenda
 }

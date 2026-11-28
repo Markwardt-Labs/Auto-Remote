@@ -63,6 +63,14 @@ internal interface IGitService
     Task<string> Pending(string folder, CancellationToken cancellation);
 
     /// <summary>
+    /// Checks whether the last commit of the checked out branch is on the <c>origin</c> remote.
+    /// </summary>
+    /// <param name="folder">The repository folder.</param>
+    /// <param name="cancellation">Cancels the check.</param>
+    /// <returns>Whether it is, or <see langword="null" /> when nothing is to be pushed there: there is no <c>origin</c>, no branch is checked out, or the branch is a side session's.</returns>
+    Task<bool?> IsPushed(string folder, CancellationToken cancellation);
+
+    /// <summary>
     /// Stages every change and commits it, then pushes the branch when there is a remote, unless it is a side session's; a failing push is ignored.
     /// </summary>
     /// <param name="folder">The workspace folder.</param>
@@ -349,6 +357,12 @@ internal sealed class GitService : IGitService
         RequirePath(path);
         return Parse(path, Check(await Run(folder, ["diff", "--no-color", "--no-ext-diff", "--no-renames", "-U1000000", from, to, "--", path], cancellation)).Output);
     }
+
+    /// <inheritdoc />
+    public async Task<bool?> IsPushed(string folder, CancellationToken cancellation)
+        => await Optional(folder, ["remote", "get-url", "origin"], cancellation) is null || await Optional(folder, ["symbolic-ref", "--short", "-q", "HEAD"], cancellation) is not { } branch || branch.StartsWith("auto-remote/session/", StringComparison.Ordinal)
+            ? null
+            : await Optional(folder, ["rev-parse", "--verify", "--quiet", $"refs/remotes/origin/{branch}"], cancellation) is { } remote && remote == await Optional(folder, ["rev-parse", "HEAD"], cancellation);
 
     /// <inheritdoc />
     public async Task Commit(string folder, string message, CancellationToken cancellation)

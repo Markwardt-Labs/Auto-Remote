@@ -51,14 +51,19 @@ internal sealed record StoredSideSession
     public string BaseTree { get; init; } = string.Empty;
 
     /// <summary>
-    /// Gets a value indicating whether it is integrated by itself once its AI marked its task complete.
+    /// Gets a value indicating whether it is brought into the main workspace by itself once its work is done.
     /// </summary>
     public bool IntegrateWhenFinished { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether its AI marked its task complete and the integration has not started yet.
+    /// Gets a value indicating whether its work ended well and it was not brought in yet.
     /// </summary>
     public bool MarkedComplete { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the changes are committed after it was brought in.
+    /// </summary>
+    public bool CommitBringIn { get; init; } = true;
 
     /// <summary>
     /// Gets what went wrong while it was set up.

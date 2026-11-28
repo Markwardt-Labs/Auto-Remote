@@ -11,11 +11,6 @@ internal enum SessionDialog
     None,
 
     /// <summary>
-    /// What a new side session is like.
-    /// </summary>
-    New,
-
-    /// <summary>
     /// The new name of a side session.
     /// </summary>
     Rename,
@@ -26,17 +21,17 @@ internal enum SessionDialog
     Delete,
 
     /// <summary>
-    /// Whether to integrate a side session.
+    /// Whether to bring a side session into the main one.
     /// </summary>
     Integrate,
 
     /// <summary>
-    /// Whether to integrate a side session by itself once it is finished.
+    /// Whether to bring a side session into the main one by itself once its work is done.
     /// </summary>
     IntegrateWhenFinished,
 
     /// <summary>
-    /// Whether to cancel an integration.
+    /// Whether to cancel bringing a side session in.
     /// </summary>
     CancelIntegration
 }

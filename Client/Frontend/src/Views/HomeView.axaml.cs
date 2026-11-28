@@ -74,6 +74,18 @@ public sealed partial class HomeView : UserControl
             };
         }
 
+        if (this.FindControl<Border>("TaskDetailOverlay") is { } taskDetail)
+        {
+            // It takes the keyboard, so that Escape closes it.
+            taskDetail.PropertyChanged += (_, args) =>
+            {
+                if (args.Property == Visual.IsVisibleProperty && taskDetail.IsVisible)
+                {
+                    Avalonia.Threading.Dispatcher.UIThread.Post(() => taskDetail.Focus(), Avalonia.Threading.DispatcherPriority.Background);
+                }
+            };
+        }
+
         if (this.FindControl<Grid>("SessionList") is { } sessionList && this.FindControl<Border>("SessionCard") is { } card)
         {
             // Opening it leaves the keyboard nowhere, since the title is held back while it is clicked, and Escape has to reach it.
@@ -381,6 +393,12 @@ public sealed partial class HomeView : UserControl
             }
 
             return false;
+        }
+
+        if (key == Avalonia.Input.Key.Escape && home.Sessions.HasTask)
+        {
+            home.Sessions.CloseTask();
+            return true;
         }
 
         if (key != Avalonia.Input.Key.Escape || !home.Sessions.IsOpen)
@@ -1015,11 +1033,11 @@ public sealed partial class HomeView : UserControl
         }
     }
 
-    private void CloseLoop(object? sender, Avalonia.Input.PointerPressedEventArgs args)
+    private void CloseSendOptions(object? sender, Avalonia.Input.PointerPressedEventArgs args)
     {
         if (DataContext is HomeViewModel { Active: { } active })
         {
-            active.Loop.IsOpen = false;
+            active.SendOptions.IsOpen = false;
         }
     }
 

@@ -56,12 +56,12 @@ internal sealed record SessionEntry
     public bool CanOpen => Side is null || Side.State == SideSessionState.Ready;
 
     /// <summary>
-    /// Gets a value indicating whether it is being integrated into the main session.
+    /// Gets a value indicating whether it is being brought into the main session.
     /// </summary>
     public bool IsIntegrating => Side?.State == SideSessionState.Integrating;
 
     /// <summary>
-    /// Gets a value indicating whether it is ready, so that it can be renamed, integrated and compared with its start.
+    /// Gets a value indicating whether it is ready, so that it can be renamed, brought in and compared with its start.
     /// </summary>
     public bool CanManage => Side?.State == SideSessionState.Ready;
 
@@ -86,12 +86,12 @@ internal sealed record SessionEntry
     public bool ShowDelete => IsExpanded && CanDelete;
 
     /// <summary>
-    /// Gets the label of the switch that integrates the session once it is finished, with a check mark when it is on.
+    /// Gets the label of the switch that brings the session into the main one once its work is done, with a check mark when it is on.
     /// </summary>
-    public string WhenFinishedText => Side?.IntegrateWhenFinished == true ? "✓ Integrate When Finished" : "Integrate When Finished";
+    public string WhenFinishedText => Side?.IntegrateWhenFinished == true ? "✓ When Done: Bring Into Main" : "When Done: Bring Into Main";
 
     /// <summary>
     /// Gets the line under the name.
     /// </summary>
-    public string Detail => Side is { IntegrateWhenFinished: true, State: SideSessionState.Ready } ? $"{Status} - Integrates when finished" : Status;
+    public string Detail => Side is { IntegrateWhenFinished: true, State: SideSessionState.Ready } ? $"{Status} - When Done: Bring Into Main" : Status;
 }

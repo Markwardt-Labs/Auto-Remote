@@ -404,7 +404,7 @@ public sealed class PrompterHostTests : IDisposable
     {
         (PrompterHost host, FakePromptSession session, _) = Stored();
         await host.Configure(Config, CancellationToken.None);
-        await host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { IsShellAllowed = false, IsWebAllowed = false, IsSystemAccessAllowed = false, IsImageGenerationAllowed = true, Instructions = "be brief" } }, CancellationToken.None);
+        await host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { IsSandboxed = true, IsWebAllowed = false, IsImageGenerationAllowed = true, Instructions = "be brief" } }, CancellationToken.None);
 
         await host.Adopt(session.Id, CancellationToken.None);
 
@@ -431,7 +431,7 @@ public sealed class PrompterHostTests : IDisposable
         PrompterHost host = await Configured();
 
         PromptEnvironment environment = prompter.Environment;
-        Assert.Equal((PromptCapability.Balanced, PromptEffort.High, false, false, true, false), (environment.Capability, environment.Effort, environment.IsShellAllowed, environment.IsSystemAccessAllowed, environment.IsWebAllowed, environment.IsImageGenerationAllowed));
+        Assert.Equal((PromptCapability.Balanced, PromptEffort.High, true, true, true, false), (environment.Capability, environment.Effort, environment.IsShellAllowed, environment.IsSystemAccessAllowed, environment.IsWebAllowed, environment.IsImageGenerationAllowed));
         Assert.Equal(builtIn.Compose(null, 5), environment.Instructions);
         Assert.Equal(string.Empty, host.Get().NewWorkspaces.Instructions);
     }
@@ -440,7 +440,7 @@ public sealed class PrompterHostTests : IDisposable
     public async Task Set_AppliesTheNewWorkspaceDefaultsAndKeepsThemForTheNextStart()
     {
         PrompterHost host = await Configured();
-        WorkspaceDefaults defaults = new() { Capability = AiCapability.Max, Effort = AiEffort.Low, IsShellAllowed = false, IsSystemAccessAllowed = false, IsWebAllowed = false, IsImageGenerationAllowed = false, Instructions = "  be brief  " };
+        WorkspaceDefaults defaults = new() { Capability = AiCapability.Max, Effort = AiEffort.Low, IsSandboxed = true, IsWebAllowed = false, IsImageGenerationAllowed = false, Instructions = "  be brief  " };
 
         AiEnvironment saved = await host.Set(host.Get() with { NewWorkspaces = defaults }, CancellationToken.None);
 
@@ -588,7 +588,7 @@ public sealed class PrompterHostTests : IDisposable
         Assert.Equal((folder, "sk-1"), (setup.WorkspacePath, setup.ApiKey));
         IPromptSessionConfiguration configuration = prompter.Sessions[0].Configuration;
         Assert.Equal((PromptCapability.Balanced, PromptEffort.High), (configuration.Capability, configuration.Effort));
-        Assert.Equal((false, false, true, false), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
+        Assert.Equal((true, true, true, false), (configuration.IsShellAllowed, configuration.IsSystemAccessAllowed, configuration.IsWebAllowed, configuration.IsImageGenerationAllowed));
         Assert.Equal(builtIn.Compose(null, 5), configuration.Instructions);
         Assert.Equal(prompter.Sessions[0].Id, id);
         Assert.True(prompter.Sessions[0].IsDisposed);
@@ -611,7 +611,7 @@ public sealed class PrompterHostTests : IDisposable
     public async Task CreateSession_StartsTheSessionWithTheNewWorkspaceDefaultsThatAreSet()
     {
         PrompterHost host = await Configured();
-        await host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Medium, IsShellAllowed = false, IsImageGenerationAllowed = false, Instructions = "be brief" } }, CancellationToken.None);
+        await host.Set(host.Get() with { NewWorkspaces = new WorkspaceDefaults { Capability = AiCapability.Strong, Effort = AiEffort.Medium, IsSandboxed = true, IsImageGenerationAllowed = false, Instructions = "be brief" } }, CancellationToken.None);
 
         await host.CreateSession(temp.Path, AiService.ClaudeCode, null, CancellationToken.None);
 

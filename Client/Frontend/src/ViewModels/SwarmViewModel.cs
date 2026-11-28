@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Client;
 
 /// <summary>
-/// The swarm screen: the settings of this server in the swarm, pairing with other servers, the paired servers with what each may do, syncing the drive, delegating a task by hand and following the delegated tasks.
+/// The swarm screen: the settings of this server in the swarm, pairing with other servers, the paired servers with what each may do, syncing the drive and following the delegated tasks.
 /// </summary>
 internal sealed class SwarmViewModel : ViewModelBase, IDisposable
 {
@@ -10,15 +10,10 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     /// </summary>
     /// <param name="connection">The server connection.</param>
     /// <param name="initialTask">A task to open right away, or <see langword="null" />.</param>
-    /// <param name="initialWorkspace">The workspace to delegate from by default, or <see langword="null" />.</param>
-    public SwarmViewModel(IServerConnection connection, Guid? initialTask = null, Guid? initialWorkspace = null)
+    public SwarmViewModel(IServerConnection connection, Guid? initialTask = null)
     {
         this.connection = connection;
         this.initialTask = initialTask;
-        this.initialWorkspace = initialWorkspace;
-        selectedCapability = Capabilities.First(choice => choice.Value == AiCapability.Balanced);
-        selectedWorker = anyWorker;
-        Workers.Add(anyWorker);
         CloseCommand = new AsyncCommand(async _ =>
         {
             if (await Apply())
@@ -37,7 +32,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
         }, () => pairAddress.Trim().Length > 0 && pairCode.Trim().Length > 0);
         InviteCommand = new AsyncCommand(_ => Act(() => connection.WriteDriveInvitation(CancellationToken.None)));
         SyncCommand = new AsyncCommand(_ => Act(() => connection.SyncDrive(CancellationToken.None)));
-        DelegateCommand = new AsyncCommand(_ => Delegate(), () => selectedWorkspace is not null && taskTitle.Trim().Length > 0 && taskInstructions.Trim().Length > 0);
         BackCommand = new AsyncCommand(_ =>
         {
             Detail = null;
@@ -46,7 +40,7 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
         OpenTaskCommand = new AsyncCommand(parameter => parameter is SwarmTaskViewModel row ? Open(row.Task.Id) : Task.CompletedTask, null, false);
         CancelTaskCommand = new AsyncCommand(_ => OnTask(id => connection.CancelSwarmTask(id, CancellationToken.None)));
         RetryTaskCommand = new AsyncCommand(_ => OnTask(id => connection.RetrySwarmTask(id, CancellationToken.None)));
-        ApplyTaskCommand = new AsyncCommand(_ => OnTask(id => connection.ApplySwarmTask(id, CancellationToken.None)));
+        BringInTaskCommand = new AsyncCommand(_ => OnTask(id => connection.BringInSwarmTask(id, CancellationToken.None)));
         DiscardTaskCommand = new AsyncCommand(async _ =>
         {
             if (await OnTask(id => connection.DiscardSwarmTask(id, CancellationToken.None)))
@@ -73,9 +67,8 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
 
     private readonly Guid? initialTask;
 
-    private readonly Guid? initialWorkspace;
-
-    private readonly Choice<string?> anyWorker = new(null, "Any networked worker");
+    // The names of the side sessions, which a task delegated from one is brought into.
+    private readonly Dictionary<Guid, string> sideNames = [];
 
     private SwarmServer server = new();
 
@@ -99,18 +92,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
 
     private SwarmTaskDetail? detail;
 
-    private WorkspaceInfo? selectedWorkspace;
-
-    private string taskTitle = string.Empty;
-
-    private string taskInstructions = string.Empty;
-
-    private string taskExpected = string.Empty;
-
-    private Choice<AiCapability> selectedCapability;
-
-    private Choice<string?> selectedWorker;
-
     private bool subscribed;
 
     private bool loaded;
@@ -129,11 +110,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     /// Raised when the screen should give way to the one before it.
     /// </summary>
     public event Action? Closed;
-
-    /// <summary>
-    /// Raised with the identifiers of the tasks this screen delegated by hand, so the user is told when they end.
-    /// </summary>
-    public event Action<IReadOnlyList<Guid>>? Delegated;
 
     /// <summary>
     /// Gets or sets the name paired servers see.
@@ -264,105 +240,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     public bool HasNoTasks => loaded && Tasks.Count == 0;
 
     /// <summary>
-    /// Gets the workspaces a task can be delegated from.
-    /// </summary>
-    public ObservableCollection<WorkspaceInfo> Workspaces { get; } = [];
-
-    /// <summary>
-    /// Gets or sets the workspace a task is delegated from.
-    /// </summary>
-    public WorkspaceInfo? SelectedWorkspace
-    {
-        get => selectedWorkspace;
-        set
-        {
-            if (Set(ref selectedWorkspace, value))
-            {
-                DelegateCommand.Refresh();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets the title of the task to delegate.
-    /// </summary>
-    public string TaskTitle
-    {
-        get => taskTitle;
-        set
-        {
-            if (Set(ref taskTitle, value ?? string.Empty))
-            {
-                DelegateCommand.Refresh();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets what the task to delegate asks.
-    /// </summary>
-    public string TaskInstructions
-    {
-        get => taskInstructions;
-        set
-        {
-            if (Set(ref taskInstructions, value ?? string.Empty))
-            {
-                DelegateCommand.Refresh();
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets what the result of the task is expected to be.
-    /// </summary>
-    public string TaskExpected
-    {
-        get => taskExpected;
-        set => Set(ref taskExpected, value ?? string.Empty);
-    }
-
-    /// <summary>
-    /// Gets the capabilities a task can need.
-    /// </summary>
-    public IReadOnlyList<Choice<AiCapability>> Capabilities { get; } = [.. Enum.GetValues<AiCapability>().Select(value => new Choice<AiCapability>(value, value.ToString()))];
-
-    /// <summary>
-    /// Gets or sets the capability the task needs.
-    /// </summary>
-    public Choice<AiCapability> SelectedCapability
-    {
-        get => selectedCapability;
-        set
-        {
-            if (value is not null)
-            {
-                Set(ref selectedCapability, value);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Gets the workers the task can be given to.
-    /// </summary>
-    public ObservableCollection<Choice<string?>> Workers { get; } = [];
-
-    /// <summary>
-    /// Gets or sets the worker the task is given to.
-    /// </summary>
-    public Choice<string?> SelectedWorker
-    {
-        get => selectedWorker;
-        set
-        {
-            if (value is not null)
-            {
-                Set(ref selectedWorker, value);
-            }
-        }
-    }
-
-    /// <summary>
     /// Gets what the last action did, or <see langword="null" />.
     /// </summary>
     public string? Outcome
@@ -421,14 +298,10 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
                 Raise(nameof(HasDetail));
                 Raise(nameof(DetailTitle));
                 Raise(nameof(DetailStatus));
-                Raise(nameof(DetailError));
-                Raise(nameof(HasDetailError));
-                Raise(nameof(HasDetailExpected));
-                Raise(nameof(HasDetailReport));
-                Raise(nameof(HasDetailMessages));
                 Raise(nameof(CanCancelTask));
                 Raise(nameof(CanRetryTask));
-                Raise(nameof(CanApplyTask));
+                Raise(nameof(CanBringInTask));
+                Raise(nameof(BringInText));
                 Raise(nameof(CanDiscardTask));
             }
         }
@@ -450,31 +323,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     public string DetailStatus => detail is null ? string.Empty : string.Join(" - ", new[] { new SwarmTaskViewModel(detail.Task).Detail, detail.Task.Capability.ToString(), detail.Task.Branch }.Where(part => !string.IsNullOrEmpty(part)));
 
     /// <summary>
-    /// Gets why the opened task failed or ended, or <see langword="null" />.
-    /// </summary>
-    public string? DetailError => detail?.Task.Error;
-
-    /// <summary>
-    /// Gets a value indicating whether the opened task has an error.
-    /// </summary>
-    public bool HasDetailError => detail?.Task.Error is not null;
-
-    /// <summary>
-    /// Gets a value indicating whether the opened task says what it expects.
-    /// </summary>
-    public bool HasDetailExpected => !string.IsNullOrEmpty(detail?.ExpectedResult);
-
-    /// <summary>
-    /// Gets a value indicating whether the opened task has a report.
-    /// </summary>
-    public bool HasDetailReport => !string.IsNullOrEmpty(detail?.Report);
-
-    /// <summary>
-    /// Gets a value indicating whether the conversation of the opened task has arrived.
-    /// </summary>
-    public bool HasDetailMessages => detail is { Messages.Count: > 0 };
-
-    /// <summary>
     /// Gets a value indicating whether the opened task can be cancelled.
     /// </summary>
     public bool CanCancelTask => detail?.Task.CanCancel == true;
@@ -485,9 +333,14 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     public bool CanRetryTask => detail?.Task.CanRetry == true;
 
     /// <summary>
-    /// Gets a value indicating whether the changes of the opened task can be applied.
+    /// Gets a value indicating whether the result of the opened task can be brought into its workspace.
     /// </summary>
-    public bool CanApplyTask => detail?.Task.CanApply == true;
+    public bool CanBringInTask => detail?.Task.CanBringIn == true;
+
+    /// <summary>
+    /// Gets what the button that brings the result of the opened task in says.
+    /// </summary>
+    public string BringInText => detail?.Task.WorkspaceId is { } id && sideNames.TryGetValue(id, out string? name) ? $"Bring Into {name}" : "Bring Into Main";
 
     /// <summary>
     /// Gets a value indicating whether the opened task can be removed.
@@ -520,11 +373,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     public AsyncCommand SyncCommand { get; }
 
     /// <summary>
-    /// Gets the command that delegates the written task.
-    /// </summary>
-    public AsyncCommand DelegateCommand { get; }
-
-    /// <summary>
     /// Gets the command that opens the task given as its parameter.
     /// </summary>
     public AsyncCommand OpenTaskCommand { get; }
@@ -545,9 +393,9 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
     public AsyncCommand RetryTaskCommand { get; }
 
     /// <summary>
-    /// Gets the command that applies the changes of the opened task to its workspace.
+    /// Gets the command that has the result of the opened task brought into its workspace.
     /// </summary>
-    public AsyncCommand ApplyTaskCommand { get; }
+    public AsyncCommand BringInTaskCommand { get; }
 
     /// <summary>
     /// Gets the command that removes the opened task.
@@ -586,14 +434,11 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
             catalog = await connection.ListWorkspaces(CancellationToken.None);
         }))
         {
-            HashSet<Guid> delegated = [.. catalog!.Delegations.Select(delegation => delegation.WorkspaceId)];
-
-            foreach (WorkspaceInfo workspace in catalog.Workspaces.Where(workspace => !delegated.Contains(workspace.Id)).OrderBy(workspace => workspace.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (WorkspaceInfo session in catalog!.Sessions.Where(session => session.Side is not null))
             {
-                Workspaces.Add(workspace);
+                sideNames[session.Id] = session.Side!.Name;
             }
 
-            SelectedWorkspace = Workspaces.FirstOrDefault(workspace => workspace.Id == initialWorkspace);
             loaded = true;
             Show(status!, true);
 
@@ -684,22 +529,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
         if (!await Send(() => connection.SetSwarmPeer(settings, CancellationToken.None), false))
         {
             await Refresh();
-        }
-    }
-
-    private async Task Delegate()
-    {
-        Guid workspace = selectedWorkspace!.Id;
-        SwarmTaskRequest request = new() { Title = taskTitle.Trim(), Instructions = taskInstructions.Trim(), ExpectedResult = taskExpected.Trim(), Capability = selectedCapability.Value, PeerId = selectedWorker.Value };
-        HashSet<Guid> before = [.. Tasks.Select(task => task.Task.Id)];
-
-        if (await Act(() => connection.DelegateTask(workspace, request, CancellationToken.None)))
-        {
-            TaskTitle = string.Empty;
-            TaskInstructions = string.Empty;
-            TaskExpected = string.Empty;
-            Outcome = "The task was delegated.";
-            Delegated?.Invoke([.. Tasks.Where(task => !before.Contains(task.Task.Id) && !task.Task.IsIncoming).Select(task => task.Task.Id)]);
         }
     }
 
@@ -881,22 +710,6 @@ internal sealed class SwarmViewModel : ViewModelBase, IDisposable
             {
                 Peers.Add(new SwarmPeerViewModel(peer, PeerChanged, row => Revoking = row) { IsExpanded = true });
             }
-        }
-
-        List<Choice<string?>> workers = [anyWorker, .. status.Peers.Where(peer => peer.SendWork).Select(peer => new Choice<string?>(peer.Id, peer.Name))];
-
-        if (!workers.SequenceEqual(Workers))
-        {
-            string? chosen = selectedWorker.Value;
-            Workers.Clear();
-
-            foreach (Choice<string?> worker in workers)
-            {
-                Workers.Add(worker);
-            }
-
-            selectedWorker = workers.FirstOrDefault(worker => worker.Value == chosen) ?? anyWorker;
-            Raise(nameof(SelectedWorker));
         }
 
         // A row that stays keeps its button, which is disabled while its confirmation runs.

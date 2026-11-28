@@ -384,8 +384,8 @@ public sealed class ChatViewModelTests
         await Until(() => chat.Input.Length == 0);
 
         Assert.Equal([entry], chat.SavedInputs);
-        Assert.False(chat.HasNoSavedInputs);
-        Assert.True(chat.HasSavedInputs);
+        Assert.False(chat.HasNoDrafts);
+        Assert.True(chat.HasDrafts);
     }
 
     [Fact]
@@ -456,16 +456,16 @@ public sealed class ChatViewModelTests
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = Guid.NewGuid(), SavedInputs = [] });
 
         Assert.Equal([second, first], chat.SavedInputs);
-        Assert.True(chat.HasSavedInputs);
+        Assert.True(chat.HasDrafts);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.SavedInputsChanged, WorkspaceId = workspaceId, SavedInputs = [] });
 
-        Assert.True(chat.HasNoSavedInputs);
-        Assert.False(chat.HasSavedInputs);
+        Assert.True(chat.HasNoDrafts);
+        Assert.False(chat.HasDrafts);
     }
 
     [Fact]
-    public void Typing_ClosesTheListOfSavedInputs()
+    public void Typing_ClosesTheListOfDrafts()
     {
         chat.ToggleSavedInputsCommand.Execute(null);
 

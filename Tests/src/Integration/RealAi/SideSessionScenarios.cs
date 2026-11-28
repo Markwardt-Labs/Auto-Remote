@@ -50,6 +50,8 @@ public sealed class SideSessionScenarios
         Assert.DoesNotContain("!", await File.ReadAllTextAsync(Path.Combine(main.Folder, "greet.py")), StringComparison.Ordinal);
         Assert.Contains("Hello", await File.ReadAllTextAsync(Path.Combine(side.Folder, "greet.py")), StringComparison.Ordinal);
         int mark = server.Mark();
+        // Bringing in commits unless it is turned off.
+        await server.Connection.SetBringInCommit(main.Id, side.Id, false, CancellationToken.None);
 
         await server.Connection.IntegrateSideSession(side.Id, CancellationToken.None);
 
@@ -69,7 +71,7 @@ public sealed class SideSessionScenarios
     [RealAiTheory]
     [InlineData(AiService.ClaudeCode)]
     [InlineData(AiService.Codex)]
-    public async Task ASessionSetToIntegrateWhenFinishedIsIntegratedOnceItsAiMarksTheTaskComplete(AiService service)
+    public async Task ASessionSetToBringIntoMainIsBroughtInAndCommittedOnceItsWorkEndsWell(AiService service)
     {
         await using RealServer server = await RealServer.Start();
         WorkspaceInfo main = await server.Workspace("auto", service, shell: false);
@@ -81,7 +83,7 @@ public sealed class SideSessionScenarios
         await Gone(server, side, 600);
         await Quiet(server, main);
         Assert.Equal("pear", (await File.ReadAllTextAsync(Path.Combine(main.Folder, "notes.txt"))).Trim());
-        Assert.Equal("1", RealServer.Git(main.Folder, "rev-list", "--count", "--all"));
+        await server.Until(() => RealServer.Git(main.Folder, "rev-list", "--count", "--all") == "2", 120, "the commit of what was brought in");
         await NothingIsLeft(server, main, side);
         Assert.Empty(server.Failures(main));
     }
@@ -100,7 +102,8 @@ public sealed class SideSessionScenarios
         await server.Until(() => RealServer.Processes($"sleep {marker}") > 0, 120, "main to start the long command");
 
         await server.Connection.IntegrateSideSession(side.Id, CancellationToken.None);
-        await server.Until(() => server.Events().Skip(mark).Any(item => item.WorkspaceId == main.Id && item.Message is { Role: MessageRole.User } message && message.Text.StartsWith("Integrate the side session", StringComparison.Ordinal)), 180, "the request to reach main");
+        // It gets a turn of its own, so it waits while main works.
+        await server.Until(() => server.Connection.GetAgenda(main.Id, CancellationToken.None).Result.Items.Any(item => item is { Kind: AgendaKind.BringIn, Waiting: null }), 180, "the request to wait for main");
         await server.Connection.CancelIntegration(side.Id, CancellationToken.None);
 
         Assert.Equal(SideSessionState.Ready, (await Find(server, side.Id))!.Side!.State);
@@ -139,7 +142,7 @@ public sealed class SideSessionScenarios
 
     private async Task<WorkspaceInfo> Side(RealServer server, WorkspaceInfo main, string name, SideSessionStart start)
     {
-        WorkspaceInfo made = await server.Connection.CreateSideSession(main.Id, name, start, null, CancellationToken.None);
+        WorkspaceInfo made = await server.Connection.CreateSideSession(main.Id, name, start, null, false, CancellationToken.None);
         WorkspaceInfo? current = null;
         DateTime deadline = DateTime.UtcNow.AddSeconds(90);
 

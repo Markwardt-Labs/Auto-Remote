@@ -38,16 +38,17 @@ public sealed record SavedInput
     public bool IsQueued { get; init; }
 
     /// <summary>
-    /// Gets whether the queued input is paused, since work was stopped, was cancelled or failed: it stays queued and is not sent until a user resumes the queue, work goes well again or another input is queued.
-    /// </summary>
-    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingDefault)]
-    public bool IsPaused { get; init; }
-
-    /// <summary>
     /// Gets why a recording could not be turned into text, or <see langword="null" /> for every other entry. The entry only goes away when discarded.
     /// </summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public string? Error { get; init; }
+
+    /// <summary>
+    /// Gets what an older release stored about a queued input it had paused; the server reads it once and writes it no more.
+    /// </summary>
+    [JsonPropertyName("isPaused")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public bool? WasPaused { get; init; }
 
     /// <summary>
     /// Gets a value indicating whether the entry is a text that can be taken, which is every entry that is not a recording still being converted or one that failed to be.
@@ -66,10 +67,4 @@ public sealed record SavedInput
     /// </summary>
     [JsonIgnore]
     public string AutoCommitTip => AutoCommit ? "Auto commit is on for this input. Press to turn it off." : "Auto commit is off for this input. Press to turn it on.";
-
-    /// <summary>
-    /// Gets what a list says about a queued input.
-    /// </summary>
-    [JsonIgnore]
-    public string QueueLabel => IsPaused ? "Queued, paused" : "Queued";
 }

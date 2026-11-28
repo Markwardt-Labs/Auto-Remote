@@ -17,6 +17,11 @@ internal sealed record SwarmTaskViewModel(SwarmTaskInfo Task)
     public string Detail => Describe(Task);
 
     /// <summary>
+    /// Gets the one line the session list shows: the title, the other server and the state.
+    /// </summary>
+    public string Row => $"{Task.Title} \u00B7 {(Task.PeerName.Length > 0 ? Task.PeerName : "Any Server")} \u00B7 {State(Task)}";
+
+    /// <summary>
     /// Says where a task stands, with whom.
     /// </summary>
     /// <param name="task">The task.</param>
@@ -43,7 +48,8 @@ internal sealed record SwarmTaskViewModel(SwarmTaskInfo Task)
         SwarmTaskState.InTransit => "In transit",
         SwarmTaskState.Pending => "Waiting for a worker",
         SwarmTaskState.Waiting => "Waiting for other tasks",
-        SwarmTaskState.Done when task.IsApplied => "Done, applied",
+        SwarmTaskState.Queued => task.IsIncoming ? "Waiting on this server" : $"Waiting on {(task.PeerName.Length > 0 ? task.PeerName : "a server")}",
+        SwarmTaskState.Done when task.IsBringingIn => "Done, bringing in",
         _ => task.State.ToString()
     };
 }

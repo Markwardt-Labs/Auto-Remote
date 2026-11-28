@@ -31,9 +31,14 @@ public sealed record SideSession
     public SideSessionStart StartedFrom { get; init; }
 
     /// <summary>
-    /// Gets a value indicating whether it is integrated by itself once its AI marked its task complete and nothing of it runs any more.
+    /// Gets a value indicating whether it is brought into the main workspace by itself once its work is done and nothing of it is left to run.
     /// </summary>
     public bool IntegrateWhenFinished { get; init; }
+
+    /// <summary>
+    /// Gets a value indicating whether the changes are committed after the AI of the main workspace brought the session in.
+    /// </summary>
+    public bool CommitBringIn { get; init; } = true;
 
     /// <summary>
     /// Gets what went wrong while it was set up, or <see langword="null" />.

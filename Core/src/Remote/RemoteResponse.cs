@@ -174,4 +174,14 @@ public sealed record RemoteResponse
     /// Gets the report answering <see cref="RemoteCommand.GetResources" />.
     /// </summary>
     public ResourceReport? Resources { get; init; }
+
+    /// <summary>
+    /// Gets what is up next, answering <see cref="RemoteCommand.GetAgenda" />.
+    /// </summary>
+    public Agenda? Agenda { get; init; }
+
+    /// <summary>
+    /// Gets a page of activity, answering <see cref="RemoteCommand.GetActivity" />.
+    /// </summary>
+    public ActivityPage? Activity { get; init; }
 }

@@ -293,28 +293,15 @@ internal sealed class EnvironmentViewModel : ViewModelBase
     }
 
     /// <summary>
-    /// Gets or sets whether the AI of new workspaces may run shell commands.
+    /// Gets or sets whether the AI of new workspaces is sandboxed.
     /// </summary>
-    public bool NewIsShellAllowed
+    public bool NewIsSandboxed
     {
-        get => defaults.IsShellAllowed;
+        get => defaults.IsSandboxed;
         set
         {
-            defaults = defaults with { IsShellAllowed = value };
-            Raise(nameof(NewIsShellAllowed));
-        }
-    }
-
-    /// <summary>
-    /// Gets or sets whether the AI of new workspaces may use files outside the workspace.
-    /// </summary>
-    public bool NewIsSystemAccessAllowed
-    {
-        get => defaults.IsSystemAccessAllowed;
-        set
-        {
-            defaults = defaults with { IsSystemAccessAllowed = value };
-            Raise(nameof(NewIsSystemAccessAllowed));
+            defaults = defaults with { IsSandboxed = value };
+            Raise(nameof(NewIsSandboxed));
         }
     }
 

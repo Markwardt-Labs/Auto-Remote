@@ -214,13 +214,13 @@ public sealed class WorkspaceViewModelTests
     {
         WorkspaceViewModel model = await OpenSettings();
         model.Settings.SelectedEffort = model.Settings.Efforts.Single(choice => choice.Value == AiEffort.Low);
-        model.Settings.IsShellAllowed = true;
+        model.Settings.IsSandboxed = true;
         connection.Invocations.Clear();
 
         model.ToggleSettingsCommand.Execute(null);
         await Until(() => !model.ShowSettings);
 
-        connection.Verify(x => x.SetWorkspaceSettings(workspace.Id, It.Is<WorkspaceSettings>(sent => sent.Effort == AiEffort.Low && sent.IsShellAllowed), It.IsAny<CancellationToken>()), Times.Once);
+        connection.Verify(x => x.SetWorkspaceSettings(workspace.Id, It.Is<WorkspaceSettings>(sent => sent.Effort == AiEffort.Low && sent.IsSandboxed), It.IsAny<CancellationToken>()), Times.Once);
         Assert.False(model.Settings.HasPending);
     }
 
@@ -239,7 +239,7 @@ public sealed class WorkspaceViewModelTests
     public async Task ClosingTheSettings_StaysOnThemShowingWhyWhenTheServerRefusesTheEdits()
     {
         WorkspaceViewModel model = await OpenSettings(_ => throw new RemoteException("System access cannot be turned off with this provider."));
-        model.Settings.IsSystemAccessAllowed = true;
+        model.Settings.IsSandboxed = true;
 
         model.ToggleSettingsCommand.Execute(null);
         await Until(() => model.Settings.HasError);

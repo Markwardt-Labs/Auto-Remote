@@ -31,7 +31,12 @@ public sealed record SwarmTaskRequest
     public string? PeerId { get; init; }
 
     /// <summary>
-    /// Gets the earlier tasks this one builds on, as their identifiers.
+    /// Gets the tasks whose results this one builds on.
     /// </summary>
     public IReadOnlyList<Guid> DependsOn { get; init; } = [];
+
+    /// <summary>
+    /// Gets a value indicating whether the result is brought into the workspace by itself once the task is done.
+    /// </summary>
+    public bool BringIn { get; init; } = true;
 }

@@ -38,8 +38,8 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         Usage = new UsageViewModel(connection);
         Resources = new ResourcesViewModel(connection) { IsSectionShown = false };
         Resources.Updated += RefreshBadges;
-        // What was edited in main's settings applies to the session made next.
-        Sessions = new SessionsViewModel(connection, id => opened.TryGetValue(id, out WorkspaceViewModel? view) && view.IsAiWorking || busy.Contains(id), id => opened.TryGetValue(id, out WorkspaceViewModel? view) ? view.Settings.Apply() : Task.FromResult(true));
+        Sessions = new SessionsViewModel(connection);
+        Sessions.NewRequested += () => _ = NewSession();
         Sessions.Failed += message => active?.Chat.Show(message);
         Sessions.Discarding += Disarm;
         Sessions.Chosen += id => ShowSession(id);
@@ -50,7 +50,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                 _ = active!.ShowSessionChanges();
             }
         };
-        Sessions.Made += (made, hasTask) => Await(made, hasTask);
+        Sessions.Made += made => Await(made, false);
         ToggleUsageCommand = new AsyncCommand(_ =>
         {
             IsUsageOpen = !isUsageOpen;
@@ -78,7 +78,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         });
         SwarmCommand = new AsyncCommand(_ =>
         {
-            SwarmRequested?.Invoke(null, selected?.Id);
+            SwarmRequested?.Invoke(null);
             return Task.CompletedTask;
         });
         EnvironmentCommand = new AsyncCommand(_ =>
@@ -185,6 +185,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
     private readonly List<SwarmTaskInfo> swarmTasks = [];
 
+    // The entries of the activity the user was told need attention, each of which is told once.
+    private readonly HashSet<Guid> attended = [];
+
     private readonly HashSet<Guid> followed = [];
 
     private readonly HashSet<Guid> held = [];
@@ -241,9 +244,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     public event Action? EnvironmentRequested;
 
     /// <summary>
-    /// Raised when the swarm screen should show, with a delegated task to open or <see langword="null" />, and the focused workspace.
+    /// Raised when the swarm screen should show, with a delegated task to open or <see langword="null" />.
     /// </summary>
-    public event Action<Guid?, Guid?>? SwarmRequested;
+    public event Action<Guid?>? SwarmRequested;
 
     /// <summary>
     /// Raised with the selected workspace when the user asks to move it to another folder.
@@ -417,9 +420,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     }
 
     /// <summary>
-    /// Gets a value indicating whether the button that turns the ready notification on and off shows: the app can notify, and the focused workspace has work that is not over, being busy, looping, holding queued work or inputs or waiting for tasks it delegated, or its notification is on.
+    /// Gets a value indicating whether the button that turns the ready notification on and off shows: the app can notify, and the focused workspace has work that is not over, being busy, looping, having more to come by itself, waiting for the local AI or for tasks it delegated, or its notification is on.
     /// </summary>
-    public bool CanNotify => notifier is not null && active is { } view && (view.NotifyWhenReady || view.State != WorkspaceState.Ready || view.IsLooping || view.Chat.IsQueued || view.Chat.HasActiveQueued || HasTasksUnderWay(view.Workspace.Id));
+    public bool CanNotify => notifier is not null && active is { } view && (view.NotifyWhenReady || view.State != WorkspaceState.Ready || view.IsLooping || view.HasMoreToCome || HasTasksUnderWay(view.Workspace.Id));
 
     /// <summary>
     /// Gets a value indicating whether the user is told once the work of the focused workspace is over.
@@ -980,7 +983,19 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
         List<SessionEntry> rows = [Row(selected, "Main", null)];
         rows.AddRange(sideSessions.Where(session => session.Side!.ParentId == selected.Id).Select(session => Row(session, session.Side!.Name, session.Side)));
-        Sessions.Show(selected, rows);
+        Sessions.Show(selected, rows, [.. swarmTasks.Where(task => task.WorkspaceId is { } owner && MainOf(owner) == selected.Id).OrderBy(task => task.CreatedAt)]);
+    }
+
+    // A new session is described in Send Options of the chat on screen, which a delegated workspace does not offer.
+    private Task NewSession()
+    {
+        if (active?.Delegation is { } task)
+        {
+            active.Chat.Show($"This workspace runs a task delegated by {task.From}, so no session can be made of it.");
+            return Task.CompletedTask;
+        }
+
+        return active?.SendOptions.OpenNewSession() ?? Task.CompletedTask;
     }
 
     private ResourceBadge Badge(Guid workspace)
@@ -1012,9 +1027,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         Status = side?.State switch
         {
             SideSessionState.Creating => "Setting Up",
-            SideSessionState.Integrating => "Integrating",
+            SideSessionState.Integrating => "Bringing In",
             SideSessionState.Deleting => "Deleting",
-            _ => busy.Contains(session.Id) ? "Working" : waiting.Contains(session.Id) ? "Queued" : looping.Contains(session.Id) ? "Loop" : "Ready"
+            _ => busy.Contains(session.Id) ? "Working" : waiting.Contains(session.Id) ? "Waiting for Local AI" : looping.Contains(session.Id) ? "Loop" : "Ready"
         }
     };
 
@@ -1092,6 +1107,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         opened.Clear();
         held.Clear();
         followed.Clear();
+        Sessions.CloseTask();
         Usage.Dispose();
         Resources.Dispose();
     }
@@ -1110,6 +1126,10 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         if (remoteEvent.Kind == RemoteEventKind.WorkspacesChanged)
         {
             _ = Refresh();
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.ActivityChanged)
+        {
+            Attend(remoteEvent.WorkspaceId, remoteEvent.ActivityEntry);
         }
         else if (remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
         {
@@ -1132,6 +1152,14 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         else if (remoteEvent.Kind == RemoteEventKind.QueueChanged && (remoteEvent.Queue is not null ? waiting.Add(remoteEvent.WorkspaceId) : waiting.Remove(remoteEvent.WorkspaceId)))
         {
             BuildEntries();
+        }
+    }
+
+    private void Attend(Guid id, ActivityEntry? entry)
+    {
+        if (entry is { NeedsAttention: true, EndedAt: not null } && workspaces.Concat(sideSessions).FirstOrDefault(known => known.Id == id) is { } named && attended.Add(entry.Id))
+        {
+            notifier?.Announce(id, $"{named.Name} needs attention");
         }
     }
 
@@ -1176,16 +1204,9 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
                 swarmTasks.AddRange(status.Tasks.Where(task => !task.IsIncoming));
                 RaiseNotify();
 
-                // Tasks that were all discarded are never reported to the AI, so nothing more would end the wait.
-                foreach (Guid id in held.Where(id => !swarmTasks.Any(task => task.WorkspaceId == id && !task.IsManual)).ToList())
+                foreach (Guid id in held.ToList())
                 {
-                    held.Remove(id);
-                    keeper?.Release(id);
-
-                    if (opened.TryGetValue(id, out WorkspaceViewModel? view))
-                    {
-                        view.NotifyWhenReady = false;
-                    }
+                    Recheck(id);
                 }
 
                 BuildEntries();
@@ -1197,6 +1218,34 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             refreshingSwarm = false;
         }
     }
+
+    // A wait for delegated tasks can end without anything happening in the workspace itself.
+    private void Recheck(Guid id)
+    {
+        List<SwarmTaskInfo> followedUp = [.. swarmTasks.Where(task => task.WorkspaceId == id && IsAwaited(task))];
+
+        if (followedUp.Count == 0)
+        {
+            held.Remove(id);
+
+            // Tasks that were all discarded lead to nothing, so nothing more would end the wait; ones that were brought in end it with the work that brought them in.
+            if (opened.TryGetValue(id, out WorkspaceViewModel? discarded) && discarded.State == WorkspaceState.Ready && !discarded.HasMoreToCome)
+            {
+                keeper?.Release(id);
+                discarded.NotifyWhenReady = false;
+            }
+        }
+        else if (followedUp.All(task => task.IsManual && task.State is SwarmTaskState.Failed or SwarmTaskState.Cancelled or SwarmTaskState.Lost) && opened.TryGetValue(id, out WorkspaceViewModel? view) && view.State == WorkspaceState.Ready && view.NotifyWhenReady && Workspace(id) is { } workspace)
+        {
+            // A task of the user that did not end well brings nothing in.
+            Conclude(view, workspace);
+        }
+    }
+
+    private WorkspaceInfo? Workspace(Guid id) => workspaces.Concat(sideSessions).FirstOrDefault(known => known.Id == id);
+
+    // A task delegated by hand that is to stay separate leads to no work of the workspace.
+    private bool IsAwaited(SwarmTaskInfo task) => !task.IsManual || task.BringIn;
 
     private async Task Refresh()
     {
@@ -1379,6 +1428,12 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             Delegation = delegations.GetValueOrDefault(workspace.Id)
         };
+        created.SessionMade += (made, hasTask) => Await(made, hasTask);
+        created.Delegated += Follow;
+        created.SessionNames = () => sideSessions.Where(session => session.Side!.ParentId == MainOf(workspace.Id)).Select(session => session.Side!.Name);
+        // What was edited in main's settings applies to the session made next.
+        created.SendOptions.PrepareMain = id => opened.TryGetValue(id, out WorkspaceViewModel? main) ? main.Settings.Apply() : Task.FromResult(true);
+        created.SendOptions.IsMainWorking = id => opened.TryGetValue(id, out WorkspaceViewModel? main) && main.IsAiWorking || busy.Contains(id);
         created.Chat.PromptStarted += () => keeper?.Hold(workspace.Id, NameOf(workspace));
         created.Chat.PromptFailed += () =>
         {
@@ -1407,50 +1462,27 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
             }
             else if (created.State == WorkspaceState.Ready)
             {
-                if (created.NotifyWhenReady)
-                {
-                    Conclude(created, workspace);
-                }
-
-                if (!created.IsLooping && !created.Chat.HasActiveQueued && time.GetUtcNow() - busySince >= minimumBusy)
-                {
-                    chime?.Play();
-                }
+                _ = Settle(created, workspace, time.GetUtcNow() - busySince >= minimumBusy);
             }
 
             previous = created.State;
         };
-        // A loop that ends between its runs changes no state, though the work waited for is over with it.
+        // What was still to come can end without any change of state, as when it is deleted or stopped, or a loop ends between its runs, though the work waited for is over with it.
+        bool wasHeldBack = created.IsHeldBack;
         created.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(WorkspaceViewModel.IsLooping) && !created.IsLooping && created.State == WorkspaceState.Ready && !created.Chat.IsQueued && created.NotifyWhenReady)
+            if (args.PropertyName == nameof(WorkspaceViewModel.IsHeldBack))
             {
-                Conclude(created, workspace);
-            }
-        };
-        created.PropertyChanged += (_, args) =>
-        {
-            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.IsLooping) or nameof(WorkspaceViewModel.NotifyWhenReady))
-            {
-                RaiseNotify();
-            }
-        };
-        bool hadQueued = created.Chat.HasActiveQueued;
-        created.Chat.PropertyChanged += (_, args) =>
-        {
-            if (args.PropertyName == nameof(ChatViewModel.HasActiveQueued))
-            {
-                // The queued inputs can run out without the state changing, as when they are deleted or paused while the workspace is ready.
-                bool ranOut = hadQueued && !created.Chat.HasActiveQueued;
-                hadQueued = created.Chat.HasActiveQueued;
+                bool ranOut = wasHeldBack && !created.IsHeldBack;
+                wasHeldBack = created.IsHeldBack;
 
-                if (ranOut && created.State == WorkspaceState.Ready && !created.IsLooping && created.NotifyWhenReady)
+                if (ranOut && created.State == WorkspaceState.Ready && !created.Chat.IsQueued && created.NotifyWhenReady)
                 {
                     Conclude(created, workspace);
                 }
             }
 
-            if (created == active && args.PropertyName is nameof(ChatViewModel.IsQueued) or nameof(ChatViewModel.HasActiveQueued))
+            if (created == active && args.PropertyName is nameof(WorkspaceViewModel.State) or nameof(WorkspaceViewModel.IsLooping) or nameof(WorkspaceViewModel.NotifyWhenReady) or nameof(WorkspaceViewModel.HasMoreToCome))
             {
                 RaiseNotify();
             }
@@ -1492,12 +1524,36 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
     // Sessions and workspaces can be renamed while their view stays.
     private string NameOf(WorkspaceInfo workspace) => workspaces.Concat(sideSessions).FirstOrDefault(known => known.Id == workspace.Id)?.Name ?? workspace.Name;
 
-    private bool HasTasksUnderWay(Guid id) => swarmTasks.Any(task => task.WorkspaceId == id && !task.IsManual && IsUnderWay(task));
+    private bool HasTasksUnderWay(Guid id) => swarmTasks.Any(task => task.WorkspaceId == id && IsAwaited(task) && IsUnderWay(task));
+
+    // What is up next is read anew first: the server may not have told yet of what the work that just ended leads to, such as that it is tried again.
+    private async Task Settle(WorkspaceViewModel view, WorkspaceInfo workspace, bool wasLong)
+    {
+        if (view.NotifyWhenReady || wasLong && chime is not null)
+        {
+            await view.Chat.ReadAgenda();
+        }
+
+        if (view.State != WorkspaceState.Ready || !opened.TryGetValue(workspace.Id, out WorkspaceViewModel? current) || current != view)
+        {
+            return;
+        }
+
+        if (view.NotifyWhenReady)
+        {
+            Conclude(view, workspace);
+        }
+
+        if (!view.HasMoreToCome && wasLong)
+        {
+            chime?.Play();
+        }
+    }
 
     // Tells the user that the work they wait for is over, unless more of it is still to come.
     private void Conclude(WorkspaceViewModel view, WorkspaceInfo workspace)
     {
-        // While the AI waits for delegated tasks its work is not over, so the app stays kept alive and the user is told once it has dealt with them.
+        // While tasks delegated from the workspace are under way its work is not over, so the app stays kept alive and the user is told once it has dealt with them.
         if (HasTasksUnderWay(workspace.Id))
         {
             held.Add(workspace.Id);
@@ -1506,8 +1562,8 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
 
         held.Remove(workspace.Id);
 
-        // Nor is it while queued inputs are still to be sent or work waits for the local AI (a queued input leaves the list only after it starts to wait there), or while a loop runs, between whose runs the workspace is ready.
-        if (view.Chat.HasActiveQueued || view.Chat.IsQueued || view.IsLooping)
+        // Nor is it while more is to come by itself, such as queued inputs, a retry or the next run of a loop, unless the user stopped it all, or while work waits for the local AI.
+        if (view.HasMoreToCome)
         {
             return;
         }
@@ -1745,7 +1801,7 @@ internal sealed class HomeViewModel : ViewModelBase, IDisposable
         {
             // The task opens on the swarm screen, and the list keeps the focused workspace selected.
             ShowFocusedAsSelected();
-            SwarmRequested?.Invoke(task.Id, task.WorkspaceId is { } owner ? MainOf(owner) : null);
+            SwarmRequested?.Invoke(task.Id);
         }
         else if (entry.Workspace is { } workspace)
         {

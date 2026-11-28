@@ -470,20 +470,20 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_SaysThatTheLoopWaitsForTheUsageLimitAndWhenItLooksAgain()
+    public async Task Workspace_SaysThatTheLoopWaitsUntilTheAiCanRunAndWhenItTriesAgain()
     {
         DateTimeOffset now = new(2026, 11, 4, 12, 0, 0, TimeSpan.Zero);
         WorkspaceViewModel model = await StartedWorkspace(true);
         LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 600 }, StartedAt = now, Runs = 2, NextRunAt = now.AddSeconds(30) };
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop });
-        Assert.DoesNotContain("usage limit", model.LoopTip);
+        Assert.DoesNotContain("until the AI can run", model.LoopTip);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop with { LimitCheckAt = now.AddMinutes(15) } });
 
-        Assert.EndsWith(", 2 runs so far, waiting for the usage limit", model.LoopTip);
-        Assert.Equal("The usage limit is reached, so the loop waits. It checks again in 15 min 0 s and goes on once the AI can be prompted again.", model.DescribeNext(now));
-        Assert.Equal("The usage limit is reached, so the loop waits. It checks again in 45 s and goes on once the AI can be prompted again.", model.DescribeNext(now.AddSeconds(15 * 60 - 45)));
-        Assert.Equal("The usage limit is reached. The loop is checking it now.", model.DescribeNext(now.AddMinutes(16)));
+        Assert.EndsWith(", 2 runs so far, waiting until the AI can run", model.LoopTip);
+        Assert.Equal("The AI could not run, so the loop waits. It tries again in 15 min 0 s.", model.DescribeNext(now));
+        Assert.Equal("The AI could not run, so the loop waits. It tries again in 45 s.", model.DescribeNext(now.AddSeconds(15 * 60 - 45)));
+        Assert.Equal("The AI could not run. The loop is trying again now.", model.DescribeNext(now.AddMinutes(16)));
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop with { LimitCheckAt = null } });
 
@@ -537,43 +537,43 @@ public sealed class ScriptsViewModelTests
     }
 
     [Fact]
-    public async Task Workspace_KeepsTheLoopButtonWhileTheAiWorksAndNothingIsTypedButNotWhileWorkIsEnded()
+    public async Task Workspace_OffersSendOptionsWhateverItDoes()
     {
         WorkspaceViewModel model = await StartedWorkspace(true);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = true });
-        Assert.Equal((true, true, true), (model.ShowHaltButtons, model.ShowLoopButton, model.ShowReviewButton));
+        Assert.Equal((true, true, true), (model.ShowHaltButtons, model.OpenSendOptionsCommand.CanExecute(null), model.ShowReviewButton));
 
         model.Chat.Input = "one more thing";
-        Assert.Equal((false, false), (model.ShowHaltButtons, model.ShowLoopButton));
+        Assert.Equal((false, true), (model.ShowHaltButtons, model.OpenSendOptionsCommand.CanExecute(null)));
 
         model.Chat.Input = string.Empty;
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.WorkingChanged, WorkspaceId = workspace.Id, Working = false });
         connection.Raise(x => x.EventReceived += null, Changed(Run("a.cs", ScriptState.Running)));
-        Assert.Equal((false, true), (model.ShowHaltButtons, model.ShowLoopButton));
+        Assert.Equal((false, true), (model.ShowHaltButtons, model.OpenSendOptionsCommand.CanExecute(null)));
 
         Server(WorkspaceState.Canceling);
-        Assert.Equal((true, false), (model.ShowHaltButtons, model.ShowLoopButton));
+        Assert.Equal((true, true), (model.ShowHaltButtons, model.OpenSendOptionsCommand.CanExecute(null)));
     }
 
     [Fact]
-    public async Task Workspace_FollowsTheLoopOfTheServerAndOffersTheLoopButtonOnlyWhileNoneRuns()
+    public async Task Workspace_FollowsTheLoopOfTheServerAndOffersRepeatOnlyWhileNoneRuns()
     {
         LoopInfo loop = new() { Settings = new LoopSettings { Prompt = "check", IntervalSeconds = 300, Condition = LoopCondition.Runs, Runs = 3 }, StartedAt = DateTimeOffset.UtcNow, Runs = 1 };
         connection.Setup(x => x.GetLoop(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync((LoopInfo?)null);
         WorkspaceViewModel model = await StartedWorkspace(true);
-        Assert.Equal((true, false, false, false), (model.ShowLoopButton, model.IsLooping, model.ShowCancelLoopButton, model.ShowSendButton));
+        Assert.Equal((true, false, false, false), (model.SendOptions.CanRepeat, model.IsLooping, model.ShowCancelLoopButton, model.ShowSendButton));
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Loop = loop });
 
-        Assert.Equal((false, true, true), (model.ShowLoopButton, model.IsLooping, model.ShowCancelLoopButton));
+        Assert.Equal((false, true, true), (model.SendOptions.CanRepeat, model.IsLooping, model.ShowCancelLoopButton));
         Assert.Contains("every 5 min", model.LoopTip);
         Assert.Contains("3 runs in all", model.LoopTip);
         Assert.Contains("1 run so far", model.LoopTip);
 
         connection.Raise(x => x.EventReceived += null, new RemoteEvent { Kind = RemoteEventKind.LoopChanged, WorkspaceId = workspace.Id, Text = "The loop made all its runs." });
 
-        Assert.Equal((true, false, false), (model.ShowLoopButton, model.IsLooping, model.ShowCancelLoopButton));
+        Assert.Equal((true, false, false), (model.SendOptions.CanRepeat, model.IsLooping, model.ShowCancelLoopButton));
         Assert.Equal("The loop made all its runs.", model.Chat.Notice);
         Assert.True(model.Chat.HasNotice);
     }

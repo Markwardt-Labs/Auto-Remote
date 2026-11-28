@@ -1,7 +1,7 @@
 namespace Markwardt.AutoRemote.Server;
 
 /// <summary>
-/// Brings side sessions into their main workspace: the main AI is asked at once, with read access to the session's files and changes, and finishes with a tool, which removes the session. Until then the session stays locked; it can be cancelled, which gives it back. A request that was not finished is given once more after a restart, a failure or work that ended without finishing; after that, or after the work was stopped, it goes along with main's next work.
+/// Brings side sessions into their main workspace: the main AI gets a turn of its own for it, with read access to the files and changes of every session that is ready to come in, combines them as it sees fit and confirms each with a tool, which removes that session. Until then a session stays locked; it can be cancelled, which gives it back. One whose bringing in is not confirmed is asked for once more, and then given back as it is.
 /// </summary>
 internal interface ISideIntegrations
 {
@@ -37,21 +37,29 @@ internal interface ISideIntegrations
     Task<string> Finish(Guid mainId, string integrationId);
 
     /// <summary>
-    /// Notes that the AI of a side session completed its task, which starts its integration once nothing of it runs when it is set to integrate when finished.
-    /// </summary>
-    /// <param name="id">The side session.</param>
-    /// <returns>What happens, for the AI.</returns>
-    Task<string> MarkComplete(Guid id);
-
-    /// <summary>
-    /// Forgets that a side session's task was completed, since it was given more work.
+    /// Forgets that a side session's work was done, since it was given more work.
     /// </summary>
     /// <param name="id">The side session.</param>
     /// <returns>A task that completes once done.</returns>
     Task Reopen(Guid id);
 
     /// <summary>
-    /// Sets whether a side session is integrated by itself once its AI marks its task complete.
+    /// Sets whether the changes are committed after a side session was brought in.
+    /// </summary>
+    /// <param name="id">The side session.</param>
+    /// <param name="commit">Whether they are.</param>
+    /// <returns>A task that completes once set.</returns>
+    Task SetCommit(Guid id, bool commit);
+
+    /// <summary>
+    /// Gets what waits to be brought into a workspace.
+    /// </summary>
+    /// <param name="mainId">The main workspace.</param>
+    /// <returns>The side sessions that are being brought in and do not have their turn yet.</returns>
+    IReadOnlyList<BringInItem> Pending(Guid mainId);
+
+    /// <summary>
+    /// Sets whether a side session is brought into its main workspace by itself once its work is done.
     /// </summary>
     /// <param name="id">The side session.</param>
     /// <param name="enabled">Whether it is.</param>
@@ -59,7 +67,7 @@ internal interface ISideIntegrations
     Task SetWhenFinished(Guid id, bool enabled);
 
     /// <summary>
-    /// Tells whether a request to integrate waits to be given to a workspace's AI, which goes before a loop's next prompt.
+    /// Tells whether a request to bring work in waits for its turn, which goes before the queued inputs and a loop's next prompt.
     /// </summary>
     /// <param name="mainId">The main workspace.</param>
     /// <returns><see langword="true" /> if one waits.</returns>
@@ -74,7 +82,7 @@ internal interface ISideIntegrations
 }
 
 /// <inheritdoc />
-internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessions sessions, ISideSessionRepository repository, IPromptService prompts, IWorkQueue queue, IWorkspaceActivity activity, IWorkspaceLoops loops, IScriptRunner scripts, IWindowGuard guard, IWorkspaceSnapshots snapshots, IEventHub events, ILog log, ISwarmService? swarm = null, TimeSpan? interval = null, TimeSpan? retryDelay = null, Func<IFollowUps?>? following = null) : ISideIntegrations
+internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessions sessions, ISideSessionRepository repository, IPromptService prompts, IWorkQueue queue, IWorkspaceActivity activity, IWorkspaceLoops loops, IScriptRunner scripts, IWindowGuard guard, IWorkspaceSnapshots snapshots, IEventHub events, ILog log, ISwarmService? swarm = null, TimeSpan? interval = null, TimeSpan? retryDelay = null, Func<IFollowUps?>? following = null, IActivityLog? journal = null, Func<Guid, string, Task<string?>>? remote = null, IFailureKinds? failures = null) : ISideIntegrations
 {
     private readonly TimeSpan every = interval ?? TimeSpan.FromSeconds(5);
 
@@ -84,20 +92,23 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
 
     private readonly ConcurrentDictionary<Guid, byte> sending = new();
 
-    // Side sessions whose work was stopped or failed, which takes back what its AI said about being done.
-    private readonly ConcurrentDictionary<Guid, byte> abandoned = new();
-
     private readonly HashSet<string> cancelled = [];
 
     private readonly Lock handing = new();
-
-    private readonly ConcurrentDictionary<Guid, byte> halted = new();
 
     private readonly ConcurrentDictionary<Guid, DateTimeOffset> notBefore = new();
 
     private readonly SemaphoreSlim pumping = new(1, 1);
 
     private readonly int listedChanges = 200;
+
+    private readonly int deliveryLimit = 2;
+
+    private readonly IFailureKinds kinds = failures ?? new FailureKinds();
+
+    private readonly string restarted = "The server restarted while you were bringing this in. Check what is already here before you change anything, so nothing is brought in twice.";
+
+    private readonly string unconfirmed = "Bringing it in was not confirmed.";
 
     private readonly string handoffQuestion = "Another AI is about to bring this side session's work into the main session. Describe only what was done in this side session since it was made, not what was done in the main session before it: the goal, the decisions that matter, how it was checked and anything to watch out for. Answer with that description alone, in at most 300 words.";
 
@@ -109,11 +120,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         stopping = cancellation;
         events.Subscribe(Follow);
 
-        // Whether the work that marked its task complete ever ended well cannot be told after a restart.
-        foreach ((Guid id, StoredSideSession _) in workspaces.Sides().Where(entry => entry.Side.MarkedComplete))
-        {
-            await workspaces.UpdateSide(id, current => current with { MarkedComplete = false });
-        }
+        following?.Invoke()?.Observe(Worked);
 
         foreach ((Guid id, StoredSideSession side) in workspaces.Sides().Where(entry => entry.Side is { State: SideSessionState.Integrating, Integration: not null }))
         {
@@ -131,7 +138,15 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
 
             if (integration.InWork)
             {
-                await Change(id, integration.Id, current => current with { InWork = false, WaitsForWork = current.Deliveries >= 2 });
+                // A turn the server ended counts, so one that stops the server cannot go on for good; it gets one more than others.
+                if (integration.Deliveries > deliveryLimit)
+                {
+                    await GiveBack(id, side.ParentId, side.Name, integration, "The server stopped too often while the AI was bringing it in.");
+                }
+                else
+                {
+                    await Change(id, integration.Id, current => current with { InWork = false, Interrupted = true });
+                }
             }
         }
 
@@ -149,7 +164,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
 
             if (side.State != SideSessionState.Ready)
             {
-                throw new RequestException(side.State == SideSessionState.Integrating ? "The side session is already being integrated." : "The side session is not ready.");
+                throw new RequestException(side.State == SideSessionState.Integrating ? "The side session is already being brought into main." : "The side session is not ready.");
             }
 
             if (Busy(id) is { } reason)
@@ -185,7 +200,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         using (await sessions.Lock(id))
         {
             side = Find(id);
-            integration = side is { State: SideSessionState.Integrating, Integration: { } current } ? current : throw new RequestException("The side session is not being integrated.");
+            integration = side is { State: SideSessionState.Integrating, Integration: { } current } ? current : throw new RequestException("The side session is not being brought into main.");
             // From here on a finish with this identifier removes nothing.
             await workspaces.UpdateSide(id, entry => entry with { State = SideSessionState.Ready, Integration = null });
         }
@@ -211,11 +226,12 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
     public async Task<string> Finish(Guid mainId, string integrationId)
     {
         string id = integrationId.Trim();
-        string nothing = "There is no integration with that id under way here; it may have been cancelled. Nothing was removed.";
+        string nothing = "There is nothing being brought in with that id here; it may have been cancelled. Nothing was removed.";
 
         if (workspaces.Sides(mainId).FirstOrDefault(entry => entry.Side.Integration?.Id == id) is not { Side: not null } found)
         {
-            return nothing;
+            // It may name the result of a delegated task instead.
+            return remote is not null && await remote(mainId, id) is { } answer ? answer : nothing;
         }
 
         using (await sessions.Lock(found.Id))
@@ -226,7 +242,8 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
             }
 
             // Reverting main's work would now throw away the only copy of what the session did.
-            snapshots.Protect(mainId, "This work integrated a side session, which cancelling it would lose. Stop it instead.");
+            snapshots.Protect(mainId, "This work brought a side session in, which cancelling it would lose. Stop it instead.");
+            Record(mainId, side.Name, integration);
             await Withdraw(found.Id, side, integration);
 
             if (swarm is not null)
@@ -235,30 +252,35 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
             }
 
             await sessions.Remove(found.Id);
-            return $"The integration is finished and the side session \"{side.Name}\" was removed.";
+            return $"The side session \"{side.Name}\" is brought in and was removed.";
         }
-    }
-
-    /// <inheritdoc />
-    public async Task<string> MarkComplete(Guid id)
-    {
-        if (activity.Get(id) is WorkspaceState.Stopping or WorkspaceState.Canceling)
-        {
-            return "The work is being stopped, so the task is not marked complete.";
-        }
-
-        abandoned.TryRemove(id, out _);
-
-        if (await workspaces.UpdateSide(id, current => current with { MarkedComplete = true }) is not { } side)
-        {
-            return "This is not a side session.";
-        }
-
-        return side.IntegrateWhenFinished ? "Noted. The session is integrated into the main session once everything it runs has stopped; finish your reply now." : "Noted. The user did not set this session to integrate when finished, so it stays as it is.";
     }
 
     /// <inheritdoc />
     public async Task Reopen(Guid id) => await workspaces.UpdateSide(id, current => current with { MarkedComplete = false, Error = null, UnsentTask = null });
+
+    /// <inheritdoc />
+    public async Task SetCommit(Guid id, bool commit)
+    {
+        if (await workspaces.UpdateSide(id, current => current with { CommitBringIn = commit }) is null)
+        {
+            throw new RequestException("The side session no longer exists.");
+        }
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<BringInItem> Pending(Guid mainId)
+    {
+        // One that was given its turn but has not reached the AI yet is still to come, so nobody takes the workspace for done in between.
+        bool handingOver = activity.Get(mainId) == WorkspaceState.Ready && !prompts.IsBusy(mainId);
+
+        return
+        [
+            .. workspaces.Sides(mainId)
+                .Where(entry => entry.Side is { State: SideSessionState.Integrating, Integration: not null } && (!entry.Side.Integration.InWork || handingOver))
+                .Select(entry => new BringInItem(entry.Id, $"Bring in {entry.Side.Name}", entry.Side.CommitBringIn, entry.Side.Integration!.Request is null ? "Preparing its changes" : null))
+        ];
+    }
 
     /// <inheritdoc />
     public async Task SetWhenFinished(Guid id, bool enabled)
@@ -272,7 +294,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
     }
 
     /// <inheritdoc />
-    public bool IsDelivering(Guid mainId) => workspaces.Sides(mainId).Any(entry => entry.Side is { State: SideSessionState.Integrating, Integration: { InWork: false, WaitsForWork: false } });
+    public bool IsDelivering(Guid mainId) => workspaces.Sides(mainId).Any(entry => entry.Side is { State: SideSessionState.Integrating, Integration: { InWork: false, Request: not null } });
 
     /// <inheritdoc />
     public async Task Forget(Guid mainId)
@@ -285,7 +307,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
             }
             catch (RequestException exception)
             {
-                log.Write($"The integration of '{side.Name}' was not cancelled: {exception.Message}");
+                log.Write($"Bringing in '{side.Name}' was not cancelled: {exception.Message}");
             }
         }
     }
@@ -316,7 +338,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
 
         if (following?.Invoke()?.IsHolding(id) == true)
         {
-            return "The side session has queued inputs or a commit still to come. Let them run, or load or delete the queued inputs, first.";
+            return "The side session has queued inputs, work to try again or a commit still to come. Let them run, or remove the queued inputs, first.";
         }
 
         return scripts.IsRunning(id) ? "A script runs in the side session. Stop it first." : null;
@@ -351,7 +373,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         }
         catch (Exception exception) when (exception is RequestException or IOException or UnauthorizedAccessException)
         {
-            log.Write($"The integration files of '{side.Name}' were left: {exception.Message}");
+            log.Write($"The files made for bringing in '{side.Name}' were left: {exception.Message}");
         }
     }
 
@@ -385,7 +407,8 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
                 changes = await repository.Export(side.Folder, side.BaseTree, files, handoff, running.Token);
                 WorkspaceInfo main = await workspaces.Get(side.ParentId, running.Token);
                 string request = Describe(side, integrationId, files, handoff, changes, main);
-                StoredIntegration? ready = await Change(id, integrationId, current => current with { Folder = files, Request = request });
+                string[] changed = [.. changes.Split('\n', StringSplitOptions.RemoveEmptyEntries).Take(listedChanges)];
+                StoredIntegration? ready = await Change(id, integrationId, current => current with { Folder = files, Request = request, Handoff = handoff.Trim(), Files = changed });
 
                 if (ready is not null)
                 {
@@ -422,11 +445,11 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
                 return;
             }
 
-            await workspaces.UpdateSide(id, current => current with { State = SideSessionState.Ready, Integration = null, Error = $"The integration could not start: {reason}" });
+            await workspaces.UpdateSide(id, current => current with { State = SideSessionState.Ready, Integration = null, Error = $"Bringing it in could not start: {reason}" });
         }
 
         prompts.Unshare(side.ParentId, integrationId);
-        events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = side.ParentId, Time = DateTimeOffset.UtcNow, Error = $"The integration of the side session '{side.Name}' could not start: {reason}", IsNotice = true });
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = side.ParentId, Time = DateTimeOffset.UtcNow, Error = $"Bringing the side session '{side.Name}' in could not start: {reason}", IsNotice = true });
     }
 
     private async Task<string> Handoff(Guid id, CancellationToken cancellation)
@@ -464,8 +487,8 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
             - Review the code you copy against this workspace, which may have changed what it depends on.
             - Copy files git ignores that matter; they are not in the change list.
             - Decide conflicts yourself without asking, and run the tests that fit when you can.
-            - Do not commit or merge as part of this.
-            This joins any work you are doing now. When it is done, call finish_integration with integration_id "{integrationId}" and then say what you did, including anything you adapted or left out.
+            - How you combine it is up to you: use git or edit the files, whichever you see fit. Do not commit: Auto Remote commits when your turn ends, if the user set it to.
+            When all of it is brought over, call finish_integration with integration_id "{integrationId}", which removes the session for good, and then say what you did, including anything you adapted or left out. If you cannot bring it over, do not call it.
             """.ReplaceLineEndings("\n").Trim();
     }
 
@@ -484,7 +507,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         }
     }
 
-    // Gives out the requests whose workspace can take them, and starts the integrations of finished side sessions.
+    // Gives out the requests whose workspace can take them, and brings in the side sessions whose work is done.
     private async Task Pump()
     {
         await pumping.WaitAsync();
@@ -493,20 +516,8 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         {
             foreach ((Guid id, StoredSideSession side) in workspaces.Sides().ToList())
             {
-                if (side is { State: SideSessionState.Ready, MarkedComplete: true } && Busy(id) is null)
+                if (side is { State: SideSessionState.Ready, MarkedComplete: true, IntegrateWhenFinished: true } && Busy(id) is null)
                 {
-                    // Looked at only once the session is idle, which it is after what stopped or failed was heard.
-                    if (abandoned.TryRemove(id, out _))
-                    {
-                        await workspaces.UpdateSide(id, current => current with { MarkedComplete = false });
-                        continue;
-                    }
-
-                    if (!side.IntegrateWhenFinished)
-                    {
-                        continue;
-                    }
-
                     try
                     {
                         await Integrate(id);
@@ -515,15 +526,17 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
                     {
                     }
                 }
-                else if (side is { State: SideSessionState.Integrating, Integration: { Request: not null, InWork: false } integration } && !sending.ContainsKey(id))
-                {
-                    await Deliver(id, side, integration);
-                }
+            }
+
+            // Everything that is ready for a workspace goes into one turn, and its AI decides how to combine it.
+            foreach (IGrouping<Guid, (Guid Id, StoredSideSession Side)> ready in workspaces.Sides().Where(entry => entry.Side is { State: SideSessionState.Integrating, Integration: { Request: not null, InWork: false } }).GroupBy(entry => entry.Side.ParentId).ToList())
+            {
+                await Deliver(ready.Key, [.. ready.Where(entry => !sending.ContainsKey(entry.Id) && (!notBefore.TryGetValue(entry.Id, out DateTimeOffset soonest) || DateTimeOffset.UtcNow >= soonest))]);
             }
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException)
         {
-            log.Write($"Integrations could not be moved on: {exception.Message}");
+            log.Write($"Side sessions could not be brought in: {exception.Message}");
         }
         finally
         {
@@ -531,92 +544,231 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         }
     }
 
-    private async Task Deliver(Guid id, StoredSideSession side, StoredIntegration integration)
+    private async Task Deliver(Guid mainId, IReadOnlyList<(Guid Id, StoredSideSession Side)> ready)
     {
-        WorkspaceState state = activity.Get(side.ParentId);
-
-        if (state is not (WorkspaceState.Ready or WorkspaceState.Working) || integration.WaitsForWork && state == WorkspaceState.Ready || following?.Invoke()?.IsPending(side.ParentId) == true || guard.IsPaused(side.ParentId) || notBefore.TryGetValue(id, out DateTimeOffset soonest) && DateTimeOffset.UtcNow < soonest)
+        if (ready.Count == 0 || activity.Get(mainId) != WorkspaceState.Ready || prompts.IsBusy(mainId) || following?.Invoke()?.MayBringIn(mainId) == false || guard.IsPaused(mainId) || await guard.Hold(mainId, ready[0].Side.Service, stopping))
         {
             return;
         }
 
-        // Starting new work is held to the usage limit, as a loop's prompt is; joining work in progress is not new work.
-        if (state == WorkspaceState.Ready && await guard.Hold(side.ParentId, side.Service, stopping))
+        List<(Guid Id, string Name, StoredIntegration Integration)> taken = [];
+
+        foreach ((Guid id, StoredSideSession side) in ready)
         {
-            return;
+            sending[id] = 0;
+
+            if (await Change(id, side.Integration!.Id, current => current with { InWork = true, Deliveries = current.Deliveries + 1, StepId = current.StepId == Guid.Empty ? Guid.NewGuid() : current.StepId }) is { } marked)
+            {
+                taken.Add((id, side.Name, marked));
+            }
+            else
+            {
+                sending.TryRemove(id, out _);
+            }
         }
 
-        sending[id] = 0;
-
-        if (await Change(id, integration.Id, current => current with { InWork = true, WaitsForWork = false, Deliveries = current.Deliveries + 1 }) is null)
+        if (taken.Count > 0)
         {
-            sending.TryRemove(id, out _);
-            return;
+            bool commit = ready.Any(entry => entry.Side.CommitBringIn);
+            // Sent apart from the pump: starting an AI can take long, and other workspaces must not wait for it.
+            _ = Task.Run(() => Send(mainId, taken, commit), CancellationToken.None);
         }
-
-        // Sent apart from the pump: starting an AI can take long, and other workspaces must not wait for it.
-        _ = Task.Run(() => Send(id, side.ParentId, integration.Id, integration.Request!), CancellationToken.None);
     }
 
-    private async Task Send(Guid id, Guid mainId, string integrationId, string request)
+    private async Task Send(Guid mainId, IReadOnlyList<(Guid Id, string Name, StoredIntegration Integration)> sessionsToBring, bool commit)
     {
-        string name = workspaces.GetSide(id)?.Name ?? string.Empty;
         bool started = false;
-        bool dropped;
+        IFollowUps? followed = following?.Invoke();
+        string request = sessionsToBring.Count == 1
+            ? sessionsToBring[0].Integration.Request!
+            : $"Bring these {sessionsToBring.Count} side sessions into this workspace. Decide how to combine them, together or one after another, and confirm each one you finished.\n\n{string.Join("\n\n---\n\n", sessionsToBring.Select(entry => entry.Integration.Request))}";
+        WorkStep step = new() { Id = sessionsToBring[0].Integration.StepId, Source = ActivitySource.BringIn, Text = request, Commit = commit, Preface = sessionsToBring.Any(entry => entry.Integration.Interrupted) ? restarted : null };
 
         try
         {
-            if (workspaces.GetSide(id)?.Integration?.Id != integrationId)
+            if (sessionsToBring.All(entry => workspaces.GetSide(entry.Id)?.Integration?.Id != entry.Integration.Id))
             {
                 return;
             }
 
-            WorkTicket ticket = await queue.Submit(mainId, request, WorkSource.Integration, stopping);
-
-            // A cancellation while it was on its way takes it out of the queue again.
-            if (IsCancelled(integrationId))
+            if (followed is not null && !followed.TryExpect(mainId, step, end => _ = Ended(mainId, sessionsToBring, end), () => Unfinished(sessionsToBring)))
             {
-                prompts.Withdraw(mainId, request);
-                await queue.Withdraw(mainId, request);
+                // Something else is on its way to the workspace.
+                await PutBack(sessionsToBring);
+                return;
             }
 
-            started = !ticket.Queued || await ticket.Started.WaitAsync(stopping);
+            WorkspaceInfo main = await workspaces.Get(mainId, stopping);
+            Task<bool> beginning = Task.FromResult(true);
+
+            if (main.Service == AiService.Local)
+            {
+                beginning = (await queue.SubmitWhenFree(mainId, request, WorkSource.Integration, () => Commits(mainId, commit), stopping)).Started;
+            }
+            else
+            {
+                await prompts.PromptWhenIdle(mainId, request, () => Commits(mainId, commit), stopping);
+            }
+
+            followed?.Sent(mainId, step.Id);
+
+            // A cancellation while it was on its way takes it out of the queue again.
+            foreach ((Guid _, string _, StoredIntegration integration) in sessionsToBring.Where(entry => IsCancelled(entry.Integration.Id)))
+            {
+                prompts.Withdraw(mainId, integration.Request!);
+                await queue.Withdraw(mainId, integration.Request!);
+            }
+
+            started = await beginning.WaitAsync(stopping);
 
             if (!started)
             {
-                // The queued work was dropped, which the user did; it goes along with what main does next.
-                await Change(id, integrationId, current => current with { InWork = false, WaitsForWork = true });
+                await Ended(mainId, sessionsToBring, new WorkEnd(ActivityOutcome.Stopped));
             }
         }
-        catch (RequestException exception)
+        catch (Exception exception) when (exception is not OutOfMemoryException && !stopping.IsCancellationRequested)
         {
-            log.Write($"A request to integrate could not be sent: {exception.Message}");
-            notBefore[id] = DateTimeOffset.UtcNow + retryAfter;
-            await Change(id, integrationId, current => current with { InWork = false, WaitsForWork = current.Deliveries >= 2 });
+            followed?.NotSent(mainId, step.Id);
+            log.Write($"A request to bring side sessions in could not be sent: {exception.Message}");
+
+            // Work that got there first is not a failure; an AI that cannot run is waited for; anything else counts against it.
+            bool busy = activity.Get(mainId) != WorkspaceState.Ready || prompts.IsBusy(mainId);
+            await Ended(mainId, sessionsToBring, new WorkEnd(busy || kinds.IsPassing(exception.Message) ? ActivityOutcome.Waiting : ActivityOutcome.Failed, !busy && kinds.IsPassing(exception.Message), exception.Message));
         }
         catch (OperationCanceledException)
         {
         }
         finally
         {
+            List<(string Name, string Id)> dropped;
+
             lock (handing)
             {
-                sending.TryRemove(id, out _);
-                dropped = cancelled.Contains(integrationId);
+                foreach ((Guid id, string _, StoredIntegration _) in sessionsToBring)
+                {
+                    sending.TryRemove(id, out _);
+                }
+
+                dropped = [.. sessionsToBring.Where(entry => cancelled.Contains(entry.Integration.Id)).Select(entry => (entry.Name, entry.Integration.Id))];
             }
 
-            if (dropped && started)
+            foreach ((string name, string integrationId) in started ? dropped : [])
             {
                 await TellToStop(mainId, name, integrationId);
             }
         }
+    }
 
-        // Work can end before this notices that the request is part of it.
-        if (started && !dropped && !prompts.IsBusy(mainId) && activity.Get(mainId) == WorkspaceState.Ready)
+    // Requests that did not reach the AI, which are given again.
+    private async Task PutBack(IReadOnlyList<(Guid Id, string Name, StoredIntegration Integration)> asked)
+    {
+        foreach ((Guid id, string _, StoredIntegration integration) in asked)
         {
-            await Ended(mainId, halted.ContainsKey(mainId));
+            notBefore[id] = DateTimeOffset.UtcNow + retryAfter;
+            await Change(id, integration.Id, current => current with { InWork = false, Deliveries = Math.Max(0, current.Deliveries - 1) });
         }
     }
+
+    private void Commits(Guid mainId, bool commit)
+    {
+        if (commit)
+        {
+            following?.Invoke()?.Arm(mainId);
+        }
+    }
+
+    private string? Unfinished(IReadOnlyList<(Guid Id, string Name, StoredIntegration Integration)> asked)
+        => asked.Any(entry => !IsCancelled(entry.Integration.Id) && workspaces.GetSide(entry.Id)?.Integration?.Id == entry.Integration.Id) ? unconfirmed : null;
+
+    // The turn that was to bring the sessions in ended: those it did not confirm are asked for again, or given back.
+    private async Task Ended(Guid mainId, IReadOnlyList<(Guid Id, string Name, StoredIntegration Integration)> asked, WorkEnd end)
+    {
+        try
+        {
+            foreach ((Guid id, string name, StoredIntegration integration) in asked.Where(entry => workspaces.GetSide(entry.Id)?.Integration?.Id == entry.Integration.Id).ToList())
+            {
+                // A turn the AI never really had, or that the user stopped, does not count against it.
+                bool counts = !end.CouldNotRun && end.Outcome is not (ActivityOutcome.Stopped or ActivityOutcome.Waiting);
+                bool gaveUp = end.Outcome == ActivityOutcome.Unfinished && end.Error != unconfirmed;
+                // An AI that cannot run is waited for ever longer, so it is not asked again and again.
+                notBefore[id] = DateTimeOffset.UtcNow + (end.CouldNotRun ? Longer(kinds.Delay(integration.Delays), retryAfter) : retryAfter);
+
+                if (counts && (gaveUp || integration.Deliveries >= deliveryLimit))
+                {
+                    await GiveBack(id, mainId, name, integration, end.Error ?? unconfirmed);
+                }
+                else
+                {
+                    await Change(id, integration.Id, current => current with { InWork = false, Deliveries = counts ? current.Deliveries : Math.Max(0, current.Deliveries - 1), Delays = end.CouldNotRun ? current.Delays + 1 : 0 });
+                }
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException or RequestException)
+        {
+            log.Write($"Side sessions could not be brought in: {exception.Message}");
+        }
+    }
+
+    private async Task GiveBack(Guid id, Guid mainId, string name, StoredIntegration integration, string reason)
+    {
+        StoredSideSession side;
+
+        using (await sessions.Lock(id))
+        {
+            if (workspaces.GetSide(id) is not { Integration: { } current } found || current.Id != integration.Id)
+            {
+                return;
+            }
+
+            side = found;
+            // It stays as it is, and is not brought in again until the user asks.
+            await workspaces.UpdateSide(id, entry => entry with { State = SideSessionState.Ready, Integration = null, IntegrateWhenFinished = false, MarkedComplete = false, Error = $"Needs attention: it was not brought in. {reason}" });
+        }
+
+        await Withdraw(id, side, integration);
+        following?.Invoke()?.Tell(mainId, $"Bringing the side session \"{name}\" in was not confirmed, so it stays as it was. This workspace may hold part of its changes.");
+        events.Publish(new RemoteEvent { Kind = RemoteEventKind.Failed, WorkspaceId = mainId, Time = DateTimeOffset.UtcNow, Error = $"The side session '{name}' was not brought in and stays as it was: {reason}", IsNotice = true });
+    }
+
+    // What the session said about its work stays with the activity of the workspace it went into, since the session goes.
+    private void Record(Guid mainId, string name, StoredIntegration integration)
+    {
+        if (journal is null || following?.Invoke()?.Describe(mainId).Step is not { } step)
+        {
+            return;
+        }
+
+        journal.Change(mainId, step.Id, entry => entry with
+        {
+            Handoff = string.Join("\n\n", new[] { entry.Handoff, $"{name}: {integration.Handoff}" }.Where(part => !string.IsNullOrEmpty(part))),
+            Files = [.. entry.Files, .. integration.Files.Select(file => $"{name}: {file}")]
+        });
+        journal.Note(mainId, step.Id, $"Brought in the side session \"{name}\".");
+    }
+
+    // A side session whose work ended well is done; any other way it ends, or new work, takes that back.
+    private void Worked(Guid id, WorkStep step, WorkEnd end)
+    {
+        if (workspaces.GetSide(id) is null || end.Outcome == ActivityOutcome.Waiting)
+        {
+            return;
+        }
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await workspaces.UpdateSide(id, current => current with { MarkedComplete = end.Outcome == ActivityOutcome.Done });
+                await Pump();
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ObjectDisposedException or RequestException)
+            {
+                log.Write($"Side sessions could not be brought in: {exception.Message}");
+            }
+        }, CancellationToken.None);
+    }
+
+    private TimeSpan Longer(TimeSpan first, TimeSpan second) => first > second ? first : second;
 
     private bool IsCancelled(string integrationId)
     {
@@ -636,7 +788,7 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
 
         try
         {
-            await prompts.Prompt(mainId, $"The user cancelled the integration of the side session \"{name}\" (integration {integrationId}). Stop integrating it, leave what you already changed as it is without undoing it, and go on with your other work.", stopping);
+            await prompts.Prompt(mainId, $"The user cancelled bringing in the side session \"{name}\" (integration {integrationId}). Stop bringing it in, leave what you already changed as it is without undoing it, and go on with your other work.", stopping);
         }
         catch (Exception exception) when (exception is RequestException or OperationCanceledException)
         {
@@ -644,41 +796,13 @@ internal sealed class SideIntegrations(IWorkspaceManager workspaces, ISideSessio
         }
     }
 
-    // Main's work ended: a request that was part of it and was not finished is given once more, unless the work was stopped.
-    private async Task Ended(Guid mainId, bool stopped)
-    {
-        foreach ((Guid id, StoredSideSession side) in workspaces.Sides(mainId).Where(entry => entry.Side is { State: SideSessionState.Integrating, Integration.InWork: true } && !sending.ContainsKey(entry.Id)))
-        {
-            notBefore[id] = DateTimeOffset.UtcNow + retryAfter;
-            await Change(id, side.Integration!.Id, current => current with { InWork = false, WaitsForWork = stopped || current.Deliveries >= 2 });
-        }
-    }
-
     private void Follow(RemoteEvent remoteEvent)
     {
-        // Noted as it happens, before the session can be seen as idle again.
-        if ((remoteEvent.Kind == RemoteEventKind.Failed || remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is WorkspaceState.Stopping or WorkspaceState.Canceling) && workspaces.GetSide(remoteEvent.WorkspaceId) is not null)
+        if (remoteEvent.Kind == RemoteEventKind.StateChanged)
         {
-            abandoned[remoteEvent.WorkspaceId] = 0;
-        }
-
-        if (remoteEvent.Kind == RemoteEventKind.StateChanged && remoteEvent.State is { } state)
-        {
-            Guid mainId = remoteEvent.WorkspaceId;
-
-            if (state is WorkspaceState.Stopping or WorkspaceState.Canceling)
-            {
-                halted[mainId] = 0;
-            }
-            else if (state == WorkspaceState.Ready)
-            {
-                bool stopped = halted.TryRemove(mainId, out _);
-                _ = Task.Run(() => Ended(mainId, stopped), CancellationToken.None);
-            }
-
             _ = Task.Run(Pump, CancellationToken.None);
         }
-        else if (remoteEvent.Kind is RemoteEventKind.LoopChanged or RemoteEventKind.QueueChanged or RemoteEventKind.ScriptChanged or RemoteEventKind.LimitPauseChanged)
+        else if (remoteEvent.Kind is RemoteEventKind.LoopChanged or RemoteEventKind.QueueChanged or RemoteEventKind.ScriptChanged or RemoteEventKind.LimitPauseChanged or RemoteEventKind.SavedInputsChanged)
         {
             if (workspaces.GetSide(remoteEvent.WorkspaceId) is { MarkedComplete: true } || remoteEvent.Kind == RemoteEventKind.LimitPauseChanged)
             {

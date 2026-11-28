@@ -26,18 +26,15 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Scripts = new ScriptsViewModel(connection, workspace.Id);
         Settings = new SettingsViewModel(connection, workspace);
         Errors = new ErrorHistoryViewModel(connection, workspace.Id);
-        Loop = new LoopViewModel(connection, workspace);
-        Loop.Started += () => Chat.Notice = null;
-        OpenLoopCommand = new AsyncCommand(_ => Loop.Open(), () => delegation is null);
+        Activity = new ActivityViewModel(connection, workspace.Id);
+        SendOptions = new SendOptionsViewModel(connection, workspace, Chat, Git, () => IsLooping);
+        SendOptions.SessionMade += (made, hasTask) => SessionMade?.Invoke(made, hasTask);
+        SendOptions.Delegated += tasks => Delegated?.Invoke(tasks);
+        OpenSendOptionsCommand = new AsyncCommand(parameter => parameter is LoopPromptKind repeated ? SendOptions.OpenRepeating(repeated) : SendOptions.Open(), () => delegation is null, false);
         CancelLoopCommand = new AsyncCommand(_ => CancelLoop());
+        RunInNewSessionCommand = new AsyncCommand(RunInNewSession, () => delegation is null, false);
         Chat.PropertyChanged += (_, args) =>
         {
-            if (args.PropertyName == nameof(ChatViewModel.HasLimitPause))
-            {
-                Raise(nameof(LoopTip));
-                Raise(nameof(LoopNext));
-            }
-
             if (args.PropertyName == nameof(ChatViewModel.HasContent))
             {
                 Raise(nameof(ShowHaltButtons));
@@ -47,7 +44,31 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowExpandButton));
                 Raise(nameof(ShowPauseButton));
                 Raise(nameof(ShowResumeButton));
-                Raise(nameof(ShowLoopButton));
+                Raise(nameof(ShowJoinNote));
+                Raise(nameof(ShowUpNextButton));
+            }
+
+            if (args.PropertyName == nameof(ChatViewModel.HasQueuedInputs))
+            {
+                Raise(nameof(ShowUpNextButton));
+            }
+
+            if (args.PropertyName == nameof(ChatViewModel.Agenda))
+            {
+                Raise(nameof(IsHeldBack));
+                Raise(nameof(HasMoreToCome));
+                Raise(nameof(LoopNext));
+            }
+
+            if (args.PropertyName == nameof(ChatViewModel.IsQueued))
+            {
+                Raise(nameof(HasMoreToCome));
+            }
+
+            if (args.PropertyName == nameof(ChatViewModel.HasLimitPause))
+            {
+                Raise(nameof(LoopTip));
+                Raise(nameof(LoopNext));
             }
         };
         Chat.PropertyChanged += (_, args) =>
@@ -55,12 +76,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             if (args.PropertyName is nameof(ChatViewModel.HasLoadedInput) or nameof(ChatViewModel.IsLoadedAutoCommitOn))
             {
                 RaiseFollowUps();
-            }
-
-            if (args.PropertyName == nameof(ChatViewModel.ActiveQueuedCount))
-            {
-                Raise(nameof(LoopWaiting));
-                Raise(nameof(IsLoopWaiting));
             }
 
             if (args.PropertyName == nameof(ChatViewModel.AutoCommit))
@@ -83,7 +98,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         };
         Chat.QueuedWorkDropped += () => wasNotifying = NotifyWhenReady;
         // Work that does not start leaves the wait as it was before, which goes on only while something is still to come and was not announced meanwhile.
-        Chat.PromptFailed += () => NotifyWhenReady &= wasNotifying && (State != WorkspaceState.Ready || IsLooping || Chat.HasActiveQueued || Chat.IsQueued);
+        Chat.PromptFailed += () => NotifyWhenReady &= wasNotifying && (State != WorkspaceState.Ready || HasMoreToCome);
         Chat.PropertyChanged += (_, args) =>
         {
             if (args.PropertyName == nameof(ChatViewModel.IsAiWorking))
@@ -148,6 +163,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             Tab = WorkspaceTab.Script;
             return Task.CompletedTask;
         });
+        ShowActivityCommand = new AsyncCommand(_ =>
+        {
+            Tab = WorkspaceTab.Activity;
+            return Task.CompletedTask;
+        });
         ShowHistoryCommand = new AsyncCommand(async _ =>
         {
             Tab = WorkspaceTab.History;
@@ -195,6 +215,8 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
     private bool missedReconnect;
 
+    private bool runningInNewSession;
+
     private readonly ClientLayout layout;
 
     private readonly IServerConnection connection;
@@ -210,6 +232,31 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     private WorkspaceTab tab;
 
     private WorkspaceTab beforeSettings;
+
+    /// <summary>
+    /// Occurs when a side session was made from what this workspace holds, with whether it was given a first task.
+    /// </summary>
+    public event Action<WorkspaceInfo, bool>? SessionMade;
+
+    /// <summary>
+    /// Occurs when a task was delegated from this workspace by hand, with the identifiers of what was added.
+    /// </summary>
+    public event Action<IReadOnlyList<Guid>>? Delegated;
+
+    /// <summary>
+    /// Gets or sets how the names the sessions of the main workspace have are told, so one made after an input gets a name of its own.
+    /// </summary>
+    public Func<IEnumerable<string>>? SessionNames { get; set; }
+
+    /// <summary>
+    /// Gets the activity of the workspace.
+    /// </summary>
+    public ActivityViewModel Activity { get; }
+
+    /// <summary>
+    /// Gets the Send Options panel.
+    /// </summary>
+    public SendOptionsViewModel SendOptions { get; }
 
     /// <summary>
     /// Gets the workspace as it was when it was focused.
@@ -306,42 +353,29 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool CanHalt => State is WorkspaceState.Working or WorkspaceState.Managing;
 
     /// <summary>
-    /// Gets a value indicating whether the button that turns auto commit on and off shows: the workspace is a git repository, no run of a loop is under way, and the AI works, or auto commit is still on while the work goes on by other means, such as waiting to be resumed.
+    /// Gets a value indicating whether the button that turns committing the current work on and off shows: the workspace is a git repository, and the AI works, runs of a loop included, or auto commit is still on while the work goes on by other means, such as waiting to be resumed.
     /// </summary>
-    public bool ShowAutoCommitButton => delegation is null && Git.IsRepo && activeLoop?.IsRunning != true && State is not (WorkspaceState.Stopping or WorkspaceState.Canceling) && (State == WorkspaceState.Working || Chat.IsAutoCommitOn);
+    public bool ShowAutoCommitButton => delegation is null && Git.IsRepo && State is not (WorkspaceState.Stopping or WorkspaceState.Canceling) && (State == WorkspaceState.Working || Chat.IsAutoCommitOn);
 
     /// <summary>
-    /// Gets a value indicating whether the button that turns auto commit of a loaded input on and off shows above the message box.
+    /// Gets a value indicating whether the message box says that sending joins the running work: the AI works and something is typed or attached.
     /// </summary>
-    public bool ShowLoadedAutoCommit => delegation is null && Git.IsRepo && Chat.HasLoadedInput;
+    public bool ShowJoinNote => delegation is null && State == WorkspaceState.Working && Chat.HasContent;
 
     /// <summary>
-    /// Gets a value indicating whether the auto commit button beside the message box says that it is about the current work, which it does while the button about a loaded input shows too.
+    /// Gets a value indicating whether the button of what is up next shows beside the one of the drafts: inputs are queued and nothing is typed.
     /// </summary>
-    public bool LabelsAutoCommitButton => ShowAutoCommitButton && ShowLoadedAutoCommit;
+    public bool ShowUpNextButton => delegation is null && Chat.HasQueuedInputs && !Chat.HasText;
 
     /// <summary>
-    /// Gets what has to be known about the loaded input besides what its button says, or <see langword="null" /> when nothing has: what queuing it does while its button is about the current work, or that a run of a loop it would join is not committed.
+    /// Gets a value indicating whether more work is to come by itself: the agenda holds work that is not stopped, or a loop runs that is not.
     /// </summary>
-    public string? LoadedAutoCommitNote => !ShowLoadedAutoCommit ? null
-        : Chat.IsAutoCommitOn ? Chat.IsLoadedAutoCommitOn ? null : "Queuing or saving it keeps its own setting: off."
-        : Chat.IsLoadedAutoCommitOn && activeLoop?.IsRunning == true ? "Sent now, it joins the loop's run, which is not committed. Queue it to have it committed."
-        : null;
+    public bool IsHeldBack => Chat.Agenda.IsPending || IsLooping && !Chat.Agenda.IsStopped;
 
     /// <summary>
-    /// Gets a value indicating whether <see cref="LoadedAutoCommitNote" /> says anything.
+    /// Gets a value indicating whether the work of the workspace is not over although it may be ready: <see cref="IsHeldBack" />, or work waits for the local AI.
     /// </summary>
-    public bool HasLoadedAutoCommitNote => LoadedAutoCommitNote is not null;
-
-    /// <summary>
-    /// Gets what the loop waits for besides its interval, or what goes before its next run, in words, or <see langword="null" /> when nothing does.
-    /// </summary>
-    public string? LoopWaiting => DescribeWaiting(DateTimeOffset.UtcNow);
-
-    /// <summary>
-    /// Gets a value indicating whether <see cref="LoopWaiting" /> says anything.
-    /// </summary>
-    public bool IsLoopWaiting => LoopWaiting is not null;
+    public bool HasMoreToCome => IsHeldBack || Chat.IsQueued;
 
     /// <summary>
     /// Gets a value indicating whether the button that queues what is typed shows beside the send button.
@@ -352,23 +386,23 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets what the queue button says it does, which includes a commit only when one follows: in a git repository, for an input whose auto commit is not turned off.
     /// </summary>
     public string QueueTip => Git.IsRepo && (!Chat.HasLoadedInput || Chat.IsLoadedAutoCommitOn)
-        ? "Queue: send once the current work is done, at once if there is none, and auto commit afterwards"
-        : "Queue: send once the current work is done, at once if there is none";
+        ? "Queue: send once the current work is done, at once if there is none, and commit afterwards. Right-click or hold for Send Options"
+        : "Queue: send once the current work is done, at once if there is none. Right-click or hold for Send Options";
 
     /// <summary>
-    /// Gets a value indicating whether the message box offers the work buttons instead of sending: git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand, pause and loop buttons.
+    /// Gets a value indicating whether the message box offers the work buttons instead of sending: git runs or work is being ended, or the AI works and nothing is typed, which puts the stop button beside the review, expand and pause buttons.
     /// </summary>
     public bool ShowHaltButtons => State is WorkspaceState.Managing or WorkspaceState.Canceling || State == WorkspaceState.Working && !Chat.HasContent;
 
     /// <summary>
-    /// Gets the panel in which a loop of the AI is set up.
+    /// Gets the command that opens Send Options.
     /// </summary>
-    public LoopViewModel Loop { get; }
+    public AsyncCommand OpenSendOptionsCommand { get; }
 
     /// <summary>
-    /// Gets the command that opens the loop panel.
+    /// Gets the command that takes the draft, or the queued input of the <see cref="AgendaRowViewModel" />, given as its parameter and runs it in a new side session.
     /// </summary>
-    public AsyncCommand OpenLoopCommand { get; }
+    public AsyncCommand RunInNewSessionCommand { get; }
 
     /// <summary>
     /// Gets the command that cancels the loop without stopping the run in progress.
@@ -390,8 +424,10 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(LoopTip));
                 Raise(nameof(LoopNext));
                 FollowLoopClock();
-                Raise(nameof(ShowLoopButton));
                 Raise(nameof(ShowCancelLoopButton));
+                Raise(nameof(IsHeldBack));
+                Raise(nameof(HasMoreToCome));
+                SendOptions.LoopChanged();
             }
         }
     }
@@ -404,7 +440,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// <summary>
     /// Gets a description of the loop that runs, for the tooltip of its icon: what it sends, how often, when it ends and how many runs it made.
     /// </summary>
-    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far{(activeLoop.LimitCheckAt is null ? string.Empty : ", waiting for the usage limit")}{(Chat.HasLimitPause ? ", paused with the AI at the max usage window limit" : string.Empty)}";
+    public string LoopTip => activeLoop is null ? string.Empty : $"Loop: {Shorten(activeLoop.Settings.Prompt)}, {(activeLoop.Settings.IntervalSeconds > 0 ? $"every {activeLoop.Settings.IntervalSeconds / 60.0:0.#} min" : "back to back")}, {Describe(activeLoop.Settings)}, {activeLoop.Runs} run{(activeLoop.Runs == 1 ? string.Empty : "s")} so far{(activeLoop.Settings.AutoCommit ? ", committing each run" : string.Empty)}{(activeLoop.LimitCheckAt is null ? string.Empty : ", waiting until the AI can run")}{(Chat.HasLimitPause ? ", paused with the AI at the max usage window limit" : string.Empty)}";
 
     /// <summary>
     /// Gets when the next automatic prompt of the loop is sent, in words, which the loop icon in the header shows when clicked and which counts down while it is open.
@@ -420,11 +456,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets a value indicating whether the message box shows the resume button: nothing is typed and the workspace is ready.
     /// </summary>
     public bool ShowResumeButton => State == WorkspaceState.Ready && !Chat.HasContent;
-
-    /// <summary>
-    /// Gets a value indicating whether the message box shows the loop button next to the review or stop button: there is no loop yet and nothing is typed, while the AI is ready or working (a loop started during work waits for it to finish).
-    /// </summary>
-    public bool ShowLoopButton => activeLoop is null && (ShowReviewButton || (Chat.IsCommitting && !Chat.HasContent));
 
     /// <summary>
     /// Gets a value indicating whether the message box shows the button that cancels the loop, whatever else it shows.
@@ -472,6 +503,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
                 Raise(nameof(ShowFiles));
                 Raise(nameof(ShowHistory));
                 Raise(nameof(ShowScript));
+                Raise(nameof(ShowActivity));
                 Raise(nameof(ShowSettings));
                 RaiseLayout();
             }
@@ -499,19 +531,24 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowFilesPanel => !ShowSettings && (layout == ClientLayout.Panels || ShowFiles);
 
     /// <summary>
-    /// Gets a value indicating whether the panel of the conversation, the scripts and the history is showing.
+    /// Gets a value indicating whether the panel of the conversation, the scripts, the activity and the history is showing.
     /// </summary>
-    public bool ShowChatPanel => !ShowSettings && (layout == ClientLayout.Panels || ShowChat || ShowScript || ShowHistory);
+    public bool ShowChatPanel => !ShowSettings && (layout == ClientLayout.Panels || ShowChat || ShowScript || ShowActivity || ShowHistory);
 
     /// <summary>
     /// Gets a value indicating whether the conversation is showing in its panel.
     /// </summary>
-    public bool ShowChatView => layout == ClientLayout.Panels ? tab is not (WorkspaceTab.History or WorkspaceTab.Script) : ShowChat;
+    public bool ShowChatView => layout == ClientLayout.Panels ? tab is not (WorkspaceTab.History or WorkspaceTab.Script or WorkspaceTab.Activity) : ShowChat;
 
     /// <summary>
     /// Gets a value indicating whether the scripts are showing in the panel of the conversation.
     /// </summary>
     public bool ShowScriptView => tab == WorkspaceTab.Script;
+
+    /// <summary>
+    /// Gets a value indicating whether the activity is showing in the panel of the conversation.
+    /// </summary>
+    public bool ShowActivityView => tab == WorkspaceTab.Activity;
 
     /// <summary>
     /// Gets a value indicating whether the history is showing in its panel.
@@ -529,7 +566,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowHistoryTab => Git.IsRepo;
 
     /// <summary>
-    /// Gets a value indicating whether the panel of the conversation has tabs for the conversation, the scripts and the history, which only panels do; tabs along the bottom hold them next to the files otherwise.
+    /// Gets a value indicating whether the panel of the conversation has tabs for the conversation, the scripts, the activity and the history, which only panels do; tabs along the bottom hold them next to the files otherwise.
     /// </summary>
     public bool ShowSideTabs => layout == ClientLayout.Panels;
 
@@ -564,6 +601,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     public bool ShowScript => tab == WorkspaceTab.Script;
 
     /// <summary>
+    /// Gets a value indicating whether the activity tab is selected.
+    /// </summary>
+    public bool ShowActivity => tab == WorkspaceTab.Activity;
+
+    /// <summary>
     /// Gets a value indicating whether the settings are showing.
     /// </summary>
     public bool ShowSettings => tab == WorkspaceTab.Settings;
@@ -577,6 +619,11 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
     /// Gets the command that shows the scripts.
     /// </summary>
     public AsyncCommand ShowScriptCommand { get; }
+
+    /// <summary>
+    /// Gets the command that shows the activity.
+    /// </summary>
+    public AsyncCommand ShowActivityCommand { get; }
 
     /// <summary>
     /// Gets the command that shows the git history.
@@ -676,6 +723,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         _ = Git.Start();
         _ = Scripts.Start();
         _ = Errors.Load();
+        _ = Activity.Load();
         await Chat.Start();
         chatStarted = true;
         KeepUnsentTask();
@@ -733,7 +781,14 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Chat.IsDelegated = delegation is not null;
         Files.RunsScripts = delegation is null;
         Settings.IsLocked = delegation is not null;
-        OpenLoopCommand.Refresh();
+        OpenSendOptionsCommand.Refresh();
+        RunInNewSessionCommand.Refresh();
+
+        if (delegation is not null)
+        {
+            SendOptions.IsOpen = false;
+        }
+
         Raise(nameof(StopTip));
         Chat.BlockReason = BlockReason(state);
         Git.IsLocked = Chat.IsCommitting || state is WorkspaceState.Working or WorkspaceState.Stopping or WorkspaceState.Canceling;
@@ -745,60 +800,83 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowExpandButton));
         Raise(nameof(ShowPauseButton));
         Raise(nameof(ShowResumeButton));
-        Raise(nameof(ShowLoopButton));
+        Raise(nameof(ShowJoinNote));
+        Raise(nameof(ShowUpNextButton));
         RaiseFollowUps();
         Raise(nameof(ShowQueueButton));
         Raise(nameof(LoopNext));
         Raise(nameof(IsWorking));
     }
 
-    // What is shown about auto commit and about a loop's wait, which hang on much of the same.
+    // What is shown about committing, which hangs on much the same.
     private void RaiseFollowUps()
     {
         Raise(nameof(ShowAutoCommitButton));
-        Raise(nameof(ShowLoadedAutoCommit));
         Raise(nameof(QueueTip));
-        Raise(nameof(LabelsAutoCommitButton));
-        Raise(nameof(LoadedAutoCommitNote));
-        Raise(nameof(HasLoadedAutoCommitNote));
-        Raise(nameof(LoopWaiting));
-        Raise(nameof(IsLoopWaiting));
     }
 
-    private bool IsRunDue(DateTimeOffset now) => activeLoop?.NextRunAt is not { } next || next <= now;
-
-    // A loop only waits once its next run is due; until then it counts down, which queued inputs do not change.
-    private string? DescribeWaiting(DateTimeOffset now)
+    // The input leaves its list before the session is made, so nothing else sends it meanwhile; one that no session could be made for goes back where it was.
+    private async Task RunInNewSession(object? parameter)
     {
-        if (activeLoop is null)
+        SavedInput? chosen = parameter as SavedInput ?? (parameter is AgendaRowViewModel { IsQueued: true } row ? Chat.SavedInputs.FirstOrDefault(saved => saved.Id == row.Item.Id) : null);
+
+        if (chosen is not { IsReady: true } || delegation is not null || runningInNewSession)
         {
-            return null;
+            return;
         }
 
-        int queued = Chat.ActiveQueuedCount;
-        string inputs = queued == 1 ? "1 queued input" : $"{queued} queued inputs";
+        runningInNewSession = true;
+        Guid main = side?.ParentId ?? Workspace.Id;
 
-        if (activeLoop.IsRunning)
+        try
         {
-            return queued > 0 ? $"{inputs} will run when this loop run ends." : null;
-        }
+            SavedInput? taken = null;
 
-        if (!IsRunDue(now))
+            if (!await Attempt(async () => taken = await connection.TakeSavedInput(Workspace.Id, chosen.Id, CancellationToken.None)))
+            {
+                Chat.Show(Error!);
+                return;
+            }
+
+            Chat.IsUpNextOpen = false;
+
+            if (Chat.IsSavedInputsOpen)
+            {
+                Chat.ToggleSavedInputsCommand.Execute(null);
+            }
+
+            WorkspaceInfo? made = null;
+
+            if (await Attempt(async () =>
+            {
+                if (SendOptions.PrepareMain is not null && !await SendOptions.PrepareMain(main))
+                {
+                    throw new RemoteException("The workspace's settings could not be saved.");
+                }
+
+                made = await connection.CreateSideSession(main, taken!.Text.ToSessionName(SessionNames?.Invoke() ?? []), SideSessionStart.Files, taken.Text, true, CancellationToken.None);
+            }))
+            {
+                SessionMade?.Invoke(made!, true);
+                return;
+            }
+
+            string failure = Error!;
+
+            if (!await Attempt(() => chosen.IsQueued
+                ? connection.QueueInput(Workspace.Id, taken!.Text, taken.AutoCommit, CancellationToken.None)
+                : connection.SaveInput(Workspace.Id, taken!.Text, taken.AutoCommit, CancellationToken.None)))
+            {
+                // It is not to be lost, whatever else fails.
+                Chat.Input = Chat.Input.Length == 0 ? taken!.Text : $"{taken!.Text}\n{Chat.Input}";
+            }
+
+            Chat.Show(failure);
+        }
+        finally
         {
-            return queued > 0 ? $"{inputs} {(queued == 1 ? "goes" : "go")} before the loop's next run." : null;
+            runningInNewSession = false;
         }
-
-        if (Chat.IsCommitting)
-        {
-            return queued > 0 ? $"Loop waiting for the commit and {inputs}." : "Loop waiting for the commit.";
-        }
-
-        if (queued > 0)
-        {
-            return State == WorkspaceState.Ready ? $"Loop waiting for {inputs}." : $"Loop waiting for the current work and {inputs}.";
-        }
-
-        return State is WorkspaceState.Working or WorkspaceState.Managing ? "Loop waiting for the current work to finish." : null;
     }
 
     private string? BlockReason(WorkspaceState state) => delegation is { } task ? $"This workspace runs a task delegated by {task.From}" : state switch
@@ -823,6 +901,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         _ = Chat.Resync();
         _ = Scripts.Start();
         _ = Errors.Load();
+        _ = Activity.Load();
         _ = Git.Refresh();
 
         // The server watches one workspace for a connection, which is to be the one on screen.
@@ -846,6 +925,10 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         else if (remoteEvent.Kind == RemoteEventKind.ErrorsChanged)
         {
             Errors.Receive(remoteEvent);
+        }
+        else if (remoteEvent.Kind == RemoteEventKind.ActivityChanged)
+        {
+            Activity.Receive(remoteEvent);
         }
         else if (remoteEvent.Kind == RemoteEventKind.LoopChanged)
         {
@@ -896,9 +979,6 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
             while (await timer.WaitForNextTickAsync(cancellation))
             {
                 Raise(nameof(LoopNext));
-                // What it waits for changes as its next run comes due.
-                Raise(nameof(LoopWaiting));
-                Raise(nameof(IsLoopWaiting));
             }
         }
         catch (OperationCanceledException)
@@ -939,10 +1019,9 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
 
         bool busy = State != WorkspaceState.Ready;
 
-        // What a due run waits for says more than that it waits for the workspace.
-        if (!Chat.HasLimitPause && activeLoop is { IsRunning: false, LimitCheckAt: null } && (Chat.ActiveQueuedCount > 0 || Chat.IsCommitting) && IsRunDue(now) && DescribeWaiting(now) is { } waiting)
+        if (Chat.IsStopped)
         {
-            return waiting;
+            return "The loop is paused since the work was stopped. It goes on after Resume.";
         }
 
         if (Chat.HasLimitPause)
@@ -954,7 +1033,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         {
             TimeSpan left = check - now;
             string until = left.TotalHours >= 1 ? $"{(int)left.TotalHours} h {left.Minutes} min" : left.TotalMinutes >= 1 ? $"{(int)left.TotalMinutes} min {left.Seconds} s" : $"{Math.Max(1, left.Seconds)} s";
-            return left <= TimeSpan.Zero ? "The usage limit is reached. The loop is checking it now." : $"The usage limit is reached, so the loop waits. It checks again in {until} and goes on once the AI can be prompted again.";
+            return left <= TimeSpan.Zero ? "The AI could not run. The loop is trying again now." : $"The AI could not run, so the loop waits. It tries again in {until}.";
         }
 
         if (activeLoop.NextRunAt is not { } next)
@@ -1007,6 +1086,7 @@ internal sealed class WorkspaceViewModel : ViewModelBase, IDisposable
         Raise(nameof(ShowChatPanel));
         Raise(nameof(ShowChatView));
         Raise(nameof(ShowScriptView));
+        Raise(nameof(ShowActivityView));
         Raise(nameof(ShowHistoryView));
         Raise(nameof(ShowContentPanel));
         Raise(nameof(ShowSeparators));

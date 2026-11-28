@@ -156,22 +156,11 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .swarm-text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .swarm-work { opacity: 0.6; font-size: 12px; }
 .swarm-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 6px; }
-.queue-banner { display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); border-bottom: 1px solid var(--accent); flex: none; }
-.queue-banner[hidden] { display: none; }
-.queue-banner .info { flex: 1; min-width: 0; }
-.queue-banner .prompt { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 4px; }
-.limit-banner { display: flex; align-items: flex-start; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); border-bottom: 1px solid var(--warning); flex: none; }
-.limit-banner svg { flex: none; margin-top: 1px; color: var(--warning); }
-.limit-banner > div { flex: 1; }
-.limit-banner button { flex: none; font-size: 12px; padding: 2px 8px; }
-.limit-banner[hidden] { display: none; }
-.paused-banner, .loop-banner { display: flex; align-items: center; gap: 10px; padding: 8px 14px; font-size: 12px; background: var(--elevated); flex: none; }
-.paused-banner { border-bottom: 1px solid var(--warning); }
-.loop-banner { border-bottom: 1px solid var(--accent); }
-.paused-banner[hidden], .loop-banner[hidden] { display: none; }
-.paused-banner .info, .loop-banner > div { flex: 1; min-width: 0; }
-.paused-banner button { flex: none; font-size: 12px; padding: 5px 10px; }
-.loop-banner svg { flex: none; }
+.status-line { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 6px 14px; font-size: 12px; background: var(--elevated); border-bottom: 1px solid var(--accent); flex: none; }
+.status-line.warn { border-bottom-color: var(--warning); }
+.status-line button { font-size: 12px; padding: 3px 10px; }
+.status-line button.text { flex: 1 1 180px; min-width: 0; text-align: left; background: transparent; border: 0; padding: 3px 0; overflow-wrap: anywhere; }
+.status-line button.text:hover:not(:disabled) { background: var(--hover); }
 .row-check { display: flex; align-items: center; gap: 6px; cursor: pointer; }
 .topbar .title { user-select: none; -webkit-touch-callout: none; }
 .topbar.offline .title::after { content: "(reconnecting…)"; min-width: 0; overflow: hidden; text-overflow: ellipsis; margin-left: 6px; font-size: 12px; opacity: 0.8; }
@@ -199,18 +188,14 @@ input[type=checkbox] { accent-color: var(--accent); width: 18px; height: 18px; }
 .composer { max-width: 820px; width: 100%; margin: 0 auto; padding: 4px 12px 12px; }
 .composer .box { display: flex; flex-wrap: wrap; align-content: center; justify-content: flex-end; align-items: center; gap: 6px; padding: 4px 0 4px 8px; box-sizing: border-box; height: 120px; min-height: 60px; }
 .composer textarea, .composer textarea:focus, .composer textarea:hover { flex: 1 1 100px; min-width: 100px; background: transparent; border: 0; border-radius: 0; padding: 0; min-height: 0; max-height: 100%; height: auto; resize: none; outline: none; align-self: center; }
-.composer .box button { align-self: center; }
+.composer .box button { align-self: center; user-select: none; -webkit-touch-callout: none; }
 .composer .box button.act.saved { border-color: var(--accent); }
 .composer .box button.act.toggled { background: var(--selection); border: 2px solid var(--accent); }
-.composer .loaded-commit { width: auto; height: auto; display: inline-flex; align-items: center; gap: 6px; margin: 0 0 6px 8px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
-.composer .loaded-commit[hidden] { display: none; }
-.composer .loaded-commit.toggled { background: var(--selection); border: 2px solid var(--accent); }
-.composer .loaded-commit:disabled { opacity: .65; }
-.composer .loaded-note { margin: 0 0 6px 8px; font-size: 12px; }
+.composer .work-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin: 0 0 6px 8px; font-size: 12px; }
+.composer .work-row button.when-done { width: auto; height: auto; display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px; white-space: nowrap; }
+.composer .work-row button.when-done.toggled { background: var(--selection); border: 2px solid var(--accent); padding: 3px 7px; }
 .composer .box button.act { flex: none; width: 34px; height: 34px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
-.composer .box button.act.labelled { width: auto; gap: 5px; padding: 0 9px; }
-.composer .box button.act .caption { font-size: 10px; line-height: 12px; text-align: left; white-space: pre; }
-.composer .box button.act.load-saved { position: relative; }
+.composer .box button.act.load-saved, .composer .box button.act.up-next { position: relative; }
 .composer .box .badge { position: absolute; top: 1px; right: 1px; min-width: 13px; height: 13px; box-sizing: border-box; border-radius: 7px; padding: 0 3px; font-size: 9px; line-height: 13px; background: var(--accent); color: #fff; }
 .composer .box .badge.paused { background: var(--warning); color: #1E1E1E; }
 .composer .chips { display: flex; flex-wrap: wrap; gap: 4px 6px; padding: 0 0 4px 8px; }
@@ -412,14 +397,15 @@ button.refbtn .ref { margin: 0; }
 .saved-inputs .list { flex: 1; min-height: 0; overflow-y: auto; }
 .saved-inputs .none { color: var(--muted); }
 .saved-inputs .saved-row { display: flex; align-items: center; gap: 4px; border-bottom: 1px solid var(--border); }
-.saved-inputs .saved-row.queued { border-left: 3px solid var(--accent); background: var(--elevated); }
+.saved-inputs .saved-row > button.icon { flex: none; padding: 8px; }
+.saved-inputs .saved-row > button.saved-commit.toggled, .saved-inputs .row-actions button.saved-commit.toggled { background: var(--selection); border: 2px solid var(--accent); border-radius: 4px; padding: 6px; }
+.saved-inputs .agenda-row { flex-direction: column; align-items: stretch; gap: 0; }
+.saved-inputs .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 2px 6px 8px; }
+.saved-inputs .row-actions button { font-size: 12px; padding: 4px 10px; }
+.saved-inputs .row-actions button.icon { padding: 6px; }
+.saved-inputs .agenda-item { padding: 8px 6px 4px; font-size: 13px; overflow-wrap: anywhere; }
 .saved-inputs .saved-row > button.load { display: block; flex: 1; min-width: 0; text-align: left; background: transparent; border: 0; border-radius: 0; padding: 10px 6px; color: inherit; cursor: pointer; font-size: 13px; line-height: 1.35; }
 .saved-inputs .saved-row > button.load:hover { background: var(--hover, rgba(128, 128, 128, 0.15)); }
-.saved-inputs .saved-row > button.delete, .saved-inputs .saved-row > button.saved-commit { flex: none; padding: 8px; }
-.saved-inputs .saved-row > button.saved-commit.toggled { background: var(--selection); border: 2px solid var(--accent); border-radius: 4px; padding: 6px; }
-.saved-inputs .queue-label { color: var(--accent); font-size: 11px; font-weight: 700; margin-bottom: 4px; }
-.saved-inputs .paused-note { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; font-size: 12px; margin-bottom: 8px; }
-.saved-inputs .paused-note button { font-size: 12px; padding: 5px 10px; }
 .saved-inputs .confirm { position: absolute; inset: 0; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 24px; }
 .saved-inputs .confirm .card { width: 100%; max-width: 420px; background: var(--surface); border: 1px solid var(--border); border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
 .saved-inputs .confirm h3 { margin: 0; font-size: 18px; }
@@ -473,6 +459,36 @@ details.section > .stack { padding: 4px 0 12px; }
 .dialog-wrap { position: absolute; inset: 0; background: var(--scrim); z-index: 20; display: flex; align-items: center; justify-content: center; padding: 24px; }
 .dialog { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 20px; width: 100%; max-width: 420px; max-height: 100%; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
 .dialog > * { flex: none; }
+.segments { display: flex; flex-wrap: wrap; gap: 6px; }
+.segments button { flex: 1 1 auto; padding: 6px 10px; font-size: 13px; }
+.segments button.on { background: var(--selection); border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.segments button:disabled.on { opacity: .8; }
+.dialog .note { font-size: 12px; color: var(--muted); }
+.activity { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 12px 12px; }
+.activity .inner { max-width: 820px; margin: 0 auto; }
+.activity-entry { border-bottom: 1px solid var(--border); }
+.activity-entry.attention { border-left: 3px solid var(--warning); background: var(--elevated); }
+.activity-entry > button { display: flex; flex-direction: column; gap: 3px; width: 100%; text-align: left; background: transparent; border: 0; border-radius: 0; padding: 8px; }
+.activity-entry > button:hover:not(:disabled) { background: var(--hover); }
+.activity-entry .line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: 11px; color: var(--muted); }
+.activity-entry .line .outcome { font-weight: 700; color: var(--accent-hover); }
+.activity-entry .line .outcome.Unfinished, .activity-entry .line .outcome.Failed { color: var(--danger); }
+.activity-entry .line .flag { color: var(--warning); font-weight: 700; border: 1px solid var(--warning); border-radius: 3px; padding: 0 5px; }
+.activity-entry .title { font-size: 13px; overflow-wrap: anywhere; }
+.activity-entry .detail { display: flex; flex-direction: column; gap: 4px; padding: 0 8px 10px; font-size: 13px; overflow-wrap: anywhere; user-select: text; }
+.activity-entry .detail h4 { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+.activity-entry .detail .plain { white-space: pre-wrap; }
+.activity-entry .detail ul { margin: 0; padding-left: 18px; }
+.task-wrap { position: absolute; inset: 0; z-index: 15; background: var(--scrim); display: flex; justify-content: center; padding: 12px; }
+.task-wrap[hidden] { display: none; }
+.task-card { width: 100%; max-width: 720px; min-height: 0; display: flex; flex-direction: column; gap: 8px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 14px; }
+.task-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.task-card header > div { min-width: 0; overflow-wrap: anywhere; }
+.task-card h2 { font-size: 18px; }
+.task-card .swarm-detail { flex: 1; min-height: 0; overflow-y: auto; }
+.task-card .swarm-actions button.when-done.toggled { background: var(--selection); border-color: var(--accent); }
+.sessions-card .tasks-head { font-size: 11px; margin: 8px 8px 2px; }
+.session-row.task button.pick { font-size: 12px; overflow-wrap: anywhere; }
 .dialog h3 { font-size: 20px; }
 
 .newws { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 16px; max-width: 820px; width: 100%; margin: 0 auto; }
@@ -580,6 +596,124 @@ const services = {
 const capabilities = ["Fast", "Balanced", "Strong", "Max"];
 const efforts = ["Low", "Medium", "High", "Max"];
 const imageKinds = { None: "None", OpenAi: "OpenAI", Local: "Local Stable Diffusion server" };
+const sandboxNote = "On: no shell, and no files outside the workspace except what Auto Remote shares.";
+const activityPage = 50;
+// A session made from an input is named by its first words, with a number when that name is taken.
+function sessionName(text, taken) {
+  const line = splitAttachments(text).body.split("\n").map(part => part.replace(/[\u0000-\u001f\u007f]/g, " ").trim()).find(part => part) ?? "";
+  const name = line.split(/\s+/).filter(word => word).slice(0, 5).join(" ").slice(0, 40).trimEnd() || "Session";
+  const used = new Set(["main", ...taken.map(other => other.toLowerCase())]);
+  let candidate = name;
+
+  for (let number = 2; used.has(candidate.toLowerCase()); number++) {
+    candidate = `${name} ${number}`;
+  }
+
+  return candidate;
+}
+
+// One of a few choices, shown side by side.
+function segments(options, value, onchange = () => {}) {
+  const buttons = new Map();
+  const control = {
+    value,
+    element: null,
+    set(chosen) {
+      control.value = chosen;
+
+      for (const [key, button] of buttons) {
+        button.classList.toggle("on", key === chosen);
+        button.setAttribute("aria-checked", String(key === chosen));
+      }
+    },
+    enable(key, enabled) {
+      buttons.get(key).disabled = !enabled;
+    }
+  };
+  control.element = h("div", { class: "segments", role: "radiogroup" }, options.map(([key, label]) => {
+    const button = h("button", { type: "button", role: "radio", onclick: () => { control.set(key); onchange(key); } }, label);
+    buttons.set(key, button);
+    return button;
+  }));
+  control.set(value);
+  return control;
+}
+
+// A button that offers more than its click: a right click, the menu key or a finger held still on it ask for that instead.
+function offerOnHold(button, offer) {
+  let finger = null;
+  let held = false;
+  const stop = () => {
+    clearTimeout(finger?.timer);
+    finger = null;
+  };
+  const ask = () => {
+    if (!button.disabled) {
+      offer();
+    }
+  };
+  const hold = () => {
+    stop();
+    held = true;
+    ask();
+  };
+  button.addEventListener("pointerdown", event => {
+    stop();
+    held = false;
+
+    if (event.pointerType === "touch" && !button.disabled) {
+      finger = { id: event.pointerId, x: event.clientX, y: event.clientY, timer: setTimeout(hold, 500) };
+    }
+  });
+  button.addEventListener("pointermove", event => {
+    if (finger?.id === event.pointerId && Math.max(Math.abs(event.clientX - finger.x), Math.abs(event.clientY - finger.y)) > 10) {
+      stop();
+    }
+  });
+  button.addEventListener("pointerup", stop);
+  button.addEventListener("pointercancel", stop);
+  button.addEventListener("keydown", () => { held = false; });
+  // A browser may ask for the menu of a held finger itself, before or after the finger counts as held here.
+  button.addEventListener("contextmenu", event => {
+    event.preventDefault();
+
+    if (finger) {
+      hold();
+    } else if (!held) {
+      ask();
+    }
+  });
+  // Lifting a finger that was held must not click too, neither the button nor what has opened over it by then.
+  button.addEventListener("touchend", event => {
+    if (held) {
+      event.preventDefault();
+    }
+  });
+  button.addEventListener("click", event => {
+    if (held) {
+      held = false;
+      event.stopImmediatePropagation();
+    }
+  }, true);
+}
+
+// Shows a notification, where the user allows them, that opens its workspace when pressed.
+function notify(home, workspaceId, title, tag) {
+  try {
+    if ("Notification" in window && Notification.permission === "granted") {
+      const note = new Notification(title, tag ? { tag } : {});
+      note.onclick = () => {
+        window.focus();
+        home.app.showWorkspace(home, workspaceId);
+        note.close();
+      };
+      return note;
+    }
+  } catch (exception) {
+  }
+
+  return null;
+}
 
 
 function h(tag, props = {}, ...children) {
@@ -1637,6 +1771,10 @@ class Connection {
   getHistory(workspaceId, before, limit, characters) { return this.request("GetHistory", { workspaceId, before: before ?? undefined, limit, characters }).then(r => r.history); }
   renderDiagram(source) { return this.request("RenderDiagram", { text: source }).then(r => r.diagram); }
   prompt(workspaceId, text) { return this.request("Prompt", { workspaceId, text }); }
+  getAgenda(workspaceId) { return this.request("GetAgenda", { workspaceId }).then(r => r.agenda); }
+  getActivity(workspaceId, before, limit) { return this.request("GetActivity", { workspaceId, before: before ?? undefined, limit }).then(r => r.activity); }
+  setBringInCommit(workspaceId, inputId, enabled) { return this.request("SetBringInCommit", { workspaceId, inputId, enabled }); }
+  continueSwarmTask(taskId, name) { return this.request("ContinueSwarmTask", { taskId, name: name || undefined }).then(r => r.workspace); }
   promptOverLimit(workspaceId, text) { return this.request("Prompt", { workspaceId, text, ignoreLimit: true }); }
   cancelLimitPause(workspaceId) { return this.request("CancelLimitPause", { workspaceId }); }
   swarm(command, fields = {}) { return this.request(command, fields).then(r => r.swarm); }
@@ -1661,9 +1799,8 @@ class Connection {
   saveInput(workspaceId, text, autoCommit) { return this.request("SaveInput", { workspaceId, text, autoCommit }).then(r => r.savedInputs); }
   queueInput(workspaceId, text, autoCommit) { return this.request("QueueInput", { workspaceId, text, autoCommit }).then(r => r.savedInputs); }
   setSavedInputAutoCommit(workspaceId, inputId, enabled) { return this.request("SetSavedInputAutoCommit", { workspaceId, inputId, enabled }).then(r => r.savedInputs); }
-  promptToCommit(workspaceId, text, overLimit) { return this.request("Prompt", { workspaceId, text, ignoreLimit: overLimit || undefined, autoCommit: true }); }
   setAutoCommit(workspaceId, enabled) { return this.request("SetAutoCommit", { workspaceId, enabled }); }
-  resumeQueue(workspaceId) { return this.request("ResumeQueue", { workspaceId }); }
+  resumeAutomation(workspaceId) { return this.request("ResumeAutomation", { workspaceId }); }
   takeSavedInput(workspaceId, inputId) { return this.request("TakeSavedInput", { workspaceId, inputId }).then(r => r.savedInput); }
   setShowWork(workspaceId, showWork) { return this.request("SetShowWork", { workspaceId, showWork }); }
   getErrors(workspaceId) { return this.request("GetErrors", { workspaceId }).then(r => r.errors); }
@@ -1681,7 +1818,7 @@ class Connection {
   gitMerge(workspaceId, name, base, text) { return this.request("GitMerge", { workspaceId, name, base, text: text ?? undefined }); }
   gitFetch(workspaceId) { return this.request("GitFetch", { workspaceId }); }
   gitSync(workspaceId) { return this.request("GitSync", { workspaceId }); }
-  createSideSession(workspaceId, name, start, text) { return this.request("CreateSideSession", { workspaceId, name, start, text: text || undefined }).then(r => r.workspace); }
+  createSideSession(workspaceId, name, start, text, bringIn) { return this.request("CreateSideSession", { workspaceId, name, start, text: text || undefined, bringIn }).then(r => r.workspace); }
   renameSideSession(workspaceId, name) { return this.request("RenameSideSession", { workspaceId, name }); }
   deleteSideSession(workspaceId) { return this.request("DeleteSideSession", { workspaceId }); }
   integrateSideSession(workspaceId) { return this.request("IntegrateSideSession", { workspaceId }); }
@@ -1870,8 +2007,8 @@ function splitAttachments(text) {
 const activeTaskStates = ["Waiting", "Pending", "InTransit", "Queued", "Running"];
 
 function taskStateText(task) {
-  const names = { InTransit: "In transit", Pending: "Waiting for a worker", Waiting: "Waiting for other tasks" };
-  return task.state === "Done" && task.isApplied ? "Done, applied" : names[task.state] ?? task.state;
+  const names = { InTransit: "In transit", Pending: "Waiting for a worker", Waiting: "Waiting for other tasks", Queued: `Waiting on ${task.isIncoming ? "this server" : task.peerName || "a server"}` };
+  return task.state === "Done" && task.isBringingIn ? "Done, bringing in" : names[task.state] ?? task.state;
 }
 
 function taskLine(task) {
@@ -2242,6 +2379,10 @@ class WorkspaceView {
     this.readyNote = null;
     this.lastState = "Ready";
     this.loop = null;
+    this.agenda = { items: [], status: null, isStopped: false };
+    this.agendaHeard = 0;
+    this.activity = { entries: [], older: null, loaded: false, loading: false, again: false, early: [], open: new Set() };
+    this.activityError = new ErrorLine();
     this.scripts = { entries: [], selected: null, child: null, wanted: null, loaded: false, early: [] };
     this.scriptError = new ErrorLine();
     this.errorsError = new ErrorLine();
@@ -2261,6 +2402,7 @@ class WorkspaceView {
     this.loadScripts();
     this.loadState();
     this.loadLoop();
+    this.loadAgenda();
     this.loadErrors();
   }
 
@@ -2272,33 +2414,33 @@ class WorkspaceView {
     new ResizeObserver(() => this.keepAnchor()).observe(this.list);
     this.restoreHeight = null;
     this.input = h("textarea", { rows: 1, placeholder: "Enter query...", oninput: () => this.inputChanged(), onkeydown: event => this.keyed(event) });
-    this.sendButton = h("button", { class: "primary act", title: "Send", hidden: true, onclick: () => this.send() }, "↑");
-    this.reviewButton = h("button", { class: "primary act", title: "Review the workspace and its changes and fix any problems", onclick: () => this.preset("review") }, icon("review"));
-    this.expandButton = h("button", { class: "primary act", title: "Expand upon the content of the workspace", onclick: () => this.preset("expand") }, icon("expand"));
+    this.sendButton = h("button", { class: "primary act", title: "Send. Right-click or hold for Send Options", hidden: true, onclick: () => this.send() }, "↑");
+    this.reviewButton = h("button", { class: "primary act", title: "Review the workspace and its changes and fix any problems. Right-click or hold for Send Options", onclick: () => this.preset("review") }, icon("review"));
+    this.expandButton = h("button", { class: "primary act", title: "Expand upon the content of the workspace. Right-click or hold for Send Options", onclick: () => this.preset("expand") }, icon("expand"));
     this.pauseButton = h("button", { class: "primary act", title: "Pause: ask the AI to pause its current work", onclick: () => this.quick(pausePrompt) }, icon("pause"));
     this.resumeButton = h("button", { class: "primary act", title: "Resume: ask the AI to resume its unfinished work", onclick: () => this.quick(resumePrompt) }, icon("resume"));
-    this.loopButton = h("button", { class: "act", title: "Loop: send a prompt over and over", onclick: () => this.openLoop() }, icon("loop"));
     this.cancelLoopButton = h("button", { class: "act", hidden: true, title: "Cancel the loop (the work in progress keeps going)", onclick: () => this.cancelLoop() }, icon("loopcancel"));
     this.autoCommitState = "Off";
-    this.autoCommitCaption = h("span", { class: "caption", hidden: true }, "Current\nWork");
-    this.autoCommitButton = h("button", { class: "act autocommit", hidden: true, onclick: () => this.toggleAutoCommit() }, icon("autoCommit"), this.autoCommitCaption);
-    this.queueButton = h("button", { class: "primary act queue", title: "Queue: send once the current work is done, at once if there is none, and auto commit afterwards", hidden: true, onclick: () => this.queueInput() }, icon("queue"));
+    this.autoCommitText = h("span", {});
+    this.autoCommitButton = h("button", { class: "when-done", hidden: true, onclick: () => this.toggleAutoCommit() }, icon("autoCommit"), this.autoCommitText);
+    this.joinNote = h("span", { class: "muted join-note", hidden: true }, "Send joins the running work.");
+    this.workRow = h("div", { class: "work-row", hidden: true }, this.autoCommitButton, this.joinNote);
+    this.queueButton = h("button", { class: "primary act queue", title: "Queue: send once the current work is done, at once if there is none, and commit afterwards. Right-click or hold for Send Options", hidden: true, onclick: () => this.queueInput() }, icon("queue"));
+    for (const [button, repeat] of [[this.sendButton, null], [this.queueButton, null], [this.reviewButton, "Review"], [this.expandButton, "Expand"]]) {
+      offerOnHold(button, () => this.openSendOptions({ repeat }));
+    }
+
     this.deletingInput = null;
-    // What auto commit of a saved input loaded into the box is, or null when it holds nothing that was loaded.
+    // What auto commit of a draft loaded into the box is, or null when it holds nothing that was loaded.
     this.loadedAutoCommit = null;
-    this.loadedText = h("span", {});
-    this.loadedButton = h("button", { class: "loaded-commit", hidden: true, onclick: () => this.toggleLoadedAutoCommit() }, icon("autoCommit"), this.loadedText);
-    this.loadedNote = h("div", { class: "loaded-note muted", hidden: true });
-    this.pausedText = h("b", {});
-    this.pausedBanner = h("div", { class: "paused-banner", hidden: true }, h("div", { class: "info" }, this.pausedText, h("div", { class: "muted" }, "Work was stopped, cancelled or failed, or the server restarted.")), h("button", { class: "primary", onclick: () => this.resumeQueue() }, "Resume Queue"));
-    this.loopWaitingText = h("div", {});
-    this.loopBanner = h("div", { class: "loop-banner", hidden: true }, icon("loop"), this.loopWaitingText);
     this.savedInputs = [];
-    this.savedOpen = false;
+    this.savedRead = false;
+    this.panelMode = null;
     this.savedPanel = h("div", { class: "saved-inputs", hidden: true });
-    this.saveInputButton = h("button", { class: "act", hidden: true, title: "Save the input for later and clear it", onclick: () => this.saveInput() }, icon("saveInput"));
+    this.saveInputButton = h("button", { class: "act", hidden: true, title: "Save Draft: keep the input for later and clear it", onclick: () => this.saveInput() }, icon("saveInput"));
     this.queuedBadge = h("span", { class: "badge", hidden: true });
-    this.loadInputButton = h("button", { class: "act load-saved", title: "Load a saved input", onclick: () => this.toggleSaved() }, icon("loadInput"), this.queuedBadge);
+    this.upNextButton = h("button", { class: "act up-next", hidden: true, title: "Up Next", onclick: () => this.toggleUpNext() }, icon("outline"), this.queuedBadge);
+    this.loadInputButton = h("button", { class: "act load-saved", title: "Drafts", onclick: () => this.toggleDrafts() }, icon("loadInput"));
     this.stopButton = h("button", { class: "primary act", hidden: true, title: "Stop the work and keep what it did", onclick: () => this.home.confirmHalt(this) }, icon("stop"));
     this.attachments = [];
     this.chips = h("div", { class: "chips", hidden: true });
@@ -2327,28 +2469,26 @@ class WorkspaceView {
     this.showWork = false;
     this.streaming = null;
     this.workButton = h("button", { class: "flat icon worktoggle", title: "Show the work of the AI (tool calls and results, dimmed) and stream its answer as it is written", onclick: () => this.toggleWork() }, icon("work"));
-    this.limitText = h("div", {});
-    this.limitBanner = h("div", { class: "limit-banner", hidden: true }, icon("pause"), this.limitText, h("button", { class: "flat", title: "End the automatic pause without resuming the work and the loop", onclick: () => this.cancelLimitPause() }, "Cancel Auto Resume"));
     this.queue = null;
     this.submitted = [];
-    this.queueText = h("div", {});
-    this.queuePrompt = h("div", { class: "prompt" });
-    this.queueBanner = h("div", { class: "queue-banner", hidden: true }, h("div", { class: "info" }, this.queueText, this.queuePrompt), h("button", { class: "flat", onclick: () => this.cancelQueued() }, "Cancel Queued Work"));
+    this.statusText = h("button", { class: "text", onclick: () => this.openUpNext() });
+    this.resumeAutomationButton = h("button", { class: "primary", onclick: () => this.resumeAutomation() }, "Resume");
+    this.stopRetryingButton = h("button", { title: "Give up on the work that waits to be tried again", onclick: () => attempt(() => this.connection.stopWorkspace(this.info.id), this.chatError) }, "Stop Retrying");
+    this.cancelPauseButton = h("button", { title: "End the automatic pause without resuming the work and the loop", onclick: () => this.cancelLimitPause() }, "Cancel Auto Resume");
+    this.cancelWaitingButton = h("button", { onclick: () => this.cancelQueued() }, "Cancel Waiting Work");
+    this.statusLine = h("div", { class: "status-line", hidden: true }, this.statusText, this.resumeAutomationButton, this.stopRetryingButton, this.cancelPauseButton, this.cancelWaitingButton);
     this.contextLabel = h("div", { class: "side-context muted", hidden: !this.sideInfo }, "Has main's context from session creation.");
     this.sideErrorBanner = h("div", { class: "side-error", hidden: true });
     this.chatBody = h("div", { class: "pane-body chat" },
       this.contextLabel,
       this.sideErrorBanner,
-      this.limitBanner,
-      this.queueBanner,
-      this.pausedBanner,
-      this.loopBanner,
+      this.statusLine,
       h("div", { class: "messages-wrap" }, this.scroller, this.workButton, this.chatAutoButton),
       this.chatNotice = h("div", { class: "chat-error muted small", hidden: true }),
       h("div", { class: "chat-error" }, this.chatError.element),
       this.grip,
       this.savedPanel,
-      h("div", { class: "composer" }, this.gitBar, this.loadedButton, this.loadedNote, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.loopButton, this.cancelLoopButton, this.autoCommitButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.queueButton, this.sendButton, this.stopButton)), this.fileInput));
+      h("div", { class: "composer" }, this.gitBar, this.workRow, this.chips, (this.box = h("div", { class: "box" }, this.attachButton, this.voiceButton, this.input, this.loadInputButton, this.upNextButton, this.cancelLoopButton, this.reviewButton, this.expandButton, this.pauseButton, this.resumeButton, this.saveInputButton, this.queueButton, this.sendButton, this.stopButton)), this.fileInput));
     this.historyList = h("div", { class: "items" });
     this.historyBody = h("div", { class: "pane-body history", hidden: true },
       h("div", { class: "head" }, h("div", {}, h("button", { class: "flat icon", title: "Git remote", hidden: !!this.sideInfo, onclick: () => this.beginGit("remote") }, icon("remote")), h("button", { class: "flat icon", title: "Fetch from the remote", hidden: !!this.sideInfo, onclick: () => this.fetchGit() }, icon("fetch")), h("button", { class: "flat icon", title: "Refresh", onclick: () => this.loadHistory(true) }, icon("refresh")))),
@@ -2376,11 +2516,16 @@ class WorkspaceView {
       h("div", { style: "padding:0 16px" }, this.scriptError.element),
       this.scriptScroller,
       this.scriptInputBar);
+    this.activityList = h("div", { class: "inner" });
+    this.activityBody = h("div", { class: "pane-body activity-pane", hidden: true },
+      h("div", { style: "padding:0 16px" }, this.activityError.element),
+      h("div", { class: "activity" }, this.activityList));
     this.chatTab = h("button", { class: "on", onclick: () => this.showSide("chat") }, "Chat");
     this.scriptTab = h("button", { onclick: () => this.showSide("script") }, "Script");
+    this.activityTab = h("button", { onclick: () => this.showSide("activity") }, "Activity");
     this.historyTab = h("button", { hidden: true, onclick: () => this.showSide("history") }, "History");
-    this.tabs = h("div", { class: "tabs" }, this.chatTab, this.scriptTab, this.historyTab);
-    this.chatPane = h("div", { class: "panel chat" }, this.tabs, this.chatBody, this.scriptBody, this.historyBody);
+    this.tabs = h("div", { class: "tabs" }, this.chatTab, this.scriptTab, this.activityTab, this.historyTab);
+    this.chatPane = h("div", { class: "panel chat" }, this.tabs, this.chatBody, this.scriptBody, this.activityBody, this.historyBody);
 
     this.pathLabel = h("div", { class: "path muted", hidden: true }, "Changes");
     this.sinceTitle = h("div", { class: "since-title muted", hidden: true }, "Changes Since Session Start");
@@ -2518,8 +2663,8 @@ class WorkspaceView {
         h("div", { class: "muted", style: "margin-top:8px" }, "Capability"), this.capabilitySelect,
         h("div", { class: "muted", style: "margin-top:8px" }, "Effort"), this.effortSelect),
       section("Access",
-        switchRow("isShellAllowed", "Run shell commands"),
-        switchRow("isSystemAccessAllowed", "Allow files outside the workspace"),
+        switchRow("isSandboxed", "Sandbox"),
+        h("div", { class: "muted small" }, sandboxNote),
         switchRow("isWebAllowed", "Use the web"),
         switchRow("isImageGenerationAllowed", "Generate images"),
         switchRow("isDelegationAllowed", "Let the AI delegate work", "The AI may send tasks, with the code of this workspace, to the paired servers that receive work, and decides what to delegate without asking about each task.")),
@@ -2684,7 +2829,7 @@ class WorkspaceView {
     const edited = this.editedSettings();
     return edited.capability !== this.current.capability
       || edited.effort !== this.current.effort
-      || ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed", "isDelegationAllowed"].some(key => !!edited[key] !== !!this.current[key])
+      || ["isSandboxed", "isWebAllowed", "isImageGenerationAllowed", "isDelegationAllowed"].some(key => !!edited[key] !== !!this.current[key])
       || edited.instructions !== (this.current.instructions ?? "").trim()
       || (edited.statusMinutes ?? null) !== (this.current.statusMinutes ?? null)
       || (edited.reviewPrompt ?? "") !== (this.current.reviewPrompt ?? "").trim()
@@ -2832,7 +2977,7 @@ class WorkspaceView {
     this.diagrams.connection = connection;
     connection.listeners.add(this.listener);
 
-    // The server refuses what is read of a session that is being set up, integrated or removed; it is read once it is ready.
+    // The server refuses what is read of a session that is being set up, brought in or removed; it is read once it is ready.
     if (this.sideInfo && this.sideInfo.state !== "Ready") {
       this.missedReconnect = true;
       return;
@@ -2852,8 +2997,13 @@ class WorkspaceView {
     this.loadScripts();
     this.loadState();
     this.loadLoop();
+    this.loadAgenda();
     this.loadErrors();
     this.loadRoot(this.files?.path ?? "", false);
+
+    if (this.activity.loaded || this.activity.loading) {
+      this.loadActivity(true);
+    }
   }
 
   blur() {
@@ -2904,114 +3054,103 @@ class WorkspaceView {
     return this.input.value.trim().length > 0 || this.attachments.length > 0;
   }
 
-  toggleLoadedAutoCommit() {
-    // While the current work is to be committed whatever the input says, there is nothing to choose for sending it.
-    if (this.autoCommitState === "On") {
-      return;
-    }
-
-    this.loadedAutoCommit = !this.loadedAutoCommit;
-    this.renderLoaded();
-    this.saveDraft();
-  }
-
-  // A loaded input keeps what it was loaded with for as long as any of it is in the box.
+  // A loaded draft keeps whether it is committed for queuing for as long as any of it is in the box.
   renderLoaded() {
     if (!this.hasContent()) {
       this.loadedAutoCommit = null;
     }
 
-    this.loadedButton.hidden = this.loadedAutoCommit === null || !this.gitStatus.isRepo || !!this.delegation();
-    const already = this.autoCommitState === "On";
-    this.loadedButton.disabled = already;
-    this.loadedButton.classList.toggle("toggled", already || this.loadedAutoCommit === true);
-    this.loadedText.textContent = already ? "Auto Commit Already On for Current Work" : this.loadedAutoCommit === true ? "Auto Commit This Input: On" : "Auto Commit This Input: Off";
-    const note = this.loadedButton.hidden ? "" : already ? this.loadedAutoCommit === false ? "Queuing or saving it keeps its own setting: off." : ""
-      : this.loadedAutoCommit === true && this.loop?.isRunning === true ? "Sent now, it joins the loop's run, which is not committed. Queue it to have it committed." : "";
-    this.loadedNote.textContent = note;
-    this.loadedNote.hidden = note === "";
     const commits = this.gitStatus.isRepo && this.loadedAutoCommit !== false;
-    this.queueButton.title = `Queue: send once the current work is done, at once if there is none${commits ? ", and auto commit afterwards" : ""}`;
-    this.renderAutoCommitCaption();
+    this.queueButton.title = `Queue: send once the current work is done, at once if there is none${commits ? ", and commit afterwards" : ""}. Right-click or hold for Send Options`;
   }
 
-  // The button beside the message box says that it is about the current work while the one about a loaded input shows too.
-  renderAutoCommitCaption() {
-    const labelled = !this.autoCommitButton.hidden && !this.loadedButton.hidden;
-    this.autoCommitCaption.hidden = !labelled;
-    this.autoCommitButton.classList.toggle("labelled", labelled);
+  queuedInputs() {
+    return this.savedInputs.filter(entry => entry.isQueued);
   }
 
-  // What the loop waits for besides its interval, or what goes before its next run, in words, or empty when nothing does.
-  loopWaiting() {
-    if (!this.loop) {
-      return "";
-    }
-
-    const queued = this.activeQueued();
-    const inputs = queued === 1 ? "1 queued input" : `${queued} queued inputs`;
-    const state = this.state();
-
-    if (this.loop.isRunning) {
-      return queued > 0 ? `${inputs} will run when this loop run ends.` : "";
-    }
-
-    // A loop only waits once its next run is due; until then it counts down, which queued inputs do not change.
-    if (!this.isRunDue()) {
-      return queued > 0 ? `${inputs} ${queued === 1 ? "goes" : "go"} before the loop's next run.` : "";
-    }
-
-    if (this.autoCommitState === "Committing") {
-      return queued > 0 ? `Loop waiting for the commit and ${inputs}.` : "Loop waiting for the commit.";
-    }
-
-    if (queued > 0) {
-      return state === "Ready" ? `Loop waiting for ${inputs}.` : `Loop waiting for the current work and ${inputs}.`;
-    }
-
-    return state === "Working" || state === "Managing" ? "Loop waiting for the current work to finish." : "";
+  drafts() {
+    return this.savedInputs.filter(entry => !entry.isQueued);
   }
 
-  activeQueued() {
-    return this.savedInputs.filter(entry => entry.isQueued && !entry.isPaused).length;
-  }
+  async loadAgenda() {
+    const heard = this.agendaHeard;
 
-  isRunDue() {
-    return !this.loop?.nextRunAt || new Date(this.loop.nextRunAt).getTime() <= Date.now();
-  }
+    try {
+      const agenda = await this.connection.getAgenda(this.info.id);
 
-  renderLoopWaiting() {
-    const waiting = this.loopWaiting();
-    this.loopWaitingText.textContent = waiting;
-    this.loopBanner.hidden = waiting === "";
-    clearTimeout(this.runDueTimer);
-
-    // What it waits for changes as its next run comes due.
-    if (this.loop && !this.isRunDue()) {
-      this.runDueTimer = setTimeout(() => this.renderLoopWaiting(), Math.min(new Date(this.loop.nextRunAt).getTime() - Date.now() + 50, 2 ** 31 - 1));
+      // One that was told of meanwhile is newer than what was asked for.
+      if (heard === this.agendaHeard) {
+        this.setAgenda(agenda);
+      }
+    } catch (exception) {
     }
   }
 
-  renderQueueState() {
-    const queued = this.savedInputs.filter(entry => entry.isQueued);
-    const paused = queued.filter(entry => entry.isPaused).length;
-    this.queuedBadge.textContent = String(queued.length);
-    this.queuedBadge.hidden = queued.length === 0;
-    this.queuedBadge.classList.toggle("paused", paused > 0);
-    this.pausedText.textContent = `Queue paused (${paused})`;
-    this.pausedBanner.hidden = paused === 0;
-    this.renderLoopWaiting();
+  setAgenda(agenda) {
+    const waited = this.hasWorkToCome();
+    this.agenda = { items: agenda?.items ?? [], status: agenda?.status ?? null, isStopped: agenda?.isStopped === true };
+    this.renderStatusLine();
+    this.renderUpNextButton();
+
+    if (this.panelMode === "upNext") {
+      this.renderSaved();
+    }
+
+    this.home.updateLoop(this);
+    this.home.updateNotify(this);
+
+    // What was still to come can end without the state changing, as when it is stopped or deleted while the workspace is ready.
+    if (waited && !this.hasWorkToCome() && this.state() === "Ready" && this.notifyWhenReady) {
+      this.conclude();
+    }
+  }
+
+  isAgendaPending() {
+    return !this.agenda.isStopped && this.agenda.items.some(item => item.kind !== "Loop");
+  }
+
+  isLoopActive() {
+    return this.loop !== null && !this.agenda.isStopped;
+  }
+
+  // Whether more is to come by itself, between which the workspace can be ready.
+  hasWorkToCome() {
+    return this.isAgendaPending() || this.isLoopActive() || !!this.queue;
+  }
+
+  renderStatusLine() {
+    const agenda = this.agenda;
+    const paused = this.limitPause !== null;
+    const text = agenda.status ?? (agenda.isStopped ? "Stopped" : paused ? "Paused at the usage limit" : this.queue ? `Waiting for Local AI, position ${this.queue.position}` : "");
+    this.statusLine.hidden = text === "";
+    this.statusLine.classList.toggle("warn", agenda.isStopped || paused);
+    this.statusText.textContent = text;
+    this.statusText.title = paused ? this.limitPauseText() : "Open Up Next";
+    this.resumeAutomationButton.hidden = !agenda.isStopped;
+    this.stopRetryingButton.hidden = agenda.isStopped || !(agenda.items ?? []).some(item => item.kind === "Retry");
+    this.cancelPauseButton.hidden = !paused;
+    this.cancelWaitingButton.hidden = !this.queue;
+  }
+
+  renderUpNextButton() {
+    const queued = this.queuedInputs().length;
+    this.queuedBadge.textContent = String(queued);
+    this.queuedBadge.hidden = queued === 0;
+    this.queuedBadge.classList.toggle("paused", this.agenda.isStopped);
+    this.upNextButton.hidden = !!this.delegation() || queued === 0 || this.input.value.trim().length > 0;
+    this.upNextButton.title = queued === 0 ? "Up Next" : `Up Next: ${queued} queued input${queued === 1 ? "" : "s"}`;
+    this.loadInputButton.classList.toggle("saved", this.drafts().length > 0);
   }
 
   // Resuming gives the workspace work like queuing does, so its end is waited for in the same way.
-  async resumeQueue() {
+  async resumeAutomation() {
     this.chatNotice.hidden = true;
     const waited = this.notifyWhenReady;
     this.notifyWhenReady = true;
     this.clearReady();
     requestNotifications().then(() => this.home.updateNotify(this));
 
-    if (!(await attempt(() => this.connection.resumeQueue(this.info.id), this.chatError)).ok) {
+    if (!(await attempt(() => this.connection.resumeAutomation(this.info.id), this.chatError)).ok) {
       this.settleNotify(waited);
     }
   }
@@ -3029,12 +3168,12 @@ class WorkspaceView {
     await attempt(() => this.connection.setSavedInputAutoCommit(this.info.id, entry.id, !entry.autoCommit), this.chatError);
   }
 
-  async toggleAutoCommit() {
-    await attempt(() => this.connection.setAutoCommit(this.info.id, this.autoCommitState !== "On"), this.chatError);
+  async toggleBringInCommit(item) {
+    await attempt(() => this.connection.setBringInCommit(this.info.id, item.id, !item.autoCommit), this.chatError);
   }
 
-  hasActiveQueued() {
-    return this.savedInputs.some(entry => entry.isQueued && !entry.isPaused);
+  async toggleAutoCommit() {
+    await attempt(() => this.connection.setAutoCommit(this.info.id, this.autoCommitState !== "On"), this.chatError);
   }
 
   // Whether the user is told once the work is over, which giving it work from here turns on and the user can also turn on or off.
@@ -3049,11 +3188,11 @@ class WorkspaceView {
 
   // Work that does not start leaves the wait as it was before, which goes on only while something is still to come and was not announced meanwhile.
   settleNotify(waited) {
-    this.notifyWhenReady &&= waited && (this.state() !== "Ready" || this.loop !== null || this.hasActiveQueued() || !!this.queue || this.home.held.has(this.info.id));
+    this.notifyWhenReady &&= waited && (this.state() !== "Ready" || this.hasWorkToCome() || this.home.held.has(this.info.id));
   }
 
   hasTasksUnderWay() {
-    return this.home.swarmTasks.some(task => task.workspaceId === this.info.id && !task.isManual && this.home.isUnderWay(task));
+    return this.home.swarmTasks.some(task => task.workspaceId === this.info.id && this.home.isAwaited(task) && this.home.isUnderWay(task));
   }
 
   refuseWork() {
@@ -3092,8 +3231,7 @@ class WorkspaceView {
 
   setLimitPause(pause) {
     this.limitPause = pause;
-    this.limitBanner.hidden = !pause;
-    this.limitText.textContent = this.limitPauseText();
+    this.renderStatusLine();
     this.home.updateLimit(this);
     this.home.updateLoop(this);
   }
@@ -3128,7 +3266,7 @@ class WorkspaceView {
     }[settings.condition];
     const runs = loop.runs ?? 0;
     const line = settings.prompt.replace(/\s+/g, " ").trim();
-    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}, ${runs} run${runs === 1 ? "" : "s"} so far${loop.limitCheckAt ? ", waiting for the usage limit" : ""}${this.limitPause ? ", paused with the AI at the max usage window limit" : ""}`;
+    return `Loop: "${line.length <= 40 ? line : `${line.slice(0, 40).trimEnd()}...`}", ${settings.intervalSeconds > 0 ? `every ${Math.round(settings.intervalSeconds / 6) / 10} min` : "back to back"}, ${ends ? ends() : "until cancelled"}${settings.autoCommit ? ", committing each run" : ""}, ${runs} run${runs === 1 ? "" : "s"} so far${loop.limitCheckAt ? ", waiting until the AI can run" : ""}${this.limitPause ? ", paused with the AI at the max usage window limit" : ""}`;
   }
 
   loopNext() {
@@ -3140,19 +3278,18 @@ class WorkspaceView {
 
     const busy = this.state() !== "Ready";
 
-    if (this.limitPause) {
-      return "The loop is paused with the AI because a usage window is at or past the max usage window limit. It sends nothing until the AI resumes, and goes on then.";
+    if (this.agenda.isStopped) {
+      return "The loop is paused since the work was stopped. It goes on after Resume.";
     }
 
-    // What a due run waits for says more than that it waits for the workspace.
-    if (!loop.isRunning && !loop.limitCheckAt && (this.activeQueued() > 0 || this.autoCommitState === "Committing") && this.isRunDue()) {
-      return this.loopWaiting();
+    if (this.limitPause) {
+      return "The loop is paused with the AI because a usage window is at or past the max usage window limit. It sends nothing until the AI resumes, and goes on then.";
     }
 
     if (loop.limitCheckAt) {
       const left = (new Date(loop.limitCheckAt).getTime() - Date.now()) / 1000;
       const until = left >= 3600 ? `${Math.floor(left / 3600)} h ${Math.floor(left % 3600 / 60)} min` : left >= 60 ? `${Math.floor(left / 60)} min ${Math.floor(left % 60)} s` : `${Math.max(1, Math.floor(left))} s`;
-      return left <= 0 ? "The usage limit is reached. The loop is checking it now." : `The usage limit is reached, so the loop waits. It checks again in ${until} and goes on once the AI can be prompted again.`;
+      return left <= 0 ? "The AI could not run. The loop is trying again now." : `The AI could not run, so the loop waits. It tries again in ${until}.`;
     }
 
     if (!loop.nextRunAt) {
@@ -3173,41 +3310,77 @@ class WorkspaceView {
     await attempt(() => this.connection.cancelLoop(this.info.id), this.chatError);
   }
 
-  async openLoop() {
-    let windows = [];
-    let reviewPrompt = "";
-    let expandPrompt = "";
-
-    try {
-      const settings = await this.connection.getWorkspaceSettings(this.info.id);
-      reviewPrompt = (settings.reviewPrompt ?? settings.globalReviewPrompt ?? "").trim();
-      expandPrompt = (settings.expandPrompt ?? settings.globalExpandPrompt ?? "").trim();
-    } catch (exception) {
-    }
-
-    if (this.home.active !== this) {
+  // The choices of when and where what is in the message box is sent and what happens afterwards. The list of sessions opens only the part that makes a new one.
+  async openSendOptions({ newSession = false, repeat = null } = {}) {
+    if (this.openingOptions || (!newSession && this.delegation())) {
       return;
     }
 
-    try {
-      windows = ((await this.connection.getUsage(this.info.service))?.windows ?? []).map(window => window.name);
-    } catch (exception) {
-    }
+    this.openingOptions = true;
 
     // A dialog that opens after another workspace was chosen would be taken as one about that workspace.
-    if (this.home.active !== this) {
+    try {
+      const read = async ask => {
+        try {
+          return this.home.active === this ? await ask() : null;
+        } catch (exception) {
+          return null;
+        }
+      };
+      const settings = newSession ? null : await read(() => this.connection.getWorkspaceSettings(this.info.id));
+      const usage = newSession ? null : await read(() => this.connection.getUsage(this.info.service));
+      const swarm = await read(() => this.connection.swarm("GetSwarm"));
+
+      if (this.home.active === this) {
+        this.showSendOptions(newSession, settings, (usage?.windows ?? []).map(window => window.name), (swarm?.peers ?? []).filter(peer => peer.sendWork), repeat);
+      }
+    } finally {
+      this.openingOptions = false;
+    }
+  }
+
+  showSendOptions(newSession, settings, windows, peers, repeat = null) {
+    const home = this.home;
+    const main = home.workspaces.find(workspace => workspace.id === home.mainOf(this.info.id));
+
+    if (!main) {
       return;
     }
 
-    const field = (label, ...controls) => h("div", { class: "stack tight", style: "margin-top:6px" }, h("div", { class: "muted" }, label), ...controls);
-    const reviewRadio = h("input", { type: "radio", name: "loop-prompt", checked: true });
-    const expandRadio = h("input", { type: "radio", name: "loop-prompt" });
-    const customRadio = h("input", { type: "radio", name: "loop-prompt" });
-    const custom = h("textarea", { rows: 3, placeholder: "Enter the prompt...", hidden: true });
-    const choosePrompt = () => { custom.hidden = !customRadio.checked; };
-    reviewRadio.onchange = choosePrompt;
-    expandRadio.onchange = choosePrompt;
-    customRadio.onchange = choosePrompt;
+    const repo = this.gitStatus.isRepo === true;
+    const typed = () => this.input.value.trim();
+    const field = (label, ...controls) => h("div", { class: "stack tight" }, h("div", { class: "muted" }, label), ...controls);
+    const note = text => h("div", { class: "note" }, text);
+    let update = () => {};
+    const mirrors = [];
+    const boxText = placeholder => {
+      const area = h("textarea", { rows: 3, placeholder, value: this.input.value, oninput: () => {
+        this.input.value = area.value;
+        this.inputChanged();
+        mirrors.filter(other => other !== area).forEach(other => { other.value = area.value; });
+        update();
+      } });
+      mirrors.push(area);
+      return area;
+    };
+    // Asked for with a prompt of the workspace, it is about repeating that prompt, which a loop that already runs leaves no room for.
+    const when = segments([["Now", "Now"], ["Next", "Next"], ["Repeat", "Repeat"]], repeat && this.loop === null ? "Repeat" : "Now", () => update());
+    const where = segments([["Chat", "This Chat"], ["New", "New Session"]], newSession ? "New" : "Chat", () => update());
+    const loopNote = note("A loop already runs, so Repeat is not offered.");
+    const whenField = field("When", when.element, loopNote);
+    const whereField = field("Where", where.element);
+
+    const nowBox = field("When Done", note("Send never turns on auto commit."));
+
+    const queued = segments([["Commit", "Commit"], ["Keep", "Keep Changes"]], this.loadedAutoCommit === false ? "Keep" : "Commit");
+    const nextBox = h("div", { class: "stack tight" }, repo ? field("When Done", queued.element) : null);
+
+    const prompts = {
+      Review: (settings?.reviewPrompt ?? settings?.globalReviewPrompt ?? "").trim(),
+      Expand: (settings?.expandPrompt ?? settings?.globalExpandPrompt ?? "").trim()
+    };
+    const promptKind = segments([["Review", "Review"], ["Expand", "Expand"], ["Custom", "Custom"]], repeat ?? (typed() ? "Custom" : "Review"), () => update());
+    const customBox = boxText("Enter the prompt...");
     const interval = h("input", { type: "number", min: "0", max: "1440", step: "1", value: "15" });
     const conditions = [["Forever", "Until I cancel it"], ["UntilTime", "Until a time of day"], ["ForDuration", "For a length of time"], ["Runs", "For a number of runs"], ...(windows.length > 0 ? [["UntilWindow", "Until a usage limit reaches a share"]] : [])];
     const time = h("input", { type: "time", value: "23:00" });
@@ -3216,25 +3389,108 @@ class WorkspaceView {
     const runs = h("input", { type: "number", min: "1", max: "100000", step: "1", value: "5" });
     const windowSelect = h("select", {}, windows.map(name => h("option", { value: name }, name)));
     const percent = h("input", { type: "number", min: "1", max: "100", step: "5", value: "90" });
-    const waitForLimit = h("input", { type: "checkbox", checked: true });
     const boxes = {
       UntilTime: field("Time of day (the next time it is)", time),
       ForDuration: field("Hours and minutes", h("div", { style: "display:flex;gap:8px" }, hours, minutes)),
       Runs: field("Runs", runs),
       UntilWindow: field("Usage window and share of its limit (%)", windowSelect, percent)
     };
-    const kind = h("select", { onchange: () => show() }, conditions.map(([value, label]) => h("option", { value }, label)));
-    const show = () => { for (const [name, box] of Object.entries(boxes)) { box.hidden = name !== kind.value; } };
+    const showCondition = () => { for (const [name, box] of Object.entries(boxes)) { box.hidden = name !== kind.value; } };
+    const kind = h("select", { onchange: () => showCondition() }, conditions.map(([value, label]) => h("option", { value }, label)));
     kind.value = "Forever";
-    show();
-    const start = async () => {
-      const text = reviewRadio.checked ? reviewPrompt : expandRadio.checked ? expandPrompt : custom.value.trim();
+    showCondition();
+    const commitEach = h("input", { type: "checkbox" });
+    const repeatBox = h("div", { class: "stack tight" },
+      field("Prompt", promptKind.element, customBox),
+      field("Minutes between runs", interval),
+      field("Ends", kind),
+      ...Object.values(boxes),
+      repo ? h("label", { class: "check" }, commitEach, "Commit Each Run") : null);
+
+    const nameLabel = h("div", { class: "muted" });
+    const name = h("input", { type: "text", onkeydown: event => { if (event.key === "Enter") { confirm.click(); } } });
+    const runOn = h("select", { onchange: () => update() }, h("option", { value: "" }, "This Server"), ...peers.map(peer => h("option", { value: `peer:${peer.id}` }, peer.name)), peers.length > 0 ? h("option", { value: "any" }, "Any Server") : null);
+    // Decided as the dialog opens and left alone after that: unfinished work of a busy AI is best left behind.
+    const working = home.busy.has(main.id) || !!home.opened.get(main.id)?.working;
+    const starting = segments([["Commit", "Current Commit"], ["Files", "Current Files"]], working ? "Commit" : "Files");
+    const startingField = field("Starting files", starting.element, note("Current Files includes changes that are not committed, new files too."));
+    const expected = h("textarea", { rows: 2, placeholder: "Expected result and how to check it" });
+    const capability = h("select", {}, capabilities.map(value => h("option", { value }, value)));
+    capability.value = "Balanced";
+    let chosenAfterwards = null;
+    const afterwards = segments([["Bring", "Bring Into Main"], ["Keep", "Keep Separate"]], "Keep", value => { chosenAfterwards = value; });
+    const taskLabel = h("div", { class: "muted" });
+    const taskBox = boxText("Work the session starts on once it is set up");
+    const remoteNote = note("Instructions must be complete on their own: the other server does not see this conversation.");
+    const remoteFields = h("div", { class: "stack tight" }, remoteNote, field("Expected Result (optional)", expected), field("Capability", capability));
+    const newBox = h("div", { class: "stack tight" },
+      h("div", { class: "stack tight" }, nameLabel, name),
+      field("Run On", runOn),
+      h("div", { class: "stack tight" }, taskLabel, taskBox),
+      remoteFields,
+      startingField,
+      field("When Done", afterwards.element));
+
+    const confirm = h("button", { class: "primary block confirm-send" });
+    let element = null;
+    let running = false;
+    const mode = () => where.value === "New" ? runOn.value ? "Delegate" : "Session" : when.value === "Now" ? "Send" : when.value === "Next" ? "Queue" : "Loop";
+    update = () => {
+      const looping = this.loop !== null;
+      when.enable("Repeat", !looping);
+      loopNote.hidden = !looping;
+
+      if (when.value !== "Now") {
+        where.set("Chat");
+      }
+
+      where.enable("New", when.value === "Now");
+      const chosen = mode();
+      const remote = chosen === "Delegate";
+      nowBox.hidden = chosen !== "Send";
+      nextBox.hidden = chosen !== "Queue";
+      repeatBox.hidden = chosen !== "Loop";
+      customBox.hidden = promptKind.value !== "Custom";
+      newBox.hidden = where.value !== "New";
+      nameLabel.textContent = remote ? "Title" : "Name";
+      name.placeholder = remote ? "Title" : "Name";
+      startingField.hidden = remote;
+      remoteFields.hidden = !remote;
+      taskLabel.textContent = remote ? "Instructions" : "First Task (optional)";
+      afterwards.element.firstChild.textContent = remote ? home.bringInLabel(this.info.id) : "Bring Into Main";
+      // A session that is given a task is brought in when it is done, unless the user says otherwise.
+      afterwards.set(chosenAfterwards ?? (remote || typed() ? "Bring" : "Keep"));
+      confirm.textContent = { Send: "Send", Queue: "Queue", Loop: "Start Loop", Session: "Start Session", Delegate: "Delegate Task" }[chosen];
+      confirm.disabled = running || ((chosen === "Send" || chosen === "Queue") && !this.hasContent()) || (chosen === "Loop" && looping);
+    };
+    const fail = message => {
+      if (home.dialogHost.firstChild === element) {
+        home.dialogError.set(message);
+      } else {
+        this.chatError.set(message);
+      }
+    };
+    const close = () => {
+      if (home.dialogHost.firstChild === element) {
+        home.closeDialog();
+      }
+    };
+
+    const startLoop = async () => {
+      const chosen = promptKind.value;
+      const custom = chosen === "Custom";
       const minutesBetween = Number(interval.value);
       const condition = kind.value;
-      const fail = message => this.home.dialogError.set(message);
+      const used = this.input.value;
+
+      if (custom && this.attachments.length > 0) {
+        return fail("A loop cannot send attached files. Remove them first.");
+      }
+
+      const text = custom ? used.trim() : prompts[chosen];
 
       if (!text) {
-        return fail(reviewRadio.checked ? "The review prompt could not be read, so write the prompt the loop sends." : expandRadio.checked ? "The expand prompt could not be read, so write the prompt the loop sends." : "Write the prompt the loop sends.");
+        return fail(custom ? "Write the prompt the loop sends." : `The ${chosen.toLowerCase()} prompt could not be read, so write the prompt the loop sends.`);
       }
 
       // An empty box counts as 0; a number box also reads as empty while it holds something that is no number.
@@ -3242,7 +3498,7 @@ class WorkspaceView {
         return fail("The minutes between runs must be between 0 and 1440.");
       }
 
-      const settings = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition, waitForLimit: waitForLimit.checked };
+      const loop = { prompt: text, intervalSeconds: Math.round(minutesBetween * 60), condition, autoCommit: repo && commitEach.checked };
 
       if (condition === "UntilTime") {
         const [hour, minute] = (time.value || "").split(":").map(Number);
@@ -3258,7 +3514,7 @@ class WorkspaceView {
           end.setDate(end.getDate() + 1);
         }
 
-        settings.until = end.toISOString();
+        loop.until = end.toISOString();
       } else if (condition === "ForDuration") {
         const seconds = Math.round(Number(hours.value || 0) * 3600 + Number(minutes.value || 0) * 60);
 
@@ -3266,37 +3522,146 @@ class WorkspaceView {
           return fail("The loop must run for a time between a minute and 24 days.");
         }
 
-        settings.durationSeconds = seconds;
+        loop.durationSeconds = seconds;
       } else if (condition === "Runs") {
         if (!(Number(runs.value) >= 1)) {
           return fail("The loop needs at least one run.");
         }
 
-        settings.runs = Math.trunc(Number(runs.value));
+        loop.runs = Math.trunc(Number(runs.value));
       } else if (condition === "UntilWindow") {
         if (!windowSelect.value || !(Number(percent.value) >= 1 && Number(percent.value) <= 100)) {
           return fail("Choose a usage window and a share between 1 and 100.");
         }
 
-        settings.window = windowSelect.value;
-        settings.percent = Number(percent.value);
+        loop.window = windowSelect.value;
+        loop.percent = Number(percent.value);
       }
 
-      this.home.dialogError.set(null);
-      const result = await attempt(() => this.connection.startLoop(this.info.id, settings), this.home.dialogError);
+      home.dialogError.set(null);
+      await this.connection.startLoop(this.info.id, loop);
+      this.chatNotice.hidden = true;
 
-      if (result.ok) {
-        this.home.closeDialog();
+      if (custom) {
+        this.clearSent(used);
       }
+
+      close();
     };
-    this.home.dialog("Loop", null,
-      field("Prompt", h("label", { class: "row-check" }, reviewRadio, " Review"), h("label", { class: "row-check" }, expandRadio, " Expand"), h("label", { class: "row-check" }, customRadio, " Custom"), custom),
-      field("Minutes between runs", interval),
-      field("Ends", kind),
-      ...Object.values(boxes),
-      h("label", { class: "check", style: "margin-top:6px" }, waitForLimit, "Wait for the usage limit instead of ending"),
-      h("button", { class: "primary block", onclick: start }, "Start Loop"));
-    this.home.dialogHost.firstChild.dataset.view = this.info.id;
+
+    const startSession = async () => {
+      const given = name.value.trim();
+
+      if (!given) {
+        return fail("Enter a name.");
+      }
+
+      if (this.attachments.length > 0) {
+        return fail("Attached files cannot go to a new session. Remove them first.");
+      }
+
+      const used = this.input.value;
+      const task = used.trim();
+      const start = starting.value;
+      const bringIn = afterwards.value === "Bring";
+
+      // Browsers ask only while the user is clicking.
+      if (task) {
+        requestNotifications();
+      }
+
+      // What was edited in main's settings applies to the session made next.
+      const view = home.opened.get(main.id);
+
+      if (view && !await view.applySettings()) {
+        return fail("The workspace's settings could not be saved.");
+      }
+
+      const made = await this.connection.createSideSession(main.id, given, start, task, bringIn);
+
+      if (task) {
+        this.clearSent(used);
+      }
+
+      close();
+      home.awaitSession(made, !!task);
+    };
+
+    const delegate = async () => {
+      const title = name.value.trim();
+      const used = this.input.value;
+
+      if (!title) {
+        return fail("Enter a title.");
+      }
+
+      if (!used.trim()) {
+        return fail("Write the instructions of the task.");
+      }
+
+      if (this.attachments.length > 0) {
+        return fail("Attached files cannot go to a new session. Remove them first.");
+      }
+
+      requestNotifications();
+      const task = { title, instructions: used.trim(), expectedResult: expected.value.trim(), capability: capability.value, peerId: runOn.value.startsWith("peer:") ? runOn.value.slice(5) : undefined, dependsOn: [], bringIn: afterwards.value === "Bring" };
+      const before = new Set(home.swarmTasks.map(item => item.id));
+      const status = await this.connection.swarm("DelegateTask", { workspaceId: this.info.id, task });
+      this.clearSent(used);
+      close();
+      this.chatNotice.textContent = "The task was delegated.";
+      this.chatNotice.hidden = false;
+      home.follow((status?.tasks ?? []).filter(item => !before.has(item.id) && !item.isIncoming).map(item => item.id));
+    };
+
+    confirm.addEventListener("click", async () => {
+      const chosen = mode();
+      home.dialogError.set(null);
+
+      if (chosen === "Send") {
+        if (!this.takesAiInput()) {
+          return fail("The AI cannot take input right now. Queue it instead.");
+        }
+
+        close();
+        return this.send();
+      }
+
+      if (chosen === "Queue") {
+        close();
+        return this.queueInput(repo ? queued.value === "Commit" : undefined);
+      }
+
+      if (chosen === "Loop" && !this.takesAiInput() && this.autoCommitState !== "Committing") {
+        return fail("A loop cannot be started right now.");
+      }
+
+      running = true;
+      confirm.disabled = true;
+
+      try {
+        await (chosen === "Loop" ? startLoop() : chosen === "Session" ? startSession() : delegate());
+      } catch (exception) {
+        fail(exception.message);
+      } finally {
+        running = false;
+        update();
+      }
+    });
+
+    home.dialog(newSession ? "New Session" : "Send Options", null, ...(newSession ? [] : [whenField, whereField, nowBox, nextBox, repeatBox]), newBox, confirm);
+    element = home.dialogHost.firstChild;
+    element.dataset.view = this.info.id;
+    element.dataset.buttonOnly = "true";
+    update();
+  }
+
+  // Takes out of the box what was sent from it, unless it was changed meanwhile.
+  clearSent(text) {
+    if (this.input.value === text) {
+      this.input.value = "";
+      this.inputChanged();
+    }
   }
 
   async loadState() {
@@ -3582,7 +3947,24 @@ class WorkspaceView {
   }
 
   // Tells the user that the work they wait for is over, unless more of it is still to come.
-  conclude() {
+  async conclude() {
+    if (this.concluding) {
+      return;
+    }
+
+    this.concluding = true;
+
+    // What is up next is read again, since news of it can come after the news of the state.
+    try {
+      await this.loadAgenda();
+    } finally {
+      this.concluding = false;
+    }
+
+    if (!this.notifyWhenReady || this.state() !== "Ready") {
+      return;
+    }
+
     // While the AI waits for delegated tasks its work is not over, so the user is told once it has dealt with them.
     if (this.hasTasksUnderWay()) {
       this.home.held.add(this.info.id);
@@ -3591,25 +3973,13 @@ class WorkspaceView {
 
     this.home.held.delete(this.info.id);
 
-    // Nor is it while queued inputs are still to be sent or work waits for the local AI (a queued input leaves the list only after it starts to wait there), or while a loop runs, between whose runs the workspace is ready.
-    if (this.hasActiveQueued() || this.queue || this.loop !== null) {
+    // Nor is it while more is to come by itself or work waits for the local AI, or while a loop runs, between whose runs the workspace is ready. A stopped one has nothing to come.
+    if (this.hasWorkToCome()) {
       return;
     }
 
     this.notifyWhenReady = false;
-
-    try {
-      if ("Notification" in window && Notification.permission === "granted") {
-        const note = new Notification(`${workspaceName(this.info)} is ready`, { tag: `ready-${this.info.id}` });
-        this.readyNote = note;
-        note.onclick = () => {
-          window.focus();
-          this.home.app.showWorkspace(this.home, this.info.id);
-          note.close();
-        };
-      }
-    } catch (exception) {
-    }
+    this.readyNote = notify(this.home, this.info.id, `${workspaceName(this.info)} is ready`, `ready-${this.info.id}`);
   }
 
   clearReady() {
@@ -3628,7 +3998,7 @@ class WorkspaceView {
     if (previous === "Ready" && state !== "Ready") {
       this.busySince = Date.now();
       this.clearReady();
-    } else if (previous !== "Ready" && state === "Ready" && Date.now() - this.busySince >= 2000 && this.loop === null && !this.hasActiveQueued()) {
+    } else if (previous !== "Ready" && state === "Ready" && Date.now() - this.busySince >= 2000 && !this.isLoopActive() && !this.isAgendaPending()) {
       ding();
     }
 
@@ -3636,6 +4006,7 @@ class WorkspaceView {
     const delegated = this.delegation();
     this.input.placeholder = delegated ? `This workspace runs a task delegated by ${delegated.from}` : { Managing: this.autoCommitState === "Committing" ? "Committing the changes, queue what comes next" : "Git is working, wait for it to finish", Stopping: "Stopping, wait for it to finish", Canceling: "Cancelling and reverting, wait for it to finish" }[state] ?? "Enter query...";
     this.showDelegation(delegated);
+    this.renderUpNextButton();
     this.updateSend();
     this.home.updateWorking(this);
   }
@@ -3643,7 +4014,7 @@ class WorkspaceView {
   showDelegation(delegation) {
     const delegated = delegation !== null;
 
-    for (const control of [this.input, this.attachButton, this.loadInputButton, this.renameButton, this.relocateButton, ...this.lockedControls]) {
+    for (const control of [this.input, this.attachButton, this.loadInputButton, this.upNextButton, this.renameButton, this.relocateButton, ...this.lockedControls]) {
       control.disabled = delegated;
     }
 
@@ -3725,12 +4096,6 @@ class WorkspaceView {
       // Known before the state, since work that waits for the local AI keeps the workspace from counting as ready.
       if (waiting.ok) {
         this.setQueue(waiting.value);
-      }
-
-      // Queued inputs still to be sent are shown before the state and none left only after it, so neither step looks like the end of the work.
-      if (unshown?.some(entry => entry.isQueued && !entry.isPaused)) {
-        this.setSavedInputs(unshown);
-        unshown = null;
       }
 
       // Both change before the state is applied once, so no state in between, such as ready, is ever seen.
@@ -3942,6 +4307,17 @@ class WorkspaceView {
 
     if (event.kind === "LoopChanged") {
       this.setLoop(event.loop ?? null, event.loop ? null : event.text ?? null);
+      return;
+    }
+
+    if (event.kind === "AgendaChanged" && event.agenda) {
+      this.agendaHeard++;
+      this.setAgenda(event.agenda);
+      return;
+    }
+
+    if (event.kind === "ActivityChanged" && event.activityEntry) {
+      this.receiveActivity(event.activityEntry);
       return;
     }
 
@@ -4259,10 +4635,9 @@ class WorkspaceView {
   }
 
   setSavedInputs(saved) {
-    const had = this.hasActiveQueued();
     this.savedInputs = [...saved];
-    this.loadInputButton.classList.toggle("saved", this.savedInputs.length > 0);
-    this.renderQueueState();
+    this.savedRead = true;
+    this.renderUpNextButton();
 
     // The question is dropped with what it asks about, which another client or the queue may have taken.
     if (this.deletingInput && !this.savedInputs.some(entry => entry.id === this.deletingInput.id)) {
@@ -4270,52 +4645,85 @@ class WorkspaceView {
     }
 
     this.renderSaved();
+    this.home.updateNotify(this);
+  }
 
-    // The queued inputs can run out without the state changing, as when they are deleted or paused while the workspace is ready.
-    if (had && !this.hasActiveQueued() && this.state() === "Ready" && this.loop === null && this.notifyWhenReady) {
-      this.conclude();
+  commitToggle(on, title, action) {
+    return h("button", { class: `flat icon saved-commit${on ? " toggled" : ""}`, title, onclick: action }, icon("autoCommit"));
+  }
+
+  savedCommitToggle(entry) {
+    return this.gitStatus.isRepo && !entry.error ? this.commitToggle(entry.autoCommit, entry.autoCommit ? "Auto commit is on for this input. Press to turn it off." : "Auto commit is off for this input. Press to turn it on.", () => this.toggleSavedAutoCommit(entry)) : null;
+  }
+
+  runButton(entry) {
+    return this.gitStatus.isRepo ? h("button", { class: "flat icon run-saved", title: "Run in New Session", onclick: () => this.runInNewSession(entry) }, icon("session")) : null;
+  }
+
+  deleteButton(entry) {
+    return h("button", { class: "flat icon delete", title: "Delete", onclick: () => this.askDelete(entry) }, icon("trash"));
+  }
+
+  draftRow(entry) {
+    const when = h("div", { class: "when", title: new Date(entry.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.time));
+
+    if (entry.isConverting || entry.error) {
+      return h("div", { class: "saved-row" },
+        h("div", { class: "pending" },
+          entry.isConverting ? h("div", { class: "muted" }, "Turning speech into text...") : h("div", { class: "error" }, entry.error),
+          entry.isConverting ? h("div", { class: "bar" }) : "",
+          when),
+        this.savedCommitToggle(entry),
+        this.deleteButton(entry));
     }
 
-    this.home.updateNotify(this);
+    return h("div", { class: "saved-row" },
+      h("button", { class: "load", onclick: () => this.takeSaved(entry) }, h("div", { class: "text" }, entry.text), when),
+      this.savedCommitToggle(entry),
+      this.runButton(entry),
+      this.deleteButton(entry));
+  }
+
+  agendaRow(item) {
+    const entry = item.kind === "Queued" ? this.savedInputs.find(other => other.id === item.id) ?? null : null;
+    const tip = on => on ? "The changes are committed after it. Press to keep them uncommitted." : "The changes are kept uncommitted after it. Press to commit them.";
+    const actions = entry
+      ? [this.gitStatus.isRepo ? this.commitToggle(entry.autoCommit, tip(entry.autoCommit), () => this.toggleSavedAutoCommit(entry)) : null,
+        h("button", { onclick: () => this.takeSaved(entry) }, "Edit"),
+        this.gitStatus.isRepo ? h("button", { onclick: () => this.runInNewSession(entry) }, "Run in New Session") : null,
+        h("button", { onclick: () => this.askDelete(entry) }, "Delete")]
+      : item.kind === "BringIn" && item.id && this.gitStatus.isRepo
+        ? [this.commitToggle(item.autoCommit === true, tip(item.autoCommit === true), () => this.toggleBringInCommit(item))]
+        : [];
+    const detail = [item.waiting, item.at ? `at ${messageStamp(item.at)}` : null].filter(part => part).join(" - ");
+    return h("div", { class: "saved-row agenda-row", "data-kind": item.kind },
+      h("div", { class: "agenda-item" },
+        h("div", { class: "text" }, item.title),
+        detail ? h("div", { class: "when", title: item.at ? new Date(item.at).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) : "" }, detail) : null),
+      actions.length > 0 ? h("div", { class: "row-actions" }, ...actions) : h("div", { style: "height:8px" }));
   }
 
   renderSaved() {
     // The list is built anew, so it takes over where it was scrolled to.
     const scrolled = this.savedPanel.querySelector(".list")?.scrollTop ?? 0;
-    this.savedPanel.hidden = !this.savedOpen;
-    const when = entry => h("div", { class: "when", title: new Date(entry.time).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.time));
-    const entryElement = entry => {
-      const remove = h("button", { class: "flat icon delete", title: "Delete", onclick: () => this.askDelete(entry) }, icon("trash"));
-      const commit = this.gitStatus.isRepo && !entry.error ? h("button", { class: `flat icon saved-commit${entry.autoCommit ? " toggled" : ""}`, title: entry.autoCommit ? "Auto commit is on for this input. Press to turn it off." : "Auto commit is off for this input. Press to turn it on.", onclick: () => this.toggleSavedAutoCommit(entry) }, icon("autoCommit")) : null;
+    const upNext = this.panelMode === "upNext";
+    this.savedPanel.hidden = this.panelMode === null;
 
-      if (entry.isConverting || entry.error) {
-        return h("div", { class: "saved-row" },
-          h("div", { class: "pending" },
-            entry.isConverting ? h("div", { class: "muted" }, "Turning speech into text...") : h("div", { class: "error" }, entry.error),
-            entry.isConverting ? h("div", { class: "bar" }) : "",
-            when(entry)),
-          commit,
-          remove);
-      }
+    if (this.panelMode === null) {
+      this.savedPanel.replaceChildren();
+      return;
+    }
 
-      return h("div", { class: `saved-row${entry.isQueued ? " queued" : ""}` },
-        h("button", { class: "load", onclick: () => this.takeSaved(entry) },
-          ...(entry.isQueued ? [h("div", { class: "queue-label" }, entry.isPaused ? "Queued, paused" : "Queued")] : []),
-          h("div", { class: "text" }, entry.text), when(entry)),
-        commit,
-        remove);
-    };
+    // What was just taken or deleted goes at once, though what is up next says so a moment later.
+    const rows = upNext
+      ? this.agenda.items.filter(item => item.kind !== "Queued" || !this.savedRead || this.savedInputs.some(entry => entry.id === item.id && entry.isQueued)).map(item => this.agendaRow(item))
+      : this.drafts().map(entry => this.draftRow(entry));
     const deleting = this.deletingInput;
-    const question = !deleting ? "" : deleting.isQueued ? "Delete this queued input? It will not be sent." : deleting.isConverting || deleting.error ? "Delete this recording? Its text is not kept." : "Delete this saved input? This cannot be undone.";
+    const question = !deleting ? "" : deleting.isQueued ? "Delete this queued input? It will not be sent." : deleting.isConverting || deleting.error ? "Delete this recording? Its text is not kept." : "Delete this draft? This cannot be undone.";
 
     this.savedPanel.replaceChildren(...[
-      h("div", { class: "head" }, h("h3", { class: "serif" }, "Saved inputs"), h("button", { class: "flat", onclick: () => this.toggleSaved() }, "Close")),
-      this.savedInputs.some(entry => entry.isQueued && entry.isPaused) ? h("div", { class: "paused-note" },
-        h("div", { class: "muted" }, "Queued inputs are paused because work was stopped, cancelled or failed, or the server restarted. They also go on after work ends well again or when you queue another input."),
-        h("button", { class: "primary", onclick: () => this.resumeQueue() }, "Resume Queue")) : null,
-      h("div", { class: "list" }, ...(this.savedInputs.length === 0
-        ? [h("div", { class: "none" }, "No saved inputs.")]
-        : this.savedInputs.map(entryElement))),
+      h("div", { class: "head" }, h("h3", { class: "serif" }, upNext ? "Up Next" : "Drafts"), h("button", { class: "flat", onclick: () => this.closePanel() }, "Close")),
+      h("div", { class: "list" }, ...(rows.length === 0 ? [h("div", { class: "none" }, upNext ? "Nothing is up next." : "No drafts.")] : rows)),
       deleting ? h("div", { class: "confirm" },
         h("div", { class: "card" },
           h("h3", { class: "serif" }, question),
@@ -4346,8 +4754,63 @@ class WorkspaceView {
     }
   }
 
+  // An input is taken from the list and given to a session of its own, which is brought in when it is done. Should that fail, it goes back.
+  async runInNewSession(entry) {
+    const main = this.home.workspaces.find(workspace => workspace.id === this.home.mainOf(this.info.id));
+
+    if (!main) {
+      return;
+    }
+
+    requestNotifications();
+    this.closePanel();
+    this.chatError.set(null);
+    const view = this.home.opened.get(main.id);
+
+    if (view && !await view.applySettings()) {
+      this.chatError.set("The workspace's settings could not be saved.");
+      return;
+    }
+
+    const taken = await attempt(() => this.connection.takeSavedInput(this.info.id, entry.id), this.chatError);
+
+    if (!taken.ok) {
+      await this.reloadSaved();
+      return;
+    }
+
+    const input = taken.value;
+
+    try {
+      const names = this.home.sideSessions.filter(session => session.side.parentId === main.id).map(session => session.side.name);
+      this.home.awaitSession(await this.connection.createSideSession(main.id, sessionName(input.text, names), "Files", input.text, true), true);
+    } catch (exception) {
+      const queued = entry.isQueued === true;
+
+      try {
+        this.setSavedInputs(await (queued ? this.connection.queueInput(this.info.id, input.text, input.autoCommit) : this.connection.saveInput(this.info.id, input.text, input.autoCommit)));
+        this.chatError.set(exception.message);
+      } catch (again) {
+        // It is not to be lost, whatever else fails.
+        this.giveBack(input.text, []);
+        this.chatError.set(exception.message);
+      }
+    }
+  }
+
+  // A list that could not be acted on is read again, keeping what went wrong on screen.
+  async reloadSaved() {
+    const message = this.chatError.message;
+    const again = await attempt(() => this.connection.getSavedInputs(this.info.id), this.chatError);
+
+    if (again.ok) {
+      this.setSavedInputs(again.value);
+      this.chatError.set(message);
+    }
+  }
+
   // Queuing gives the workspace work like sending does, only that the server sends it when the work before it is over.
-  async queueInput() {
+  async queueInput(commits = undefined) {
     if (this.delegation() || (this.input.value.trim().length === 0 && this.attachments.length === 0)) {
       return;
     }
@@ -4373,7 +4836,7 @@ class WorkspaceView {
         paths.push(attachment.serverPath ?? await this.connection.uploadAttachment(this.info.id, attachment.name, await this.encode(attachment.file)));
       }
 
-      await this.connection.queueInput(this.info.id, this.written(text, paths), loaded ?? true);
+      await this.connection.queueInput(this.info.id, this.written(text, paths), commits ?? loaded ?? true);
     }, this.chatError);
 
     if (!result.ok) {
@@ -4383,10 +4846,31 @@ class WorkspaceView {
     }
   }
 
-  toggleSaved() {
-    this.savedOpen = !this.savedOpen;
+  showPanel(mode) {
+    this.panelMode = mode;
     this.deletingInput = null;
     this.renderSaved();
+  }
+
+  closePanel() {
+    this.showPanel(null);
+  }
+
+  toggleDrafts() {
+    this.showPanel(this.panelMode === "drafts" ? null : "drafts");
+  }
+
+  toggleUpNext() {
+    if (this.panelMode === "upNext") {
+      this.closePanel();
+    } else {
+      this.openUpNext();
+    }
+  }
+
+  openUpNext() {
+    this.showPanel("upNext");
+    this.loadAgenda();
   }
 
   async saveInput() {
@@ -4406,8 +4890,7 @@ class WorkspaceView {
 
   async takeSaved(entry) {
     const result = await attempt(() => this.connection.takeSavedInput(this.info.id, entry.id), this.chatError);
-    this.savedOpen = false;
-    this.renderSaved();
+    this.closePanel();
 
     if (result.ok) {
       this.input.value = this.input.value.trim().length > 0 ? `${result.value.text}\n${this.input.value}` : result.value.text;
@@ -4415,13 +4898,7 @@ class WorkspaceView {
       this.inputChanged();
       this.input.focus();
     } else {
-      const message = this.chatError.message;
-      const again = await attempt(() => this.connection.getSavedInputs(this.info.id), this.chatError);
-
-      if (again.ok) {
-        this.setSavedInputs(again.value);
-        this.chatError.set(message);
-      }
+      await this.reloadSaved();
     }
   }
 
@@ -4459,27 +4936,25 @@ class WorkspaceView {
     this.pauseButton.hidden = !(empty && state === "Working");
     this.resumeButton.disabled = !this.takesAiInput();
     this.resumeButton.hidden = !(empty && state === "Ready");
-    // A loop can also be started while the changes are committed after work.
-    const afterWork = this.autoCommitState === "Committing";
-    this.loopButton.disabled = !this.takesAiInput() && !afterWork;
-    this.loopButton.hidden = !(prompting || (afterWork && empty)) || this.loop !== null;
     this.renderLoaded();
     this.cancelLoopButton.hidden = this.loop === null;
     const typed = this.input.value.trim().length > 0;
     this.saveInputButton.hidden = !typed;
     this.loadInputButton.hidden = typed;
+    this.renderUpNextButton();
 
-    if ((typed || this.delegation()) && this.savedOpen) {
-      this.toggleSaved();
+    if ((typed && this.panelMode === "drafts") || (this.delegation() && this.panelMode !== null)) {
+      this.closePanel();
     }
 
     this.queueButton.hidden = empty || !!this.delegation();
-    this.autoCommitButton.hidden = !!this.delegation() || !this.gitStatus.isRepo || this.loop?.isRunning === true || state === "Stopping" || state === "Canceling" || !(state === "Working" || this.autoCommitState === "On");
+    this.autoCommitButton.hidden = !!this.delegation() || !this.gitStatus.isRepo || state === "Stopping" || state === "Canceling" || !(state === "Working" || this.autoCommitState === "On");
     const committing = this.autoCommitState === "On";
     this.autoCommitButton.classList.toggle("toggled", committing);
-    this.autoCommitButton.title = committing ? "The changes are committed when the current work is done. Press to turn auto commit off." : "Auto commit the changes when the current work is done";
-    this.renderAutoCommitCaption();
-    this.renderLoopWaiting();
+    this.autoCommitText.textContent = committing ? "When Done: Commit" : "When Done: Keep Changes";
+    this.autoCommitButton.title = committing ? "The changes are committed when the current work is done. Press to keep them uncommitted." : "The changes are left uncommitted when the current work is done. Press to commit them.";
+    this.joinNote.hidden = !(state === "Working" && !empty && !this.delegation());
+    this.workRow.hidden = this.autoCommitButton.hidden && this.joinNote.hidden;
     this.stopButton.hidden = !halt;
     this.stopButton.disabled = state === "Canceling";
     this.voiceButton.disabled = this.transcribing || (!this.voice && !this.takesAiInput());
@@ -4587,8 +5062,7 @@ class WorkspaceView {
 
       if (result.ok) {
         this.setSavedInputs(result.value);
-        this.savedOpen = true;
-        this.renderSaved();
+        this.showPanel("drafts");
       }
     } finally {
       this.transcribing = false;
@@ -4687,7 +5161,7 @@ class WorkspaceView {
 
       try {
         this.submitted.push(splitAttachments(prompt));
-        await (loaded === true ? this.connection.promptToCommit(this.info.id, prompt, false) : this.connection.prompt(this.info.id, prompt));
+        await this.connection.prompt(this.info.id, prompt);
       } catch (exception) {
         if (!exception.overLimit) {
           throw exception;
@@ -4738,7 +5212,7 @@ class WorkspaceView {
 
       this.renderLoaded();
 
-      if (!(await attempt(() => ask.loaded === true ? this.connection.promptToCommit(this.info.id, ask.prompt, true) : this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
+      if (!(await attempt(() => this.connection.promptOverLimit(this.info.id, ask.prompt), this.chatError)).ok) {
         this.settleNotify(waited);
         this.withdraw(echo);
         this.giveBack(boxed ? ask.typed : "", taken);
@@ -4761,11 +5235,11 @@ class WorkspaceView {
     }
 
     this.queue = queue;
-    this.queueBanner.hidden = !queue;
+    this.renderStatusLine();
     this.home.updateNotify(this);
 
     if (queue?.text) {
-      // The banner shows a prompt that has to wait; it is a message once its work starts.
+      // A prompt that has to wait is in what is up next; it is a message once its work starts.
       const held = splitAttachments(queue.text);
       this.messages.filter(message => message.pending && this.holds(held, splitAttachments(message.text))).forEach(echo => this.withdraw(echo));
     }
@@ -4773,12 +5247,6 @@ class WorkspaceView {
     if (!queue) {
       return;
     }
-
-    const running = queue.running ?? [];
-    this.queueText.textContent = `Queued (position ${queue.position})${running.length > 0 ? `, waiting for ${running.join(", ")}` : ""}.`;
-    const parts = splitAttachments(queue.text ?? "");
-    this.queuePrompt.textContent = [parts.body, parts.files.map(file => file.name).join(", ")].filter(part => part).join("\n");
-    this.queuePrompt.hidden = !queue.text;
 
     if (this.gitWorking()) {
       this.showSide("chat");
@@ -4906,7 +5374,7 @@ class WorkspaceView {
     }
 
     if (!own) {
-      this.chatNotice.textContent = "The queued prompt was kept as a saved input.";
+      this.chatNotice.textContent = "The waiting prompt was kept as a draft.";
       this.chatNotice.hidden = false;
       return;
     }
@@ -5915,12 +6383,14 @@ class WorkspaceView {
   }
 
   showSide(name) {
-    this.side = name === "history" && this.gitStatus.isRepo ? "history" : name === "script" ? "script" : "chat";
+    this.side = name === "history" && this.gitStatus.isRepo ? "history" : name === "script" || name === "activity" ? name : "chat";
     this.chatBody.hidden = this.side !== "chat";
     this.scriptBody.hidden = this.side !== "script";
+    this.activityBody.hidden = this.side !== "activity";
     this.historyBody.hidden = this.side !== "history";
     this.chatTab.classList.toggle("on", this.side === "chat");
     this.scriptTab.classList.toggle("on", this.side === "script");
+    this.activityTab.classList.toggle("on", this.side === "activity");
     this.historyTab.classList.toggle("on", this.side === "history");
 
     if (this.side === "history") {
@@ -5933,7 +6403,139 @@ class WorkspaceView {
       this.scrollToEnd();
     } else if (this.side === "script") {
       this.scriptToEnd();
+    } else if (this.side === "activity") {
+      this.renderActivity();
+
+      if (!this.activity.loaded) {
+        this.loadActivity(true);
+      }
     }
+  }
+
+  async loadActivity(reset) {
+    const activity = this.activity;
+
+    if (activity.loading) {
+      activity.again ||= reset;
+      return;
+    }
+
+    activity.loading = true;
+    this.activityError.set(null);
+    this.renderActivity();
+    const result = await attempt(() => this.connection.getActivity(this.info.id, reset ? null : activity.older, activityPage), this.activityError);
+    activity.loading = false;
+
+    if (result.ok) {
+      const entries = result.value.entries ?? [];
+      activity.entries = reset ? [...entries] : [...activity.entries, ...entries.filter(entry => !activity.entries.some(other => other.id === entry.id))];
+      activity.older = result.value.older ?? null;
+      activity.loaded = true;
+    }
+
+    // What changed while the page was on its way may be newer than what it says.
+    const early = activity.early;
+    activity.early = [];
+
+    if (activity.loaded) {
+      early.forEach(entry => this.mergeActivity(entry));
+    }
+
+    this.renderActivity();
+
+    if (activity.again) {
+      activity.again = false;
+      await this.loadActivity(true);
+    }
+  }
+
+  receiveActivity(entry) {
+    if (this.activity.loading) {
+      this.activity.early.push(entry);
+    }
+
+    if (this.activity.loaded) {
+      this.mergeActivity(entry);
+      this.renderActivity();
+    }
+  }
+
+  // One that is older than everything read comes with the older ones.
+  mergeActivity(entry) {
+    const entries = this.activity.entries;
+    const index = entries.findIndex(other => other.id === entry.id);
+
+    if (index >= 0) {
+      entries[index] = entry;
+      return;
+    }
+
+    const after = entries.findIndex(other => Date.parse(other.startedAt) <= Date.parse(entry.startedAt));
+
+    if (after >= 0) {
+      entries.splice(after, 0, entry);
+    } else if (!this.activity.older) {
+      entries.push(entry);
+    }
+  }
+
+  toggleActivity(id) {
+    if (!this.activity.open.delete(id)) {
+      this.activity.open.add(id);
+    }
+
+    this.renderActivity();
+  }
+
+  renderActivity() {
+    if (this.side !== "activity") {
+      return;
+    }
+
+    const activity = this.activity;
+    const nodes = activity.entries.map(entry => this.activityElement(entry));
+
+    if (nodes.length === 0) {
+      nodes.push(h("div", { class: "muted small", style: "padding:8px" }, activity.loading ? "Loading..." : activity.loaded ? "No activity yet." : ""));
+    } else if (activity.older) {
+      nodes.push(h("button", { class: "block load-more", style: "margin-top:8px", disabled: activity.loading, onclick: () => this.loadActivity(false) }, "Load More"));
+    }
+
+    this.activityList.replaceChildren(...nodes);
+  }
+
+  activityElement(entry) {
+    const open = this.activity.open.has(entry.id);
+    const head = h("button", { onclick: () => this.toggleActivity(entry.id) },
+      h("div", { class: "line" },
+        h("span", { class: `outcome ${entry.outcome}` }, entry.outcome),
+        entry.needsAttention ? h("span", { class: "flag" }, "Needs Attention") : null,
+        h("span", { title: new Date(entry.startedAt).toLocaleString([], { dateStyle: "full", timeStyle: "medium" }) }, messageStamp(entry.startedAt))),
+      h("div", { class: "title" }, entry.title));
+    head.setAttribute("aria-expanded", String(open));
+    const element = h("div", { class: `activity-entry${entry.needsAttention ? " attention" : ""}`, "data-entry": entry.id }, head);
+
+    if (!open) {
+      return element;
+    }
+
+    const part = (name, ...children) => [h("h4", {}, name), ...children];
+    const plain = text => h("div", { class: "plain" }, text);
+    const list = items => h("ul", {}, items.map(item => h("li", {}, item)));
+    const commit = [
+      entry.commit ? plain(`${entry.commit}${entry.pushed === true ? " (pushed)" : entry.pushed === false ? " (not pushed)" : ""}`) : null,
+      entry.commitError ? h("div", { class: "error" }, `${entry.commit ? "Push failed" : "Commit failed"}: ${entry.commitError}`) : null
+    ].filter(node => node !== null);
+    element.append(h("div", { class: "detail" }, ...[
+      entry.text ? part("Input", plain(entry.text)) : [],
+      entry.reason ? part("Reason", plain(entry.reason)) : [],
+      entry.report ? part("AI Report", h("div", { class: "md" }, ...renderMarkdown(entry.report).childNodes)) : [],
+      commit.length > 0 ? part("Commit", ...commit) : [],
+      (entry.files ?? []).length > 0 ? part("Files", list(entry.files)) : [],
+      entry.handoff ? part("Handoff", plain(entry.handoff)) : [],
+      (entry.notes ?? []).length > 0 ? part("Notes", list(entry.notes)) : []
+    ].flat()));
+    return element;
   }
 
   async loadHistory(reset) {
@@ -6350,11 +6952,19 @@ class Home {
     this.swarmTasks = [];
     this.followed = new Set();
     this.held = new Set();
+    this.attended = new Set();
     this.catalogListener = event => {
       if (event.kind === "WorkspacesChanged") {
         this.refreshCatalog();
       } else if (event.kind === "SwarmChanged") {
         this.refreshSwarm();
+        this.taskView.read();
+      } else if (event.kind === "SwarmTaskChanged") {
+        if (event.taskId === this.taskView.taskId) {
+          this.taskView.read();
+        }
+      } else if (event.kind === "ActivityChanged") {
+        this.callAttention(event.workspaceId, event.activityEntry);
       } else if (event.kind === "QueueChanged") {
         const had = this.queued.has(event.workspaceId);
 
@@ -6421,6 +7031,7 @@ class Home {
       this.sessionRows,
       this.sessionError.element,
       h("button", { class: "block", onclick: () => this.beginNewSession() }, "New Session"));
+    this.taskView = new TaskView(this);
     this.sessionsWrap = h("div", { class: "sessions-wrap", hidden: true, onclick: event => event.target === this.sessionsWrap && this.toggleSessions(false) }, this.sessionsCard);
     this.usage = null;
     this.usageService = null;
@@ -6441,13 +7052,13 @@ class Home {
         h("button", { class: "block", onclick: () => this.app.showNewWorkspace(this.connection, this) }, "New Workspace"),
         h("button", { class: "block", onclick: () => this.app.showCloneWorkspace(this.connection, this) }, "Clone Workspace"),
         h("button", { class: "block", onclick: () => this.beginNewGroup() }, "New Group"),
-        h("button", { class: "block", onclick: () => this.app.showSwarm(this.connection, this, null, this.selected?.id ?? null) }, "Swarm"),
+        h("button", { class: "block", onclick: () => this.app.showSwarm(this.connection, this, null) }, "Swarm"),
         h("button", { class: "block", onclick: () => this.app.changeServer() }, "Change Server")));
     this.scrim = h("div", { class: "overlay", hidden: true, onclick: () => this.setDrawer(false) });
     this.dialogHost = h("div", { class: "dialog-wrap", hidden: true });
     this.dialogKeyListener = event => this.dialogKey(event);
     document.addEventListener("keydown", this.dialogKeyListener);
-    this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.sessionsWrap, this.scrim, this.drawer, this.dialogHost);
+    this.element = h("div", { class: "home" }, this.topbar, this.content, this.usageWrap, this.sessionsWrap, this.taskView.element, this.scrim, this.drawer, this.dialogHost);
     this.drawerOpen = false;
   }
 
@@ -6577,6 +7188,7 @@ class Home {
     }
 
     this.activeId = info?.id ?? null;
+    this.taskView.close();
     this.loopIndicator.hidden = true;
     this.limitIndicator.hidden = true;
     this.notifyButton.hidden = true;
@@ -6621,8 +7233,8 @@ class Home {
   }
 
   sessionStatus(session) {
-    const states = { Creating: "Setting Up", Integrating: "Integrating", Deleting: "Deleting" };
-    return states[session.side?.state] ?? (this.busy.has(session.id) ? "Working" : this.queued.has(session.id) ? "Queued" : this.looping.has(session.id) ? "Loop" : "Ready");
+    const states = { Creating: "Setting Up", Integrating: "Bringing In", Deleting: "Deleting" };
+    return states[session.side?.state] ?? (this.busy.has(session.id) ? "Working" : this.queued.has(session.id) ? "Waiting for Local AI" : this.looping.has(session.id) ? "Loop" : "Ready");
   }
 
   renderSessions() {
@@ -6643,13 +7255,13 @@ class Home {
       const ready = side?.state === "Ready";
       const removable = ready || side?.state === "Creating";
       const status = this.sessionStatus(session);
-      const detail = side?.integrateWhenFinished && ready ? `${status} - Integrates when finished` : status;
+      const detail = side?.integrateWhenFinished && ready ? `${status} - When Done: Bring Into Main` : status;
       const pick = h("button", { class: `pick${(this.activeId ?? main?.id) === session.id ? " on" : ""}`, disabled: !!side && !ready, onclick: () => { this.toggleSessions(false); this.showSession(session.id); } },
         h("div", { class: "name" }, ...(side ? [icon("session")] : []), h("span", {}, side ? side.name : "Main"), ...(this.busy.has(session.id) ? [h("span", { class: "dot" }, "●")] : [])),
         h("div", { class: "muted small" }, detail));
       const row = h("div", { class: "session-row" },
         pick,
-        ...(side?.state === "Integrating" ? [h("button", { class: "small", onclick: () => this.beginCancelIntegration(session) }, "Cancel Integration")] : []),
+        ...(side?.state === "Integrating" ? [h("button", { class: "small", onclick: () => this.beginCancelIntegration(session) }, "Cancel Bring In")] : []),
         ...(side && removable ? [h("button", { class: "flat small", title: "Session actions", onclick: () => { this.sessionExpanded = this.sessionExpanded === session.id ? null : session.id; this.renderSessions(); } }, "⋯")] : []));
 
       if (!side || !removable || this.sessionExpanded !== session.id) {
@@ -6658,12 +7270,29 @@ class Home {
 
       return h("div", {}, row, h("div", { class: "session-actions" },
         ...(ready ? [
-          h("button", { onclick: () => this.beginIntegrate(session) }, "Integrate"),
-          h("button", { onclick: () => this.switchWhenFinished(session) }, side.integrateWhenFinished ? "✓ Integrate When Finished" : "Integrate When Finished"),
+          h("button", { onclick: () => this.beginIntegrate(session) }, "Bring Into Main"),
+          h("button", { class: "when-done-switch", onclick: () => this.switchWhenFinished(session) }, side.integrateWhenFinished ? "✓ When Done: Bring Into Main" : "When Done: Bring Into Main"),
           h("button", { onclick: () => this.showChangesOf(session.id) }, "Changes Since Session Start"),
           h("button", { onclick: () => this.beginRenameSession(session) }, "Rename")] : []),
         h("button", { class: "danger", onclick: () => this.beginDeleteSession(session) }, "Delete")));
-    }));
+    }), ...this.taskRows());
+  }
+
+  taskRows() {
+    const tasks = this.chatTasks();
+    return tasks.length === 0 ? [] : [h("div", { class: "muted tasks-head" }, "Delegated Tasks"), ...tasks.map(task => h("div", { class: "session-row task", "data-task": task.id },
+      h("button", { class: `pick${this.taskView.taskId === task.id ? " on" : ""}`, onclick: () => { this.toggleSessions(false); this.taskView.open(task.id); } }, [task.title, task.peerName || "Any Server", taskStateText(task)].join(" · "))))];
+  }
+
+  // The tasks delegated from the workspace on screen or one of its sessions.
+  chatTasks() {
+    return this.selected ? this.swarmTasks.filter(task => this.mainOf(task.workspaceId) === this.selected.id).sort((left, right) => Date.parse(left.createdAt) - Date.parse(right.createdAt)) : [];
+  }
+
+  // What brings something into a workspace is named after where it goes.
+  bringInLabel(workspaceId) {
+    const side = this.sideSessions.find(session => session.id === workspaceId)?.side;
+    return side ? `Bring Into ${side.name}` : "Bring Into Main";
   }
 
   showChangesOf(id) {
@@ -6728,64 +7357,10 @@ class Home {
     }
   }
 
+  // A new session is made with the same form as in the send options, which starts on what is typed in the chat on screen.
   beginNewSession() {
-    const main = this.selected;
-
-    if (!main) {
-      return;
-    }
-
-    // Decided as the dialog opens and left alone after that: unfinished work of a busy AI is best left behind.
-    const working = this.busy.has(main.id) || !!this.opened.get(main.id)?.working;
-    const choice = (label, checked) => {
-      const box = h("input", { type: "radio", name: "session-start", checked });
-      return { box, element: h("label", { class: "check" }, box, label) };
-    };
-    const commit = choice("Current Commit", working);
-    const files = choice("Current Files", !working);
-    const name = h("input", { type: "text", placeholder: "Name" });
-    const task = h("textarea", { rows: 3, placeholder: "Work the session starts on once it is set up" });
-    let hasTask = false;
-    const create = async () => {
-      if (!name.value.trim()) {
-        throw new RemoteError("Enter a name.");
-      }
-
-      const given = name.value.trim();
-      const start = files.box.checked ? "Files" : "Commit";
-      const first = task.value.trim();
-      hasTask = !!first;
-
-      // Browsers ask only while the user is clicking.
-      if (hasTask) {
-        requestNotifications();
-      }
-
-      // What was edited in main's settings applies to the session made next.
-      const settings = this.opened.get(main.id);
-
-      if (settings && !await settings.applySettings()) {
-        throw new RemoteError("The workspace's settings could not be saved.");
-      }
-
-      return this.connection.createSideSession(main.id, given, start, first);
-    };
-    this.askSession({
-      title: "New session",
-      controls: [name,
-        h("div", { class: "stack tight" },
-          h("div", { class: "muted" }, "Starting files"),
-          commit.element,
-          files.element,
-          h("div", { class: "muted small" }, "Current Files includes changes that are not committed, new files too."),
-          h("div", { class: "muted", style: "margin-top:8px" }, "First Task (optional)"),
-          task)],
-      confirm: "Create Session",
-      enter: true,
-      action: create,
-      then: made => this.awaitSession(made, hasTask)
-    });
-    name.addEventListener("keydown", event => { if (event.key === "Enter") { this.dialogHost.querySelector("button.primary")?.click(); } });
+    this.toggleSessions(false);
+    this.active?.openSendOptions({ newSession: true });
   }
 
   beginRenameSession(session) {
@@ -6799,7 +7374,7 @@ class Home {
   }
 
   beginIntegrate(session) {
-    this.askSession({ title: "Integrate session?", body: `The main session's AI brings the changes of "${session.side.name}" into the main session, and the session is then permanently removed. This cannot be undone.`, confirm: "Integrate", id: session.id, holds: now => now.side.state === "Ready", action: () => this.connection.integrateSideSession(session.id) });
+    this.askSession({ title: "Bring Into Main?", body: `The main session's AI brings the changes of "${session.side.name}" into the main session, and the session is then permanently removed. This cannot be undone.`, confirm: "Bring Into Main", id: session.id, holds: now => now.side.state === "Ready", action: () => this.connection.integrateSideSession(session.id) });
   }
 
   async switchWhenFinished(session) {
@@ -6808,11 +7383,11 @@ class Home {
       return;
     }
 
-    this.askSession({ title: "Integrate When Finished?", body: `Once its AI marks its task complete and nothing of it runs any more, "${session.side.name}" is integrated into the main session by itself and permanently removed. This cannot be undone.`, confirm: "Turn On", id: session.id, holds: now => now.side.state === "Ready", action: () => this.connection.setIntegrateWhenFinished(session.id, true) });
+    this.askSession({ title: "When Done: Bring Into Main?", body: `Once its work is done and nothing of it is left to run, the main session's AI brings the changes of "${session.side.name}" into the main session by itself, and the session is then permanently removed. This cannot be undone.`, confirm: "Turn On", id: session.id, holds: now => now.side.state === "Ready", action: () => this.connection.setIntegrateWhenFinished(session.id, true) });
   }
 
   beginCancelIntegration(session) {
-    this.askSession({ title: "Cancel Integration?", body: "Main may already contain some of this session's changes. They will not be undone, and you may need to clean up main yourself. The AI may make a few more edits before it stops.", confirm: "Cancel Integration", dismiss: "Keep Integrating", id: session.id, holds: now => now.side.state === "Integrating", action: () => this.connection.cancelIntegration(session.id) });
+    this.askSession({ title: "Cancel Bring In?", body: "Main may already contain some of this session's changes. They will not be undone, and you may need to clean up main yourself. The AI may make a few more edits before it stops.", confirm: "Cancel Bring In", dismiss: "Keep Bringing In", id: session.id, holds: now => now.side.state === "Integrating", action: () => this.connection.cancelIntegration(session.id) });
   }
 
   // A new session is switched to as soon as it is set up, unless the user went somewhere else in the meantime.
@@ -6882,6 +7457,29 @@ class Home {
     return activeTaskStates.includes(task.state) && !(task.state === "Waiting" && this.swarmTasks.some(other => other.jobId === task.jobId && other.state === "Lost"));
   }
 
+  // A task delegated by hand that is to stay separate leads to no work of the workspace.
+  isAwaited(task) {
+    return !task.isManual || task.bringIn === true;
+  }
+
+  // A wait for delegated tasks can end without anything happening in the workspace itself.
+  recheck(id) {
+    const awaited = this.swarmTasks.filter(task => task.workspaceId === id && this.isAwaited(task));
+    const view = this.opened.get(id);
+
+    if (awaited.length === 0) {
+      this.held.delete(id);
+
+      // Tasks that were all discarded lead to nothing, so nothing more would end the wait; ones that were brought in end it with the work that brought them in.
+      if (view && view.state() === "Ready" && !view.hasWorkToCome()) {
+        view.notifyWhenReady = false;
+      }
+    } else if (awaited.every(task => task.isManual && ["Failed", "Cancelled", "Lost"].includes(task.state)) && view && view.state() === "Ready" && view.notifyWhenReady) {
+      // A task of the user that did not end well brings nothing in.
+      view.conclude();
+    }
+  }
+
   async refreshSwarm() {
     if (this.refreshingSwarm) {
       this.refreshSwarmAgain = true;
@@ -6909,14 +7507,8 @@ class Home {
 
         this.swarmTasks = (status.tasks ?? []).filter(task => !task.isIncoming);
 
-        // Tasks that were all discarded are never reported to the AI, so nothing more would end the wait.
-        for (const id of [...this.held].filter(held => !this.swarmTasks.some(task => task.workspaceId === held && !task.isManual))) {
-          this.held.delete(id);
-          const view = this.opened.get(id);
-
-          if (view) {
-            view.notifyWhenReady = false;
-          }
+        for (const id of [...this.held]) {
+          this.recheck(id);
         }
 
         this.buildEntries();
@@ -6934,16 +7526,20 @@ class Home {
   }
 
   announce(workspaceId, message) {
-    try {
-      if ("Notification" in window && Notification.permission === "granted") {
-        const note = new Notification(message);
-        note.onclick = () => {
-          window.focus();
-          this.app.showWorkspace(this, workspaceId);
-          note.close();
-        };
-      }
-    } catch (exception) {
+    notify(this, workspaceId, message);
+  }
+
+  // Told once for each piece of work that ended needing the user.
+  callAttention(workspaceId, entry) {
+    if (!entry?.needsAttention || !entry.endedAt || this.attended.has(entry.id)) {
+      return;
+    }
+
+    this.attended.add(entry.id);
+    const info = this.known(workspaceId);
+
+    if (info) {
+      notify(this, workspaceId, `${workspaceName(info)} needs attention`, `attention-${entry.id}`);
     }
   }
 
@@ -7023,7 +7619,7 @@ class Home {
     }
 
     if (this.selected) {
-      // A session that went, or that is being integrated, gives way to the main one.
+      // A session that went, or that is being brought in, gives way to the main one.
       this.forgetUnshowable(this.selected);
 
       this.swap();
@@ -7040,6 +7636,7 @@ class Home {
     this.setOffline(false);
     this.refreshCatalog();
     this.refreshSwarm();
+    this.taskView.read();
     // What is shown is from before the connection was lost.
     this.refreshUsage();
 
@@ -7189,7 +7786,7 @@ class Home {
   updateNotify(view) {
     if (view && view === this.active) {
       const on = view.notifyWhenReady && !this.notificationsBlocked();
-      this.notifyButton.hidden = !("Notification" in window) || !(view.notifyWhenReady || view.state() !== "Ready" || view.loop !== null || !!view.queue || view.hasActiveQueued() || view.hasTasksUnderWay());
+      this.notifyButton.hidden = !("Notification" in window) || !(view.notifyWhenReady || view.state() !== "Ready" || view.hasWorkToCome() || view.hasTasksUnderWay());
       this.notifyButton.classList.toggle("on", on);
       this.notifyButton.title = on ? "You will be notified when this workspace is ready. Press to turn the notification off." : "Notify me when this workspace is ready";
     }
@@ -7446,13 +8043,13 @@ class Home {
       }
 
       if (entry.task) {
-        return h("div", { class: "row", style: indent, onclick: () => this.app.showSwarm(this.connection, this, entry.task.id, this.mainOf(entry.task.workspaceId)) },
+        return h("div", { class: "row", style: indent, onclick: () => this.app.showSwarm(this.connection, this, entry.task.id) },
           h("div", { class: "name" }, `\u21B3 ${entry.task.title}`, h("small", {}, taskLine(entry.task))));
       }
 
       const workspace = entry.workspace;
       const delegatedBy = this.delegations.get(workspace.id)?.from;
-      const detail = [this.anySession(workspace.id, this.queued) ? "Queued" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
+      const detail = [this.anySession(workspace.id, this.queued) ? "Waiting for Local AI" : null, delegatedBy ? `Delegated by ${delegatedBy}` : null, workspace.folder].filter(part => part).join(" - ");
       const taken = this.resources.brief(workspace.id, this.anySession(workspace.id, this.busy));
       return h("div", { class: `row${this.anySession(workspace.id, this.busy) ? " working" : ""}${workspace.id === this.selected?.id ? " on" : ""}`, style: indent, onclick: () => this.select(workspace) },
         h("div", { class: "name" }, folderName(workspace.folder), ...(this.anySession(workspace.id, this.looping) ? [h("span", { class: "ws-loop", title: "A loop is running" }, icon("loop"))] : []), h("small", {}, detail), h("small", { "data-resources": workspace.id, hidden: taken === "" }, taken)),
@@ -7510,6 +8107,12 @@ class Home {
     if (event.key === "Escape" && this.dialogHost.hidden && !this.sessionsWrap.hidden && !event.defaultPrevented) {
       event.preventDefault();
       this.toggleSessions(false);
+      return;
+    }
+
+    if (event.key === "Escape" && this.dialogHost.hidden && this.taskView.taskId && !event.defaultPrevented) {
+      event.preventDefault();
+      this.taskView.close();
       return;
     }
 
@@ -7722,6 +8325,197 @@ class Home {
     }
 
     this.opened.clear();
+  }
+}
+
+function taskDetailNodes(detail) {
+  const heading = text => h("h3", { class: "serif" }, text);
+  const block = text => h("div", { class: "swarm-text selectable" }, text);
+  const messages = detail.messages ?? [];
+  return [
+    ...(detail.task.error ? [h("div", { class: "error" }, detail.task.error)] : []),
+    heading("Instructions"), block(detail.instructions),
+    ...(detail.expectedResult ? [heading("Expected result"), block(detail.expectedResult)] : []),
+    ...(detail.report ? [heading("Report"), block(detail.report)] : []),
+    ...(messages.length > 0 ? [heading("Conversation"), ...messages.map(message => message.isWork
+      ? h("div", { class: "swarm-text swarm-work selectable" }, message.text)
+      : h("div", {}, h("div", { class: "muted small" }, message.role), block(message.text)))] : [])];
+}
+
+// A task delegated from the workspace on screen, read-only and followed as it goes.
+class TaskView {
+  constructor(home) {
+    this.home = home;
+    this.taskId = null;
+    this.detail = null;
+    this.reading = false;
+    this.readAgain = false;
+    this.running = false;
+    this.heading = h("h2", { class: "serif" });
+    this.status = h("div", { class: "muted small" });
+    this.body = h("div", { class: "swarm-detail" });
+    this.error = new ErrorLine();
+    this.outcome = h("div", { class: "muted small", hidden: true });
+    this.actions = h("div", { class: "swarm-actions" });
+    this.element = h("div", { class: "task-wrap", hidden: true, onclick: event => event.target === this.element && this.close() },
+      h("div", { class: "task-card" },
+        h("header", {}, h("div", {}, this.heading, this.status), h("button", { class: "flat", onclick: () => this.close() }, "Close")),
+        this.body,
+        this.error.element,
+        this.outcome,
+        this.actions));
+  }
+
+  open(taskId) {
+    this.taskId = taskId;
+    this.detail = null;
+    this.heading.textContent = "Delegated task";
+    this.status.textContent = "";
+    this.body.replaceChildren(h("div", { class: "muted" }, "Loading..."));
+    this.actions.replaceChildren();
+    this.error.set(null);
+    this.say(null);
+    this.element.hidden = false;
+    this.read();
+  }
+
+  close() {
+    this.taskId = null;
+    this.detail = null;
+    this.element.hidden = true;
+  }
+
+  say(text) {
+    this.outcome.textContent = text ?? "";
+    this.outcome.hidden = !text;
+  }
+
+  // A task that can no longer be read was removed, such as once it was brought in.
+  async read() {
+    if (this.reading) {
+      this.readAgain = true;
+      return;
+    }
+
+    this.reading = true;
+
+    try {
+      do {
+        this.readAgain = false;
+        const taskId = this.taskId;
+
+        if (!taskId) {
+          break;
+        }
+
+        try {
+          const detail = await this.home.connection.getSwarmTask(taskId);
+
+          if (this.taskId === taskId) {
+            this.render(detail);
+          }
+        } catch (exception) {
+          if (this.taskId === taskId) {
+            if (exception instanceof RemoteError) {
+              this.close();
+            } else {
+              this.error.set(exception.message);
+            }
+          }
+        }
+      } while (this.readAgain);
+    } finally {
+      this.reading = false;
+    }
+  }
+
+  render(detail) {
+    const first = this.detail === null;
+    const stays = !first && this.body.scrollTop + this.body.clientHeight >= this.body.scrollHeight - 2 && this.body.scrollTop > 0;
+    const scroll = first ? 0 : this.body.scrollTop;
+    this.detail = detail;
+    const task = detail.task;
+    this.heading.textContent = task.title;
+    this.status.textContent = [taskLine(task), task.capability].filter(part => part).join(" - ");
+    this.body.replaceChildren(...taskDetailNodes(detail));
+    this.body.scrollTop = stays ? this.body.scrollHeight : scroll;
+    this.renderActions();
+  }
+
+  renderActions() {
+    const task = this.detail?.task;
+
+    if (!task) {
+      return;
+    }
+
+    const active = activeTaskStates.includes(task.state);
+    const done = task.state === "Done" && !!task.branch;
+    const button = (label, classes, action) => h("button", { class: classes, disabled: this.running, onclick: action }, label);
+    const bringIn = this.home.bringInLabel(task.workspaceId);
+    // Turning it off also cancels bringing it in that is under way.
+    const brings = task.bringIn === true || task.isBringingIn === true;
+    this.actions.replaceChildren(...[
+      done && !task.isBringingIn ? button(bringIn, "primary", () => this.command("BringInSwarmTask")) : null,
+      done && !task.isBringingIn ? button("Continue Here", "", () => this.continueHere()) : null,
+      active || task.state === "Done" ? button(brings ? `When Done: ${bringIn}` : "When Done: Keep Separate", `when-done${brings ? " toggled" : ""}`, () => this.command("SetSwarmTaskBringIn", { enabled: !brings })) : null,
+      ["Failed", "Cancelled", "Lost"].includes(task.state) ? button("Retry Task", "", () => this.command("RetrySwarmTask")) : null,
+      active || task.state === "Lost" ? button("Cancel Task", "danger", () => this.command("CancelSwarmTask")) : null,
+      !active ? button("Discard Task", "", () => this.command("DiscardSwarmTask")) : null
+    ].filter(node => node !== null));
+  }
+
+  async act(request, done) {
+    const taskId = this.taskId;
+
+    if (this.running || !taskId) {
+      return;
+    }
+
+    this.running = true;
+    this.error.set(null);
+    this.say(null);
+    this.renderActions();
+    let result;
+
+    try {
+      result = { value: await request(taskId), ok: true };
+    } catch (exception) {
+      result = { ok: false, message: exception.message };
+    }
+
+    this.running = false;
+    this.home.refreshSwarm();
+
+    if (this.taskId !== taskId) {
+      return;
+    }
+
+    if (result.ok) {
+      done(result.value);
+    } else {
+      this.error.set(result.message);
+    }
+
+    this.renderActions();
+    await this.read();
+  }
+
+  command(command, fields = {}) {
+    return this.act(taskId => this.home.connection.swarm(command, { taskId, ...fields }), status => {
+      if (command === "DiscardSwarmTask") {
+        this.close();
+      } else {
+        this.say(status?.report);
+      }
+    });
+  }
+
+  continueHere() {
+    return this.act(taskId => this.home.connection.continueSwarmTask(taskId), made => {
+      this.close();
+      this.home.awaitSession(made, false);
+    });
   }
 }
 
@@ -8156,7 +8950,7 @@ class AiEnvironmentScreen {
     this.localCommand = this.text();
     this.localServer = this.text();
     this.ollamaCommand = this.text();
-    this.workMode = h("select", { title: "Yield runs one local AI session at a time: other work waits in a queue, your own before delegated work. Simultaneous runs work side by side.", onchange: () => this.syncWorkMode() }, h("option", { value: "Yield" }, "Yield: one at a time, mine first"), h("option", { value: "Simultaneous" }, "Simultaneous: side by side"));
+    this.workMode = h("select", { title: "Yield runs one local AI session at a time: other work waits for its turn, your own before delegated work. Simultaneous runs work side by side.", onchange: () => this.syncWorkMode() }, h("option", { value: "Yield" }, "Yield: one at a time, mine first"), h("option", { value: "Simultaneous" }, "Simultaneous: side by side"));
     this.delegatedLimit = h("input", { type: "number", min: "1", max: "16", step: "1" });
     this.localOptimize = h("input", { type: "checkbox", onchange: () => this.askService() });
     this.serviceControl = false;
@@ -8194,8 +8988,8 @@ class AiEnvironmentScreen {
             this.field("Default provider for new workspaces", this.defaultSelect),
             this.field("Capability", this.newCapability),
             this.field("Effort", this.newEffort),
-            newSwitch("isShellAllowed", "Run shell commands"),
-            newSwitch("isSystemAccessAllowed", "Allow files outside the workspace"),
+            newSwitch("isSandboxed", "Sandbox"),
+            h("div", { class: "muted small" }, sandboxNote),
             newSwitch("isWebAllowed", "Use the web"),
             newSwitch("isImageGenerationAllowed", "Generate images"),
             newSwitch("isDelegationAllowed", "Let the AI delegate work", "The AI may send tasks, with the code of the workspace, to the paired servers that receive work."),
@@ -8467,19 +9261,17 @@ function arrange(container, elements) {
 }
 
 class SwarmScreen {
-  constructor(app, connection, home, taskId, workspaceId) {
+  constructor(app, connection, home, taskId) {
     this.app = app;
     this.connection = connection;
     this.home = home;
     this.initialTask = taskId;
-    this.initialWorkspace = workspaceId;
     this.error = new ErrorLine();
     this.outcome = h("div", { class: "muted small", hidden: true });
     this.status = null;
     this.missed = false;
     this.peerCards = new Map();
     this.pairingCards = new Map();
-    this.workerChoices = "";
     this.detail = null;
     this.reading = false;
     this.readAgain = false;
@@ -8552,17 +9344,6 @@ class SwarmScreen {
     this.pairings = h("div", { class: "stack tight" });
     this.noPeers = h("div", { class: "muted", hidden: true }, "No paired servers.");
     this.peers = h("div", { class: "stack tight" });
-    this.workspaceSelect = h("select", { onchange: () => this.syncDelegate() });
-    this.taskTitle = this.input("Title");
-    this.taskInstructions = h("textarea", { rows: 4, placeholder: "Instructions, complete on their own" });
-    this.taskExpected = h("textarea", { rows: 2, placeholder: "Expected result and how to check it (optional)" });
-    this.taskCapability = h("select", {}, capabilities.map(name => h("option", { value: name }, name)));
-    this.taskCapability.value = "Balanced";
-    this.taskWorker = h("select", {}, h("option", { value: "" }, "Any networked worker"));
-    this.delegateButton = this.actionButton("Delegate Task", "primary block", () => this.delegate(), () => this.delegateReady());
-    this.delegateButton.disabled = true;
-    this.taskTitle.addEventListener("input", () => this.syncDelegate());
-    this.taskInstructions.addEventListener("input", () => this.syncDelegate());
     this.noTasks = h("div", { class: "muted", hidden: true }, "No delegated tasks.");
     this.tasks = h("div", { class: "swarm-tasks" });
     this.lists = h("div", { class: "settings", style: "flex:1;min-height:0;overflow-y:auto" },
@@ -8588,20 +9369,12 @@ class SwarmScreen {
           h("div", { class: "muted" }, "Folder of the drive on the machine of the server. Plug in and mount the drive there, not on this device."),
           this.driveFolder,
           this.actionButton("Sync Drive", "primary block", () => this.act(() => this.connection.swarm("SyncDrive")))),
-        section("Delegate a task",
-          this.field("Workspace", this.workspaceSelect),
-          this.taskTitle,
-          this.taskInstructions,
-          this.taskExpected,
-          this.field("Capability", this.taskCapability),
-          this.field("Worker", this.taskWorker),
-          this.delegateButton),
         this.openSection("Delegated tasks", this.noTasks, this.tasks)));
     this.detailTitle = h("h2", { class: "serif" });
     this.detailStatus = h("div", { class: "muted small" });
     this.detailBody = h("div", { class: "settings swarm-detail", style: "flex:1;min-height:0;overflow-y:auto" });
     this.detailActions = h("div", { class: "swarm-actions" });
-    this.applyButton = this.actionButton("Apply Changes", "primary", () => this.onTask("ApplySwarmTask"));
+    this.bringInButton = this.actionButton("Bring Into Main", "primary", () => this.onTask("BringInSwarmTask"));
     this.retryButton = this.actionButton("Retry Task", "", () => this.onTask("RetrySwarmTask"));
     this.cancelTaskButton = this.actionButton("Cancel Task", "danger", () => this.onTask("CancelSwarmTask"));
     this.discardButton = this.actionButton("Discard Task", "", () => this.onTask("DiscardSwarmTask", () => this.showDetail(null)));
@@ -8650,19 +9423,13 @@ class SwarmScreen {
   }
 
   async load() {
-    const result = await attempt(async () => [await this.connection.swarm("GetSwarm"), await this.connection.listWorkspaces()], this.error);
+    const result = await attempt(() => this.connection.swarm("GetSwarm"), this.error);
 
     if (!result.ok) {
       return;
     }
 
-    const [status, catalog] = result.value;
-    const delegated = new Set((catalog.delegations ?? []).map(delegation => delegation.workspaceId));
-    const workspaces = catalog.workspaces.filter(workspace => !delegated.has(workspace.id)).sort((left, right) => folderName(left.folder).localeCompare(folderName(right.folder)));
-    this.workspaceSelect.replaceChildren(h("option", { value: "" }, "Choose a workspace"), ...workspaces.map(workspace => h("option", { value: workspace.id }, folderName(workspace.folder))));
-    this.workspaceSelect.value = workspaces.some(workspace => workspace.id === this.initialWorkspace) ? this.initialWorkspace : "";
-    this.show(status, true);
-    this.syncDelegate();
+    this.show(result.value, true);
 
     if (this.missed) {
       this.missed = false;
@@ -8739,30 +9506,6 @@ class SwarmScreen {
     this.pairButton.disabled = !!this.pairButton.running || !this.pairReady();
   }
 
-  delegateReady() {
-    return !!this.workspaceSelect.value && !!this.taskTitle.value.trim() && !!this.taskInstructions.value.trim();
-  }
-
-  syncDelegate() {
-    this.delegateButton.disabled = !!this.delegateButton.running || !this.delegateReady();
-  }
-
-  async delegate() {
-    requestNotifications();
-    const workspaceId = this.workspaceSelect.value;
-    const task = { title: this.taskTitle.value.trim(), instructions: this.taskInstructions.value.trim(), expectedResult: this.taskExpected.value.trim(), capability: this.taskCapability.value, peerId: this.taskWorker.value || undefined, dependsOn: [] };
-    const before = new Set((this.status?.tasks ?? []).map(item => item.id));
-
-    if (await this.act(() => this.connection.swarm("DelegateTask", { workspaceId, task }))) {
-      this.taskTitle.value = "";
-      this.taskInstructions.value = "";
-      this.taskExpected.value = "";
-      this.syncDelegate();
-      this.say("The task was delegated.");
-      this.home.follow((this.status.tasks ?? []).filter(item => !before.has(item.id) && !item.isIncoming).map(item => item.id));
-    }
-  }
-
   show(status, takeServer) {
     const editing = !takeServer && this.status !== null && this.serverTyped();
     this.status = status;
@@ -8808,16 +9551,6 @@ class SwarmScreen {
 
     arrange(this.peers, peers.map(peer => this.peerCards.get(peer.id).element));
     this.noPeers.hidden = peers.length > 0;
-    const workers = peers.filter(peer => peer.sendWork);
-    const workerChoices = JSON.stringify(workers.map(peer => [peer.id, peer.name]));
-
-    if (workerChoices !== this.workerChoices) {
-      this.workerChoices = workerChoices;
-      const chosen = this.taskWorker.value;
-      this.taskWorker.replaceChildren(h("option", { value: "" }, "Any networked worker"), ...workers.map(peer => h("option", { value: peer.id }, peer.name)));
-      this.taskWorker.value = workers.some(peer => peer.id === chosen) ? chosen : "";
-    }
-
     const tasks = status.tasks ?? [];
     this.noTasks.hidden = tasks.length > 0;
     this.tasks.replaceChildren(...tasks.map(task => h("button", { onclick: () => this.openTask(task.id) },
@@ -8852,15 +9585,14 @@ class SwarmScreen {
     card.address = this.input("host:port");
     card.address.value = peer.address ?? "";
     card.addressBox = this.field("Address to connect to (empty waits for it to connect here)", card.address);
-    card.isShellAllowed = this.toggle("Run shell commands", () => permission("isShellAllowed"), "A shell can reach anything the server's account can, whatever else is off.");
-    card.isSystemAccessAllowed = this.toggle("Allow files outside the workspace", () => permission("isSystemAccessAllowed"));
+    card.isSandboxed = this.toggle("Sandbox", () => permission("isSandboxed"));
     card.isWebAllowed = this.toggle("Use the web", () => permission("isWebAllowed"));
     card.isImageGenerationAllowed = this.toggle("Generate images", () => permission("isImageGenerationAllowed"));
     card.element = h("details", { class: "section swarm-peer", open: true }, card.name, h("div", { class: "stack tight" },
       card.state, card.problem, card.models, card.print, card.send.element, card.accept.element,
       this.field("Delivery mode", card.mode), card.modeText, card.addressBox,
       h("h3", { class: "serif" }, "What its tasks may do here"),
-      card.isShellAllowed.element, card.isSystemAccessAllowed.element, card.isWebAllowed.element, card.isImageGenerationAllowed.element,
+      card.isSandboxed.element, h("div", { class: "muted small" }, sandboxNote), card.isWebAllowed.element, card.isImageGenerationAllowed.element,
       h("button", { class: "danger block", onclick: () => this.askRevoke(card.peer) }, "Revoke Server")));
     card.element.open = true;
     card.update = next => {
@@ -8892,7 +9624,7 @@ class SwarmScreen {
         card.address.value = next.address ?? "";
       }
 
-      for (const key of ["isShellAllowed", "isSystemAccessAllowed", "isWebAllowed", "isImageGenerationAllowed"]) {
+      for (const key of ["isSandboxed", "isWebAllowed", "isImageGenerationAllowed"]) {
         card[key].box.checked = next.permissions?.[key] === true;
       }
     };
@@ -8932,21 +9664,12 @@ class SwarmScreen {
     const task = detail.task;
     this.detailTitle.textContent = task.title;
     this.detailStatus.textContent = [taskLine(task), task.capability, task.branch].filter(part => part).join(" - ");
-    const heading = text => h("h3", { class: "serif" }, text);
-    const block = text => h("div", { class: "swarm-text selectable" }, text);
-    const messages = detail.messages ?? [];
-    this.detailBody.replaceChildren(
-      ...(task.error ? [h("div", { class: "error" }, task.error)] : []),
-      heading("Instructions"), block(detail.instructions),
-      ...(detail.expectedResult ? [heading("Expected result"), block(detail.expectedResult)] : []),
-      ...(detail.report ? [heading("Report"), block(detail.report)] : []),
-      ...(messages.length > 0 ? [heading("Conversation"), ...messages.map(message => message.isWork
-        ? h("div", { class: "swarm-text swarm-work selectable" }, message.text)
-        : h("div", {}, h("div", { class: "muted small" }, message.role), block(message.text)))] : []));
+    this.detailBody.replaceChildren(...taskDetailNodes(detail));
     this.detailBody.scrollTop = scroll;
+    this.bringInButton.textContent = this.home.bringInLabel(task.workspaceId);
     const active = activeTaskStates.includes(task.state);
     this.detailActions.replaceChildren(...[
-      !task.isIncoming && task.state === "Done" && task.branch && !task.isApplied ? this.applyButton : null,
+      !task.isIncoming && task.state === "Done" && task.branch && !task.isBringingIn ? this.bringInButton : null,
       !task.isIncoming && ["Failed", "Cancelled", "Lost"].includes(task.state) ? this.retryButton : null,
       active || task.state === "Lost" ? this.cancelTaskButton : null,
       !active ? this.discardButton : null
@@ -9264,8 +9987,8 @@ class App {
     this.show(screen.element, screen);
   }
 
-  showSwarm(connection, home, taskId, workspaceId) {
-    this.swarm = new SwarmScreen(this, connection, home, taskId, workspaceId);
+  showSwarm(connection, home, taskId) {
+    this.swarm = new SwarmScreen(this, connection, home, taskId);
     this.show(this.swarm.element, this.swarm);
   }
 

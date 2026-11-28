@@ -219,4 +219,9 @@ public sealed record RemoteRequest
     /// Gets whether the changes are committed after the work an input starts: for <see cref="RemoteCommand.SaveInput" /> and <see cref="RemoteCommand.QueueInput" /> what the input is kept with, on when omitted, and for <see cref="RemoteCommand.Prompt" />, when <see langword="true" />, that auto commit is turned on for the work the prompt starts or joins.
     /// </summary>
     public bool? AutoCommit { get; init; }
+
+    /// <summary>
+    /// Gets for <see cref="RemoteCommand.CreateSideSession" /> whether the session is brought into the main one by itself once its work is done; when omitted, it is when a first task is given.
+    /// </summary>
+    public bool? BringIn { get; init; }
 }

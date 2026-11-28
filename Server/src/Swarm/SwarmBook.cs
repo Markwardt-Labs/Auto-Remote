@@ -24,6 +24,12 @@ internal interface ISwarmBook
     Task Open(string dataFolder, CancellationToken cancellation);
 
     /// <summary>
+    /// Calls back with what is stored once it is loaded and after every change, while nothing else can read or change it, so what is derived from it never lags behind.
+    /// </summary>
+    /// <param name="watcher">Derives it; it must be quick and must not use the book.</param>
+    void Watch(Action<SwarmDocument> watcher);
+
+    /// <summary>
     /// Reads from what is stored; what is read must not be changed or kept.
     /// </summary>
     /// <typeparam name="T">What is read.</typeparam>
@@ -92,6 +98,8 @@ internal sealed class SwarmBook(IEventHub events, ISwarmIdentity.IFactory identi
 
     private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
 
+    private readonly List<Action<SwarmDocument>> watchers = [];
+
     private SwarmDocument document = new();
 
     private ISwarmIdentity? identity;
@@ -128,7 +136,20 @@ internal sealed class SwarmBook(IEventHub events, ISwarmIdentity.IFactory identi
         }
 
         folder = root;
+        await gate.WaitAsync(cancellation);
+
+        try
+        {
+            watchers.ForEach(watcher => watcher(document));
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
+
+    /// <inheritdoc />
+    public void Watch(Action<SwarmDocument> watcher) => watchers.Add(watcher);
 
     /// <inheritdoc />
     public async Task<T> Read<T>(Func<SwarmDocument, T> read)
@@ -154,6 +175,7 @@ internal sealed class SwarmBook(IEventHub events, ISwarmIdentity.IFactory identi
         try
         {
             result = change(document);
+            watchers.ForEach(watcher => watcher(document));
             await file.Write(Path.Combine(Folder, "swarm.json"), JsonSerializer.SerializeToNode(document, options)!.AsObject(), CancellationToken.None);
         }
         finally

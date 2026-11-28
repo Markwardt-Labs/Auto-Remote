@@ -396,10 +396,9 @@ internal sealed class MainViewModel(IAppInfo info, IServerConnection.IFactory fa
             Current = moving;
             await moving.Open();
         };
-        opening.SwarmRequested += async (task, workspace) =>
+        opening.SwarmRequested += async task =>
         {
-            SwarmViewModel swarm = new(opened, task, workspace);
-            swarm.Delegated += opening.Follow;
+            SwarmViewModel swarm = new(opened, task);
             swarm.Closed += () =>
             {
                 swarm.Dispose();

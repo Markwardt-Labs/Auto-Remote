@@ -141,6 +141,16 @@ internal interface IWorkspaceManager
     Task<WorkspaceInfo> SetShowWork(Guid id, bool show, CancellationToken cancellation);
 
     /// <summary>
+    /// Sets whether the AI of a workspace is sandboxed.
+    /// </summary>
+    /// <param name="id">The workspace identifier.</param>
+    /// <param name="sandboxed">Whether it is.</param>
+    /// <param name="cancellation">Cancels the write.</param>
+    /// <returns>The workspace.</returns>
+    /// <exception cref="RequestException">No such workspace exists.</exception>
+    Task<WorkspaceInfo> SetSandbox(Guid id, bool sandboxed, CancellationToken cancellation);
+
+    /// <summary>
     /// Sets whether the AI of a workspace may delegate tasks to paired servers, and keeps it; does nothing when it already is so.
     /// </summary>
     /// <param name="id">The workspace identifier.</param>
@@ -304,11 +314,11 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 if (stored.Side is { } side)
                 {
                     sides[stored.Id] = side;
-                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = side.Folder, Service = side.Service, SessionId = stored.SessionId, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation, LastUpdated = sessions.GetValueOrDefault(stored.SessionId ?? string.Empty)?.LastLoaded });
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = side.Folder, Service = side.Service, SessionId = stored.SessionId, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation, IsSandboxed = stored.IsSandboxed, LastUpdated = sessions.GetValueOrDefault(stored.SessionId ?? string.Empty)?.LastLoaded });
                 }
                 else if (stored.SessionId is { } sessionId && sessions.TryGetValue(sessionId, out PromptSessionInfo? info) && info.WorkspacePath is { } folder)
                 {
-                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation, SessionFiles = stored.SessionFiles, SessionSetupScript = stored.SessionSetupScript });
+                    workspaces.Add(new WorkspaceInfo { Id = stored.Id, Folder = folder, Service = ServiceOf(info.Provider), SessionId = sessionId, GroupId = stored.GroupId, LastUpdated = info.LastLoaded, ReviewPrompt = stored.ReviewPrompt, ExpandPrompt = stored.ExpandPrompt, StatusMinutes = stored.StatusMinutes, ShowWork = stored.ShowWork, AllowDelegation = stored.AllowDelegation, IsSandboxed = stored.IsSandboxed, SessionFiles = stored.SessionFiles, SessionSetupScript = stored.SessionSetupScript });
 
                     if (stored.Adopt)
                     {
@@ -402,7 +412,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
             }
 
             string sessionId = await host.CreateSession(full, service, apiKey, cancellation);
-            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId, GroupId = groupId, LastUpdated = await Loaded(sessionId, cancellation), ShowWork = host.Get().NewWorkspaces.ShowWork, AllowDelegation = host.Get().NewWorkspaces.IsDelegationAllowed };
+            WorkspaceInfo created = new() { Id = Guid.NewGuid(), Folder = full, Service = service, SessionId = sessionId, GroupId = groupId, LastUpdated = await Loaded(sessionId, cancellation), ShowWork = host.Get().NewWorkspaces.ShowWork, AllowDelegation = host.Get().NewWorkspaces.IsDelegationAllowed, IsSandboxed = host.Get().NewWorkspaces.IsSandboxed };
             workspaces.Add(created);
 
             try
@@ -518,6 +528,16 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
     }
 
     /// <inheritdoc />
+    public async Task<WorkspaceInfo> SetSandbox(Guid id, bool sandboxed, CancellationToken cancellation)
+    {
+        using (await Lock(cancellation))
+        {
+            WorkspaceInfo workspace = Find(id);
+            return workspace.IsSandboxed == sandboxed ? Present(workspace) : await Replace(workspace with { IsSandboxed = sandboxed }, cancellation, false);
+        }
+    }
+
+    /// <inheritdoc />
     public async Task<WorkspaceInfo> SetDelegation(Guid id, bool allowed, CancellationToken cancellation)
     {
         using (await Lock(cancellation))
@@ -563,7 +583,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
                 throw new RequestException("A side session cannot have side sessions of its own.");
             }
 
-            WorkspaceInfo created = new() { Id = id, Folder = side.Folder, Service = side.Service, LastUpdated = DateTimeOffset.UtcNow, ShowWork = parent.ShowWork, AllowDelegation = parent.AllowDelegation, ReviewPrompt = parent.ReviewPrompt, ExpandPrompt = parent.ExpandPrompt, StatusMinutes = parent.StatusMinutes };
+            WorkspaceInfo created = new() { Id = id, Folder = side.Folder, Service = side.Service, LastUpdated = DateTimeOffset.UtcNow, ShowWork = parent.ShowWork, IsSandboxed = parent.IsSandboxed, AllowDelegation = parent.AllowDelegation, ReviewPrompt = parent.ReviewPrompt, ExpandPrompt = parent.ExpandPrompt, StatusMinutes = parent.StatusMinutes };
             sides[id] = side;
             workspaces.Add(created);
             Order();
@@ -860,7 +880,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
     private WorkspaceInfo Present(WorkspaceInfo workspace)
         => sides.TryGetValue(workspace.Id, out StoredSideSession? side)
-            ? workspace with { Side = new SideSession { ParentId = side.ParentId, ParentName = workspaces.FirstOrDefault(parent => parent.Id == side.ParentId)?.Name ?? string.Empty, Name = side.Name, State = side.State, StartedFrom = side.StartedFrom, IntegrateWhenFinished = side.IntegrateWhenFinished, Error = side.Error, UnsentTask = side.UnsentTask } }
+            ? workspace with { Side = new SideSession { ParentId = side.ParentId, ParentName = workspaces.FirstOrDefault(parent => parent.Id == side.ParentId)?.Name ?? string.Empty, Name = side.Name, State = side.State, StartedFrom = side.StartedFrom, IntegrateWhenFinished = side.IntegrateWhenFinished, CommitBringIn = side.CommitBringIn, Error = side.Error, UnsentTask = side.UnsentTask } }
             : workspace;
 
     private void Shift<T>(List<T> items, T item, int offset, Func<T, bool> isSibling)
@@ -896,7 +916,7 @@ internal sealed class WorkspaceManager(IWorkspaceStore store, IFolderBrowser fol
 
     private async Task Save(CancellationToken cancellation, bool announce = true)
     {
-        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Side = sides.GetValueOrDefault(workspace.Id), SessionFiles = workspace.SessionFiles, SessionSetupScript = workspace.SessionSetupScript, Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, StatusMinutes = workspace.StatusMinutes, ShowWork = workspace.ShowWork, AllowDelegation = workspace.AllowDelegation, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
+        await store.Save(new StoredCatalog { Groups = [.. groups], Workspaces = [.. workspaces.Select(workspace => new StoredWorkspace { Side = sides.GetValueOrDefault(workspace.Id), SessionFiles = workspace.SessionFiles, SessionSetupScript = workspace.SessionSetupScript, Id = workspace.Id, SessionId = workspace.SessionId, GroupId = workspace.GroupId, ReviewPrompt = workspace.ReviewPrompt, ExpandPrompt = workspace.ExpandPrompt, StatusMinutes = workspace.StatusMinutes, ShowWork = workspace.ShowWork, AllowDelegation = workspace.AllowDelegation, IsSandboxed = workspace.IsSandboxed, Adopt = adopting.Contains(workspace.Id) }), .. unresolved] }, cancellation);
 
         if (announce)
         {

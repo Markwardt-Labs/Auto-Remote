@@ -4,8 +4,6 @@ public sealed class WorkspaceControlTests
 {
     private readonly Mock<IPromptService> prompts = new();
 
-    private readonly Mock<IWorkspaceLoops> loops = new();
-
     private readonly Mock<IWorkspaceVersioning> versioning = new();
 
     private readonly Mock<IWorkspaceSnapshots> snapshots = new();
@@ -21,30 +19,8 @@ public sealed class WorkspaceControlTests
     public WorkspaceControlTests()
     {
         activity = new WorkspaceActivity(hub);
-        control = new WorkspaceControl(activity, prompts.Object, loops.Object, versioning.Object, snapshots.Object);
+        control = new WorkspaceControl(activity, prompts.Object, versioning.Object, snapshots.Object);
         snapshots.Setup(x => x.Has(id)).Returns(true);
-    }
-
-    [Theory]
-    [InlineData(WorkspaceState.Working)]
-    [InlineData(WorkspaceState.Managing)]
-    public async Task Stop_CancelsTheLoopOfTheWorkspaceWhateverWorkItEnds(WorkspaceState work)
-    {
-        activity.TryEnter(id, work);
-
-        await control.Stop(id);
-
-        loops.Verify(x => x.Cancel(id), Times.Once);
-    }
-
-    [Fact]
-    public async Task Cancel_CancelsTheLoopOfTheWorkspaceToo()
-    {
-        activity.TryEnter(id, WorkspaceState.Working);
-
-        await control.Cancel(id);
-
-        loops.Verify(x => x.Cancel(id), Times.Once);
     }
 
     [Fact]

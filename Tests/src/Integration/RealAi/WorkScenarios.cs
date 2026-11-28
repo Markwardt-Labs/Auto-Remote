@@ -205,7 +205,7 @@ public sealed class WorkScenarios
         await using RealServer server = await RealServer.Start();
         await server.Environment(environment => environment with { StatusMinutes = 1 });
         WorkspaceInfo workspace = await server.Workspace("background", AiService.ClaudeCode);
-        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsShellAllowed = true }, CancellationToken.None);
+        await server.Connection.SetWorkspaceSettings(workspace.Id, (await server.Connection.GetWorkspaceSettings(workspace.Id, CancellationToken.None)) with { IsSandboxed = false }, CancellationToken.None);
         string folder = workspace.Folder;
         int mark = server.Mark();
 

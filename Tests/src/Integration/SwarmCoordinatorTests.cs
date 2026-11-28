@@ -8,19 +8,11 @@ public sealed class SwarmCoordinatorTests : IAsyncLifetime
 
     private readonly Mock<IWorkspaceManager> workspaces = new();
 
-    private readonly Mock<IWorkQueue> queue = new();
-
     private readonly EventHub events = new();
 
     private readonly WorkspaceInfo workspace = new() { Id = Guid.NewGuid(), Folder = "/work/app" };
 
     private readonly SwarmIdentity worker = new(ECDsa.Create(ECCurve.NamedCurves.nistP256), ECDiffieHellman.Create(ECCurve.NamedCurves.nistP256));
-
-    private readonly TaskCompletionSource<bool> reportStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-    private readonly List<WorkSource> submitted = [];
-
-    private readonly WorkspaceActivity activity;
 
     private readonly SwarmBook book;
 
@@ -28,21 +20,11 @@ public sealed class SwarmCoordinatorTests : IAsyncLifetime
 
     public SwarmCoordinatorTests()
     {
-        activity = new WorkspaceActivity(events);
         book = new SwarmBook(events, new ISwarmIdentity.Factory());
         workspaces.Setup(x => x.Get(workspace.Id, It.IsAny<CancellationToken>())).ReturnsAsync(workspace);
         repository.Setup(x => x.Snapshot(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<CancellationToken>())).ReturnsAsync((new string('a', 40), "project"));
         repository.Setup(x => x.Bundle(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<IReadOnlyList<string>>(), It.IsAny<CancellationToken>())).ReturnsAsync(ReadOnlyMemory<byte>.Empty);
-        queue.Setup(x => x.Submit(workspace.Id, It.IsAny<string>(), It.IsAny<WorkSource>(), It.IsAny<CancellationToken>())).ReturnsAsync((Guid _, string _, WorkSource source, CancellationToken _) =>
-        {
-            lock (submitted)
-            {
-                submitted.Add(source);
-            }
-
-            return new WorkTicket(true, reportStarted.Task);
-        });
-        coordinator = new SwarmCoordinator(book, new SwarmCourier(book, new SwarmSealer()), repository.Object, workspaces.Object, queue.Object, activity) { ReportRetry = TimeSpan.FromMilliseconds(20) };
+        coordinator = new SwarmCoordinator(book, new SwarmCourier(book, new SwarmSealer()), repository.Object, workspaces.Object);
     }
 
     public async Task InitializeAsync()
@@ -251,28 +233,120 @@ public sealed class SwarmCoordinatorTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task AJobCountsAsReportedOnlyOnceItsMessageStartedAndIsNotGivenWhileGitHasTheWorkspace()
+    public async Task ItsAiAwaitsAJobOnlyWhileTasksOfItAreUnderWayAndAResultStillToBringInIsUnderWayAfterThat()
     {
-        activity.TryEnter(workspace.Id, WorkspaceState.Managing);
         Guid task = await Delegate(false);
-        await coordinator.Receive(Peer, new SwarmResultBody { TaskId = task, Outcome = SwarmOutcome.Failed, Error = "no" }, ReadOnlyMemory<byte>.Empty);
-        await Task.Delay(150);
 
-        Assert.Empty(submitted);
-
-        activity.Leave(workspace.Id, WorkspaceState.Managing);
-        await Until(() => Task.FromResult(submitted.Count == 1));
-        await Task.Delay(100);
-
-        Assert.Equal([WorkSource.Report], submitted);
-        Assert.False(await book.Read(document => document.Jobs.Single().IsReported));
-        // The work of the AI that delegated goes on with the outcome until it is told.
         Assert.True(await coordinator.IsAwaited(workspace.Id));
         Assert.False(await coordinator.IsAwaited(Guid.NewGuid()));
 
-        reportStarted.SetResult(true);
+        await Done(task);
 
-        await Until(() => book.Read(document => document.Jobs.Single().IsReported));
         Assert.False(await coordinator.IsAwaited(workspace.Id));
+        Assert.True(await coordinator.IsUnderWay(workspace.Id));
+
+        await book.Change(document =>
+        {
+            document.Jobs.Single().IsReported = true;
+            document.Outgoing.Single().BringIn = false;
+        });
+
+        Assert.False(await coordinator.IsUnderWay(workspace.Id));
     }
+
+    [Fact]
+    public async Task TasksAreBroughtInUnlessTheyAskNotToBeAndThoseStoredWithoutSayingSoAreNot()
+    {
+        Guid task = await Delegate();
+        Guid kept = (await coordinator.Delegate(workspace.Id, [new SwarmPlannedTask(Request() with { BringIn = false }, [])], true, CancellationToken.None))[0];
+
+        bool[] wanted = await book.Read(document => new[] { task, kept }.Select(id => document.Outgoing.Single(entry => entry.Id == id).BringIn).ToArray());
+        Assert.Equal(new bool[] { true, false }, wanted);
+        SwarmOutgoing stored = JsonSerializer.Deserialize<SwarmOutgoing>($$"""{"id":"{{task}}","jobId":"{{task}}","workspaceId":"{{task}}","title":"old","state":5,"resultCommit":"{{new string('b', 40)}}","isApplied":true}""", new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase })!;
+        Assert.Equal((false, true, (string?)null, (Guid?)null), (stored.BringIn, stored.CommitBringIn, stored.BringInId, stored.TurnId));
+        Assert.Empty(stored.Dependencies);
+    }
+
+    [Theory]
+    [InlineData(SwarmMode.Direct, 0, SwarmTaskState.Pending, "cannot take with its version")]
+    [InlineData(SwarmMode.AirGapped, 0, SwarmTaskState.Failed, "cannot take with its version")]
+    [InlineData(SwarmMode.AirGapped, -1, SwarmTaskState.Pending, "not known yet")]
+    [InlineData(SwarmMode.Direct, 1, SwarmTaskState.InTransit, null)]
+    public async Task ATaskThatBuildsOnChangesIsOnlyGivenToAWorkerThatCanTakeThem(SwarmMode mode, int version, SwarmTaskState expected, string? reason)
+    {
+        Guid first = await Delegate();
+        await Done(first);
+        await book.Change(document =>
+        {
+            document.Peers[0].Mode = mode;
+            document.Peers[0].Profile = version < 0 ? null : document.Peers[0].Profile! with { Version = version };
+        });
+
+        Guid second = (await coordinator.Delegate(workspace.Id, [new SwarmPlannedTask(Request() with { DependsOn = [first], PeerId = Peer }, [])], true, CancellationToken.None))[0];
+
+        await Until(async () => await State(second) == expected);
+        string? error = await book.Read(document => document.Outgoing.Single(task => task.Id == second).Error);
+        Assert.Equal(reason is null, error is null);
+        Assert.Contains(reason ?? string.Empty, error ?? string.Empty);
+        Assert.Equal(first, Assert.Single(await book.Read(document => document.Outgoing.Single(task => task.Id == second).Dependencies.ToList())).TaskId);
+        Assert.Equal(new string('a', 40), await book.Read(document => document.Outgoing.Single(task => task.Id == second).BaseCommit));
+    }
+
+    [Fact]
+    public async Task ATaskForAnyWorkerWaitsAndSaysWhyWhileOnlyWorkersTooOldForItAreFree()
+    {
+        Guid first = await Delegate();
+        await Done(first);
+
+        Guid second = (await coordinator.Delegate(workspace.Id, [new SwarmPlannedTask(Request() with { DependsOn = [first] }, [])], true, CancellationToken.None))[0];
+        await coordinator.Dispatch();
+
+        Assert.Equal(SwarmTaskState.Pending, await State(second));
+        Assert.Contains("no worker that could take it", await book.Read(document => document.Outgoing.Single(task => task.Id == second).Error));
+
+        await book.Change(document => document.Peers[0].Profile = document.Peers[0].Profile! with { Version = SwarmProfileBody.DependencyVersion });
+        await coordinator.Dispatch();
+
+        Assert.Equal(SwarmTaskState.InTransit, await State(second));
+        Assert.Null(await book.Read(document => document.Outgoing.Single(task => task.Id == second).Error));
+    }
+
+    [Fact]
+    public async Task ATaskStillWaitingKeepsTheResultOfADependencyThatWasBroughtInMeanwhile()
+    {
+        IReadOnlyList<Guid> tasks = await coordinator.Delegate(workspace.Id, [new SwarmPlannedTask(Request(), []), new SwarmPlannedTask(Request(), []), new SwarmPlannedTask(Request(), [0, 1])], true, CancellationToken.None);
+        await Done(tasks[0]);
+
+        await coordinator.Complete(tasks[0]);
+        await coordinator.Dispatch();
+
+        Assert.Equal(SwarmTaskState.Waiting, await State(tasks[2]));
+        repository.Verify(x => x.PinDependency(workspace.Folder, tasks[2], tasks[0], new string('b', 40), It.IsAny<CancellationToken>()));
+        repository.Verify(x => x.Release(workspace.Folder, tasks[0], It.IsAny<string?>(), It.IsAny<CancellationToken>()));
+
+        await Done(tasks[1]);
+        await coordinator.Dispatch();
+
+        Assert.NotEqual(SwarmTaskState.Waiting, await State(tasks[2]));
+        Assert.Equal([tasks[0], tasks[1]], await book.Read(document => document.Outgoing.Single(task => task.Id == tasks[2]).Dependencies.Select(dependency => dependency.TaskId).ToArray()));
+    }
+
+    [Fact]
+    public async Task ATaskThatFailedButSentChangesKeepsThemOnABranch()
+    {
+        Guid task = await Delegate();
+        repository.Setup(x => x.Import(It.IsAny<string>(), It.IsAny<ReadOnlyMemory<byte>>(), task, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync((new string('b', 40), "swarm/partial"));
+
+        await coordinator.Receive(Peer, new SwarmResultBody { TaskId = task, Outcome = SwarmOutcome.Failed, Error = "The AI could not finish it: no key", ResultCommit = new string('b', 40) }, ReadOnlyMemory<byte>.Empty);
+
+        Assert.Equal((SwarmTaskState.Failed, "swarm/partial", "The AI could not finish it: no key"), await book.Read(document => (document.Outgoing.Single().State, document.Outgoing.Single().Branch, document.Outgoing.Single().Error)));
+    }
+
+    private Task Done(Guid id) => book.Change(document =>
+    {
+        SwarmOutgoing task = document.Outgoing.Single(task => task.Id == id);
+        task.State = SwarmTaskState.Done;
+        task.ResultCommit = new string('b', 40);
+        task.Branch = "swarm/done";
+    });
 }

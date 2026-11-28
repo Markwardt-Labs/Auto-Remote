@@ -71,7 +71,7 @@ internal interface IWindowGuard
 }
 
 /// <inheritdoc />
-internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService prompts, IUsageService usage, IPrompterHost host, IEventHub events, TimeProvider? time = null) : IWindowGuard
+internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService prompts, IUsageService usage, IPrompterHost host, IEventHub events, TimeProvider? time = null, Func<Guid, bool>? halted = null) : IWindowGuard
 {
     private readonly ConcurrentDictionary<Guid, Held> held = new();
 
@@ -260,7 +260,7 @@ internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService p
                 }
 
                 break;
-            case RemoteEventKind.StateChanged when remoteEvent.State == WorkspaceState.Stopping:
+            case RemoteEventKind.StateChanged when remoteEvent.State is WorkspaceState.Stopping or WorkspaceState.Canceling:
                 Release(remoteEvent.WorkspaceId);
                 break;
         }
@@ -332,7 +332,8 @@ internal sealed class WindowGuard(IWorkspaceManager workspaces, IPromptService p
             }
         }
 
-        if (pause.Idle)
+        // A chat the user stopped is not made to go on by itself.
+        if (pause.Idle || halted?.Invoke(id) == true)
         {
             Release(id);
             return;

@@ -41,6 +41,8 @@ public sealed class QueuedLoopTests
             }
         });
         following.Setup(x => x.GoesFirst(workspace.Id)).Returns(() => goesFirst);
+        following.Setup(x => x.TryExpect(workspace.Id, It.IsAny<WorkStep>(), It.IsAny<Action<WorkEnd>?>(), It.IsAny<Func<string?>?>())).Returns(true);
+        following.Setup(x => x.Describe(workspace.Id)).Returns(new FollowState(false, false, false, false, null, null, null, null, null, null));
         loops = new WorkspaceLoops(workspaces.Object, prompts.Object, new WorkspaceActivity(events), Mock.Of<IUsageService>(), events, TimeSpan.FromMilliseconds(10), queue: queue.Object, following: () => following.Object);
     }
 

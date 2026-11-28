@@ -17,6 +17,36 @@ public sealed class ServerConnectionTests
     }
 
     [Fact]
+    public async Task TheCommandsAboutWhatRunsByItselfSendWhatTheyNameAndReadWhatTheyAreAnswered()
+    {
+        List<RemoteRequest> sent = [];
+        Guid id = Guid.NewGuid();
+        Guid other = Guid.NewGuid();
+        WorkspaceInfo made = new() { Id = other, Folder = "/work/x" };
+        Mock<IMessageChannel> channel = Channel(sent, out _, request => new RemoteResponse { Id = request.Id, Workspace = made, Swarm = new SwarmStatus { Server = new SwarmServer() }, Agenda = new Agenda { Status = "1 up next" }, Activity = new ActivityPage { Entries = [], Older = "more" } });
+        await using ServerConnection connection = new(new ClientWebSocket(), channel.Object, null, _ => throw new IOException("down"), Mock.Of<ILog>(), "box:1", _ => null);
+
+        await connection.ResumeAutomation(id, CancellationToken.None);
+        await connection.BringInSwarmTask(other, CancellationToken.None);
+        await connection.SetSwarmTaskBringIn(other, false, CancellationToken.None);
+        WorkspaceInfo continued = await connection.ContinueSwarmTask(other, null, CancellationToken.None);
+        await connection.SetBringInCommit(id, other, true, CancellationToken.None);
+        ActivityPage page = await connection.GetActivity(id, "cursor", 50, CancellationToken.None);
+        Agenda agenda = await connection.GetAgenda(id, CancellationToken.None);
+        await connection.CreateSideSession(id, "x", SideSessionStart.Files, "task", false, CancellationToken.None);
+        await connection.Prompt(id, "go", CancellationToken.None);
+
+        Assert.Equal([RemoteCommand.ResumeAutomation, RemoteCommand.BringInSwarmTask, RemoteCommand.SetSwarmTaskBringIn, RemoteCommand.ContinueSwarmTask, RemoteCommand.SetBringInCommit, RemoteCommand.GetActivity, RemoteCommand.GetAgenda, RemoteCommand.CreateSideSession, RemoteCommand.Prompt], sent.Select(request => request.Command));
+        Assert.Equal(other, sent[1].TaskId);
+        Assert.Equal(((Guid?)other, (bool?)false), (sent[2].TaskId, sent[2].Enabled));
+        Assert.Equal(((Guid?)id, (Guid?)other, (bool?)true), (sent[4].WorkspaceId, sent[4].InputId, sent[4].Enabled));
+        Assert.Equal(("cursor", (int?)50), (sent[5].Before, sent[5].Limit));
+        Assert.Equal((bool?)false, sent[7].BringIn);
+        Assert.Null(sent[8].AutoCommit);
+        Assert.Equal((made.Id, "more", "1 up next"), (continued.Id, page.Older, agenda.Status));
+    }
+
+    [Fact]
     public async Task RunScript_SendsTheDisplayOfThisMachineWhenThereIsOne()
     {
         List<RemoteRequest> sentGraphical = [];
