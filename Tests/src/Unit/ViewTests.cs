@@ -1965,7 +1965,7 @@ public sealed class ViewTests(HeadlessFixture fixture)
                 button.HoldDelay = TimeSpan.FromMilliseconds(30);
                 Avalonia.Input.Pointer pointer = Finger();
                 Press(button, screen.Window, pointer);
-                Wait(() => panel.IsOpen);
+                Wait(() => panel.IsOpen, 10000);
                 screen.Settle();
                 Lift(button, screen.Window, pointer);
             }
@@ -2009,10 +2009,20 @@ public sealed class ViewTests(HeadlessFixture fixture)
             window.UpdateLayout();
             Avalonia.Input.Pointer pointer = Finger();
 
+            // A hold that has options to give is waited for, however late a busy machine gets to it.
             void Hold()
             {
                 Press(button, window, pointer);
-                Wait(() => false, 150);
+
+                if (offered)
+                {
+                    Wait(() => asked > 0, 10000);
+                }
+                else
+                {
+                    Wait(() => false, 150);
+                }
+
                 Lift(button, window, pointer);
             }
 

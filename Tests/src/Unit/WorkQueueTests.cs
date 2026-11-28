@@ -543,6 +543,39 @@ public sealed class WorkQueueTests : IDisposable
     }
 
     [Fact]
+    public async Task APromptThatIsDroppedIsNeverToldAsAnEmptiedQueueWithoutTheMarkAlsoWhileOtherChangesAreTold()
+    {
+        Guid one = Workspace("one");
+        Guid two = Workspace("two");
+        await Submit(one, "a");
+        using CancellationTokenSource ending = new();
+        // Every change of the state of a workspace has the queue tell its clients about itself, on a thread of its own.
+        Task others = Task.Run(async () =>
+        {
+            while (!ending.IsCancellationRequested)
+            {
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.StateChanged, WorkspaceId = one });
+                await Task.Yield();
+            }
+        });
+
+        for (int round = 0; round < 500; round++)
+        {
+            await Submit(two, "b");
+            await queue.Cancel(two);
+        }
+
+        await ending.CancelAsync();
+        await others;
+
+        lock (published)
+        {
+            List<RemoteEvent> emptied = [.. published.Where(remoteEvent => remoteEvent is { Kind: RemoteEventKind.QueueChanged, Queue: null } && remoteEvent.WorkspaceId == two)];
+            Assert.Equal((500, 0), (emptied.Count, emptied.Count(remoteEvent => remoteEvent.Text != "dropped")));
+        }
+    }
+
+    [Fact]
     public async Task AReportNeverJoinsOtherWorkAndCountsAsStartedOnceAPromptOfTheUserTakesItAlong()
     {
         Guid one = Workspace("one");

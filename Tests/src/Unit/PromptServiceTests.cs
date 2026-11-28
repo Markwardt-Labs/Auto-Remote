@@ -113,6 +113,17 @@ public sealed class PromptServiceTests : IDisposable
 
     private List<string> Messages(MessageRole role) => [.. Events(RemoteEventKind.MessageAdded).Where(remoteEvent => remoteEvent.Message!.Role == role && !remoteEvent.Message.IsWork).Select(remoteEvent => remoteEvent.Message!.Text)];
 
+    // Chat messages are saved behind the work, and reading the history waits for them to be, as it does for a client.
+    private async Task<List<ChatMessage>> Saved(PromptService prompting)
+    {
+        await prompting.History(workspace.Id, null, null, null, CancellationToken.None);
+
+        lock (chats)
+        {
+            return [.. chats[workspace.Id]];
+        }
+    }
+
     [Fact]
     public async Task Attach_StoresTheDecodedFileAndAnswersItsPath()
     {
@@ -187,8 +198,9 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal(["Run ls -la", "→ a.txt", "Fetch https://x.test", "→ Failed: no such host", "idle", "→ No output", "→ 1 line"], work.Select(message => message.Text));
         Assert.All(work, message => Assert.Equal(MessageRole.Assistant, message.Role));
         Assert.All(work, message => Assert.InRange(message.Time!.Value, DateTimeOffset.UtcNow.AddMinutes(-1), DateTimeOffset.UtcNow.AddSeconds(1)));
-        Assert.Equal([MessageRole.User, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant], chats[workspace.Id].Select(message => message.Role));
-        Assert.Equal([false, true, true, true, true, true, true, true, false], chats[workspace.Id].Select(message => message.IsWork));
+        List<ChatMessage> saved = await Saved(service);
+        Assert.Equal([MessageRole.User, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant, MessageRole.Assistant], saved.Select(message => message.Role));
+        Assert.Equal([false, true, true, true, true, true, true, true, false], saved.Select(message => message.IsWork));
     }
 
     [Theory]
@@ -220,29 +232,52 @@ public sealed class PromptServiceTests : IDisposable
         Assert.Equal(show, older.ShowWork);
     }
 
-    private IEnumerable<PromptEvent> Writing(ManualResetEventSlim? gate = null)
+    private IEnumerable<PromptEvent> Writing(bool shown = false, ManualResetEventSlim? gate = null)
     {
         yield return new PromptDeltaEvent { Text = "Hel" };
-        Thread.Sleep(80);
-        gate?.Wait(TimeSpan.FromSeconds(10));
+        Streamed(shown, "Hel");
+
+        if (gate is not null)
+        {
+            // The server takes the events in order, so once it tells of this one it is past the first piece.
+            yield return new PromptNoticeEvent { Text = "paused" };
+            gate.Wait(TimeSpan.FromSeconds(10));
+        }
+
+        bool showing = shown || gate is not null;
         yield return new PromptDeltaEvent { Text = "lo " };
-        Thread.Sleep(80);
+        Streamed(showing, "lo ");
         yield return new PromptDeltaEvent { Text = "world" };
-        Thread.Sleep(80);
+        Streamed(showing, "world");
         yield return new PromptMessageEvent { Text = "Hello world" };
     }
 
     private IEnumerable<PromptEvent> Reasoning()
     {
         yield return new PromptThinkingEvent { Text = "let me " };
-        Thread.Sleep(80);
+        Streamed(true, "let me ");
         yield return new PromptThinkingEvent { Text = "think" };
-        Thread.Sleep(80);
+        Streamed(true, "think");
         yield return new PromptDeltaEvent { Text = "The " };
-        Thread.Sleep(80);
+        Streamed(true, "The ");
         yield return new PromptDeltaEvent { Text = "answer" };
-        Thread.Sleep(80);
+        Streamed(true, "answer");
         yield return new PromptMessageEvent { Text = "The answer" };
+    }
+
+    // A piece still waiting when the finished message arrives is dropped, so the AI goes on only once its piece was sent, however late a busy machine is with it. With nothing to be sent, it leaves the time in which a piece would have been.
+    private void Streamed(bool shown, string ending)
+    {
+        if (!shown)
+        {
+            Thread.Sleep(80);
+            return;
+        }
+
+        for (int attempt = 0; attempt < 1000 && !string.Concat(Events(RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text)).EndsWith(ending, StringComparison.Ordinal); attempt++)
+        {
+            Thread.Sleep(10);
+        }
     }
 
     private PromptService Streaming(out Action<RemoteEvent> deliver)
@@ -260,21 +295,29 @@ public sealed class PromptServiceTests : IDisposable
     {
         Use(workspace with { ShowWork = true });
         PromptService streaming = Streaming(out _);
-        prompter.OnCreate = session => session.ReplyWith(_ => Writing());
+        prompter.OnCreate = session => session.ReplyWith(_ => Writing(true));
 
         await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
         await Until(() => !streaming.IsBusy(workspace.Id));
 
         List<RemoteEvent> published = [.. Events(RemoteEventKind.MessageAdded).Concat(Events(RemoteEventKind.MessageDelta))];
-        int final = events.FindIndex(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message!.Role == MessageRole.Assistant);
+        List<RemoteEvent> told;
+
+        lock (events)
+        {
+            told = [.. events];
+        }
+
+        int final = told.FindIndex(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded && remoteEvent.Message!.Role == MessageRole.Assistant);
         string[] pieces = [.. Events(RemoteEventKind.MessageDelta).Select(remoteEvent => remoteEvent.Text!)];
 
         Assert.NotEmpty(pieces);
         Assert.Equal("Hello world", string.Concat(pieces));
         Assert.All(published.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta), remoteEvent => Assert.Equal(workspace.Id, remoteEvent.WorkspaceId));
-        Assert.DoesNotContain(events.Skip(final + 1), remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta);
+        Assert.DoesNotContain(told.Skip(final + 1), remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageDelta);
         Assert.Equal(["Hello world"], Messages(MessageRole.Assistant));
-        Assert.Equal(["Hello world"], chats[workspace.Id].Where(message => message.Role == MessageRole.Assistant).Select(message => message.Text));
+        List<ChatMessage> saved = await Saved(streaming);
+        Assert.Equal(["Hello world"], saved.Where(message => message.Role == MessageRole.Assistant).Select(message => message.Text));
     }
 
     [Fact]
@@ -295,10 +338,11 @@ public sealed class PromptServiceTests : IDisposable
     {
         PromptService streaming = Streaming(out Action<RemoteEvent> deliver);
         using ManualResetEventSlim gate = new();
-        prompter.OnCreate = session => session.ReplyWith(_ => Writing(gate));
+        prompter.OnCreate = session => session.ReplyWith(_ => Writing(gate: gate));
 
         await streaming.Prompt(workspace.Id, "go", CancellationToken.None);
-        await Task.Delay(200);
+        // The first piece is past, so showing the work from here on cannot take it along.
+        await Until(() => Events(RemoteEventKind.MessageAdded).Any(remoteEvent => remoteEvent.Message!.Text == "paused"));
         Assert.Empty(Events(RemoteEventKind.MessageDelta));
 
         deliver(new RemoteEvent { Kind = RemoteEventKind.ShowWorkChanged, WorkspaceId = workspace.Id, ShowWork = true });
@@ -731,10 +775,11 @@ public sealed class PromptServiceTests : IDisposable
         RemoteEvent[] pieces = [.. Events(RemoteEventKind.MessageDelta)];
         Assert.Equal("let me think", string.Concat(pieces.Where(piece => piece.Thought == true).Select(piece => piece.Text)));
         Assert.Equal("The answer", string.Concat(pieces.Where(piece => piece.Thought != true).Select(piece => piece.Text)));
-        ChatMessage thought = Assert.Single(chats[workspace.Id], message => message.IsThought);
+        List<ChatMessage> saved = await Saved(streaming);
+        ChatMessage thought = Assert.Single(saved, message => message.IsThought);
         Assert.Equal(("let me think", true, MessageRole.Assistant), (thought.Text, thought.IsWork, thought.Role));
         Assert.InRange(thought.Time!.Value, before, DateTimeOffset.UtcNow.AddSeconds(1));
-        Assert.Equal(["go", "let me think", "The answer"], chats[workspace.Id].Select(message => message.Text));
+        Assert.Equal(["go", "let me think", "The answer"], saved.Select(message => message.Text));
         Assert.Equal(["The answer"], Messages(MessageRole.Assistant));
     }
 
@@ -747,9 +792,10 @@ public sealed class PromptServiceTests : IDisposable
         await Until(() => !service.IsBusy(workspace.Id));
 
         Assert.Empty(Events(RemoteEventKind.MessageDelta));
-        Assert.Equal(["go", "step one. step two.", "Read a.txt", "done"], chats[workspace.Id].Select(message => message.Text));
-        Assert.Equal([false, true, true, false], chats[workspace.Id].Select(message => message.IsWork));
-        Assert.Equal([false, true, false, false], chats[workspace.Id].Select(message => message.IsThought));
+        List<ChatMessage> saved = await Saved(service);
+        Assert.Equal(["go", "step one. step two.", "Read a.txt", "done"], saved.Select(message => message.Text));
+        Assert.Equal([false, true, true, false], saved.Select(message => message.IsWork));
+        Assert.Equal([false, true, false, false], saved.Select(message => message.IsThought));
         Assert.Equal(["go", "done"], (await service.History(workspace.Id, null, null, null, CancellationToken.None)).Messages.Select(message => message.Text));
     }
 

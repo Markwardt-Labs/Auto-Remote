@@ -184,6 +184,9 @@ internal sealed class WorkQueue : IWorkQueue
 
     private readonly HashSet<Guid> announced = [];
 
+    // Marked under the lock that takes the work out, so whatever tells the clients next also says that it will not start.
+    private readonly HashSet<Guid> unstartable = [];
+
     private readonly IStoredFile stored = new StoredFile([], true);
 
     private readonly JsonSerializerOptions options = new() { PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
@@ -492,6 +495,7 @@ internal sealed class WorkQueue : IWorkQueue
             status = Describe(id);
             removed = [.. entries.Where(entry => entry.Workspace == id)];
             entries.RemoveAll(entry => entry.Workspace == id);
+            MarkDropped(removed);
         }
 
         await Dropped(removed);
@@ -507,6 +511,7 @@ internal sealed class WorkQueue : IWorkQueue
         {
             removed = [.. entries.Where(entry => entry.Workspace == id && !entry.IsReservation && entry.Source == WorkSource.Loop)];
             entries.RemoveAll(removed.Contains);
+            MarkDropped(removed);
 
             foreach (Entry run in launching.Where(entry => entry.Workspace == id && entry.Source == WorkSource.Loop))
             {
@@ -560,6 +565,7 @@ internal sealed class WorkQueue : IWorkQueue
                 {
                     entries.Remove(entry);
                     removed.Add(entry);
+                    MarkDropped([entry]);
                 }
                 else
                 {
@@ -762,10 +768,12 @@ internal sealed class WorkQueue : IWorkQueue
             entry.Started.TrySetResult(false);
         }
 
-        Changed([.. removed.Where(entry => !entry.IsReservation).Select(entry => entry.Workspace)]);
+        Changed();
         await Save();
         Pump();
     }
+
+    private void MarkDropped(IEnumerable<Entry> removed) => unstartable.UnionWith(removed.Where(entry => !entry.IsReservation).Select(entry => entry.Workspace));
 
     private void Follow(RemoteEvent remoteEvent)
     {
@@ -916,20 +924,22 @@ internal sealed class WorkQueue : IWorkQueue
     {
         lock (publishing)
         {
-            List<(Guid Id, QueueStatus? Status)> changes = [];
+            List<(Guid Id, QueueStatus? Status, bool Dropped)> changes = [];
 
             lock (gate)
             {
+                unstartable.UnionWith(dropped ?? []);
                 HashSet<Guid> waiting = [.. entries.Select(entry => entry.Workspace)];
-                changes.AddRange(announced.Union(dropped ?? []).Where(id => !waiting.Contains(id)).Select(id => (id, (QueueStatus?)null)));
-                changes.AddRange(waiting.Select(id => (id, Describe(id))));
+                changes.AddRange(announced.Union(unstartable).Where(id => !waiting.Contains(id)).Select(id => (id, (QueueStatus?)null, unstartable.Contains(id))));
+                changes.AddRange(waiting.Select(id => (id, Describe(id), false)));
                 announced.Clear();
                 announced.UnionWith(waiting);
+                unstartable.Clear();
             }
 
-            foreach ((Guid id, QueueStatus? status) in changes)
+            foreach ((Guid id, QueueStatus? status, bool never) in changes)
             {
-                events.Publish(new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = id, Queue = status, Text = status is null && dropped?.Contains(id) == true ? "dropped" : null });
+                events.Publish(new RemoteEvent { Kind = RemoteEventKind.QueueChanged, WorkspaceId = id, Queue = status, Text = never ? "dropped" : null });
             }
         }
     }

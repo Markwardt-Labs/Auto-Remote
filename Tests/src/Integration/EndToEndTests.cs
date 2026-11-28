@@ -128,7 +128,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
         if (asked.StartsWith("stream", StringComparison.Ordinal))
         {
-            return Writing();
+            return Writing(asked.EndsWith("aloud", StringComparison.Ordinal));
         }
 
         if (asked.StartsWith("work", StringComparison.Ordinal))
@@ -153,15 +153,34 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private SemaphoreSlim Gate(string text) => gates.GetOrAdd(text, _ => new SemaphoreSlim(0));
 
-    private IEnumerable<PromptEvent> Writing()
+    private IEnumerable<PromptEvent> Writing(bool shown)
     {
         foreach (string piece in (string[])["The ", "answer ", "is ", "streamed."])
         {
             yield return new PromptDeltaEvent { Text = piece };
-            Thread.Sleep(150);
+
+            if (!shown)
+            {
+                Thread.Sleep(150);
+                continue;
+            }
+
+            // A piece still waiting when the finished message arrives is dropped, so the AI goes on only once the client has its piece.
+            for (int attempt = 0; attempt < 1000 && !Streamed().EndsWith(piece, StringComparison.Ordinal); attempt++)
+            {
+                Thread.Sleep(10);
+            }
         }
 
         yield return new PromptMessageEvent { Text = "The answer is streamed." };
+    }
+
+    private string Streamed()
+    {
+        lock (received)
+        {
+            return string.Concat(received.Where(item => item.Kind == RemoteEventKind.MessageDelta).Select(item => item.Text));
+        }
     }
 
     // The activity and the agenda follow the work, so they may be told after it.
@@ -169,7 +188,7 @@ public sealed class EndToEndTests : IAsyncLifetime
 
     private async Task<List<RemoteEvent>> Received(Func<List<RemoteEvent>, bool> done)
     {
-        for (int attempt = 0; attempt < 250; attempt++)
+        for (int attempt = 0; attempt < 750; attempt++)
         {
             lock (received)
             {
@@ -1199,13 +1218,15 @@ public sealed class EndToEndTests : IAsyncLifetime
         FolderListing folder = await connection.CreateFolder(temp.Path, "slow", CancellationToken.None);
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
-        await connection.Prompt(workspace.Id, "long", CancellationToken.None);
+        // The work goes on until the test lets it end, however long the steps in between take.
+        await connection.Prompt(workspace.Id, "gate long", CancellationToken.None);
         await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
         Assert.True((await connection.GetHistory(workspace.Id, null, null, null, CancellationToken.None)).Working);
         await connection.Prompt(workspace.Id, "short", CancellationToken.None);
+        Gate("gate long").Release();
         List<RemoteEvent> events = await Received(events => events.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 4 && Latest(events).Working == false);
 
-        Assert.Equal(["long", "short", "reply to long", "reply to short"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
+        Assert.Equal(["gate long", "short", "reply to gate long", "reply to short"], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded).Select(remoteEvent => remoteEvent.Message?.Text));
         Assert.Equal([true, false], events.Where(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged).Select(remoteEvent => remoteEvent.Working == true));
     }
 
@@ -1246,7 +1267,10 @@ public sealed class EndToEndTests : IAsyncLifetime
         RemoteException refused = await Assert.ThrowsAsync<RemoteException>(() => connection.Prompt(workspace.Id, "long", CancellationToken.None));
 
         Assert.Equal(("5 hours", 97d, 95d), (refused.OverLimit?.Window, refused.OverLimit?.PercentUsed, refused.OverLimit?.MaxPercent));
-        Assert.DoesNotContain(received, remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded);
+        lock (received)
+        {
+            Assert.DoesNotContain(received, remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded);
+        }
 
         await connection.PromptOverLimit(workspace.Id, "long", CancellationToken.None);
         List<RemoteEvent> events = await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && Latest(items).Working == false);
@@ -1315,11 +1339,14 @@ public sealed class EndToEndTests : IAsyncLifetime
         await File.WriteAllTextAsync(Path.Combine(folder.Path, "b.cs"), "// not run by the fake");
         WorkspaceInfo workspace = await connection.CreateWorkspace(folder.Path, null, null, null, CancellationToken.None);
 
-        await connection.Prompt(workspace.Id, "long", CancellationToken.None);
+        // The AI works until both scripts are done, however long they take.
+        await connection.Prompt(workspace.Id, "gate beside", CancellationToken.None);
         await Received(events => events.Any(remoteEvent => remoteEvent.Kind == RemoteEventKind.WorkingChanged && remoteEvent.Working == true));
         await connection.RunScript(workspace.Id, "a.cs", CancellationToken.None);
         await connection.RunScript(workspace.Id, "b.cs", CancellationToken.None);
         WorkspaceState during = await connection.GetWorkspaceState(workspace.Id, CancellationToken.None);
+        await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptChanged && remoteEvent.Script?.State == ScriptState.Succeeded) == 2);
+        Gate("gate beside").Release();
         List<RemoteEvent> events = await Received(items => items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.MessageAdded) == 2 && items.Count(remoteEvent => remoteEvent.Kind == RemoteEventKind.ScriptChanged && remoteEvent.Script?.State == ScriptState.Succeeded) == 2 && Latest(items).Working == false);
 
         Assert.Equal(WorkspaceState.Working, during);

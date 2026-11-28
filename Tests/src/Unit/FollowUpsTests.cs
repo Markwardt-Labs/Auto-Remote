@@ -594,7 +594,11 @@ public sealed class FollowUpsTests : IAsyncLifetime
 
         await Until(() => Sent().Count == 2);
         Assert.False(followUps.IsStopped(workspace.Id));
-        Assert.Contains(published, item => item.Kind == RemoteEventKind.Failed && item.Error!.StartsWith("Auto commit failed: Git needs your name", StringComparison.Ordinal));
+        // The server still tells of the work that went on, so the list is only read under its lock.
+        lock (published)
+        {
+            Assert.Contains(published, item => item.Kind == RemoteEventKind.Failed && item.Error!.StartsWith("Auto commit failed: Git needs your name", StringComparison.Ordinal));
+        }
     }
 
     [Fact]

@@ -134,7 +134,11 @@ public sealed class AgendaServiceTests
         using CancellationTokenSource stopping = new();
         agenda.Open(stopping.Token);
         await Task.Delay(80);
-        Assert.DoesNotContain(published, item => item.Kind == RemoteEventKind.AgendaChanged);
+
+        lock (published)
+        {
+            Assert.DoesNotContain(published, item => item.Kind == RemoteEventKind.AgendaChanged);
+        }
 
         inputs = [Queued("next")];
         await Task.Delay(150);
